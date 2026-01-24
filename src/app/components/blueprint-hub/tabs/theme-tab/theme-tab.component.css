@@ -1,0 +1,58 @@
+/* Theme Tab Styles - Two Pane Layout */
+:host {
+    display: block;
+    height: 100%;
+    width: 100%;
+}
+
+/* Smooth transitions */
+button {
+    transition: all 0.15s ease;
+}
+
+/* Custom scrollbar for entity list */
+.overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.3);
+}
+
+/* Color picker hover effect */
+.relative:hover>div:first-child {
+    transform: scale(1.05);
+}
+
+/* Animation for category collapse */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.border-b>div:last-child {
+    animation: slideDown 0.15s ease-out;
+}
+
+/* Focus states */
+input:focus {
+    outline: none;
+    ring: 2px;
+    ring-color: hsl(var(--primary) / 0.5);
+}

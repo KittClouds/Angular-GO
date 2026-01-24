@@ -1,0 +1,179 @@
+<div class="flex h-full w-full bg-background text-foreground overflow-hidden">
+    <!-- Left Pane: Entity Type Selector -->
+    <div class="w-72 min-w-[280px] border-r border-border flex flex-col bg-muted/5">
+        <!-- Header with Search -->
+        <div class="p-4 border-b border-border space-y-3">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold tracking-tight">Entity Styles</h2>
+                <app-highlighting-mode-toggle></app-highlighting-mode-toggle>
+            </div>
+            <!-- Search -->
+            <div class="relative">
+                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm"></i>
+                <input type="text" placeholder="Search entities..."
+                    class="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" />
+            </div>
+        </div>
+
+        <!-- Category List -->
+        <div class="flex-1 overflow-y-auto">
+            <div *ngFor="let category of filteredCategories()" class="border-b border-border/50">
+                <!-- Category Header -->
+                <button
+                    class="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/50 transition-colors"
+                    (click)="toggleCategory(category.name)">
+                    <i [class]="category.icon + ' text-sm'"></i>
+                    <span class="flex-1 text-left">{{ category.name }}</span>
+                    <i class="pi text-[10px]" [class.pi-chevron-down]="!isCategoryCollapsed(category.name)"
+                        [class.pi-chevron-right]="isCategoryCollapsed(category.name)"></i>
+                </button>
+
+                <!-- Entity List -->
+                <div *ngIf="!isCategoryCollapsed(category.name)" class="pb-1">
+                    <button *ngFor="let kind of category.kinds"
+                        class="w-full flex items-center gap-3 px-4 py-2 text-sm transition-all hover:bg-accent/30"
+                        [class.bg-accent]="selectedKind() === kind" [class.border-l-2]="selectedKind() === kind"
+                        [class.border-primary]="selectedKind() === kind" (click)="selectKind(kind)">
+                        <!-- Color Chip -->
+                        <div class="w-4 h-4 rounded-sm shrink-0 ring-1 ring-black/10"
+                            [style.backgroundColor]="getHexColor(kind)"></div>
+                        <!-- Name -->
+                        <span class="flex-1 text-left truncate" [class.font-medium]="selectedKind() === kind">
+                            {{ formatKindName(kind) }}
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Pane: Style Editor -->
+    <div class="flex-1 flex flex-col min-w-0 bg-background">
+        <!-- Editor Header -->
+        <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+            <div>
+                <h3 class="text-xl font-semibold">{{ formatKindName(selectedKind()) }}</h3>
+                <p class="text-sm text-muted-foreground mt-0.5">Customize appearance for this entity type</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button class="px-3 py-1.5 text-sm border border-border rounded-md hover:bg-muted transition-colors"
+                    (click)="resetSelected()">
+                    Reset
+                </button>
+                <button
+                    class="px-3 py-1.5 text-sm text-primary-foreground bg-primary rounded-md hover:bg-primary/90 transition-colors"
+                    (click)="applyToCategory()">
+                    Apply to Category
+                </button>
+            </div>
+        </div>
+
+        <!-- Editor Content -->
+        <div class="flex-1 overflow-y-auto p-6">
+            <div class="max-w-2xl space-y-8">
+                <!-- Live Preview Card -->
+                <div class="p-6 rounded-xl border border-border bg-card/50">
+                    <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Live Preview
+                    </h4>
+                    <div class="flex items-center gap-6">
+                        <!-- Pill Preview -->
+                        <div class="flex flex-col items-center gap-2">
+                            <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Pill</span>
+                            <span class="px-3 py-1 rounded-md text-sm font-medium"
+                                [style.backgroundColor]="'hsl(var(--entity-' + selectedKind().toLowerCase() + ') / 0.2)'"
+                                [style.color]="'hsl(var(--entity-' + selectedKind().toLowerCase() + '-text))'"
+                                [style.border]="'1px solid hsl(var(--entity-' + selectedKind().toLowerCase() + ') / 0.3)'">
+                                {{ formatKindName(selectedKind()) }}
+                            </span>
+                        </div>
+                        <!-- Node Preview -->
+                        <div class="flex flex-col items-center gap-2">
+                            <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Graph Node</span>
+                            <div class="flex flex-col items-center">
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg"
+                                    [style.backgroundColor]="getHexColor(selectedKind())">
+                                    {{ selectedKind().charAt(0) }}
+                                </div>
+                                <span class="text-xs mt-1 text-muted-foreground">Label</span>
+                            </div>
+                        </div>
+                        <!-- Inline Text Preview -->
+                        <div class="flex flex-col items-center gap-2">
+                            <span class="text-[10px] text-muted-foreground uppercase tracking-wider">Inline</span>
+                            <span class="text-sm font-medium" [style.color]="getHexTextColor(selectedKind())">
+                                Example Entity
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Color Settings -->
+                <div class="space-y-4">
+                    <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Colors</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Primary Color -->
+                        <div class="p-4 rounded-lg border border-border bg-card/30 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium">Primary Color</span>
+                                <span class="text-xs font-mono text-muted-foreground">{{ getHexColor(selectedKind())
+                                    }}</span>
+                            </div>
+                            <p class="text-xs text-muted-foreground">Background for pills, nodes, and highlights</p>
+                            <div class="flex items-center gap-3">
+                                <div class="relative">
+                                    <div class="w-12 h-12 rounded-lg shadow-sm ring-1 ring-black/10 cursor-pointer transition-transform hover:scale-105"
+                                        [style.backgroundColor]="getHexColor(selectedKind())">
+                                    </div>
+                                    <input type="color" [value]="getHexColor(selectedKind())"
+                                        (input)="updateColor(selectedKind(), $any($event.target).value)"
+                                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                </div>
+                                <input type="text" [value]="getHexColor(selectedKind())"
+                                    (change)="updateColor(selectedKind(), $any($event.target).value)"
+                                    class="flex-1 px-3 py-2 text-sm font-mono bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            </div>
+                        </div>
+
+                        <!-- Text Color -->
+                        <div class="p-4 rounded-lg border border-border bg-card/30 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium">Text Color</span>
+                                <span class="text-xs font-mono text-muted-foreground">{{ getHexTextColor(selectedKind())
+                                    }}</span>
+                            </div>
+                            <p class="text-xs text-muted-foreground">Foreground for labels and inline mentions</p>
+                            <div class="flex items-center gap-3">
+                                <div class="relative">
+                                    <div class="w-12 h-12 rounded-lg shadow-sm ring-1 ring-black/10 cursor-pointer transition-transform hover:scale-105 flex items-center justify-center bg-background"
+                                        [style.color]="getHexTextColor(selectedKind())"
+                                        [style.border]="'2px solid ' + getHexTextColor(selectedKind())">
+                                        <span class="text-lg font-bold">Aa</span>
+                                    </div>
+                                    <input type="color" [value]="getHexTextColor(selectedKind())"
+                                        (input)="updateTextColor(selectedKind(), $any($event.target).value)"
+                                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                </div>
+                                <input type="text" [value]="getHexTextColor(selectedKind())"
+                                    (change)="updateTextColor(selectedKind(), $any($event.target).value)"
+                                    class="flex-1 px-3 py-2 text-sm font-mono bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="pt-4 border-t border-border">
+                    <div class="flex items-center gap-3">
+                        <button
+                            class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-destructive border border-border rounded-md hover:bg-muted/50 transition-colors"
+                            (click)="resetAll()">
+                            <i class="pi pi-refresh"></i>
+                            Reset All Styles
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

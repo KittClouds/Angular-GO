@@ -1,1 +1,27 @@
-/* Empty styles */
+/* Sidebar Styles */
+:host {
+    display: block;
+    height: 100%;
+}
+
+/* Sidebar background color */
+.bg-sidebar {
+    background-color: hsl(var(--muted) / 0.3);
+}
+
+/* Folder dropdown menu item */
+.folder-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.375rem 0.75rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s;
+    color: hsl(var(--foreground));
+}
+
+.folder-menu-item:hover {
+    background-color: hsl(var(--accent));
+}

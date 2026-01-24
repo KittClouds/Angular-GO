@@ -1,16 +1,13 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
     LucideAngularModule,
-    X,
     Undo,
     Redo,
-    MoreHorizontal,
-    PanelRight,
-    Moon,
-    Sidebar
+    PanelLeft
 } from 'lucide-angular';
 import { EditorService } from '../../services/editor.service';
+import { SidebarService } from '../../lib/services/sidebar.service';
 
 @Component({
     selector: 'app-header',
@@ -20,15 +17,17 @@ import { EditorService } from '../../services/editor.service';
     styleUrls: ['./header.component.css']
 })
 export class HeaderComponent {
-    readonly X = X;
     readonly Undo = Undo;
     readonly Redo = Redo;
-    readonly More = MoreHorizontal;
-    readonly PanelRight = PanelRight;
-    readonly Moon = Moon; // For theme toggle shown in image
-    readonly Sidebar = Sidebar; // For sidebar toggle
+    readonly PanelLeft = PanelLeft;
+
+    sidebarService = inject(SidebarService);
 
     constructor(private editorService: EditorService) { }
+
+    toggleSidebar() {
+        this.sidebarService.toggle();
+    }
 
     undo() {
         this.editorService.undo();

@@ -1,0 +1,52 @@
+<!-- Highlighting Mode Toggle Dropdown -->
+<div class="relative inline-block text-left">
+    <!-- Trigger Button -->
+    <button type="button"
+        class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-border rounded-md bg-background hover:bg-accent transition-colors"
+        [class]="getColorClass(mode())" (click)="toggleDropdown()">
+        <i [class]="getIconClass(mode())"></i>
+        {{ labels[mode()] }}
+        <i class="pi pi-chevron-down text-xs opacity-50"></i>
+    </button>
+
+    <!-- Dropdown Panel -->
+    <div *ngIf="isOpen()"
+        class="absolute right-0 mt-2 w-64 origin-top-right rounded-lg border border-border bg-popover text-popover-foreground shadow-lg z-[100] overflow-hidden"
+        (mouseleave)="closeDropdown()">
+
+        <!-- Header -->
+        <div class="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
+            Highlighting Mode
+        </div>
+
+        <!-- Mode Options -->
+        <div class="p-1">
+            <button *ngFor="let m of modes"
+                class="w-full flex items-start gap-3 p-2 rounded-md cursor-pointer hover:bg-accent transition-colors text-left"
+                [class.bg-muted]="mode() === m" (click)="selectMode(m)">
+                <span [class]="getColorClass(m)" class="mt-0.5">
+                    <i [class]="getIconClass(m)"></i>
+                </span>
+                <div class="flex-1">
+                    <div class="font-medium text-sm">{{ labels[m] }}</div>
+                    <div class="text-xs text-muted-foreground">{{ descriptions[m] }}</div>
+                </div>
+            </button>
+        </div>
+
+        <!-- Focus Mode: Entity Selection -->
+        <div *ngIf="mode() === 'focus'" class="border-t border-border">
+            <div class="px-3 py-2 text-xs font-semibold text-muted-foreground">
+                Focus on Entity Types
+            </div>
+            <div class="max-h-48 overflow-y-auto p-1">
+                <label *ngFor="let kind of entityKinds"
+                    class="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-accent text-xs">
+                    <input type="checkbox" [checked]="isKindSelected(kind)" (change)="toggleKind(kind)"
+                        class="w-3.5 h-3.5 rounded border-border" />
+                    {{ kind }}
+                </label>
+            </div>
+        </div>
+    </div>
+</div>

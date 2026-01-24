@@ -89,3 +89,11 @@
         @apply h-full;
     }
 }
+
+/* GLOBAL OVERRIDE: Hide Milkdown LaTeX Inline Edit Tool */
+.milkdown-latex-inline-edit {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}

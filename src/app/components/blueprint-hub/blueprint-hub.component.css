@@ -1,0 +1,4 @@
+:host {
+    display: contents;
+    /* Allow fixed positioning to work relative to viewport */
+}

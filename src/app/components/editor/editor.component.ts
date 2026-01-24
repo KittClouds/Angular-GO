@@ -1,7 +1,18 @@
 import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Crepe } from '@milkdown/crepe';
-import "@milkdown/crepe/theme/common/style.css";
+import '@milkdown/crepe/theme/common/prosemirror.css';
+import '@milkdown/crepe/theme/common/reset.css';
+import '@milkdown/crepe/theme/common/block-edit.css';
+import '@milkdown/crepe/theme/common/code-mirror.css';
+import '@milkdown/crepe/theme/common/cursor.css';
+import '@milkdown/crepe/theme/common/image-block.css';
+import '@milkdown/crepe/theme/common/link-tooltip.css';
+import '@milkdown/crepe/theme/common/list-item.css';
+import '@milkdown/crepe/theme/common/placeholder.css';
+import '@milkdown/crepe/theme/common/toolbar.css';
+import '@milkdown/crepe/theme/common/table.css';
+// import '@milkdown/crepe/theme/common/latex.css'; // Excluded to fix build error
 // import "@milkdown/crepe/theme/frame.css";
 // We don't import the light theme CSS because we are in dark mode and will rely on overrides/default
 import { configureAngularToolbar, angularToolbarPlugin } from './plugins/toolbar';
@@ -14,9 +25,11 @@ import {
     underlineAttr, underlineSchema, setUnderlineCommand
 } from './plugins/marks';
 import { textAlignPlugin, setTextAlignCommand, indentPlugin, indentCommand, outdentCommand } from './plugins/nodes';
+import { entityHighlighter } from './plugins/entityHighlighter';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 import { commandsCtx } from '@milkdown/kit/core';
 import { EditorService } from '../../services/editor.service';
+import { getHighlighterApi } from '../../api/highlighter-api';
 
 @Component({
     selector: 'app-editor',
@@ -72,11 +85,17 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             .config(textAlignPlugin)
             .use(setTextAlignCommand)
             .config(indentPlugin)
-            .use(indentCommand)
-            .use(outdentCommand);
+            .use(indentCommand) // Ensure indent command is available
+            .use(outdentCommand)
+            .use(entityHighlighter);
 
         await this.crepe.create();
         this.editorService.registerEditor(this.crepe);
+
+        // Set explicit Note ID to enable scanning/registry
+        const highlighterApi = getHighlighterApi();
+        highlighterApi.setNoteId('scratchpad-1', 'narrative-1');
+        console.log('[EditorComponent] Set initial Note ID to scratchpad-1');
 
         this.crepe.on((listener) => {
             listener.updated((ctx, doc, prevDoc) => {
