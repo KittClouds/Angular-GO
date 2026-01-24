@@ -1,23 +1,26 @@
 // src/app/components/sidebar/file-tree/tree-node.component.ts
-// Individual tree row - VS Code style with connector lines
+// Individual tree row - VS Code style with connector lines and inline rename
 
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Folder, FolderOpen, FileText, Star, BookOpen, MoreVertical } from 'lucide-angular';
 import type { FlatTreeNode } from '../../../lib/arborist/types';
 
 @Component({
     selector: 'app-tree-node',
     standalone: true,
-    imports: [CommonModule, LucideAngularModule],
+    imports: [CommonModule, LucideAngularModule, FormsModule],
     template: `
         <div
-            class="tree-node relative flex items-center gap-1.5 h-7 w-full group pr-2 cursor-pointer transition-colors duration-100"
+            class="tree-node relative flex items-center gap-1.5 h-7 w-full pr-2 cursor-pointer transition-colors duration-100"
             [class.bg-accent]="selected"
-            [class.hover:bg-muted/50]="!selected"
+            [class.hover:bg-muted/50]="!selected && !isEditing"
             [class.narrative-root]="node.isNarrativeRoot"
             [style.paddingLeft.px]="node.level * 16"
-            (click)="onNodeClick()">
+            (click)="onNodeClick()"
+            (mouseenter)="isHovered = true"
+            (mouseleave)="isHovered = false">
 
             <!-- Connector Lines (VS Code structured style) -->
             <ng-container *ngIf="node.level > 0">
@@ -88,17 +91,32 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
                 class="shrink-0 z-10 text-muted-foreground">
             </lucide-icon>
 
-            <!-- Name: Narrative roots and typed roots get colored text -->
+            <!-- Name (normal mode) -->
             <span
+                *ngIf="!isEditing"
                 class="truncate text-xs flex-1 z-10"
                 [class.font-semibold]="node.isNarrativeRoot"
-                [style.color]="(node.type === 'folder' && (node.isTypedRoot || node.isNarrativeRoot)) ? node.effectiveColor : null">
+                [style.color]="(node.type === 'folder' && (node.isTypedRoot || node.isNarrativeRoot)) ? node.effectiveColor : null"
+                (dblclick)="startEditing($event)">
                 {{ node.name || (node.type === 'folder' ? 'New Folder' : 'Untitled') }}
             </span>
 
+            <!-- Name (edit mode) -->
+            <input
+                *ngIf="isEditing"
+                #editInput
+                type="text"
+                class="flex-1 z-10 text-xs bg-background border border-ring rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring"
+                [value]="editValue"
+                (input)="editValue = $any($event.target).value"
+                (blur)="finishEditing()"
+                (keydown.enter)="finishEditing()"
+                (keydown.escape)="cancelEditing()"
+                (click)="$event.stopPropagation()">
+
             <!-- Narrative Badge (special) -->
             <span
-                *ngIf="node.isNarrativeRoot"
+                *ngIf="node.isNarrativeRoot && !isEditing"
                 class="text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 z-10 uppercase tracking-wider"
                 style="background-color: hsl(270, 70%, 60%, 0.15); color: hsl(270, 70%, 60%);">
                 NARRATIVE
@@ -106,7 +124,7 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
 
             <!-- Entity Badge (non-narrative) -->
             <span
-                *ngIf="node.entityKind && !node.isNarrativeRoot"
+                *ngIf="node.entityKind && !node.isNarrativeRoot && !isEditing"
                 class="text-[9px] px-1 py-0.5 rounded font-semibold shrink-0 z-10 uppercase tracking-wider"
                 [style.backgroundColor]="'hsl(var(--entity-' + node.entityKind.toLowerCase() + ') / 0.15)'"
                 [style.color]="'hsl(var(--entity-' + node.entityKind.toLowerCase() + '))'">
@@ -115,7 +133,7 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
 
             <!-- Favorite Star -->
             <lucide-icon
-                *ngIf="node.favorite"
+                *ngIf="node.favorite && !isEditing"
                 [img]="Star"
                 size="12"
                 class="shrink-0 z-10 fill-yellow-400 text-yellow-400">
@@ -123,7 +141,10 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
 
             <!-- Kebab Menu (appears on hover) -->
             <button
-                class="shrink-0 z-10 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-accent"
+                *ngIf="!isEditing"
+                class="kebab-menu shrink-0 z-10 p-0.5 rounded transition-opacity hover:bg-accent"
+                [class.opacity-0]="!isHovered"
+                [class.opacity-100]="isHovered"
                 (click)="onMenuClick($event)">
                 <lucide-icon [img]="MoreVertical" size="14" class="text-muted-foreground"></lucide-icon>
             </button>
@@ -136,15 +157,28 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
         .narrative-root {
             background: linear-gradient(90deg, hsl(270, 70%, 60%, 0.05) 0%, transparent 100%);
         }
+        .tree-node:hover .kebab-menu {
+            opacity: 1;
+        }
     `]
 })
-export class TreeNodeComponent {
+export class TreeNodeComponent implements AfterViewChecked {
     @Input() node!: FlatTreeNode;
     @Input() selected = false;
+    @Input() isEditing = false;
+
+    isHovered = false;
 
     @Output() toggle = new EventEmitter<string>();
     @Output() select = new EventEmitter<FlatTreeNode>();
     @Output() menuClick = new EventEmitter<{ node: FlatTreeNode; event: MouseEvent }>();
+    @Output() rename = new EventEmitter<{ node: FlatTreeNode; newName: string }>();
+    @Output() startRename = new EventEmitter<FlatTreeNode>();
+
+    @ViewChild('editInput') editInput?: ElementRef<HTMLInputElement>;
+
+    editValue = '';
+    private needsFocus = false;
 
     // Icons
     readonly Folder = Folder;
@@ -154,6 +188,14 @@ export class TreeNodeComponent {
     readonly BookOpen = BookOpen;
     readonly MoreVertical = MoreVertical;
 
+    ngAfterViewChecked(): void {
+        if (this.needsFocus && this.editInput) {
+            this.editInput.nativeElement.focus();
+            this.editInput.nativeElement.select();
+            this.needsFocus = false;
+        }
+    }
+
     onToggle(event: Event): void {
         event.stopPropagation();
         if (this.node.type === 'folder') {
@@ -162,12 +204,32 @@ export class TreeNodeComponent {
     }
 
     onNodeClick(): void {
-        this.select.emit(this.node);
+        if (!this.isEditing) {
+            this.select.emit(this.node);
+        }
     }
 
     onMenuClick(event: MouseEvent): void {
         event.stopPropagation();
         this.menuClick.emit({ node: this.node, event });
     }
-}
 
+    startEditing(event: Event): void {
+        event.stopPropagation();
+        this.editValue = this.node.name || '';
+        this.startRename.emit(this.node);
+        this.needsFocus = true;
+    }
+
+    finishEditing(): void {
+        const trimmed = this.editValue.trim();
+        if (trimmed && trimmed !== this.node.name) {
+            this.rename.emit({ node: this.node, newName: trimmed });
+        }
+        // Parent will clear isEditing
+    }
+
+    cancelEditing(): void {
+        this.rename.emit({ node: this.node, newName: this.node.name || '' }); // No change
+    }
+}

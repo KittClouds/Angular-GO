@@ -3,11 +3,12 @@
 
 import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { FolderService } from '../../lib/services/folder.service';
 import { NotesService } from '../../lib/dexie/notes.service';
+import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note, FolderSchema } from '../../lib/dexie/db';
@@ -45,6 +46,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     sidebarService = inject(SidebarService);
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
+    private noteEditorStore = inject(NoteEditorStore);
 
     // Subscriptions
     private foldersSubscription?: Subscription;
@@ -55,6 +57,9 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly FolderPlus = FolderPlus;
     readonly BookOpen = BookOpen;
     readonly Folder = Folder;
+    readonly PanelLeft = PanelLeft;
+    readonly PanelLeftClose = PanelLeftClose;
+    readonly FileText = FileText;
 
     // Entity folder options for dropdown
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;
@@ -68,6 +73,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     // Computed tree from Dexie data
     treeData = computed<TreeNode[]>(() => this.buildTree(this.folders(), this.notes()));
+
+    // Collapsed view: show only root-level items (folders + notes without parent)
+    collapsedNodes = computed<TreeNode[]>(() => {
+        return this.treeData().filter(node => !node.parentId || node.parentId === '');
+    });
 
     // ─────────────────────────────────────────────────────────────
     // Lifecycle
@@ -173,23 +183,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     async createNote(): Promise<void> {
         console.log('[Sidebar] Creating new note at root');
-
-        const id = await this.notesService.createNote({
-            worldId: '',
-            title: 'Untitled Note',
-            content: '{}',
-            markdownContent: '',
-            folderId: '',
-            entityKind: '',
-            entitySubtype: '',
-            isEntity: false,
-            isPinned: false,
-            favorite: false,
-            ownerId: '',
-            narrativeId: '',
-        });
-
-        console.log(`[Sidebar] Created note: ${id}`);
+        const id = await this.noteEditorStore.createAndOpenNote('', '');
+        console.log(`[Sidebar] Created and opened note: ${id}`);
     }
 
     toggleFolderDropdown(): void {
@@ -228,5 +223,27 @@ export class SidebarComponent implements OnInit, OnDestroy {
         console.log('[Sidebar] Creating new Narrative Vault');
         const id = await this.folderService.createNarrativeVault('New Narrative');
         console.log(`[Sidebar] Created narrative vault: ${id}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Collapsed View Helpers
+    // ─────────────────────────────────────────────────────────────
+
+    getNodeIcon(node: TreeNode): any {
+        if (node.type === 'folder') {
+            if (node.isNarrativeRoot) return this.BookOpen;
+            return this.Folder;
+        }
+        return this.FileText;
+    }
+
+    onCollapsedNodeClick(node: TreeNode): void {
+        if (node.type === 'note') {
+            // Open note in editor
+            this.noteEditorStore.openNote(node.id);
+        } else {
+            // Expand sidebar to show folder contents
+            this.sidebarService.open();
+        }
     }
 }

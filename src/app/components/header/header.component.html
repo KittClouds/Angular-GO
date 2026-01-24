@@ -17,5 +17,13 @@
             <lucide-icon [img]="Redo" size="18"></lucide-icon>
         </button>
 
+        <div class="w-px h-4 bg-border mx-2"></div>
+
+        <button class="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors"
+            (click)="rightSidebarService.toggle()"
+            [title]="rightSidebarService.isOpen() ? 'Hide details' : 'Show details'">
+            <lucide-icon [img]="PanelRight" size="18"></lucide-icon>
+        </button>
+
     </div>
 </div>

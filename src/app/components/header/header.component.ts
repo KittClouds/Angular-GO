@@ -4,10 +4,12 @@ import {
     LucideAngularModule,
     Undo,
     Redo,
-    PanelLeft
+    PanelLeft,
+    PanelRight
 } from 'lucide-angular';
 import { EditorService } from '../../services/editor.service';
 import { SidebarService } from '../../lib/services/sidebar.service';
+import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 
 @Component({
     selector: 'app-header',
@@ -20,13 +22,15 @@ export class HeaderComponent {
     readonly Undo = Undo;
     readonly Redo = Redo;
     readonly PanelLeft = PanelLeft;
+    readonly PanelRight = PanelRight;
 
     sidebarService = inject(SidebarService);
+    rightSidebarService = inject(RightSidebarService);
 
     constructor(private editorService: EditorService) { }
 
     toggleSidebar() {
-        this.sidebarService.toggle();
+        this.sidebarService.toggleClose();
     }
 
     undo() {

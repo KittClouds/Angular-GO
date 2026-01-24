@@ -1,23 +1,27 @@
 <!-- Sidebar Shell -->
 <aside
     class="h-full border-r border-border bg-sidebar flex flex-col transition-all duration-300 ease-in-out overflow-hidden"
-    [class.w-64]="sidebarService.isOpen()" [class.w-0]="!sidebarService.isOpen()">
+    [class.w-64]="sidebarService.isOpen()" [class.w-14]="sidebarService.isCollapsed()"
+    [class.w-0]="sidebarService.isClosed()">
 
     <!-- Sidebar Header with Action Buttons -->
-    <div class="h-10 flex items-center justify-between px-3 border-b border-border shrink-0">
-        <span class="text-sm font-semibold text-foreground">Navigator</span>
+    <div class="h-10 flex items-center justify-between px-3 border-b border-border shrink-0"
+        [class.px-2]="sidebarService.isCollapsed()" [class.justify-center]="sidebarService.isCollapsed()">
+
+        <!-- Title (only when open) -->
+        <span *ngIf="sidebarService.isOpen()" class="text-sm font-semibold text-foreground">Navigator</span>
 
         <!-- Quick Action Buttons -->
-        <div class="flex items-center gap-1">
+        <div class="flex items-center gap-1" [class.flex-col]="sidebarService.isCollapsed()">
             <!-- New Note Button -->
             <button
                 class="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                title="New Note" (click)="createNote()">
+                [title]="sidebarService.isCollapsed() ? 'New Note' : ''" (click)="createNote()">
                 <lucide-icon [img]="Plus" size="16"></lucide-icon>
             </button>
 
-            <!-- Folder Dropdown Trigger -->
-            <div class="relative">
+            <!-- Folder Dropdown Trigger (only when open) -->
+            <div class="relative" *ngIf="sidebarService.isOpen()">
                 <button
                     class="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                     title="New Folder" (click)="toggleFolderDropdown()">
@@ -55,10 +59,11 @@
                 </div>
             </div>
 
-            <!-- Create Narrative Vault Button (Purple/Special) -->
+            <!-- Create Narrative Vault Button -->
             <button
                 class="p-1.5 rounded-md hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-colors"
-                title="Create Narrative Vault" (click)="createNarrative()">
+                [title]="sidebarService.isCollapsed() ? 'New Narrative' : 'Create Narrative Vault'"
+                (click)="createNarrative()">
                 <lucide-icon [img]="BookOpen" size="16"></lucide-icon>
             </button>
         </div>
@@ -70,11 +75,37 @@
 
     <!-- Sidebar Content -->
     <div class="flex-1 overflow-hidden">
-        <app-file-tree [tree]="treeData()"></app-file-tree>
+        <!-- Full tree when open -->
+        <app-file-tree *ngIf="sidebarService.isOpen()" [tree]="treeData()"></app-file-tree>
+
+        <!-- Collapsed icons view -->
+        <div *ngIf="sidebarService.isCollapsed()" class="flex flex-col items-center py-2 gap-1 overflow-y-auto h-full">
+            <!-- Icon only list -->
+            <button *ngFor="let node of collapsedNodes()"
+                class="w-10 h-8 flex items-center justify-center rounded-md hover:bg-accent transition-colors"
+                [title]="node.name" (click)="onCollapsedNodeClick(node)">
+                <lucide-icon [img]="getNodeIcon(node)" size="16" [style.color]="node.color || 'currentColor'"
+                    class="text-muted-foreground">
+                </lucide-icon>
+            </button>
+        </div>
     </div>
 
     <!-- Sidebar Footer -->
-    <div class="h-8 flex items-center px-3 border-t border-border shrink-0">
-        <span class="text-xs text-muted-foreground">{{ treeData().length }} items</span>
+    <div class="h-8 flex items-center px-3 border-t border-border shrink-0"
+        [class.justify-center]="sidebarService.isCollapsed()" [class.px-1]="sidebarService.isCollapsed()">
+
+        <!-- Item count (only when open) -->
+        <span *ngIf="sidebarService.isOpen()" class="text-xs text-muted-foreground flex-1">
+            {{ treeData().length }} items
+        </span>
+
+        <!-- Collapse/Expand Toggle -->
+        <button class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+            [title]="sidebarService.isOpen() ? 'Collapse sidebar' : 'Expand sidebar'"
+            (click)="sidebarService.toggleCollapse()">
+            <lucide-icon [img]="sidebarService.isOpen() ? PanelLeftClose : PanelLeft" size="14">
+            </lucide-icon>
+        </button>
     </div>
 </aside>

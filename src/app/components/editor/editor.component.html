@@ -1,1 +1,24 @@
-<div #editorContainer class="crepe-host h-full w-full overflow-hidden"></div>
+<div class="h-full w-full overflow-hidden relative">
+    <!-- Editor (always rendered, hidden when no note) -->
+    <div #editorContainer class="crepe-host h-full w-full" [class.hidden]="!noteEditorStore.isNoteOpen()">
+    </div>
+
+    <!-- No Note Selected Placeholder (shown when no note open) -->
+    <div *ngIf="!noteEditorStore.isNoteOpen()" class="absolute inset-0 flex items-center justify-center bg-muted/5">
+        <div class="text-center p-8 max-w-md">
+            <div class="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-6">
+                <lucide-icon [img]="FileText" size="32" class="text-muted-foreground/60"></lucide-icon>
+            </div>
+            <h2 class="text-lg font-medium text-foreground mb-2">No note selected</h2>
+            <p class="text-sm text-muted-foreground mb-6">
+                Select a note from the sidebar to start editing, or create a new one.
+            </p>
+            <button
+                class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+                (click)="createNote()">
+                <lucide-icon [img]="Plus" size="16"></lucide-icon>
+                Create New Note
+            </button>
+        </div>
+    </div>
+</div>

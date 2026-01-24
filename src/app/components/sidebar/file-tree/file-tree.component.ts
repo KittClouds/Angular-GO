@@ -11,6 +11,7 @@ import type { AllowedSubfolderDef, AllowedNoteTypeDef } from '../../../lib/dexie
 import { flattenTree, toggleExpansion } from '../../../lib/arborist/flatten';
 import { FolderService } from '../../../lib/services/folder.service';
 import { NotesService } from '../../../lib/dexie/notes.service';
+import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 
 @Component({
     selector: 'app-file-tree',
@@ -29,9 +30,12 @@ import { NotesService } from '../../../lib/dexie/notes.service';
                     <app-tree-node
                         [node]="node"
                         [selected]="selectedId() === node.id"
+                        [isEditing]="editingNodeId() === node.id"
                         (toggle)="onToggle($event)"
                         (select)="onSelect($event)"
-                        (menuClick)="onMenuClick($event)">
+                        (menuClick)="onMenuClick($event)"
+                        (startRename)="onStartRename($event)"
+                        (rename)="onRename($event)">
                     </app-tree-node>
                 </ng-template>
             </p-scroller>
@@ -136,6 +140,7 @@ import { NotesService } from '../../../lib/dexie/notes.service';
 export class FileTreeComponent {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
+    private noteEditorStore = inject(NoteEditorStore);
 
     // Input: the nested tree data
     @Input() set tree(value: TreeNode[]) {
@@ -146,6 +151,7 @@ export class FileTreeComponent {
     private _tree = signal<TreeNode[]>([]);
     private expansion = signal<ExpansionState>(new Set());
     selectedId = signal<string | null>(null);
+    editingNodeId = signal<string | null>(null);
 
     // Menu state
     menuOpen = signal(false);
@@ -237,9 +243,36 @@ export class FileTreeComponent {
     onSelect(node: FlatTreeNode): void {
         this.selectedId.set(node.id);
 
-        // If folder, also toggle (optional, mimicking VS Code basic behavior)
         if (node.type === 'folder') {
+            // Toggle folder expansion
             this.onToggle(node.id);
+        } else if (node.type === 'note') {
+            // Open note in editor
+            this.noteEditorStore.openNote(node.id);
+        }
+    }
+
+    onStartRename(node: FlatTreeNode): void {
+        this.editingNodeId.set(node.id);
+    }
+
+    async onRename(event: { node: FlatTreeNode; newName: string }): Promise<void> {
+        const { node, newName } = event;
+        this.editingNodeId.set(null); // Clear editing state
+
+        // Only save if name actually changed
+        if (newName && newName !== node.name) {
+            try {
+                if (node.type === 'folder') {
+                    await this.folderService.updateFolder(node.id, { name: newName });
+                    console.log(`[FileTree] Renamed folder "${node.name}" → "${newName}"`);
+                } else {
+                    await this.notesService.updateNote(node.id, { title: newName });
+                    console.log(`[FileTree] Renamed note "${node.name}" → "${newName}"`);
+                }
+            } catch (e) {
+                console.error('[FileTree] Rename failed:', e);
+            }
         }
     }
 
@@ -285,8 +318,7 @@ export class FileTreeComponent {
                 this.expandNode(node.id);
                 break;
             case 'rename':
-                // TODO: Implement inline rename
-                console.log(`[FileTree] Rename: ${node.name} (not yet implemented)`);
+                this.editingNodeId.set(node.id);
                 break;
             case 'delete':
                 if (node.type === 'folder') {

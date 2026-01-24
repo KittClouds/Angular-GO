@@ -1,30 +1,47 @@
 // src/app/lib/services/sidebar.service.ts
-// Simple service to manage sidebar open/closed state
+// Service to manage sidebar open/collapsed/closed state
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, computed } from '@angular/core';
+
+export type SidebarMode = 'open' | 'collapsed' | 'closed';
 
 @Injectable({
     providedIn: 'root'
 })
 export class SidebarService {
-    // State
-    private _isOpen = signal(true);
+    // State: three modes
+    private _mode = signal<SidebarMode>('open');
 
-    // Getters
-    get isOpen() {
-        return this._isOpen;
-    }
+    // Computed getters for template convenience
+    readonly mode = this._mode.asReadonly();
+    readonly isOpen = computed(() => this._mode() === 'open');
+    readonly isCollapsed = computed(() => this._mode() === 'collapsed');
+    readonly isClosed = computed(() => this._mode() === 'closed');
 
     // Actions
-    toggle(): void {
-        this._isOpen.update(v => !v);
+    setMode(mode: SidebarMode): void {
+        this._mode.set(mode);
     }
 
     open(): void {
-        this._isOpen.set(true);
+        this._mode.set('open');
+    }
+
+    collapse(): void {
+        this._mode.set('collapsed');
     }
 
     close(): void {
-        this._isOpen.set(false);
+        this._mode.set('closed');
+    }
+
+    // Toggle between open and collapsed (for footer button)
+    toggleCollapse(): void {
+        this._mode.update(m => m === 'open' ? 'collapsed' : 'open');
+    }
+
+    // Toggle between open/collapsed and closed (for header button)
+    toggleClose(): void {
+        this._mode.update(m => m === 'closed' ? 'open' : 'closed');
     }
 }

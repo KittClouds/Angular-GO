@@ -17,9 +17,10 @@ export class NotesService {
 
     /**
      * Get all notes as a live-updating observable
+     * Returns in insertion order (stable - won't jump when edited)
      */
     getAllNotes$(): Observable<Note[]> {
-        return from(liveQuery(() => db.notes.orderBy('updatedAt').reverse().toArray()) as DexieObservable<Note[]>);
+        return from(liveQuery(() => db.notes.toArray()) as DexieObservable<Note[]>);
     }
 
     /**
