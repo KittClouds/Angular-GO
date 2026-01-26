@@ -3,7 +3,6 @@
 package chunker
 
 import (
-	"strings"
 	"unicode"
 )
 
@@ -171,16 +170,14 @@ type ChunkResult struct {
 
 // Chunker performs rule-based phrase detection
 type Chunker struct {
-	lexicon map[string]POS
+	tagger *Tagger
 }
 
 // New creates a Chunker with the default English lexicon
 func New() *Chunker {
-	c := &Chunker{
-		lexicon: make(map[string]POS),
+	return &Chunker{
+		tagger: NewTagger(),
 	}
-	c.loadDefaultLexicon()
-	return c
 }
 
 // Chunk processes text and returns detected phrases
@@ -202,7 +199,8 @@ func (c *Chunker) Chunk(text string) ChunkResult {
 // ============================================================================
 
 func (c *Chunker) tokenize(text string) []TextRange {
-	var tokens []TextRange
+	// Heuristic: Average word length 5 + punctuation. ~1/6 of text len.
+	tokens := make([]TextRange, 0, len(text)/6)
 	var start int = -1
 
 	for i, ch := range text {
@@ -235,63 +233,22 @@ func (c *Chunker) tokenize(text string) []TextRange {
 // ============================================================================
 
 func (c *Chunker) tagTokens(ranges []TextRange, text string) []Token {
-	tokens := make([]Token, 0, len(ranges))
-	for _, r := range ranges {
-		word := r.Slice(text)
-		pos := c.lookupPOS(word)
-		tokens = append(tokens, Token{Text: word, POS: pos, Range: r})
+	// Extract words
+	words := make([]string, len(ranges))
+	for i, r := range ranges {
+		words[i] = r.Slice(text)
 	}
+
+	// Tag them using the Tagger (Baseline + Context)
+	posTags := c.tagger.Tag(words)
+
+	// Combine into Tokens
+	tokens := make([]Token, len(ranges))
+	for i := 0; i < len(ranges); i++ {
+		tokens[i] = Token{Text: words[i], POS: posTags[i], Range: ranges[i]}
+	}
+
 	return tokens
-}
-
-func (c *Chunker) lookupPOS(word string) POS {
-	lower := strings.ToLower(word)
-
-	// Check lexicon
-	if pos, ok := c.lexicon[lower]; ok {
-		return pos
-	}
-
-	// Infer from heuristics
-	return c.inferPOS(word)
-}
-
-func (c *Chunker) inferPOS(word string) POS {
-	lower := strings.ToLower(word)
-
-	// Single punctuation
-	if len(word) == 1 {
-		ch := rune(word[0])
-		if unicode.IsPunct(ch) {
-			return Punctuation
-		}
-	}
-
-	// Proper noun: starts with uppercase
-	if len(word) > 0 && unicode.IsUpper(rune(word[0])) {
-		return ProperNoun
-	}
-
-	// Suffix heuristics
-	if strings.HasSuffix(lower, "ly") {
-		return Adverb
-	}
-	if strings.HasSuffix(lower, "ing") || strings.HasSuffix(lower, "ed") || strings.HasSuffix(lower, "en") {
-		return Verb
-	}
-	if strings.HasSuffix(lower, "ness") || strings.HasSuffix(lower, "tion") ||
-		strings.HasSuffix(lower, "ment") || strings.HasSuffix(lower, "ity") ||
-		strings.HasSuffix(lower, "er") || strings.HasSuffix(lower, "or") {
-		return Noun
-	}
-	if strings.HasSuffix(lower, "ful") || strings.HasSuffix(lower, "less") ||
-		strings.HasSuffix(lower, "ous") || strings.HasSuffix(lower, "ive") ||
-		strings.HasSuffix(lower, "able") || strings.HasSuffix(lower, "ible") {
-		return Adjective
-	}
-
-	// Default: noun
-	return Noun
 }
 
 // ============================================================================
@@ -299,7 +256,8 @@ func (c *Chunker) inferPOS(word string) POS {
 // ============================================================================
 
 func (c *Chunker) findChunks(tokens []Token, text string) []Chunk {
-	var chunks []Chunk
+	// Heuristic: Chunks are roughly 1/3 of tokens
+	chunks := make([]Chunk, 0, len(tokens)/3)
 	i := 0
 
 	for i < len(tokens) {
@@ -472,87 +430,4 @@ func (c *Chunker) tryClause(tokens []Token, start int) (Chunk, int) {
 
 	rng := NewRange(rel.Range.Start, end)
 	return Chunk{Kind: Clause, Range: rng, Head: vp.Head, Modifiers: []TextRange{rel.Range}}, i - start
-}
-
-// ============================================================================
-// Default Lexicon
-// ============================================================================
-
-func (c *Chunker) loadDefaultLexicon() {
-	// Determiners
-	for _, w := range []string{"the", "a", "an", "this", "that", "these", "those", "my", "your",
-		"his", "her", "its", "our", "their", "some", "any", "no", "every", "each", "all", "both",
-		"few", "many", "much", "most", "other"} {
-		c.lexicon[w] = Determiner
-	}
-
-	// Prepositions
-	for _, w := range []string{"in", "on", "at", "to", "for", "with", "by", "from", "of", "about",
-		"into", "through", "during", "before", "after", "above", "below", "between", "under", "over",
-		"against", "among", "around", "behind", "beside", "beyond", "near", "toward", "towards",
-		"upon", "within", "without", "across", "along", "inside", "outside", "throughout"} {
-		c.lexicon[w] = Preposition
-	}
-
-	// Auxiliaries
-	for _, w := range []string{"is", "are", "was", "were", "be", "been", "being", "am",
-		"have", "has", "had", "having", "do", "does", "did", "doing"} {
-		c.lexicon[w] = Auxiliary
-	}
-
-	// Modals
-	for _, w := range []string{"can", "could", "will", "would", "shall", "should", "may", "might", "must"} {
-		c.lexicon[w] = Modal
-	}
-
-	// Conjunctions
-	for _, w := range []string{"and", "or", "but", "nor", "yet", "so", "because", "although",
-		"while", "if", "unless", "until", "since", "when", "where", "whether"} {
-		c.lexicon[w] = Conjunction
-	}
-
-	// Pronouns
-	for _, w := range []string{"i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them",
-		"myself", "yourself", "himself", "herself", "itself", "ourselves", "themselves"} {
-		c.lexicon[w] = Pronoun
-	}
-
-	// Relative pronouns
-	for _, w := range []string{"who", "whom", "whose", "which", "that"} {
-		c.lexicon[w] = RelativePronoun
-	}
-
-	// Common adjectives
-	for _, w := range []string{"old", "new", "good", "bad", "great", "small", "large", "big", "little",
-		"young", "long", "short", "high", "low", "early", "late", "first", "last", "ancient", "dark",
-		"bright", "powerful", "mighty", "wise", "evil", "grey", "black", "white", "red", "blue",
-		"green", "golden", "silver"} {
-		c.lexicon[w] = Adjective
-	}
-
-	// Common adverbs
-	for _, w := range []string{"very", "quite", "rather", "really", "too", "just", "only",
-		"now", "then", "here", "there", "always", "never", "often", "sometimes", "slowly",
-		"quickly", "suddenly", "finally", "already", "still", "even"} {
-		c.lexicon[w] = Adverb
-	}
-
-	// Common verbs
-	for _, w := range []string{"go", "went", "gone", "going", "come", "came", "coming",
-		"say", "said", "saying", "see", "saw", "seen", "seeing", "know", "knew", "known", "knowing",
-		"take", "took", "taken", "taking", "get", "got", "getting", "make", "made", "making",
-		"walk", "walked", "walking", "run", "ran", "running", "live", "lived", "living",
-		"speak", "spoke", "spoken", "speaking", "fight", "fought", "fighting", "kill", "killed",
-		"killing", "love", "loved", "loving", "hate", "hated", "hating", "rule", "ruled", "ruling",
-		"serve", "served", "serving"} {
-		c.lexicon[w] = Verb
-	}
-
-	// Common nouns
-	for _, w := range []string{"wizard", "king", "queen", "knight", "dragon", "sword", "castle",
-		"forest", "tower", "ring", "magic", "battle", "kingdom", "throne", "warrior", "mage",
-		"elf", "dwarf", "orc", "goblin", "troll", "man", "woman", "child", "hero", "villain",
-		"stranger", "lord", "lady"} {
-		c.lexicon[w] = Noun
-	}
 }
