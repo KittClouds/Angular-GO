@@ -10,6 +10,7 @@ type ResoRankConfig struct {
 	UseAdaptiveSegments bool                  `json:"useAdaptiveSegments"`
 	FieldWeights        map[string]float64    `json:"fieldWeights"`
 	FieldParams         map[string]FieldParam `json:"fieldParams"`
+	VectorAlpha         float64               `json:"vectorAlpha"` // Weight for vector score (0-1)
 }
 
 type FieldParam struct {
@@ -26,6 +27,7 @@ func DefaultConfig() ResoRankConfig {
 		MaxSegments:    32,
 		FieldWeights:   make(map[string]float64),
 		FieldParams:    make(map[string]FieldParam),
+		VectorAlpha:    0.0, // Default to pure BM25
 	}
 }
 
@@ -46,6 +48,7 @@ type FieldOccurrence struct {
 type DocumentMetadata struct {
 	FieldLengths    map[string]int `json:"fieldLengths"`
 	TotalTokenCount int            `json:"totalTokenCount"`
+	Embedding       []float32      `json:"embedding,omitempty"` // for hybrid search
 }
 
 // SearchResult represents a scored match

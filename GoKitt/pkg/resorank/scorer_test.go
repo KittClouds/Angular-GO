@@ -49,7 +49,7 @@ func TestScorerBasic(t *testing.T) {
 	// Refresh cache logic (manual stats update done above)
 
 	// Score
-	results := scorer.Search([]string{"hello"}, 10)
+	results := scorer.Search([]string{"hello"}, nil, 10)
 
 	if len(results) != 2 {
 		t.Fatalf("Expected 2 results, got %d", len(results))
@@ -105,7 +105,7 @@ func TestProximityBoost(t *testing.T) {
 	}
 	scorer.IndexDocument("docB", metaB, tokensB)
 
-	results := scorer.Search([]string{"hello", "world"}, 10)
+	results := scorer.Search([]string{"hello", "world"}, nil, 10)
 
 	scoreA := 0.0
 	scoreB := 0.0
