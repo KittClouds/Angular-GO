@@ -4,12 +4,14 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { FolderService } from '../../lib/services/folder.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
+import { ThemeService } from '../../lib/services/theme.service';
+import { EditorService } from '../../services/editor.service';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import { SearchPanelComponent } from '../search-panel/search-panel.component';
 import type { TreeNode } from '../../lib/arborist/types';
@@ -46,6 +48,8 @@ const ENTITY_FOLDER_OPTIONS: EntityFolderOption[] = [
 })
 export class SidebarComponent implements OnInit, OnDestroy {
     sidebarService = inject(SidebarService);
+    themeService = inject(ThemeService);
+    editorService = inject(EditorService);
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
@@ -68,6 +72,10 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly FileText = FileText;
     readonly Calendar = Calendar;
     readonly Search = Search;
+    readonly Undo = Undo;
+    readonly Redo = Redo;
+    readonly Sun = Sun;
+    readonly Moon = Moon;
 
     // Entity folder options for dropdown
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;

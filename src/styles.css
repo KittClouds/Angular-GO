@@ -470,3 +470,44 @@
     transform: scale(1.25) !important;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
 }
+
+/* ============================================
+   PRIMENG TABS OVERRIDES (Header Tabs)
+   Force complete transparency for teal gradient
+   ============================================ */
+
+/* Make the entire p-tabs component tree transparent */
+.custom-tabs.p-tabs,
+.custom-tabs .p-tabs,
+.custom-tabs .p-component,
+.custom-tabs .p-tablist,
+.custom-tabs .p-tablist-content,
+.custom-tabs .p-tablist-tab-list,
+.custom-tabs .p-tablist-viewport,
+.custom-tabs .p-scroller,
+.custom-tabs .p-scroller-content {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+}
+
+/* Individual tab items */
+.custom-tabs .p-tab {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+}
+
+/* Hide default active indicator */
+.custom-tabs .p-tablist-active-bar,
+.custom-tabs .p-ink-bar {
+    display: none !important;
+}
+
+/* Navigation arrows if present */
+.custom-tabs .p-tablist-nav-button,
+.custom-tabs .p-tablist-prev-btn,
+.custom-tabs .p-tablist-next-btn {
+    background: transparent !important;
+    color: white !important;
+}

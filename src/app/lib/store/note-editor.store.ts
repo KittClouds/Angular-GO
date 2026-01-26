@@ -267,4 +267,11 @@ export class NoteEditorStore {
         await ops.updateNote(noteId, { title });
         console.log(`[NoteEditorStore] Updated title: ${title}`);
     }
+    /**
+     * Rename any note by ID.
+     */
+    async renameNote(id: string, title: string): Promise<void> {
+        await ops.updateNote(id, { title });
+        console.log(`[NoteEditorStore] Renamed note ${id} to "${title}"`);
+    }
 }

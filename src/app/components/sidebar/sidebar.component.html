@@ -67,17 +67,34 @@
 
         <!-- Panel Header -->
         <div
-            class="h-10 flex items-center justify-between px-3 border-b border-sidebar-border shrink-0 bg-gradient-to-r from-[#18181b] via-[#0f2a2e] to-[#134e4a] text-slate-200">
+            class="h-10 flex items-center justify-between px-3 border-b border-sidebar-border shrink-0 bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200">
             <span class="text-sm font-semibold text-slate-200">
                 {{ viewMode() === 'files' ? 'Folders' : 'Search' }}
             </span>
 
-            <!-- Header Actions (only for files view) -->
-            <div *ngIf="viewMode() === 'files'" class="flex items-center gap-0.5">
-                <!-- Folder Dropdown Trigger -->
-                <div class="relative">
-                    <button
-                        class="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+            <!-- Header Actions -->
+            <div class="flex items-center gap-1">
+                <!-- Global Tools -->
+                <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+                    (click)="editorService.undo()" title="Undo">
+                    <lucide-icon [img]="Undo" size="14"></lucide-icon>
+                </button>
+                <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+                    (click)="editorService.redo()" title="Redo">
+                    <lucide-icon [img]="Redo" size="14"></lucide-icon>
+                </button>
+                <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+                    (click)="themeService.toggleTheme($event)"
+                    [title]="themeService.isDark() ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+                    <lucide-icon [img]="themeService.isDark() ? Sun : Moon" size="14"></lucide-icon>
+                </button>
+
+                <!-- Divider -->
+                <div class="w-px h-3 bg-white/20 mx-1"></div>
+
+                <!-- Folder Actions (only for files view) -->
+                <div *ngIf="viewMode() === 'files'" class="relative">
+                    <button class="p-1.5 rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"
                         title="New Folder" (click)="toggleFolderDropdown()">
                         <lucide-icon [img]="FolderPlus" size="14"></lucide-icon>
                     </button>

@@ -14,10 +14,12 @@ import { SidebarService } from '../../lib/services/sidebar.service';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { ThemeService } from '../../lib/services/theme.service';
 
+import { EditorTabsComponent } from './editor-tabs/editor-tabs.component';
+
 @Component({
     selector: 'app-header',
     standalone: true,
-    imports: [CommonModule, LucideAngularModule],
+    imports: [CommonModule, LucideAngularModule, EditorTabsComponent],
     templateUrl: './header.component.html',
     styleUrls: ['./header.component.css']
 })

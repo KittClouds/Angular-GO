@@ -1,37 +1,27 @@
 <div
-    class="h-10 flex items-center justify-between border-b border-teal-900/40 bg-gradient-to-r from-[#18181b] via-[#0f172a] to-[#134e4a] text-slate-200 px-2 select-none shadow-sm">
+    class="h-10 flex items-center justify-between border-b border-teal-900/40 bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f172a] text-slate-200 px-2 select-none shadow-sm">
     <!-- Left Actions -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 shrink-0 z-10">
         <!-- Sidebar Toggle -->
-        <button class="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+        <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
             (click)="toggleSidebar()" [title]="sidebarService.isOpen() ? 'Hide sidebar' : 'Show sidebar'">
             <lucide-icon [img]="PanelLeft" size="18"></lucide-icon>
         </button>
     </div>
 
+    <!-- Center: Editor Tabs -->
+    <div class="flex-1 overflow-hidden h-full mx-2 flex items-end">
+        <app-editor-tabs></app-editor-tabs>
+    </div>
+
     <!-- Right Actions -->
-    <div class="flex items-center gap-1">
-        <!-- Theme Toggle -->
-        <button class="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors"
-            (click)="themeService.toggleTheme($event)"
-            [title]="themeService.isDark() ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
-            <lucide-icon [img]="themeService.isDark() ? Sun : Moon" size="18"></lucide-icon>
-        </button>
+    <div class="flex items-center gap-1 shrink-0 z-10">
+        <div class="w-px h-4 bg-white/20 mx-2"></div>
 
-        <button class="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-white/10" (click)="undo()">
-            <lucide-icon [img]="Undo" size="18"></lucide-icon>
-        </button>
-        <button class="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-white/10" (click)="redo()">
-            <lucide-icon [img]="Redo" size="18"></lucide-icon>
-        </button>
-
-        <div class="w-px h-4 bg-slate-700 mx-2"></div>
-
-        <button class="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+        <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
             (click)="rightSidebarService.toggle()"
             [title]="rightSidebarService.isOpen() ? 'Hide details' : 'Show details'">
             <lucide-icon [img]="PanelRight" size="18"></lucide-icon>
         </button>
-
     </div>
 </div>
