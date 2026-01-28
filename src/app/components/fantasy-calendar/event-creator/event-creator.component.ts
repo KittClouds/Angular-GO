@@ -1,24 +1,17 @@
-import { Component, EventEmitter, Output, computed, signal, model, inject } from '@angular/core';
+import { Component, EventEmitter, Output, computed, signal, model, inject, effect } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideChevronDown, lucideChevronUp, lucidePlus, lucideCalendar,
-  lucideTag, lucidePalette, lucideClock, lucideX
+  lucideTag, lucidePalette, lucideClock, lucideX, lucideFolder, lucideFolderPlus
 } from '@ng-icons/lucide';
 import { CalendarService } from '../../../services/calendar.service';
+import { FolderService } from '../../../lib/services/folder.service';
+import { AllowedSubfolderDef, Folder } from '../../../lib/dexie/db';
 import { CalendarEvent, EventImportance, EventCategory } from '../../../lib/fantasy-calendar/types';
 import { getEventTypesForScale, getEventTypeById, DEFAULT_EVENT_TYPE_ID, EventTypeDefinition } from '../../../lib/fantasy-calendar/event-type-registry';
-import { IMPORTANCE_COLORS } from '../../../lib/fantasy-calendar/event-type-registry'; // Wait, I didn't export this from registry. I need to define it or get it.
-
-// Define IMPORTANCE_COLORS locally if not exported
-const IMPORTANCE_COLORS_MAP: Record<string, string> = {
-  trivial: '#94a3b8',
-  minor: '#60a5fa',
-  moderate: '#a78bfa',
-  major: '#facc15',
-  critical: '#ef4444'
-};
 
 const COLOR_PRESETS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e',
@@ -29,13 +22,15 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
   tempId: string;
 }
 
+type CreationMode = 'event' | 'entity';
+
 @Component({
   selector: 'app-event-creator',
   standalone: true,
   imports: [CommonModule, FormsModule, NgIcon],
   providers: [provideIcons({
     lucideChevronDown, lucideChevronUp, lucidePlus, lucideCalendar,
-    lucideTag, lucidePalette, lucideClock, lucideX
+    lucideTag, lucidePalette, lucideClock, lucideX, lucideFolder, lucideFolderPlus
   })],
   template: `
     <div class="space-y-3">
@@ -43,9 +38,9 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
       <div class="flex gap-2">
         <input
           type="text"
-          placeholder="What happened?"
+          [placeholder]="mode() === 'event' ? 'What happened?' : 'Folder Name (e.g. Act 1)'"
           [(ngModel)]="title"
-          (keydown.enter)="!isExpanded() && handleAddAllEvents()"
+          (keydown.enter)="!isExpanded() && handleAdd()"
           class="flex-1 h-9 px-3 rounded-md border text-sm bg-background w-full focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <button
@@ -59,8 +54,28 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
       <!-- Expandable Details -->
       <div *ngIf="isExpanded()" class="space-y-4 pt-2 border-t mt-2">
         
-        <!-- Event Type Picker -->
-        <div class="space-y-2">
+        <!-- Mode Switcher -->
+        <div class="flex gap-2 p-1 bg-muted/30 rounded-lg">
+            <button 
+                class="flex-1 text-xs py-1.5 rounded-md font-medium transition-colors flex items-center justify-center gap-2"
+                [class]="mode() === 'event' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'"
+                (click)="setMode('event')"
+            >
+                <ng-icon name="lucideCalendar" class="w-3 h-3"></ng-icon> Event
+            </button>
+            <button 
+                class="flex-1 text-xs py-1.5 rounded-md font-medium transition-colors flex items-center justify-center gap-2"
+                [class]="mode() === 'entity' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'"
+                (click)="setMode('entity')"
+                [disabled]="!hasNarrative()"
+                [title]="!hasNarrative() ? 'Create a Narrative Folder in Sidebar first' : 'Create Entity Folder'"
+            >
+                <ng-icon name="lucideFolderPlus" class="w-3 h-3"></ng-icon> Structure
+            </button>
+        </div>
+
+        <!-- EVENT MODE: Type Picker -->
+        <div class="space-y-2" *ngIf="mode() === 'event'">
           <label class="text-xs text-muted-foreground font-medium">Event Type</label>
           <div class="h-20 overflow-y-auto border rounded p-2 bg-muted/10">
             <div class="flex flex-wrap gap-1">
@@ -73,11 +88,34 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
                 [class.bg-muted-50]="selectedTypeId() !== type.id"
                 [style.border-left-color]="type.color"
               >
-                <!-- Icon would go here if we dynamically loaded it, for now text label implies type -->
                 {{ type.label }}
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- ENTITY MODE: Folder Type Picker -->
+        <div class="space-y-2" *ngIf="mode() === 'entity'">
+            <label class="text-xs text-muted-foreground font-medium">Folder Type</label>
+            <div class="h-20 overflow-y-auto border rounded p-2 bg-muted/10">
+                <div class="flex flex-wrap gap-1" *ngIf="allowedSubfolders().length > 0; else noTypes">
+                    <button
+                        *ngFor="let type of allowedSubfolders()"
+                        (click)="handleSelectFolderType(type)"
+                        class="flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border border-border hover:border-primary/50"
+                        [class.bg-primary]="selectedFolderKind() === type.entityKind"
+                        [class.text-primary-foreground]="selectedFolderKind() === type.entityKind"
+                        [class.bg-background]="selectedFolderKind() !== type.entityKind"
+                    >
+                        {{ type.label }}
+                    </button>
+                </div>
+                <ng-template #noTypes>
+                    <div class="text-xs text-muted-foreground italic p-2">
+                        No structural folders available. Check Narrative schema.
+                    </div>
+                </ng-template>
+            </div>
         </div>
 
         <!-- Date Row -->
@@ -97,7 +135,7 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
         </div>
 
         <!-- Description -->
-        <div>
+        <div *ngIf="mode() === 'event'">
           <label class="text-xs text-muted-foreground font-medium">Description</label>
            <textarea
             [(ngModel)]="description"
@@ -107,8 +145,8 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
           ></textarea>
         </div>
 
-        <!-- Color & Importance -->
-        <div class="flex gap-4">
+        <!-- Color & Importance (Event Only) -->
+        <div class="flex gap-4" *ngIf="mode() === 'event'">
           <div class="flex-1">
             <label class="text-xs text-muted-foreground font-medium">Color</label>
             <div class="flex gap-1 mt-1 flex-wrap">
@@ -135,8 +173,8 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
           </div>
         </div>
 
-        <!-- Tags (simplified) -->
-        <div>
+        <!-- Tags (simplified) - Event Only -->
+        <div *ngIf="mode() === 'event'">
            <label class="text-xs text-muted-foreground font-medium">Tags</label>
            <div class="flex flex-wrap gap-1 mb-2">
             <span *ngFor="let tag of tags()" class="bg-secondary text-secondary-foreground text-xs px-1.5 py-0.5 rounded-full flex items-center gap-1">
@@ -159,8 +197,8 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
 
       </div>
 
-      <!-- Pending Events List -->
-      <div *ngIf="pendingEvents().length > 0" class="space-y-1 bg-muted/30 p-2 rounded-md border text-xs">
+      <!-- Pending Events List (Event Mode Only) -->
+      <div *ngIf="mode() === 'event' && pendingEvents().length > 0" class="space-y-1 bg-muted/30 p-2 rounded-md border text-xs">
         <label class="text-xs text-muted-foreground">Pending Events ({{ pendingEvents().length }})</label>
         <div *ngFor="let evt of pendingEvents()" class="flex justify-between items-center bg-background p-1.5 rounded border">
           <span class="truncate flex-1">{{ evt.title }}</span>
@@ -174,17 +212,17 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
       <!-- Actions -->
       <div class="flex gap-2 text-sm">
         <button 
-          *ngIf="isExpanded()"
+          *ngIf="isExpanded() && mode() === 'event'"
           class="flex-1 btn-secondary h-8 flex items-center justify-center gap-1"
           (click)="handleQueueEvent()"
           [disabled]="!title.trim()"
         >
-          <ng-icon name="lucidePlus" class="w-3 h-3"></ng-icon> Add Another
+          <ng-icon name="lucidePlus" class="w-3 h-3"></ng-icon> Queue
         </button>
         <button 
           class="flex-[2] btn-primary h-8 flex items-center justify-center gap-1"
-          (click)="handleAddAllEvents()"
-          [disabled]="!title.trim() && pendingEvents().length === 0"
+          (click)="handleAdd()"
+          [disabled]="canAdd()"
         >
           <ng-icon name="lucidePlus" class="w-3 h-3"></ng-icon>
           {{ getAddButtonLabel() }}
@@ -201,10 +239,29 @@ interface PendingEvent extends Omit<CalendarEvent, 'id' | 'calendarId'> {
 })
 export class EventCreatorComponent {
   readonly calendarService = inject(CalendarService);
+  readonly folderService = inject(FolderService);
+
+  // State
   readonly isExpanded = signal(false);
+  readonly mode = signal<CreationMode>('event');
+
+  // Reactive Roots for Narrative Detection
+  readonly roots = toSignal(this.folderService.getRootFolders$(), { initialValue: [] });
+  readonly narrativeInfo = computed(() => {
+    const n = this.roots().find(r => r.entityKind === 'NARRATIVE');
+    return n ? { exists: true, id: n.id } : { exists: false, id: null };
+  });
+
+  readonly hasNarrative = computed(() => this.narrativeInfo().exists);
+  readonly activeNarrativeId = computed(() => this.narrativeInfo().id);
+
+  readonly allowedSubfolders = signal<AllowedSubfolderDef[]>([]);
+
+  // Form inputs
   title = '';
   description = '';
   selectedTypeId = signal(DEFAULT_EVENT_TYPE_ID);
+  selectedFolderKind = signal<string | null>(null);
   day = '1';
   color = signal<string | undefined>(undefined);
   importance = signal<EventImportance>('moderate');
@@ -212,6 +269,7 @@ export class EventCreatorComponent {
   newTag = '';
   pendingEvents = signal<PendingEvent[]>([]);
 
+  // Calendar context
   readonly calendar = this.calendarService.calendar;
   readonly viewDate = this.calendarService.viewDate;
   readonly currentMonth = this.calendarService.currentMonth;
@@ -224,8 +282,30 @@ export class EventCreatorComponent {
   );
   readonly colorPresets = COLOR_PRESETS;
 
+  constructor() {
+    // Auto-load schema when narrative becomes available
+    effect(() => {
+      if (this.hasNarrative()) {
+        this.loadNarrativeSchema();
+      }
+    });
+  }
+
+  async loadNarrativeSchema() {
+    const subfolders = await this.folderService.getAllowedSubfolders('NARRATIVE');
+    this.allowedSubfolders.set(subfolders);
+    if (subfolders.length > 0 && !this.selectedFolderKind()) {
+      // Only set default if not already set or valid
+      this.selectedFolderKind.set(subfolders[0].entityKind);
+    }
+  }
+
   toggleExpanded() {
     this.isExpanded.update(v => !v);
+  }
+
+  setMode(m: CreationMode) {
+    this.mode.set(m);
   }
 
   handleSelectType(type: EventTypeDefinition) {
@@ -234,6 +314,10 @@ export class EventCreatorComponent {
     if (!this.color()) {
       this.color.set(type.color);
     }
+  }
+
+  handleSelectFolderType(def: AllowedSubfolderDef) {
+    this.selectedFolderKind.set(def.entityKind);
   }
 
   addTag() {
@@ -246,6 +330,8 @@ export class EventCreatorComponent {
   removeTag(tag: string) {
     this.tags.update(t => t.filter(x => x !== tag));
   }
+
+  // --- Logic for EVENTS ---
 
   createEventObject(): PendingEvent | null {
     if (!this.title.trim()) return null;
@@ -274,27 +360,65 @@ export class EventCreatorComponent {
     const evt = this.createEventObject();
     if (evt) {
       this.pendingEvents.update(p => [...p, evt]);
-      this.resetForm();
+      // soft reset
+      this.title = '';
+      this.description = '';
     }
   }
 
-  handleAddAllEvents() {
+  // --- Main Add Handler ---
+
+  async handleAdd() {
+    if (this.mode() === 'event') {
+      await this.handleAddEvents();
+    } else {
+      await this.handleAddEntityFolder();
+    }
+  }
+
+  async handleAddEvents() {
     const currentEvt = this.createEventObject();
     const all = [...this.pendingEvents()];
 
     if (currentEvt) all.push(currentEvt);
     if (all.length === 0) return;
 
-    all.forEach(evt => {
+    await Promise.all(all.map(evt => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { tempId, ...data } = evt;
-      this.calendarService.addEvent(data);
-    });
+      return this.calendarService.addEvent(data);
+    }));
 
     this.pendingEvents.set([]);
     this.resetForm();
     this.isExpanded.set(false);
   }
+
+  async handleAddEntityFolder() {
+    const name = this.title.trim();
+    const kind = this.selectedFolderKind();
+    const narrativeId = this.activeNarrativeId();
+
+    if (!name || !kind || !narrativeId) return;
+
+    const date = {
+      year: this.viewDate().year,
+      monthIndex: this.viewDate().monthIndex,
+      dayIndex: parseInt(this.day) - 1
+    };
+
+    // We create it under the Narrative Root
+    await this.folderService.createDatedTypedSubfolder(
+      narrativeId,
+      kind,
+      name,
+      date
+    );
+
+    this.resetForm();
+    this.isExpanded.set(false);
+  }
+
 
   removePending(tempId: string) {
     this.pendingEvents.update(p => p.filter(x => x.tempId !== tempId));
@@ -306,10 +430,22 @@ export class EventCreatorComponent {
     this.tags.set([]);
     this.color.set(undefined);
     this.selectedTypeId.set(DEFAULT_EVENT_TYPE_ID);
-    // keep day/importance logic if desired, but resetting here
+    // keep day
+  }
+
+  canAdd(): boolean {
+    if (this.mode() === 'event') {
+      return !this.title.trim() && this.pendingEvents().length === 0;
+    } else {
+      return !this.title.trim() || !this.selectedFolderKind();
+    }
   }
 
   getAddButtonLabel() {
+    if (this.mode() === 'entity') {
+      return 'Create Folder';
+    }
+
     const count = this.pendingEvents().length;
     if (count > 0) {
       return this.title.trim() ? `Add ${count + 1} Events` : `Add ${count} Pending Events`;

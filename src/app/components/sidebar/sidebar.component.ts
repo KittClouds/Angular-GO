@@ -4,7 +4,7 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { FolderService } from '../../lib/services/folder.service';
@@ -14,6 +14,7 @@ import { ThemeService } from '../../lib/services/theme.service';
 import { EditorService } from '../../services/editor.service';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import { SearchPanelComponent } from '../search-panel/search-panel.component';
+import { NerPanelComponent } from './ner-panel/ner-panel.component';
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note, FolderSchema } from '../../lib/dexie/db';
 
@@ -42,7 +43,7 @@ const ENTITY_FOLDER_OPTIONS: EntityFolderOption[] = [
 @Component({
     selector: 'app-sidebar',
     standalone: true,
-    imports: [CommonModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent],
+    imports: [CommonModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent, NerPanelComponent],
     templateUrl: './sidebar.component.html',
     styleUrls: ['./sidebar.component.css']
 })
@@ -60,7 +61,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private notesSubscription?: Subscription;
 
     // View Mode State
-    viewMode = signal<'files' | 'search'>('files');
+    viewMode = signal<'files' | 'search' | 'ner'>('files');
 
     // Icons for template
     readonly Plus = Plus;
@@ -76,6 +77,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly Redo = Redo;
     readonly Sun = Sun;
     readonly Moon = Moon;
+    readonly Brain = Brain; // Add Brain icon for NER
 
     // Entity folder options for dropdown
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;
@@ -269,15 +271,22 @@ export class SidebarComponent implements OnInit, OnDestroy {
     }
 
     toggleSearch() {
-        if (this.viewMode() === 'files') {
-            this.viewMode.set('search');
-            this.sidebarService.open();
+        if (this.viewMode() !== 'search') {
+            this.setViewMode('search');
         } else {
-            this.viewMode.set('files');
+            this.setViewMode('files');
         }
     }
 
-    setViewMode(mode: 'files' | 'search') {
+    toggleNer() {
+        if (this.viewMode() !== 'ner') {
+            this.setViewMode('ner');
+        } else {
+            this.setViewMode('files');
+        }
+    }
+
+    setViewMode(mode: 'files' | 'search' | 'ner') {
         this.viewMode.set(mode);
         this.sidebarService.open();
     }

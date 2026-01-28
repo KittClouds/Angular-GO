@@ -135,15 +135,21 @@ class EntityColorStore {
      * Returns: '--entity-character'
      */
     getCssVarName(kind: EntityKind | string): string {
-        return `--entity-${kind.toLowerCase().replace(/_/g, '-')}`;
+        const normalized = kind.toUpperCase();
+        // Check if known, otherwise fallback to UNKNOWN
+        // We cast to any to key check on the Record
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_COLORS, normalized)) {
+            return `--entity-${kind.toLowerCase().replace(/_/g, '-')}`;
+        }
+        return '--entity-unknown';
     }
 
-    /**
-     * Get CSS variable name for text color
-     * Returns: '--entity-character-text'
-     */
     getTextCssVarName(kind: EntityKind | string): string {
-        return `--entity-${kind.toLowerCase().replace(/_/g, '-')}-text`;
+        const normalized = kind.toUpperCase();
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_TEXT_COLORS, normalized)) {
+            return `--entity-${kind.toLowerCase().replace(/_/g, '-')}-text`;
+        }
+        return '--entity-unknown-text';
     }
 
     /**

@@ -1,6 +1,5 @@
-// NO CHANGE TO THIS FILE YET - I need to inspect another file first.
 // Highlighter API - interface between Scanner and Editor
-// Connected to mocking stores for now
+// Connected to GoKitt Wasm Service
 // Wired to ScanCoordinator for entity event emission
 
 import type { DecorationSpan, HighlighterConfig, HighlightMode } from '../lib/Scanner';
@@ -9,10 +8,11 @@ import { scanForPatternsSync } from '../lib/Scanner/pattern-scanner';
 import type { EntityKind } from '../lib/Scanner/types';
 import { getScanCoordinator } from '../lib/Scanner/scanCoordinatorInstance';
 
-// Real imports (replacing mocks)
+// Real imports
 import { highlightingStore } from '../lib/store/highlightingStore';
+import { GoKittService } from '../services/gokitt.service';
+import { getAppOrchestrator } from '../lib/core/app-orchestrator';
 
-// Real Dexie imports
 import {
     getNoteDecorations,
     saveNoteDecorations,
@@ -20,30 +20,24 @@ import {
     hashContent
 } from '../lib/dexie/decorations';
 
-// STUBBED: KittCore, DiscoveryStore, AppOrchestrator remain mocked for now
+import { smartGraphRegistry } from '../lib/registry';
+import { discoveryStore } from '../lib/store/discoveryStore';
 
-// Mock for KittCore
-const kittCore = {
-    scanImplicitRust: async (_text: string, _narrativeId?: string): Promise<DecorationSpan[]> => [],
-    scan: async (_text: string, _spans: any[]) => ({ relations: [], triples: [] }),
-    scanDiscovery: async (_text: string): Promise<any[]> => []
-};
+let goKittService: GoKittService | null = null;
 
-// Mock for DiscoveryStore
+// Helper to set service (called from App Init or Component)
+export function setGoKittService(service: GoKittService) {
+    goKittService = service;
+}
+
+// Mock for DiscoveryStore (still needed until fully Angularized)
 const useDiscoveryStore = {
     getState: () => ({
         addCandidates: (_c: any[]) => { }
     })
 };
 
-// Mock for AppOrchestrator
-const appOrchestrator = {
-    getState: () => 'ready'
-};
-
-// =============================================================================
-// HIGHLIGHTER API INTERFACE
-// =============================================================================
+// ... existing interfaces ...
 
 export interface HighlighterApi {
     /** Get decoration spans for a ProseMirror document */
@@ -77,14 +71,9 @@ export interface HighlighterApi {
     onKeystroke(char: string, cursorPos: number, contextText: string): void;
 }
 
-// ProseMirror document interface (minimal)
 export interface ProseMirrorDoc {
     descendants: (callback: (node: { isText?: boolean; text?: string }, pos: number) => void) => void;
 }
-
-// =============================================================================
-// DEFAULT IMPLEMENTATION - CONNECTED TO HIGHLIGHTING STORE
-// =============================================================================
 
 function docContent(doc: ProseMirrorDoc): string {
     let text = '';
@@ -110,25 +99,32 @@ class DefaultHighlighterApi implements HighlighterApi {
     // @ts-ignore
     private prewarmCache: Map<string, DecorationSpan[] | null> = new Map();
 
-    // Smart scan tracking
-    private hasScannedOnOpen = false;  // Ensures one initial scan per note
-    private lastKnownEntityCount = 0;  // Track entity count for change detection
-
-    // Node batch tracking for discovery position alignment
+    private hasScannedOnOpen = false;
+    private lastKnownEntityCount = 0;
     private lastNodeBatch: Array<{ text: string; pos: number }> = [];
+    private lastSentenceEndPos = 0;
+    private pendingRescan = false;
 
-    // Rust scanner tracking
-    // @ts-ignore
-    private pendingRustScan = false;   // Entities found, waiting for sentence end
-    private lastSentenceEndPos = 0;    // Track last punctuation position
+    constructor() {
+        // Listen for WASM ready event to trigger rescan
+        if (typeof window !== 'undefined') {
+            window.addEventListener('gokitt-ready', () => {
+                console.log('[HighlighterApi] GoKitt ready - triggering rescan');
+                this.pendingRescan = true;
+                this.notifyListeners();
+            });
+        }
 
-    /** Set the current note ID for scan coordinator */
+        // Subscribe to store changes
+        highlightingStore.subscribe(() => this.notifyListeners());
+    }
+
+
     setNoteId(noteId: string, narrativeId?: string): void {
         const prevNoteId = this.currentNoteId;
         this.currentNoteId = noteId;
         this.currentNarrativeId = narrativeId;
 
-        // Reset smart scan state when switching notes
         if (noteId && noteId !== prevNoteId) {
             this.hasScannedOnOpen = false;
             this.lastKnownEntityCount = 0;
@@ -139,61 +135,28 @@ class DefaultHighlighterApi implements HighlighterApi {
         }
     }
 
-    /** Pre-warm cache by loading decorations early (before getDecorations is called) */
     private async prewarmCacheForNote(noteId: string): Promise<void> {
-        // We don't have content yet, but we can check if we have ANY cached entry
-        // for this note. If we do, it'll be ready when getDecorations is called.
-        // The actual content-based cache lookup happens in tryLoadCachedOrScan.
     }
 
-    /** Called on editor keystroke - forward to scan coordinator */
     onKeystroke(char: string, cursorPos: number, contextText: string): void {
         if (!this.currentNoteId) return;
         getScanCoordinator().onKeystroke(char, cursorPos, contextText, this.currentNoteId);
     }
 
-    // Store last doc for re-scan capability
     private lastDoc: ProseMirrorDoc | null = null;
 
-    constructor() {
-        // subscribe to store changes
-        highlightingStore.subscribe(() => this.notifyListeners());
 
-        // Listen for entity changes to trigger immediate re-scan
-        // Listen for entity changes to trigger immediate re-scan
-        // DISABLE: This causes an infinite loop because Registration -> entities-changed -> forceRescan -> Registration
-        // If we need this, we must ensure it only triggers on EXTERNAL changes, not self-induced ones.
-        /*
-        if (typeof window !== 'undefined') {
-            window.addEventListener('entities-changed', () => {
-                console.log('[HighlighterApi] Entities changed, triggering re-scan');
-                this.forceRescan();
-            });
-        }
-        */
-    }
 
-    /**
-     * Force a fresh scan (called when entities are registered/changed)
-     * This clears cache state and re-scans current content
-     */
     forceRescan(): void {
         if (!this.lastDoc || !this.currentNoteId) {
-            console.log('[HighlighterApi] forceRescan: no doc or noteId cached');
             return;
         }
-
-        // Clear scan state to force fresh scan
         this.hasScannedOnOpen = false;
         this.lastScannedContext = '';
-
-        // Get current text and trigger scan
         const text = docContent(this.lastDoc);
         this.lastContext = text;
         this.hasScannedOnOpen = true;
         this.lastScannedContext = text;
-
-        console.log('[HighlighterApi] forceRescan: triggering fresh implicit scan');
         this.triggerImplicitScan(this.lastDoc, text);
     }
 
@@ -202,9 +165,7 @@ class DefaultHighlighterApi implements HighlighterApi {
     }
 
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[] {
-        // Cache doc for forceRescan capability
         this.lastDoc = doc;
-
         const settings = highlightingStore.getSettings();
 
         if (settings.mode === 'off') {
@@ -212,28 +173,23 @@ class DefaultHighlighterApi implements HighlighterApi {
         }
 
         const spans = scanDocument(doc);
-        console.log(`[HighlighterApi] scanDocument identified ${spans.length} raw spans.`);
-        if (spans.length > 0) {
-            console.log('[HighlighterApi] First 3 raw spans:', spans.slice(0, 3));
-        }
         const text = docContent(doc);
 
-        // Smart scan logic:
-        // 1. First call after note switch: ALWAYS scan fresh (cache positions may be stale)
-        // 2. After that: use cache for unchanged content, re-scan on new entities
+        // Handle pending rescan (triggered when WASM becomes ready)
+        if (this.pendingRescan) {
+            this.pendingRescan = false;
+            this.lastScannedContext = '';  // Force rescan
+            this.tryLoadCachedOrScan(doc, text);
+        }
+
         if (text !== this.lastContext) {
-            this.lastContext = text; // Always update 'seen' text
+            this.lastContext = text;
 
             if (!this.hasScannedOnOpen) {
-                // ALWAYS scan fresh on note open - cached positions may be from different doc parse
-                console.log('[HighlighterApi:DIAG] Initial scan on note open (fresh)');
                 this.hasScannedOnOpen = true;
                 this.lastScannedContext = text;
-                // CHANGED: Try load from cache first instead of forcing fresh scan
                 this.tryLoadCachedOrScan(doc, text);
             } else {
-                // After initial scan: only re-scan if entity count increased
-                // This detects when user adds a new entity mention
                 const currentEntityCount = this.implicitDecorations.filter(d =>
                     d.type === 'entity_implicit'
                 ).length;
@@ -241,21 +197,14 @@ class DefaultHighlighterApi implements HighlighterApi {
                 const prevLength = this.lastScannedContext.length;
                 const shouldCheck = this.shouldCheckForNewEntities(text, prevLength);
 
-                // Quick heuristic: if no entities yet but text is being added, check again
-                // This catches the case where user types a known entity name
                 if (currentEntityCount === 0 || shouldCheck) {
-                    console.log(`[HighlighterApi:DIAG] Threshold met (Diff: ${Math.abs(text.length - prevLength)}). Scanning...`);
                     this.lastScannedContext = text;
                     this.tryLoadCachedOrScan(doc, text);
                 }
             }
         }
 
-        // Merge implicit spans
-        // Start with explicit spans
         const allSpans = [...spans];
-
-        // Add implicit spans that DON'T overlap with explicit ones
         for (const implicit of this.implicitDecorations) {
             const overlaps = allSpans.some(explicit =>
                 (implicit.from >= explicit.from && implicit.from < explicit.to) ||
@@ -268,28 +217,19 @@ class DefaultHighlighterApi implements HighlighterApi {
             }
         }
 
-        // Resort
         allSpans.sort((a, b) => a.from - b.from);
 
-        // Filter based on config
         const filteredSpans = allSpans.filter(span => {
-            // Filter by type
             if (span.type === 'wikilink' && !settings.showWikilinks) return false;
             // @ts-ignore
             if (span.type === 'entity_ref' && !this.enableEntityRefs) return false;
-
-            // Focus mode: filter by entity kind
+            // @ts-ignore
             if (settings.mode === 'focus' && span.type === 'entity' && span.kind) {
                 // @ts-ignore
                 return settings.focusEntityKinds.includes(span.kind as EntityKind);
             }
-
             return true;
         });
-
-        // Emit entity decorations to ScanCoordinator (non-blocking)
-        // This is in the hot path but ScanCoordinator queues, doesn't block
-        // console.log(`[HighlighterApi] Checking check to send to Coordinator. NoteID: '${this.currentNoteId}'`);
 
         if (this.currentNoteId) {
             const entitySpans = filteredSpans.filter(s =>
@@ -298,28 +238,16 @@ class DefaultHighlighterApi implements HighlighterApi {
                 s.type === 'relationship' ||
                 s.type === 'predicate'
             );
-            // console.log(`[HighlighterApi] Sending ${entitySpans.length} entities to ScanCoordinator`);
             for (const span of entitySpans) {
                 getScanCoordinator().onEntityDecoration(span, this.currentNoteId);
             }
-        } else {
-            console.warn('[HighlighterApi] NOT sending entities to ScanCoordinator because currentNoteId is missing!');
         }
 
         return filteredSpans;
     }
 
-    /**
-     * Heuristic to detect if user might have added a new entity.
-     * We check if text has grown by enough characters to potentially contain an entity name.
-     */
     private shouldCheckForNewEntities(currentText: string, prevLength: number): boolean {
-        // If we have entities and text grew, the implicit scanner will pick up new mentions
-        // This is a lightweight check - actual entity detection happens in the worker
         const currLength = currentText.length;
-
-        // Text grew by at least 3 chars (minimum entity name length)
-        // This prevents scanning on every single keystroke
         return Math.abs(currLength - prevLength) >= 3;
     }
 
@@ -371,50 +299,36 @@ class DefaultHighlighterApi implements HighlighterApi {
         return () => this.listeners.delete(callback);
     }
 
-    /**
-     * Try to load cached decorations, fall back to scanner if cache miss or stale
-     */
     private async tryLoadCachedOrScan(doc: ProseMirrorDoc, text: string): Promise<void> {
-        // Must have noteId for local storage
         if (!this.currentNoteId) {
             this.triggerImplicitScan(doc, text);
             return;
         }
 
         try {
-            // Local-first: read from Dexie
             const cached = await getNoteDecorations(this.currentNoteId);
-
             if (cached && cached.length > 0) {
-                // Validate content hash to ensure positions are still valid
                 const storedHash = await getDecorationContentHash(this.currentNoteId);
                 const currentHash = hashContent(text);
 
                 if (storedHash === currentHash) {
-                    console.log(`[HighlighterApi] Cache hit (hash match): ${cached.length} decorations for note ${this.currentNoteId}`);
                     this.implicitDecorations = cached;
                     this.notifyListeners();
                     return;
                 }
-
-                // Hash mismatch: content changed, positions are stale
-                console.log(`[HighlighterApi] Cache stale (hash mismatch) for note ${this.currentNoteId}, re-scanning...`);
             }
         } catch (err) {
             console.warn('[HighlighterApi] Dexie read failed:', err);
         }
 
-        console.log(`[HighlighterApi] No valid cache for note ${this.currentNoteId}, scanning...`);
         this.triggerImplicitScan(doc, text);
     }
 
     private triggerImplicitScan(doc: ProseMirrorDoc, text?: string, _entityVersion?: number) {
-        // console.log('[HighlighterApi:DIAG] triggerImplicitScan called!');
         const myVersion = ++this.scanVersion;
         const batch: { id: number, text: string }[] = [];
-        const nodePositions = new Map<number, number>(); // Map batch ID to document position
+        const nodePositions = new Map<number, number>();
 
-        // Collect full text for hash computation
         let fullText = '';
         let batchIdCounter = 0;
         const nodeBatchForDiscovery: Array<{ text: string; pos: number }> = [];
@@ -424,51 +338,57 @@ class DefaultHighlighterApi implements HighlighterApi {
                 batch.push({ id, text: node.text });
                 nodePositions.set(id, pos);
                 nodeBatchForDiscovery.push({ text: node.text, pos });
-                fullText += node.text; // Concatenate for hash (matches docContent logic)
+                fullText += node.text;
             }
         });
 
-        // Store for discovery candidate position alignment
         this.lastNodeBatch = nodeBatchForDiscovery;
 
-        // If nothing to scan
         if (batch.length === 0) {
             this.implicitDecorations = [];
             this.notifyListeners();
             return;
         }
 
-        // Capture noteId and content hash for Dexie write
         const noteIdForSave = this.currentNoteId;
         const contentHashForSave = hashContent(fullText);
 
-        // Run scans in parallel for each node (mimicking old scanBatch)
-        // This ensures offsets remain correct per-node
         const scanPromises = batch.map(async (item) => {
             try {
-                // Use Regex Pattern Scanner instead of WASM for now (until WASM is fixed)
-                // This respects the User's request to use the "pattern matcher"
-                // console.log(`[HighlighterApi:TRACE] Calling scanForPatternsSync for node ${item.id}`);
-                const spans = scanForPatternsSync(item.text);
+                // Use Aho-Corasick implicit scanner from GoKitt if available
+                let implicitSpans = goKittService?.scanImplicit(item.text) ?? [];
 
-                // console.log(`[HighlighterApi:TRACE] scanForPatternsSync returned ${spans?.length ?? 0} spans for node ${item.id}`);
-                return { id: item.id, spans };
+                // Also run regex scanner for explicit patterns
+                const explicitSpans = scanForPatternsSync(item.text);
+
+                // Merge: explicit spans take priority, no duplicates
+                const mergedSpans = [...explicitSpans];
+                for (const implicit of implicitSpans) {
+                    const overlaps = mergedSpans.some(explicit =>
+                        (implicit.from >= explicit.from && implicit.from < explicit.to) ||
+                        (implicit.to > explicit.from && implicit.to <= explicit.to)
+                    );
+                    if (!overlaps) {
+                        mergedSpans.push(implicit);
+                    }
+                }
+
+                return { id: item.id, spans: mergedSpans };
             } catch (e) {
-                console.warn(`[HighlighterApi] Scan failed for node ${item.id}`, e);
+                console.error(`[HighlighterApi.scan] Error:`, e);
                 return { id: item.id, spans: [] };
             }
         });
 
 
+
         Promise.all(scanPromises).then(async (results) => {
-            // Only apply if this is still the latest requested scan
             if (this.scanVersion !== myVersion) {
                 return;
             }
 
             const mergedSpans: DecorationSpan[] = [];
 
-            // Reconstruct spans with correct document offsets
             for (const { id, spans } of results) {
                 const nodeStart = nodePositions.get(id);
                 if (nodeStart !== undefined) {
@@ -485,20 +405,16 @@ class DefaultHighlighterApi implements HighlighterApi {
             this.implicitDecorations = mergedSpans;
             this.notifyListeners();
 
-            // Update entity count for change detection
             const entityCount = mergedSpans.filter(d => d.type === 'entity_implicit').length;
             const hadNewEntities = entityCount > this.lastKnownEntityCount;
             this.lastKnownEntityCount = entityCount;
 
-            // Check if sentence ended (punctuation at end of new content)
             const sentenceEnded = this.detectSentenceEnd(fullText);
 
-            // Trigger Rust scan (Relationships) if: entities present AND sentence just completed
             if (entityCount > 0 && sentenceEnded && hadNewEntities) {
                 this.triggerRustScan(fullText, mergedSpans);
             }
 
-            // Local-first: write to Dexie
             if (noteIdForSave) {
                 try {
                     await saveNoteDecorations(noteIdForSave, mergedSpans, contentHashForSave);
@@ -507,23 +423,16 @@ class DefaultHighlighterApi implements HighlighterApi {
                 }
             }
 
-            // [Unsupervised NER] Trigger Discovery
             this.triggerDiscoveryScan(fullText);
         });
     }
 
-    /**
-     * Detect if text ends with sentence-ending punctuation
-     */
     private detectSentenceEnd(text: string): boolean {
         const trimmed = text.trimEnd();
         if (!trimmed) return false;
-
         const lastChar = trimmed[trimmed.length - 1];
         const isPunctuation = lastChar === '.' || lastChar === '!' || lastChar === '?';
-
         if (isPunctuation) {
-            // Track position to avoid re-triggering on same sentence
             const pos = trimmed.length;
             if (pos > this.lastSentenceEndPos) {
                 this.lastSentenceEndPos = pos;
@@ -533,34 +442,42 @@ class DefaultHighlighterApi implements HighlighterApi {
         return false;
     }
 
+
+
     /**
-     * Trigger Discovery Scan (Unsupervised NER)
-     * "The Virus" - finds new entity patterns.
-     * DEFERRED: Only runs after app is ready (not during boot sequence)
+     * Trigger GoKitt Discovery Scan (Unsupervised NER)
      */
     private triggerDiscoveryScan(text: string): void {
-        // Skip discovery during boot - defer until app is ready
-        if (appOrchestrator.getState() !== 'ready') {
-            // Schedule for after boot
-            setTimeout(() => this.triggerDiscoveryScan(text), 500);
-            return;
-        }
+        if (!goKittService) return;
 
-        // Discovery is cheap (mostly), but we shouldn't spam it.
-        // It runs via Shared Memory, so no serialization overhead.
+        // Non-blocking scan
+        setTimeout(() => {
+            const candidates = goKittService!.scanDiscovery(text);
 
-        kittCore.scanDiscovery(text)
+            if (candidates && candidates.length > 0) {
+                // HARD FILTER (Sync): Reject candidates that are already KNOWN entities in Registry
+                // This prevents race conditions where Discovery runs before Implicit scan finishes
+                const unknownCandidates = candidates.filter((c: any) => {
+                    // Status check: 0=Watching, 1=Promoted
+                    if (c.status !== 0 && c.status !== 1) return false;
 
-            .then(candidates => {
-                // Show Watching (0) AND Promoted (1) for now, until graph sync is ready
-                const newCandidates = candidates.filter(c => c.status === 0 || c.status === 1);
-                if (newCandidates.length > 0) {
-                    console.log(`[Discovery:HighlightApi] Found ${newCandidates.length} NEW candidates:`, newCandidates.map(c => c.token));
+                    // CRITICAL: Check Registry (sync, authoritative source of truth)
+                    const isKnown = smartGraphRegistry.isRegisteredEntity(c.token);
+                    if (isKnown) {
+                        console.log(`[Discovery:HardFilter] Rejected '${c.token}' - already in Registry`);
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (unknownCandidates.length > 0) {
+                    console.log(`[Discovery:GoKitt] Found ${unknownCandidates.length} truly unknown candidates`);
+
                     // Emit to DiscoveryStore
-                    useDiscoveryStore.getState().addCandidates(newCandidates);
+                    discoveryStore.addCandidates(unknownCandidates);
 
                     // Create highlight spans for discovered tokens
-                    const candidateSpans = this.createCandidateSpans(text, newCandidates);
+                    const candidateSpans = this.createCandidateSpans(text, unknownCandidates);
                     if (candidateSpans.length > 0) {
                         console.log(`[Discovery:HighlightApi] Created ${candidateSpans.length} candidate spans`);
                         // Merge with existing implicitDecorations
@@ -570,15 +487,13 @@ class DefaultHighlighterApi implements HighlighterApi {
                         ];
                         this.notifyListeners();
                     }
-                } else {
-                    if (candidates.length > 0) {
-                        console.log(`[Discovery:HighlightApi] Ignored ${candidates.length} candidates (all existing/ignored)`);
-                    }
                 }
-            })
-            .catch(err => {
-                console.warn('[HighlighterApi] Discovery scan failed:', err);
-            });
+            }
+        }, 100);
+    }
+
+    private escapeRegex(str: string): string {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     /**
@@ -601,12 +516,22 @@ class DefaultHighlighterApi implements HighlighterApi {
                     const from = node.pos + match.index;
                     const to = node.pos + match.index + match[0].length;
 
-                    // Skip if already covered by an entity_implicit span
+                    // HARD FILTER (Sync): Double-check Registry in case triggerDiscoveryScan didn't filter
+                    // This is a safety net for edge cases
+                    if (smartGraphRegistry.isRegisteredEntity(candidate.token)) {
+                        continue; // Skip known entity
+                    }
+
+                    // SOFT FILTER: Skip if already covered by an entity_implicit span
                     const alreadyCovered = this.implicitDecorations.some(d =>
                         d.type === 'entity_implicit' && d.from <= from && d.to >= to
                     );
 
                     if (!alreadyCovered) {
+                        if (candidate.token.toLowerCase() === 'elbaph') {
+                            console.log(`[HighlighterApi:DIAG] Creating candidate span for Elbaph at ${from}-${to}`);
+                        }
+
                         spans.push({
                             type: 'entity_candidate',
                             from,
@@ -616,6 +541,10 @@ class DefaultHighlighterApi implements HighlighterApi {
                             kind: 'UNKNOWN',
                             resolved: false
                         });
+                    } else {
+                        if (candidate.token.toLowerCase() === 'elbaph') {
+                            console.log(`[HighlighterApi:DIAG] Skipping Elbaph at ${from}-${to} (already covered)`);
+                        }
                     }
                 }
             }
@@ -624,43 +553,57 @@ class DefaultHighlighterApi implements HighlighterApi {
         return spans;
     }
 
-    private escapeRegex(str: string): string {
-        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
 
     /**
-     * Trigger Rust/KittCore scan for relationship extraction
+     * Trigger GoKitt Scan (Relationships)
      */
     private triggerRustScan(text: string, implicitSpans: DecorationSpan[]): void {
-        // ... (Existing implementation) ...
-        // Convert implicit decorations to entity spans for KittCore
-        const entitySpans = implicitSpans
-            .filter(d => d.type === 'entity_implicit')
-            .map(d => ({
-                label: d.label ?? '',
-                start: d.from,
-                end: d.to,
-            }));
+        if (!goKittService) {
+            console.warn('[HighlighterApi] GoKittService not ready');
+            return;
+        }
 
-        if (entitySpans.length === 0) return;
+        console.log(`[HighlighterApi] Triggering GoKitt scan (implicit count: ${implicitSpans.length})`);
 
-        console.log(`[HighlighterApi] Triggering Rust scan with ${entitySpans.length} entities`);
+        // Blocking or Async? GoKittService.scan is synchronous (Wasm), so we should wrap in timeout
+        // to avoid freezing UI
+        setTimeout(() => {
+            const result = goKittService!.scan(text);
+            console.log(`[HighlighterApi] GoKitt scan result:`, result);
 
-        // Fire and forget - Rust scan runs in background
-        kittCore.scan(text, entitySpans)
-            .then(result => {
-                console.log(`[HighlighterApi] Rust scan complete: ${result.relations.length} relations, ${result.triples.length} triples`);
-                // Relations are automatically persisted by KittCore
-            })
-            .catch(err => {
-                console.warn('[HighlighterApi] Rust scan failed:', err);
-            });
+            // Process Relations
+            if (result && result.graph && result.graph.Edges) {
+                const edges = result.graph.Edges;
+                console.log(`[HighlighterApi] Found ${edges.length} edges in graph projection`);
+
+                edges.forEach((edge: any) => {
+                    // GoKitt Edge: { Source: Node, Target: Node, Relation: "rel", ... }
+                    // Source/Target might be objects with ID or just IDs depending on Projection
+                    // In main.go: conceptGraph := projection.Project(...)
+                    // Looking at pkg/graph/graph.go (if I could see it), usually Edge has pointers.
+                    // But JSON marshal usually flattens or refs. 
+                    // Let's assume the JSON structure based on typical Go JSON marshaling of structs.
+                    // If it's `type ConceptEdge struct { Source *ConceptNode ... }`:
+                    // JSON would embed source.
+
+                    // SAFEGUARD: Check properties
+                    const sourceId = edge.Source?.ID || edge.Source;
+                    const targetId = edge.Target?.ID || edge.Target;
+                    const relType = edge.Relation;
+
+                    if (sourceId && targetId && relType) {
+                        smartGraphRegistry.upsertRelationship({
+                            source: sourceId, // Note: Registry expects labels usually, but we are passing IDs.
+                            target: targetId, // We might need to ensure IDs match what registry uses (clean labels)
+                            type: relType,
+                            sourceNote: this.currentNoteId
+                        });
+                    }
+                });
+            }
+        }, 10);
     }
 }
-
-// =============================================================================
-// SINGLETON
-// =============================================================================
 
 let _instance: HighlighterApi | null = null;
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/kittclouds/gokitt/pkg/dafsa"
+	"github.com/orsinium-labs/stopwords"
 )
 
 // CandidateStatus tracks the lifecycle of a discovery candidate
@@ -27,7 +28,8 @@ type CandidateStats struct {
 type CandidateRegistry struct {
 	Stats              map[CanonicalToken]*CandidateStats
 	PromotionThreshold int
-	StopWords          map[string]bool
+	StopWords          map[string]bool      // Custom stopwords
+	stopwordChecker    *stopwords.Stopwords // Robust English stopwords
 
 	// Simplify graph for now: just track co-occurrence counts?
 	// Or just ignore for MVP.
@@ -39,9 +41,10 @@ func NewRegistry(threshold int) *CandidateRegistry {
 		Stats:              make(map[CanonicalToken]*CandidateStats),
 		PromotionThreshold: threshold,
 		StopWords:          make(map[string]bool),
+		stopwordChecker:    stopwords.MustGet("en"),
 	}
 
-	// Load base stopwords
+	// Also load our dafsa stopwords as a backup
 	for w := range dafsa.StopWords {
 		r.StopWords[w] = true
 	}
@@ -61,8 +64,13 @@ func (r *CandidateRegistry) AddToken(raw string) bool {
 		return false
 	}
 
-	// 1. Check stopwords
+	// 1. Check custom stopwords map
 	if r.StopWords[string(key)] {
+		return false
+	}
+
+	// 2. Check robust stopwords library
+	if r.stopwordChecker != nil && r.stopwordChecker.Contains(string(key)) {
 		return false
 	}
 
@@ -126,4 +134,33 @@ func (r *CandidateRegistry) ProposeInference(raw string, kind dafsa.EntityKind) 
 func (r *CandidateRegistry) GetStats(raw string) *CandidateStats {
 	key, _, _ := Canonicalize(raw)
 	return r.Stats[key]
+}
+
+// Candidate is a public view of a discovery candidate
+type Candidate struct {
+	Token  string  `json:"token"`
+	Count  int     `json:"count"`
+	Status int     `json:"status"`
+	Kind   string  `json:"kind"`
+	Score  float64 `json:"score"`
+}
+
+// GetCandidates returns all tracked candidates
+func (r *CandidateRegistry) GetCandidates() []Candidate {
+	var list []Candidate
+	for _, stats := range r.Stats {
+		kindStr := "UNKNOWN"
+		if stats.InferredKind != nil {
+			kindStr = stats.InferredKind.String()
+		}
+
+		list = append(list, Candidate{
+			Token:  stats.Display,
+			Count:  stats.Count,
+			Status: int(stats.Status),
+			Kind:   kindStr,
+			Score:  float64(stats.Count),
+		})
+	}
+	return list
 }

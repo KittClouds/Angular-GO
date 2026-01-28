@@ -20,7 +20,6 @@ type span struct {
 }
 
 const (
-	prioDoc   = 100
 	prioPara  = 90
 	prioSent  = 80
 	prioChunk = 50
@@ -139,8 +138,19 @@ func collectSpans(text string, scan conductor.ScanResult) []span {
 		spans = append(spans, span{rsyntax.KindEntitySpan, m.Start, m.End, prioSpan})
 	}
 
-	// 4. Tokens (Leaves)
-	spans = append(spans, tokenizeFull(text)...)
+	// 4. Tokens (Leaves) - Reuse from Scanner
+	for _, t := range scan.Tokens {
+		kind := rsyntax.KindWord
+		switch t.POS {
+		case chunker.Punctuation:
+			kind = rsyntax.KindPunctuation
+		case chunker.Other:
+			kind = rsyntax.KindWord
+		}
+
+		// Chunker tokens are [Start, End).
+		spans = append(spans, span{kind, t.Range.Start, t.Range.End, prioToken})
+	}
 
 	return spans
 }
@@ -156,7 +166,6 @@ func splitRanges(text, sep string) []chunker.TextRange {
 			ranges = append(ranges, chunker.TextRange{Start: offset, End: end})
 		}
 		offset = end + sepLen
-		// Note: The separator itself is lost/gap logic will handle it as whitespace
 	}
 	return ranges
 }
@@ -181,30 +190,6 @@ func splitSentences(text string) []chunker.TextRange {
 	return ranges
 }
 
-func tokenizeFull(text string) []span {
-	var spans []span
-	start := -1
-	for i, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' || r == '-' {
-			if start == -1 {
-				start = i
-			}
-		} else {
-			if start != -1 {
-				spans = append(spans, span{rsyntax.KindWord, start, i, prioToken})
-				start = -1
-			}
-			if unicode.IsPunct(r) {
-				spans = append(spans, span{rsyntax.KindPunctuation, i, i + len(string(r)), prioToken})
-			}
-		}
-	}
-	if start != -1 {
-		spans = append(spans, span{rsyntax.KindWord, start, len(text), prioToken})
-	}
-	return spans
-}
-
 func mapChunkKind(k chunker.ChunkKind) rsyntax.SyntaxKind {
 	switch k {
 	case chunker.NounPhrase:
@@ -220,8 +205,4 @@ func mapChunkKind(k chunker.ChunkKind) rsyntax.SyntaxKind {
 	default:
 		return rsyntax.KindText
 	}
-}
-
-func isLeaf(k rsyntax.SyntaxKind) bool {
-	return k == rsyntax.KindWord || k == rsyntax.KindPunctuation || k == rsyntax.KindWhitespace || k == rsyntax.KindText
 }

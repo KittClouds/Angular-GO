@@ -65,6 +65,13 @@ export class NotesService {
         return from(liveQuery(() => db.entities.where('kind').equals(kind).toArray()) as DexieObservable<Entity[]>);
     }
 
+    /**
+     * Get notes by entity kind
+     */
+    getNotesByEntityKind$(kind: string): Observable<Note[]> {
+        return from(liveQuery(() => db.notes.where('entityKind').equals(kind).toArray()) as DexieObservable<Note[]>);
+    }
+
     // ==========================================================================
     // CRUD OPERATIONS (pass-through to operations module)
     // ==========================================================================

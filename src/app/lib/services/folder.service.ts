@@ -250,6 +250,63 @@ export class FolderService {
     }
 
     /**
+     * Create a typed subfolder with date metadata
+     */
+    async createDatedTypedSubfolder(
+        parentId: string,
+        entityKind: string,
+        name: string,
+        date: { year: number; monthIndex: number; dayIndex: number }
+    ): Promise<string> {
+        // Get parent folder to inherit narrativeId
+        const parent = await db.folders.get(parentId);
+        if (!parent) {
+            throw new Error(`Parent folder ${parentId} not found`);
+        }
+
+        const id = crypto.randomUUID();
+        const now = Date.now();
+
+        await db.folders.add({
+            id,
+            worldId: parent.worldId,
+            name,
+            parentId,
+            entityKind,
+            entitySubtype: '',
+            entityLabel: '',
+            color: '',
+            isTypedRoot: true,
+            isSubtypeRoot: false,
+            collapsed: false,
+            ownerId: parent.ownerId,
+            narrativeId: parent.narrativeId, // Inherit scope
+            isNarrativeRoot: false,
+            createdAt: now,
+            updatedAt: now,
+            metadata: { date }
+        });
+
+        return id;
+    }
+
+    /**
+     * Get folders with date metadata for a specific narrative
+     */
+    getDatedFoldersByNarrative$(narrativeId: string): Observable<Folder[]> {
+        return from(liveQuery(async () => {
+            // Indexing strategy: We don't have a compound index on [narrativeId+metadata], 
+            // so filter in JS. Given folder counts are usually < 1000 per vault, this is safe.
+            const folders = await db.folders
+                .where('narrativeId')
+                .equals(narrativeId)
+                .toArray();
+
+            return folders.filter(f => f.metadata?.date !== undefined);
+        }) as DexieObservable<Folder[]>);
+    }
+
+    /**
      * Create a plain subfolder (no specific entity kind)
      */
     async createSubfolder(parentId: string, name: string): Promise<string> {

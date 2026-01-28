@@ -1,4 +1,10 @@
-import { Injectable, computed, signal, effect } from '@angular/core';
+import { Injectable, computed, signal, effect, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs/operators';
+import { combineLatest } from 'rxjs';
+import { NotesService } from '../lib/dexie/notes.service';
+import { FolderService } from '../lib/services/folder.service';
+import { Note, Folder } from '../lib/dexie/db';
 import {
     CalendarDefinition,
     FantasyDate,
@@ -68,8 +74,30 @@ export const DEFAULT_CALENDAR: CalendarDefinition = {
 })
 export class CalendarService {
     // === STATE SIGNALS ===
+    private notesService = inject(NotesService);
+    private folderService = inject(FolderService);
+
+    // === STATE SIGNALS ===
     readonly calendar = signal<CalendarDefinition>(DEFAULT_CALENDAR);
-    readonly events = signal<CalendarEvent[]>([]);
+
+    // Derived events from NotesService (Single Source of Truth)
+    readonly events = toSignal(
+        combineLatest([
+            this.notesService.getNotesByEntityKind$('EVENT'),
+            this.folderService.getAllFolders$()
+        ]).pipe(
+            map(([notes, folders]) => {
+                const noteEvents = notes.map(note => this.mapNoteToEvent(note));
+                const folderEvents = folders
+                    .filter(f => f.metadata?.date)
+                    .map(f => this.mapFolderToEvent(f));
+                return [...noteEvents, ...folderEvents];
+            })
+        ),
+        { initialValue: [] }
+    );
+
+
     readonly periods = signal<Period[]>([]);
     readonly viewDate = signal<FantasyDate>({ year: 1, monthIndex: 0, dayIndex: 0 });
     readonly highlightedEventId = signal<string | null>(null);
@@ -146,13 +174,6 @@ export class CalendarService {
             } catch (e) { console.error('Failed to load calendar', e); }
         }
 
-        const savedEvents = localStorage.getItem('fantasy_calendar_events');
-        if (savedEvents) {
-            try {
-                this.events.set(JSON.parse(savedEvents));
-            } catch (e) { console.error('Failed to load events', e); }
-        }
-
         const savedPeriods = localStorage.getItem('fantasy_calendar_periods');
         if (savedPeriods) {
             try {
@@ -163,7 +184,7 @@ export class CalendarService {
         // Auto-save effect
         effect(() => {
             localStorage.setItem('fantasy_calendar_def', JSON.stringify(this.calendar()));
-            localStorage.setItem('fantasy_calendar_events', JSON.stringify(this.events()));
+            // Events are now handled by Dexie/NotesService, no need to save to localStorage
             localStorage.setItem('fantasy_calendar_periods', JSON.stringify(this.periods()));
         });
     }
@@ -237,29 +258,53 @@ export class CalendarService {
 
     // === EVENT CRUD ===
 
-    addEvent(eventData: Omit<CalendarEvent, 'id' | 'calendarId'>): CalendarEvent {
-        const newEvent: CalendarEvent = {
+    // === EVENT CRUD ===
+
+    async addEvent(eventData: Omit<CalendarEvent, 'id' | 'calendarId'>): Promise<string> {
+        const tempId = generateUUID();
+        const fullEvent: CalendarEvent = {
             ...eventData,
-            id: generateUUID(),
+            id: tempId,
             calendarId: this.calendar().id,
             createdAt: new Date().toISOString()
         };
 
-        this.events.update(list => [...list, newEvent]);
-        return newEvent;
+        const note = this.mapEventToNote(fullEvent);
+        // We use the ID from generateUUID mostly, but createNote generates a new ID.
+        // Actually, createNote ignores the ID passed in Omit<..., 'id'>.
+        // But we want to ensure the link. 
+        // NotesService.createNote returns a Promise<string> of the new ID.
+        // So we should probably let NotesService handle the ID, or if we need to control it, we might need a different method.
+        // For now, let's just create it and let the signal update the UI.
+
+        return this.notesService.createNote(note);
     }
 
-    updateEvent(id: string, updates: Partial<CalendarEvent>) {
-        this.events.update(list =>
-            list.map(e => e.id === id ? { ...e, ...updates, updatedAt: new Date().toISOString() } : e)
-        );
+    async updateEvent(id: string, updates: Partial<CalendarEvent>) {
+        // We need to fetch the existing note to merge the content
+        // Since we don't have direct sync access to the note object here easily without subscription,
+        // we can assume the 'events' signal has the latest data, or we can just fetch the note.
+        // But 'updates' might contain 'date' which is inside the JSON content.
+
+        const currentEvent = this.events().find(e => e.id === id);
+        if (!currentEvent) return;
+
+        const updatedEvent = { ...currentEvent, ...updates, updatedAt: new Date().toISOString() };
+        const noteUpdates: Partial<Note> = {
+            title: updatedEvent.title,
+            updatedAt: Date.now(),
+            content: JSON.stringify(updatedEvent),
+            markdownContent: updatedEvent.description || '' // Keep description visible in markdown preview
+        };
+
+        await this.notesService.updateNote(id, noteUpdates);
     }
 
-    removeEvent(id: string) {
-        this.events.update(list => list.filter(e => e.id !== id));
+    async removeEvent(id: string) {
+        await this.notesService.deleteNote(id);
     }
 
-    toggleEventStatus(id: string) {
+    async toggleEventStatus(id: string) {
         const event = this.events().find(e => e.id === id);
         if (!event) return;
 
@@ -271,7 +316,53 @@ export class CalendarService {
         };
 
         const currentStatus = event.status || 'todo';
-        this.updateEvent(id, { status: statusCycle[currentStatus] });
+        await this.updateEvent(id, { status: statusCycle[currentStatus] });
+    }
+
+    // === MAPPERS ===
+
+    private mapNoteToEvent(note: Note): CalendarEvent {
+        let eventData: Partial<CalendarEvent> = {};
+        try {
+            eventData = JSON.parse(note.content);
+        } catch (e) {
+            console.error('Failed to parse event data for note', note.id, e);
+            // Fallback for broken JSON
+        }
+
+        return {
+            id: note.id,
+            calendarId: eventData.calendarId || this.calendar().id,
+            title: note.title,
+            date: eventData.date || { year: 1, monthIndex: 0, dayIndex: 0 },
+            endDate: eventData.endDate,
+            color: eventData.color,
+            description: eventData.description,
+            importance: eventData.importance,
+            type: eventData.type,
+            entityId: eventData.entityId,
+            tags: eventData.tags,
+            status: eventData.status,
+            createdAt: new Date(note.createdAt).toISOString(),
+            updatedAt: new Date(note.updatedAt).toISOString()
+        };
+    }
+
+    private mapEventToNote(event: CalendarEvent): Omit<Note, 'id' | 'createdAt' | 'updatedAt'> {
+        return {
+            worldId: 'default', // TODO: support multiple worlds
+            title: event.title,
+            content: JSON.stringify(event),
+            markdownContent: event.description || '',
+            folderId: '', // Root or specific events folder?
+            entityKind: 'EVENT',
+            entitySubtype: event.type || '',
+            isEntity: true, // It shows up in the file tree
+            isPinned: false,
+            favorite: false,
+            ownerId: 'local',
+            narrativeId: ''
+        };
     }
 
     // === PERIOD CONFIG ===
@@ -311,6 +402,26 @@ export class CalendarService {
 
 
     // === CALENDAR GENERATION ===
+
+    private mapFolderToEvent(folder: Folder): CalendarEvent {
+        // Default assumption: use metadata date or fallback to year 1
+        const date = folder.metadata?.date || { year: 1, monthIndex: 0, dayIndex: 0 };
+        return {
+            id: folder.id,
+            calendarId: this.calendar().id,
+            title: folder.name,
+            date: date,
+            color: folder.color || '#3b82f6', // Default blue if no color
+            description: `Entity Folder: ${folder.entityKind}`,
+            importance: 'major', // Acts/Chapters are usually major
+            type: folder.entityKind, // e.g., 'ACT', 'CHAPTER'
+            status: 'completed', // Folders "exist", so they are "completed" events? Or just generic.
+            entityId: folder.id, // Link back to folder
+            tags: [folder.entityKind],
+            createdAt: new Date(folder.createdAt).toISOString(),
+            updatedAt: new Date(folder.updatedAt).toISOString()
+        };
+    }
 
     async createCalendar(config: CalendarConfig) {
         this.isGenerating.set(true);

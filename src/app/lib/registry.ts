@@ -1,10 +1,11 @@
 // src/lib/registry.ts
 // Entity Registry - Write-through Cache over Dexie (IndexedDB)
 // Synchronous reads from memory, async writes to Dexie for persistence.
-// Hydrates from Dexie on init(), writes through on every mutation.
+// Hydrates from BootCache (pre-loaded in main.ts) or falls back to Dexie.
 
 import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
+import { getBootCache, waitForBootCache } from './core/boot-cache';
 
 // =============================================================================
 // Types
@@ -24,6 +25,8 @@ export interface RegisteredEntity {
     createdBy: 'user' | 'extraction' | 'auto';
     attributes?: Record<string, any>;
     registeredAt: number;
+    // For GoKitt compatibility
+    noteId?: string;
 }
 
 export interface EntityRegistrationResult {
@@ -57,24 +60,32 @@ export class CentralRegistry {
     private suppressEvents = false;
 
     // =========================================================================
-    // Initialization - Hydrate from Dexie
+    // Initialization - Hydrate from BootCache (pre-loaded) or Dexie (fallback)
     // =========================================================================
 
     async init(): Promise<void> {
         if (this.initialized) return;
 
+        const start = performance.now();
+
         try {
-            // Hydrate entities from Dexie
-            const dexieEntities = await db.entities.toArray();
-            for (const e of dexieEntities) {
+            // Try to use pre-loaded boot cache first
+            let bootData = getBootCache();
+
+            if (!bootData) {
+                console.log('[CentralRegistry] Boot cache not ready, waiting...');
+                bootData = await waitForBootCache();
+            }
+
+            // Hydrate entities from boot cache
+            for (const e of bootData.entities) {
                 const registered = this.dexieToRegisteredEntity(e);
                 this.entityCache.set(e.id, registered);
                 this.labelIndex.set(e.label.toLowerCase(), e.id);
             }
 
-            // Hydrate edges from Dexie
-            const dexieEdges = await db.edges.toArray();
-            for (const edge of dexieEdges) {
+            // Hydrate edges from boot cache
+            for (const edge of bootData.edges) {
                 this.edgeCache.set(edge.id, {
                     id: edge.id,
                     sourceId: edge.sourceId,
@@ -86,9 +97,12 @@ export class CentralRegistry {
 
             this.initialized = true;
             this.snapshot = Array.from(this.entityCache.values());
-            console.log(`[CentralRegistry] Initialized from Dexie: ${this.entityCache.size} entities, ${this.edgeCache.size} edges`);
+
+            const duration = Math.round(performance.now() - start);
+            console.log(`[CentralRegistry] ✓ Initialized: ${this.entityCache.size} entities, ${this.edgeCache.size} edges (${duration}ms, from cache)`);
+
         } catch (err) {
-            console.error('[CentralRegistry] Failed to hydrate from Dexie:', err);
+            console.error('[CentralRegistry] Failed to hydrate:', err);
             this.initialized = true; // Still mark as initialized to prevent loops
             this.snapshot = [];
         }
@@ -109,6 +123,7 @@ export class CentralRegistry {
             aliases: e.aliases || [],
             subtype: e.subtype,
             firstNote: e.firstNote,
+            noteId: e.firstNote, // Alias for GoKitt compatibility
             mentionsByNote: new Map(), // Not stored in Dexie currently
             totalMentions: e.totalMentions || 0,
             lastSeenDate: new Date(e.updatedAt),
@@ -159,6 +174,13 @@ export class CentralRegistry {
      * Efficient for Angular Signals / React Hooks.
      */
     getAllEntities(): RegisteredEntity[] {
+        return this.snapshot;
+    }
+
+    /**
+     * Alias for getAllEntities() - used by GoKitt
+     */
+    getAll(): RegisteredEntity[] {
         return this.snapshot;
     }
 

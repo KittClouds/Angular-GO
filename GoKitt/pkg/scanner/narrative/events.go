@@ -40,6 +40,8 @@ const (
 	EventThreat     EventClass = 41
 	EventAccusation EventClass = 42
 	EventBargain    EventClass = 43
+	EventDialogue   EventClass = 60 // New: General dialogue
+	EventState      EventClass = 61 // New: Copular/State verbs
 
 	// Knowledge
 	EventReveals  EventClass = 50
@@ -111,6 +113,10 @@ func (e EventClass) String() string {
 		return "ACCUSATION"
 	case EventBargain:
 		return "BARGAIN"
+	case EventDialogue:
+		return "DIALOGUE"
+	case EventState:
+		return "STATE"
 	case EventReveals:
 		return "REVEALS"
 	case EventConceals:
@@ -157,6 +163,12 @@ const (
 	RelHates     RelationType = 28
 	RelServes    RelationType = 29
 	RelRules     RelationType = 30
+	RelSpeaksTo  RelationType = 31 // New
+	RelObserves  RelationType = 32 // New
+	RelAllies    RelationType = 33 // New
+	RelMentions  RelationType = 34 // New: Attribution "said that"
+	RelBecomes   RelationType = 35 // New: State change "became"
+	RelIs        RelationType = 36 // New: Copular "is"
 )
 
 // String returns a readable name
@@ -224,6 +236,18 @@ func (r RelationType) String() string {
 		return "SERVES"
 	case RelRules:
 		return "RULES"
+	case RelSpeaksTo:
+		return "SPEAKS_TO"
+	case RelObserves:
+		return "OBSERVES"
+	case RelAllies:
+		return "ALLIES"
+	case RelMentions:
+		return "MENTIONS"
+	case RelBecomes:
+		return "BECOMES"
+	case RelIs:
+		return "IS"
 	default:
 		return "UNKNOWN"
 	}

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, computed } from '@angular/core';
+import { Component, Output, EventEmitter, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucidePlus } from '@ng-icons/lucide';
@@ -16,10 +16,10 @@ import { CalendarService } from '../../../services/calendar.service';
   template: `
     <div 
       class="relative flex flex-col min-h-[100px] bg-card border-t border-l p-1.5 hover:bg-accent/5 transition-colors cursor-pointer group"
-      [class.ring-1]="isHighlighted"
-      [class.ring-primary-50]="isHighlighted"
-      [class.bg-primary-5]="isHighlighted"
-      [class.bg-primary-10]="isToday"
+      [class.ring-1]="isHighlighted()"
+      [class.ring-primary-50]="isHighlighted()"
+      [class.bg-primary-5]="isHighlighted()"
+      [class.bg-primary-10]="isToday()"
       (click)="onDayClick.emit()"
     >
       <!-- Day Header -->
@@ -28,8 +28,8 @@ import { CalendarService } from '../../../services/calendar.service';
           <!-- Day Number -->
           <span 
             class="text-xs font-medium w-5 h-5 flex items-center justify-center rounded-full"
-            [class.bg-primary]="isToday"
-            [class.text-primary-foreground]="isToday"
+            [class.bg-primary]="isToday()"
+            [class.text-primary-foreground]="isToday()"
           >
             {{ displayDay }}
           </span>
@@ -37,9 +37,9 @@ import { CalendarService } from '../../../services/calendar.service';
           <!-- Moon Phases -->
           <div class="flex gap-0.5">
             <div 
-              *ngFor="let moon of calendar.moons.slice(0, 2)"
+              *ngFor="let moon of calendar().moons.slice(0, 2)"
               class="w-2 h-2 rounded-full border border-border/50"
-              [style.background]="getMoonGradient(moon, date)"
+              [style.background]="getMoonGradient(moon, date())"
               [title]="moon.name"
             ></div>
           </div>
@@ -82,11 +82,11 @@ import { CalendarService } from '../../../services/calendar.service';
 
       <!-- Completion Indicator -->
       <div 
-        *ngIf="events.length > 0 && completedCount() > 0"
+        *ngIf="events().length > 0 && completedCount() > 0"
         class="absolute bottom-1 right-1 text-[8px] text-muted-foreground/60"
-        [title]="completedCount() + '/' + events.length + ' completed'"
+        [title]="completedCount() + '/' + events().length + ' completed'"
       >
-        {{ completedCount() }}/{{ events.length }}
+        {{ completedCount() }}/{{ events().length }}
       </div>
     </div>
   `,
@@ -95,12 +95,12 @@ import { CalendarService } from '../../../services/calendar.service';
   `]
 })
 export class DayCellComponent {
-  @Input({ required: true }) dayIndex!: number;
-  @Input({ required: true }) date!: FantasyDate;
-  @Input({ required: true }) events: CalendarEvent[] = [];
-  @Input({ required: true }) calendar!: CalendarDefinition;
-  @Input() isToday = false;
-  @Input() isHighlighted = false;
+  readonly dayIndex = input.required<number>();
+  readonly date = input.required<FantasyDate>();
+  readonly events = input.required<CalendarEvent[]>();
+  readonly calendar = input.required<CalendarDefinition>();
+  readonly isToday = input<boolean>(false);
+  readonly isHighlighted = input<boolean>(false);
 
   @Output() onDayClick = new EventEmitter<void>();
   @Output() onAddEvent = new EventEmitter<void>();
@@ -109,22 +109,22 @@ export class DayCellComponent {
   constructor(private calendarService: CalendarService) { }
 
   get displayDay(): number {
-    return this.dayIndex + 1;
+    return this.dayIndex() + 1;
   }
 
   readonly sortedEvents = computed(() => {
-    return [...this.events].sort((a, b) => {
+    return [...this.events()].sort((a, b) => {
       const order = { 'in-progress': 0, 'todo': 1, 'completed': 2, undefined: 1 };
       return (order[(a.status || 'todo') as keyof typeof order] ?? 1) - (order[(b.status || 'todo') as keyof typeof order] ?? 1);
     });
   });
 
   readonly completedCount = computed(() =>
-    this.events.filter(e => e.status === 'completed').length
+    this.events().filter(e => e.status === 'completed').length
   );
 
   getMoonGradient(moon: any, date: FantasyDate): string {
-    const phase = getMoonPhase(moon, this.calendar, date);
+    const phase = getMoonPhase(moon, this.calendar(), date);
     return `linear-gradient(90deg, ${moon.color} ${phase * 100}%, transparent 0%)`;
   }
 

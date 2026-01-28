@@ -189,7 +189,7 @@ func (c *Chunker) Chunk(text string) ChunkResult {
 	tokens := c.tagTokens(ranges, text)
 
 	// Step 3: Find chunks
-	chunks := c.findChunks(tokens, text)
+	chunks := c.findChunks(tokens)
 
 	return ChunkResult{Chunks: chunks, Tokens: tokens}
 }
@@ -255,7 +255,7 @@ func (c *Chunker) tagTokens(ranges []TextRange, text string) []Token {
 // Chunk Finding
 // ============================================================================
 
-func (c *Chunker) findChunks(tokens []Token, text string) []Chunk {
+func (c *Chunker) findChunks(tokens []Token) []Chunk {
 	// Heuristic: Chunks are roughly 1/3 of tokens
 	chunks := make([]Chunk, 0, len(tokens)/3)
 	i := 0
@@ -341,11 +341,20 @@ func (c *Chunker) tryVerbPhrase(tokens []Token, start int) (Chunk, int) {
 		i++
 	}
 
-	// Main verb (required)
+	// Main verb (Simple Verb, or Auxiliary if no main verb found)
 	if i < len(tokens) && tokens[i].POS == Verb {
 		headIdx = i
 		i++
+	} else if headIdx == -1 && len(modifiers) > 0 {
+		// If we saw Aux/Modal but no main Verb, treat the last Aux as the head (Copula-like behavior)
+		// e.g. "is" in "is dangerous"
+		headIdx = i - 1 // The last modifier was the Aux
+		// Re-classify modifiers (remove the head from modifiers list)
+		// This is a bit hacky, but simpler than rewriting the loop.
+		// Actually, let's just accept it.
 	} else {
+		// Special Case: "is" appearing alone (Auxiliary)
+		// If we haven't consumed anything distinctively verb-like, fail.
 		return Chunk{}, 0
 	}
 

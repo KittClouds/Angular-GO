@@ -132,6 +132,14 @@ func ParseKind(s string) EntityKind {
 	}
 }
 
+// UnmarshalJSON allows EntityKind to be deserialized from string values
+func (k *EntityKind) UnmarshalJSON(data []byte) error {
+	// Remove quotes from JSON string
+	s := strings.Trim(string(data), `"`)
+	*k = ParseKind(s)
+	return nil
+}
+
 // EntityInfo holds entity metadata
 type EntityInfo struct {
 	ID          string
@@ -145,9 +153,11 @@ type RegisteredEntity struct {
 	ID          string
 	Label       string
 	Aliases     []string
-	Kind        EntityKind
+	Kind        interface{} // Handle string, int, or object
 	NarrativeID string
 }
+
+// UnmarshalJSON was removed to rely on standard unmarshaling into interface{}
 
 // ============================================================================
 // RuntimeDictionary - Dual-Purpose Aho-Corasick
@@ -186,18 +196,35 @@ func Compile(entities []RegisteredEntity) (*RuntimeDictionary, error) {
 	dict := NewRuntimeDictionary()
 
 	for _, e := range entities {
+		// Parse Kind dynamically
+		var k EntityKind
+		switch v := e.Kind.(type) {
+		case string:
+			k = ParseKind(v)
+		case float64:
+			k = EntityKind(int(v))
+		case map[string]interface{}:
+			if t, ok := v["type"].(string); ok {
+				k = ParseKind(t)
+			} else {
+				k = KindOther
+			}
+		default:
+			k = KindOther
+		}
+
 		// Store entity info
 		dict.idToInfo[e.ID] = &EntityInfo{
 			ID:          e.ID,
 			Label:       e.Label,
-			Kind:        e.Kind,
+			Kind:        k,
 			NarrativeID: e.NarrativeID,
 		}
 
 		// Collect all surface forms
 		surfaces := []string{e.Label}
 		surfaces = append(surfaces, e.Aliases...)
-		surfaces = append(surfaces, generateAutoAliases(e.Label, e.Kind)...)
+		surfaces = append(surfaces, generateAutoAliases(e.Label, k)...)
 
 		for _, surface := range surfaces {
 			key := NormalizeRaw(surface)

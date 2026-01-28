@@ -30,6 +30,8 @@ type verbEntry struct {
 }
 
 // VERB_ENTRIES: sorted list of verb stems → (EventClass, RelationType, Transitivity)
+// VERB_ENTRIES: sorted list of verb stems → (EventClass, RelationType, Transitivity)
+// Note: Stems must be lowercase.
 var verbEntries = []verbEntry{
 	// Battle/Combat
 	{"attack", EventBattle, RelAttacks, Transitive},
@@ -42,19 +44,50 @@ var verbEntries = []verbEntry{
 	{"wound", EventBattle, RelAttacks, Transitive},
 
 	// Travel/Movement
-	{"arriv", EventTravel, RelArrives, Intransitive}, // arrive at
+	{"approach", EventTravel, RelArrives, Intransitive},
+	{"arriv", EventTravel, RelArrives, Intransitive},
 	{"depart", EventTravel, RelDeparts, Intransitive},
+	{"enter", EventTravel, RelArrives, Transitive},
+	{"exit", EventTravel, RelDeparts, Transitive},
 	{"journey", EventTravel, RelTravels, Intransitive},
-	{"leav", EventTravel, RelDeparts, Transitive}, // leave X
+	{"leav", EventTravel, RelDeparts, Transitive},
+	{"sail", EventTravel, RelTravels, Intransitive},
 	{"travel", EventTravel, RelTravels, Intransitive},
 	{"visit", EventTravel, RelArrives, Transitive},
 
-	// Discovery
+	// Discovery/Knowledge
+	{"conceal", EventConceals, RelConceals, Transitive},
 	{"discov", EventDiscovery, RelDiscovers, Transitive},
 	{"find", EventDiscovery, RelFinds, Transitive},
+	{"hid", EventConceals, RelConceals, Transitive}, // hide -> hid
 	{"learn", EventDiscovery, RelDiscovers, Transitive},
+	{"li", EventDeceives, RelDeceives, Intransitive}, // lie -> li
 	{"reveal", EventReveals, RelReveals, Transitive},
 	{"uncover", EventDiscovery, RelDiscovers, Transitive},
+
+	// State Change/Copula
+	{"are", EventState, RelIs, Transitive},
+	{"be", EventState, RelIs, Transitive},
+	{"becam", EventTransform, RelBecomes, Transitive}, // became -> becam? NO, stemming logic is weak. Let's add 'became'.
+	{"became", EventTransform, RelBecomes, Transitive},
+	{"become", EventTransform, RelBecomes, Transitive},
+	{"been", EventState, RelIs, Transitive},
+	{"is", EventState, RelIs, Transitive},
+	{"transform", EventTransform, RelBecomes, Transitive},
+	{"turn", EventTransform, RelBecomes, Intransitive}, // turn into
+	{"was", EventState, RelIs, Transitive},
+	{"were", EventState, RelIs, Transitive},
+
+	// Perception/Observation (New)
+	{"hear", EventDiscovery, RelObserves, Transitive},
+	{"heard", EventDiscovery, RelObserves, Transitive}, // Irregular past
+	{"look", EventDiscovery, RelObserves, Transitive},  // look at
+	{"notic", EventDiscovery, RelObserves, Transitive},
+	{"observ", EventDiscovery, RelObserves, Transitive},
+	{"saw", EventDiscovery, RelObserves, Transitive}, // Irregular past of 'see'
+	{"see", EventDiscovery, RelObserves, Transitive},
+	{"watch", EventDiscovery, RelObserves, Transitive},
+	{"witness", EventDiscovery, RelObserves, Transitive},
 
 	// Possession
 	{"give", EventAcquire, RelGives, Ditransitive},
@@ -67,15 +100,49 @@ var verbEntries = []verbEntry{
 	{"enabl", EventCause, RelEnables, Transitive},
 	{"prevent", EventPrevent, RelPrevents, Transitive},
 
-	// Dialogue
+	// Dialogue/Speech (New & Expanded)
 	{"accus", EventAccusation, RelAccuses, Transitive},
+	{"ask", EventDialogue, RelSpeaksTo, Transitive},
 	{"bargain", EventBargain, RelInteracts, Intransitive},
+	{"call", EventDialogue, RelSpeaksTo, Transitive},
+	{"claim", EventDialogue, RelSpeaksTo, Transitive},
+	{"command", EventDialogue, RelRules, Transitive},
+	{"crie", EventDialogue, RelSpeaksTo, Intransitive}, // cry -> crie/cri? Porter: cry->cri
+	{"declar", EventDialogue, RelSpeaksTo, Transitive},
+	{"explain", EventDialogue, RelSpeaksTo, Ditransitive},
+	{"mention", EventDialogue, RelMentions, Transitive},
 	{"promis", EventPromise, RelPromises, Ditransitive},
+	{"repli", EventDialogue, RelSpeaksTo, Intransitive}, // reply -> repli
+	{"said", EventDialogue, RelSpeaksTo, Ditransitive},  // Irregular past of 'say'
+	{"say", EventDialogue, RelSpeaksTo, Ditransitive},
+	{"shout", EventDialogue, RelSpeaksTo, Transitive},
+	{"speak", EventDialogue, RelSpeaksTo, Intransitive},
+	{"spoke", EventDialogue, RelSpeaksTo, Intransitive}, // Irregular past of 'speak'
+	{"state", EventDialogue, RelSpeaksTo, Transitive},
+	{"suggest", EventDialogue, RelSpeaksTo, Transitive},
+	{"tell", EventDialogue, RelSpeaksTo, Ditransitive},
+	{"told", EventDialogue, RelSpeaksTo, Ditransitive}, // Irregular past of 'tell'
 	{"threaten", EventThreat, RelThreatens, Transitive},
+	{"whisper", EventDialogue, RelSpeaksTo, Transitive},
+	{"yell", EventDialogue, RelSpeaksTo, Intransitive},
 
-	// Betrayal/Trust
+	// Social/Relationship
+	{"alli", EventMeet, RelInteracts, Intransitive}, // ally
 	{"betray", EventBetrayal, RelBetrays, Transitive},
 	{"deceiv", EventDeceives, RelDeceives, Transitive},
+	{"follow", EventMeet, RelServes, Transitive},
+	{"friend", EventMeet, RelInteracts, Transitive}, // befriend
+	{"help", EventRescue, RelSaves, Transitive},
+	{"join", EventMeet, RelInteracts, Transitive},
+	{"serv", EventMeet, RelServes, Transitive},
+	{"support", EventMeet, RelAllies, Transitive}, // No RelSupport, use Allies/Serves
+
+	// Emotions
+	{"admir", EventMeet, RelLoves, Transitive},  // close enough
+	{"fear", EventBattle, RelHates, Transitive}, // actually 'fears' isn't Hates, but indicates relation
+	{"hat", EventBattle, RelHates, Transitive},
+	{"lov", EventMeet, RelLoves, Transitive},
+	{"trust", EventMeet, RelAllies, Transitive},
 
 	// Rescue
 	{"rescu", EventRescue, RelSaves, Transitive},
@@ -85,17 +152,14 @@ var verbEntries = []verbEntry{
 	{"encount", EventMeet, RelInteracts, Transitive},
 	{"meet", EventMeet, RelInteracts, Transitive},
 
-	// Emotions/Relations
-	{"hat", EventBattle, RelHates, Transitive},
-	{"lov", EventMeet, RelLoves, Transitive},
-
 	// Creation/Destruction
-	{"creat", EventDiscovery, RelCreates, Transitive},
+	{"build", EventCreate, RelCreates, Transitive},
+	{"creat", EventCreate, RelCreates, Transitive},
 	{"destroy", EventDeath, RelDestroys, Transitive},
+	{"make", EventCreate, RelCreates, Transitive},
 
 	// Authority
 	{"rul", EventTrial, RelRules, Transitive},
-	{"serv", EventMeet, RelServes, Transitive},
 }
 
 // packValue encodes EventClass, RelationType, Transitivity into uint64
@@ -150,15 +214,34 @@ func New() (*NarrativeMatcher, error) {
 	}, nil
 }
 
+// Common suffixes for simplistic stemming
+var suffixes = []string{"ing", "ed", "es", "s", "er", "tion", "ness"}
+
 // Stem applies simple Porter-like stemming to a verb
 func (m *NarrativeMatcher) Stem(word string) string {
-	lower := strings.ToLower(word)
+	// Optimization: 90% of calls are already lower from Chunker?
+	// Chunker keeps original case in Token.Text, so likely Mixed case.
+	// But `Lookup` calls `Stem`.
+
+	// Fast path: check if lower
+	isLower := true
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		if c >= 'A' && c <= 'Z' {
+			isLower = false
+			break
+		}
+	}
+
+	lower := word
+	if !isLower {
+		lower = strings.ToLower(word)
+	}
 
 	// Remove common suffixes
-	suffixes := []string{"ing", "ed", "es", "s", "er", "tion", "ness"}
 	for _, suffix := range suffixes {
 		if strings.HasSuffix(lower, suffix) && len(lower) > len(suffix)+2 {
-			return strings.TrimSuffix(lower, suffix)
+			return lower[:len(lower)-len(suffix)]
 		}
 	}
 

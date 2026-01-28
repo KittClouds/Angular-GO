@@ -113,6 +113,15 @@ const STORAGE_KEY = 'right-sidebar:tab';
                         }
                     }
                 </div>
+
+                <!-- Footer -->
+                <div class="h-8 flex items-center px-3 border-t border-sidebar-border shrink-0 text-xs bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1),0_-2px_4px_-1px_rgba(0,0,0,0.06)] relative z-10 transition-colors duration-300">
+                    @if (activeView() === 'entities') {
+                        <span>{{ entities().length }} entities</span>
+                    } @else {
+                        <span>Real-time analysis</span>
+                    }
+                </div>
             }
         </aside>
     `,

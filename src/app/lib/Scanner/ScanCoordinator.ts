@@ -89,7 +89,6 @@ export class ScanCoordinator {
      * This is in the hot path - must be instant.
      */
     onEntityDecoration(span: DecorationSpan, noteId: string): void {
-        console.log(`[ScanCoordinator] onEntityDecoration called for: ${span.label} (${span.type})`);
         if (this.disposed) return;
         this.stats.entityEventsReceived++;
 

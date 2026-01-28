@@ -40,10 +40,10 @@ func TestGraphBasics(t *testing.T) {
 func TestOutgoingIncoming(t *testing.T) {
 	g := NewGraph()
 
-	g.EnsureNode("gandalf", "Gandalf", "CHARACTER")
-	g.EnsureNode("sauron", "Sauron", "CHARACTER")
+	gandalf := g.EnsureNode("gandalf", "Gandalf", "CHARACTER")
+	sauron := g.EnsureNode("sauron", "Sauron", "CHARACTER")
 
-	g.AddEdge("gandalf", "sauron", &ConceptEdge{
+	g.AddEdge(gandalf, sauron, &ConceptEdge{
 		Relation: "DEFEATED",
 		Weight:   1.0,
 	})
@@ -65,11 +65,11 @@ func TestOutgoingIncoming(t *testing.T) {
 func TestOrphanNodes(t *testing.T) {
 	g := NewGraph()
 
-	g.EnsureNode("connected", "Connected", "TEST")
+	conn := g.EnsureNode("connected", "Connected", "TEST")
 	g.EnsureNode("orphan", "Orphan", "TEST")
-	g.EnsureNode("target", "Target", "TEST")
+	target := g.EnsureNode("target", "Target", "TEST")
 
-	g.AddEdge("connected", "target", &ConceptEdge{Relation: "LINKS"})
+	g.AddEdge(conn, target, &ConceptEdge{Relation: "LINKS"})
 
 	orphans := g.OrphanNodes()
 	if len(orphans) != 1 {
@@ -83,15 +83,15 @@ func TestOrphanNodes(t *testing.T) {
 func TestDegreeCentrality(t *testing.T) {
 	g := NewGraph()
 
-	g.EnsureNode("hub", "Hub", "TEST")
-	g.EnsureNode("a", "A", "TEST")
-	g.EnsureNode("b", "B", "TEST")
-	g.EnsureNode("c", "C", "TEST")
+	hub := g.EnsureNode("hub", "Hub", "TEST")
+	a := g.EnsureNode("a", "A", "TEST")
+	b := g.EnsureNode("b", "B", "TEST")
+	c := g.EnsureNode("c", "C", "TEST")
 
 	// Hub connects to all
-	g.AddEdge("hub", "a", &ConceptEdge{Relation: "LINKS"})
-	g.AddEdge("hub", "b", &ConceptEdge{Relation: "LINKS"})
-	g.AddEdge("hub", "c", &ConceptEdge{Relation: "LINKS"})
+	g.AddEdge(hub, a, &ConceptEdge{Relation: "LINKS"})
+	g.AddEdge(hub, b, &ConceptEdge{Relation: "LINKS"})
+	g.AddEdge(hub, c, &ConceptEdge{Relation: "LINKS"})
 
 	centrality := g.DegreeCentrality()
 

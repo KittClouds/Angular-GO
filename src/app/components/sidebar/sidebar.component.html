@@ -45,12 +45,20 @@
                 (click)="setViewMode('search')">
                 <lucide-icon [img]="Search" size="18"></lucide-icon>
             </button>
+
+            <!-- NER -->
+            <button class="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200"
+                [class.bg-teal-500_20]="viewMode() === 'ner'" [class.text-teal-300]="viewMode() === 'ner'"
+                [class.text-teal-400]="viewMode() !== 'ner'" [class.hover:text-teal-300]="viewMode() !== 'ner'"
+                [class.hover:bg-teal-500_10]="viewMode() !== 'ner'" title="Entity Detection" (click)="toggleNer()">
+                <lucide-icon [img]="Brain" size="18"></lucide-icon>
+            </button>
         </div>
 
         <!-- Bottom Section: Collapse Toggle -->
-        <div class="h-8 flex items-center justify-center border-t border-sidebar-border">
+        <div class="h-8 flex items-center justify-center border-t border-sidebar-border bg-[#18181b]">
             <button
-                class="w-6 h-6 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors"
+                class="w-6 h-6 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
                 [title]="sidebarService.isOpen() ? 'Collapse Panel' : 'Expand Panel'"
                 (click)="sidebarService.toggleCollapse()">
                 <lucide-icon [img]="sidebarService.isOpen() ? PanelLeftClose : PanelLeft" size="14"></lucide-icon>
@@ -69,7 +77,11 @@
         <div
             class="h-10 flex items-center justify-between px-3 border-b border-sidebar-border shrink-0 bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200">
             <span class="text-sm font-semibold text-slate-200">
-                {{ viewMode() === 'files' ? 'Folders' : 'Search' }}
+                <ng-container [ngSwitch]="viewMode()">
+                    <span *ngSwitchCase="'files'">Folders</span>
+                    <span *ngSwitchCase="'search'">Search</span>
+                    <span *ngSwitchCase="'ner'">Entities</span>
+                </ng-container>
             </span>
 
             <!-- Header Actions -->
@@ -143,10 +155,14 @@
 
             <!-- Search Panel -->
             <app-search-panel *ngIf="viewMode() === 'search'"></app-search-panel>
+
+            <!-- NER Panel -->
+            <app-ner-panel *ngIf="viewMode() === 'ner'"></app-ner-panel>
         </div>
 
         <!-- Panel Footer -->
-        <div class="h-8 flex items-center px-3 border-t border-sidebar-border shrink-0 text-xs text-muted-foreground">
+        <div
+            class="h-8 flex items-center px-3 border-t border-sidebar-border shrink-0 text-xs bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1),0_-2px_4px_-1px_rgba(0,0,0,0.06)] relative z-10">
             {{ treeData().length }} items
         </div>
     </aside>

@@ -43,18 +43,18 @@ const CATEGORIES: CategoryConfig[] = [
     {
         key: '16-25',
         label: '16-25 words',
-        gradient: 'linear-gradient(135deg, #fbbf24, #f59e0b)',
-        textColor: 'text-amber-200',
-        bgColor: 'bg-amber-900/60',
-        borderColor: 'border-amber-500/50'
+        gradient: 'linear-gradient(135deg, #fb923c, #ea580c)',
+        textColor: 'text-orange-200',
+        bgColor: 'bg-orange-600/50',
+        borderColor: 'border-orange-500/50'
     },
     {
         key: '26-39',
         label: '26-39 words',
-        gradient: 'linear-gradient(135deg, #fb923c, #f97316)',
-        textColor: 'text-orange-200',
-        bgColor: 'bg-orange-900/60',
-        borderColor: 'border-orange-500/50'
+        gradient: 'linear-gradient(135deg, #f87171, #dc2626)',
+        textColor: 'text-red-200',
+        bgColor: 'bg-red-600/50',
+        borderColor: 'border-red-500/50'
     },
     {
         key: '40+',

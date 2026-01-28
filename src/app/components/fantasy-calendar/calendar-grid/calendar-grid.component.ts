@@ -1,16 +1,17 @@
 import { Component, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { NgIcon, provideIcons } from '@ng-icons/core';
+import { NgIconComponent, provideIcons } from '@ng-icons/core';
 import { lucideChevronLeft, lucideChevronRight } from '@ng-icons/lucide';
 import { CalendarService } from '../../../services/calendar.service';
 import { DayCellComponent } from '../day-cell/day-cell.component';
-import { getWeekdayIndex } from '../../../lib/fantasy-calendar/utils';
+import { EventEditDialogComponent } from '../event-edit-dialog/event-edit-dialog.component';
 import { FantasyDate } from '../../../lib/fantasy-calendar/types';
+import { getWeekdayIndex } from '../../../lib/fantasy-calendar/utils';
 
 @Component({
   selector: 'app-fantasy-calendar-grid',
   standalone: true,
-  imports: [CommonModule, NgIcon, DayCellComponent],
+  imports: [CommonModule, NgIconComponent, DayCellComponent, EventEditDialogComponent],
   providers: [provideIcons({ lucideChevronLeft, lucideChevronRight })],
   template: `
     <div class="flex flex-col h-full bg-background border rounded-lg overflow-hidden shadow-sm">
@@ -105,6 +106,11 @@ import { FantasyDate } from '../../../lib/fantasy-calendar/types';
           </div>
         </div>
       </div>
+
+      <app-event-edit-dialog
+        [(visible)]="isDialogOpen"
+        [eventId]="selectedEventId()"
+      ></app-event-edit-dialog>
     </div>
   `,
   styles: [`
@@ -119,6 +125,10 @@ export class FantasyCalendarGridComponent {
   readonly viewDate = this.calendarService.viewDate;
   readonly currentMonth = this.calendarService.currentMonth;
   readonly daysInMonth = this.calendarService.daysInCurrentMonth;
+
+  // Dialog State
+  isDialogOpen = false;
+  selectedEventId = computed(() => this.calendarService.highlightedEventId());
 
   readonly era = computed(() =>
     this.calendar().eras.find(e => e.id === this.calendar().defaultEraId)
@@ -172,15 +182,19 @@ export class FantasyCalendarGridComponent {
     return this.events().filter(e => e.date.dayIndex === dayIndex);
   }
 
-  handleAddEvent(dayIndex: number) {
-    this.calendarService.addEvent({
+  // Make handleAddEvent async to await service call
+  async handleAddEvent(dayIndex: number) {
+    const newEventId = await this.calendarService.addEvent({
       title: 'New Event',
       date: { ...this.viewDate(), dayIndex },
       status: 'todo'
     });
+    // Optional: Open dialog immediately for new event?
+    // for now just add it, user can click to edit
   }
 
   handleEventClick(id: string) {
     this.calendarService.highlightedEventId.set(id);
+    this.isDialogOpen = true;
   }
 }

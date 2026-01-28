@@ -511,3 +511,56 @@
     background: transparent !important;
     color: white !important;
 }
+
+/* ============================================
+   SLEEK SCROLLBARS (AGGRESSIVE OVERRIDE)
+   ============================================ */
+
+/* Firefox - Target everything */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+/* Webkit (Chrome, Edge, Safari) - Target Everything including generic elements */
+*::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 9999px;
+    border: none;
+    background-clip: border-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--primary) / 0.8);
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Specific overrides to ensure coverage */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+div::-webkit-scrollbar,
+section::-webkit-scrollbar,
+aside::-webkit-scrollbar,
+main::-webkit-scrollbar,
+ul::-webkit-scrollbar,
+.p-scroller::-webkit-scrollbar,
+.p-datatable-wrapper::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+*::-webkit-resizer {
+    background: transparent;
+}

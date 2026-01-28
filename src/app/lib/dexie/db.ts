@@ -47,6 +47,10 @@ export interface Folder {
     isNarrativeRoot: boolean;     // Is THIS folder a vault root?
     // Network
     networkId?: string;           // If this folder IS a network root
+    // Metadata
+    metadata?: {
+        date?: { year: number; monthIndex: number; dayIndex: number };
+    };
 }
 
 export interface Tag {

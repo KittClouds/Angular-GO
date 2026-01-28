@@ -50,6 +50,11 @@
               },
               {
                 "glob": "**/*",
+                "input": "src/assets",
+                "output": "assets"
+              },
+              {
+                "glob": "**/*",
                 "input": "node_modules/katex/dist/fonts",
                 "output": "fonts"
               }

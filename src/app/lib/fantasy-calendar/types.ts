@@ -215,6 +215,7 @@ export interface CalendarEvent {
     // Categorization
     importance?: EventImportance;
     category?: EventCategory;
+    type?: string;           // Generic subtype for entity mapping
     eventTypeId?: string;    // ID from eventTypeRegistry
     tags?: string[];
 

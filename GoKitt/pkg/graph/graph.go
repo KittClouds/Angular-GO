@@ -9,6 +9,10 @@ type ConceptNode struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Kind  string `json:"kind"`
+
+	// Adjacency lists (Pointer-based)
+	Outbound []*ConceptEdge `json:"-"` // prevent recursion in JSON
+	Inbound  []*ConceptEdge `json:"-"`
 }
 
 // ConceptEdge represents a relationship between concepts
@@ -17,24 +21,62 @@ type ConceptEdge struct {
 	Weight     float64 `json:"weight"`
 	SourceDoc  string  `json:"sourceDoc"`
 	SourceSpan [2]int  `json:"sourceSpan"`
+
+	// QuadPlus modifiers
+	Manner    string `json:"manner,omitempty"`
+	Location  string `json:"location,omitempty"`
+	Time      string `json:"time,omitempty"`
+	Recipient string `json:"recipient,omitempty"`
+
+	// Pointers to nodes
+	Source *ConceptNode `json:"-"`
+	Target *ConceptNode `json:"-"`
 }
 
 // ConceptGraph is a directed semantic graph
 type ConceptGraph struct {
 	// Node storage: ID -> Node
 	Nodes map[string]*ConceptNode `json:"nodes"`
+	// Edge list for serialization (populated by ToSerializable)
+	Edges []*SerializableEdge `json:"edges,omitempty"`
+}
 
-	// Adjacency lists: SourceID -> TargetID -> Edge
-	Outbound map[string]map[string]*ConceptEdge `json:"outbound"`
-	Inbound  map[string]map[string]*ConceptEdge `json:"inbound"`
+// SerializableEdge is a JSON-friendly edge representation
+type SerializableEdge struct {
+	Source    string  `json:"source"`
+	Target    string  `json:"target"`
+	Relation  string  `json:"relation"`
+	Weight    float64 `json:"weight"`
+	Manner    string  `json:"manner,omitempty"`
+	Location  string  `json:"location,omitempty"`
+	Time      string  `json:"time,omitempty"`
+	Recipient string  `json:"recipient,omitempty"`
 }
 
 // NewGraph creates an empty graph
 func NewGraph() *ConceptGraph {
 	return &ConceptGraph{
-		Nodes:    make(map[string]*ConceptNode),
-		Outbound: make(map[string]map[string]*ConceptEdge),
-		Inbound:  make(map[string]map[string]*ConceptEdge),
+		Nodes: make(map[string]*ConceptNode),
+		Edges: make([]*SerializableEdge, 0),
+	}
+}
+
+// ToSerializable populates the Edges slice from node adjacency lists
+func (g *ConceptGraph) ToSerializable() {
+	g.Edges = make([]*SerializableEdge, 0)
+	for _, node := range g.Nodes {
+		for _, edge := range node.Outbound {
+			g.Edges = append(g.Edges, &SerializableEdge{
+				Source:    edge.Source.ID,
+				Target:    edge.Target.ID,
+				Relation:  edge.Relation,
+				Weight:    edge.Weight,
+				Manner:    edge.Manner,
+				Location:  edge.Location,
+				Time:      edge.Time,
+				Recipient: edge.Recipient,
+			})
+		}
 	}
 }
 
@@ -45,27 +87,23 @@ func (g *ConceptGraph) EnsureNode(id, label, kind string) *ConceptNode {
 	}
 
 	node := &ConceptNode{
-		ID:    id,
-		Label: label,
-		Kind:  kind,
+		ID:       id,
+		Label:    label,
+		Kind:     kind,
+		Outbound: make([]*ConceptEdge, 0),
+		Inbound:  make([]*ConceptEdge, 0),
 	}
 	g.Nodes[id] = node
 	return node
 }
 
 // AddEdge creates a directed edge from source to target
-func (g *ConceptGraph) AddEdge(sourceID, targetID string, edge *ConceptEdge) {
-	// Ensure outbound map exists
-	if g.Outbound[sourceID] == nil {
-		g.Outbound[sourceID] = make(map[string]*ConceptEdge)
-	}
-	g.Outbound[sourceID][targetID] = edge
+func (g *ConceptGraph) AddEdge(source *ConceptNode, target *ConceptNode, edge *ConceptEdge) {
+	edge.Source = source
+	edge.Target = target
 
-	// Maintain reverse index
-	if g.Inbound[targetID] == nil {
-		g.Inbound[targetID] = make(map[string]*ConceptEdge)
-	}
-	g.Inbound[targetID][sourceID] = edge
+	source.Outbound = append(source.Outbound, edge)
+	target.Inbound = append(target.Inbound, edge)
 }
 
 // AddEdgeWithNodes creates nodes if needed, then adds edge
@@ -75,14 +113,40 @@ func (g *ConceptGraph) AddEdgeWithNodes(
 	relation string,
 	weight float64,
 ) {
-	g.EnsureNode(sourceID, sourceLabel, sourceKind)
-	g.EnsureNode(targetID, targetLabel, targetKind)
+	g.AddQuad(sourceID, sourceLabel, sourceKind, targetID, targetLabel, targetKind, relation, weight, "", "", "")
+}
+
+// AddQuad adds an edge with detailed modifiers (Manner, Location, Time)
+func (g *ConceptGraph) AddQuad(
+	sourceID, sourceLabel, sourceKind string,
+	targetID, targetLabel, targetKind string,
+	relation string,
+	weight float64,
+	manner, location, time string,
+) {
+	g.AddQuadPlus(sourceID, sourceLabel, sourceKind, targetID, targetLabel, targetKind, relation, weight, manner, location, time, "")
+}
+
+// AddQuadPlus adds an edge with all modifiers including Recipient
+func (g *ConceptGraph) AddQuadPlus(
+	sourceID, sourceLabel, sourceKind string,
+	targetID, targetLabel, targetKind string,
+	relation string,
+	weight float64,
+	manner, location, time, recipient string,
+) {
+	source := g.EnsureNode(sourceID, sourceLabel, sourceKind)
+	target := g.EnsureNode(targetID, targetLabel, targetKind)
 
 	edge := &ConceptEdge{
-		Relation: strings.ToUpper(relation),
-		Weight:   weight,
+		Relation:  strings.ToUpper(relation),
+		Weight:    weight,
+		Manner:    manner,
+		Location:  location,
+		Time:      time,
+		Recipient: recipient,
 	}
-	g.AddEdge(sourceID, targetID, edge)
+	g.AddEdge(source, target, edge)
 }
 
 // GetNode retrieves a node by ID
@@ -95,23 +159,21 @@ func (g *ConceptGraph) OutgoingEdges(id string) []struct {
 	Target *ConceptNode
 	Edge   *ConceptEdge
 } {
-	edges := g.Outbound[id]
-	if edges == nil {
+	node := g.Nodes[id]
+	if node == nil {
 		return nil
 	}
 
 	result := make([]struct {
 		Target *ConceptNode
 		Edge   *ConceptEdge
-	}, 0, len(edges))
+	}, len(node.Outbound))
 
-	for targetID, edge := range edges {
-		if target := g.Nodes[targetID]; target != nil {
-			result = append(result, struct {
-				Target *ConceptNode
-				Edge   *ConceptEdge
-			}{target, edge})
-		}
+	for i, edge := range node.Outbound {
+		result[i] = struct {
+			Target *ConceptNode
+			Edge   *ConceptEdge
+		}{edge.Target, edge}
 	}
 	return result
 }
@@ -121,49 +183,47 @@ func (g *ConceptGraph) IncomingEdges(id string) []struct {
 	Source *ConceptNode
 	Edge   *ConceptEdge
 } {
-	edges := g.Inbound[id]
-	if edges == nil {
+	node := g.Nodes[id]
+	if node == nil {
 		return nil
 	}
 
 	result := make([]struct {
 		Source *ConceptNode
 		Edge   *ConceptEdge
-	}, 0, len(edges))
+	}, len(node.Inbound))
 
-	for sourceID, edge := range edges {
-		if source := g.Nodes[sourceID]; source != nil {
-			result = append(result, struct {
-				Source *ConceptNode
-				Edge   *ConceptEdge
-			}{source, edge})
-		}
+	for i, edge := range node.Inbound {
+		result[i] = struct {
+			Source *ConceptNode
+			Edge   *ConceptEdge
+		}{edge.Source, edge}
 	}
 	return result
 }
 
 // Neighbors returns all nodes connected to the given node (both directions)
 func (g *ConceptGraph) Neighbors(id string) []*ConceptNode {
+	node := g.Nodes[id]
+	if node == nil {
+		return nil
+	}
+
 	seen := make(map[string]bool)
 	var result []*ConceptNode
 
-	// Outbound neighbors
-	for targetID := range g.Outbound[id] {
-		if !seen[targetID] {
-			seen[targetID] = true
-			if node := g.Nodes[targetID]; node != nil {
-				result = append(result, node)
-			}
+	// Outbound
+	for _, edge := range node.Outbound {
+		if !seen[edge.Target.ID] {
+			seen[edge.Target.ID] = true
+			result = append(result, edge.Target)
 		}
 	}
-
-	// Inbound neighbors
-	for sourceID := range g.Inbound[id] {
-		if !seen[sourceID] {
-			seen[sourceID] = true
-			if node := g.Nodes[sourceID]; node != nil {
-				result = append(result, node)
-			}
+	// Inbound
+	for _, edge := range node.Inbound {
+		if !seen[edge.Source.ID] {
+			seen[edge.Source.ID] = true
+			result = append(result, edge.Source)
 		}
 	}
 
@@ -178,8 +238,8 @@ func (g *ConceptGraph) NodeCount() int {
 // EdgeCount returns the number of edges
 func (g *ConceptGraph) EdgeCount() int {
 	count := 0
-	for _, targets := range g.Outbound {
-		count += len(targets)
+	for _, node := range g.Nodes {
+		count += len(node.Outbound)
 	}
 	return count
 }
@@ -205,21 +265,14 @@ func (g *ConceptGraph) AllEdges() []struct {
 		Edge   *ConceptEdge
 	}
 
-	for sourceID, targets := range g.Outbound {
-		source := g.Nodes[sourceID]
-		if source == nil {
-			continue
-		}
-		for targetID, edge := range targets {
-			target := g.Nodes[targetID]
-			if target == nil {
-				continue
-			}
+	// Iterate nodes to find all outbound edges
+	for _, node := range g.Nodes {
+		for _, edge := range node.Outbound {
 			result = append(result, struct {
 				Source *ConceptNode
 				Target *ConceptNode
 				Edge   *ConceptEdge
-			}{source, target, edge})
+			}{node, edge.Target, edge})
 		}
 	}
 	return result
@@ -228,8 +281,6 @@ func (g *ConceptGraph) AllEdges() []struct {
 // Clear removes all nodes and edges
 func (g *ConceptGraph) Clear() {
 	g.Nodes = make(map[string]*ConceptNode)
-	g.Outbound = make(map[string]map[string]*ConceptEdge)
-	g.Inbound = make(map[string]map[string]*ConceptEdge)
 }
 
 // DegreeCentrality computes (in+out)/(2*(n-1)) for each node
@@ -246,9 +297,9 @@ func (g *ConceptGraph) DegreeCentrality() map[string]float64 {
 	normalizer := 2.0 * float64(n-1)
 	result := make(map[string]float64, n)
 
-	for id := range g.Nodes {
-		outDegree := len(g.Outbound[id])
-		inDegree := len(g.Inbound[id])
+	for id, node := range g.Nodes {
+		outDegree := len(node.Outbound)
+		inDegree := len(node.Inbound)
 		result[id] = float64(outDegree+inDegree) / normalizer
 	}
 
@@ -258,8 +309,8 @@ func (g *ConceptGraph) DegreeCentrality() map[string]float64 {
 // OrphanNodes returns nodes with no connections
 func (g *ConceptGraph) OrphanNodes() []*ConceptNode {
 	var orphans []*ConceptNode
-	for id, node := range g.Nodes {
-		if len(g.Outbound[id]) == 0 && len(g.Inbound[id]) == 0 {
+	for _, node := range g.Nodes {
+		if len(node.Outbound) == 0 && len(node.Inbound) == 0 {
 			orphans = append(orphans, node)
 		}
 	}

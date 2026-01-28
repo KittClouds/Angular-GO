@@ -62,6 +62,8 @@ export function getDecorationStyle(span: DecorationSpan, mode: HighlightMode): s
         return getAmbiguousStyle(mode);
       }
       return getEntityStyle(span.kind || 'UNKNOWN', mode);
+    case 'entity_candidate':
+      return getCandidateStyle(mode);
     default:
       return '';
   }
@@ -77,6 +79,18 @@ function getAmbiguousStyle(mode: HighlightMode): string {
     `;
   }
   return `border-bottom: 2px dashed #9ca3af;`;
+}
+
+function getCandidateStyle(mode: HighlightMode): string {
+  // Yellow dotted underline for candidates
+  if (mode === 'vivid') {
+    return `
+        border-bottom: 2px dotted #eab308; 
+        background-color: rgba(234, 179, 8, 0.1);
+        cursor: help;
+      `;
+  }
+  return `border-bottom: 2px dotted #eab308;`;
 }
 
 /**
@@ -183,6 +197,8 @@ export function getDecorationClass(span: DecorationSpan): string {
         return `entity-implicit-ambiguous`;
       }
       return `entity-implicit entity-${(span.kind || 'unknown').toLowerCase()}`;
+    case 'entity_candidate':
+      return `entity-candidate`;
     default:
       return '';
   }

@@ -31,8 +31,8 @@ func TestPronounSimple(t *testing.T) {
 	// "Gandalf walked."
 	r.ObserveMention("e1")
 
-	// "He stopped."
-	res := r.Resolve("He")
+	// "He" stopped.
+	res := r.Resolve("He", nil)
 	if res != "e1" {
 		t.Errorf("Expected e1, got %s", res)
 	}
@@ -45,12 +45,12 @@ func TestGenderSwitch(t *testing.T) {
 	r.ObserveMention("e2") // Galadriel (most recent)
 
 	// "She" -> Galadriel
-	if res := r.Resolve("She"); res != "e2" {
+	if res := r.Resolve("She", nil); res != "e2" {
 		t.Errorf("Expected e2 for She, got %s", res)
 	}
 
 	// "He" -> Gandalf (skips Galadriel)
-	if res := r.Resolve("He"); res != "e1" {
+	if res := r.Resolve("He", nil); res != "e1" {
 		t.Errorf("Expected e1 for He, got %s", res)
 	}
 }
@@ -58,15 +58,15 @@ func TestGenderSwitch(t *testing.T) {
 func TestAliasResolution(t *testing.T) {
 	r := setupResolver()
 
-	if res := r.Resolve("Gandalf"); res != "e1" {
+	if res := r.Resolve("Gandalf", nil); res != "e1" {
 		t.Errorf("Expected e1 for Gandalf")
 	}
 
-	if res := r.Resolve("Mithrandir"); res != "e1" {
+	if res := r.Resolve("Mithrandir", nil); res != "e1" {
 		t.Errorf("Expected e1 for Mithrandir")
 	}
 
-	if res := r.Resolve("Lady of Light"); res != "e2" {
+	if res := r.Resolve("Lady of Light", nil); res != "e2" {
 		t.Errorf("Expected e2 for Lady of Light")
 	}
 }
@@ -82,7 +82,7 @@ func TestRecencyUpdate(t *testing.T) {
 	r.ObserveMention("e4") // Frodo
 
 	// "He" -> Frodo
-	if res := r.Resolve("He"); res != "e4" {
+	if res := r.Resolve("He", nil); res != "e4" {
 		t.Errorf("Expected e4 (Frodo), got %s", res)
 	}
 }

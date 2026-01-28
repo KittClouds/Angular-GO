@@ -21,11 +21,12 @@ const (
 
 // EntityMetadata represents a known entity in the context
 type EntityMetadata struct {
-	ID      string
-	Name    string
-	Gender  Gender
-	Aliases []string
-	Kind    string
+	ID        string
+	Name      string
+	Gender    Gender
+	Aliases   []string
+	Kind      string
+	Embedding []float32
 }
 
 // NarrativeContext tracks the state of the narrative
@@ -139,7 +140,7 @@ func (r *Resolver) RegisterEntity(e EntityMetadata) {
 			"alias": len(e.Aliases), // treats aliases as one bag for length? approximation
 			"kind":  1,
 		},
-		// Embedding: ... (Future: pass embedding here)
+		Embedding: e.Embedding,
 	}
 
 	tokens := make(map[string]resorank.TokenMetadata)
@@ -181,7 +182,7 @@ func (r *Resolver) RegisterEntity(e EntityMetadata) {
 }
 
 // Resolve attempts to resolve text (pronoun or alias) to an EntityID
-func (r *Resolver) Resolve(text string) string {
+func (r *Resolver) Resolve(text string, queryVector []float32) string {
 	if r.isPronoun(text) {
 		gender := r.inferPronounGender(text)
 		return r.Context.FindMostRecent(gender)
@@ -203,9 +204,8 @@ func (r *Resolver) Resolve(text string) string {
 	// 2. Fuzzy/Hybrid Match (ResoRank)
 	// Split query
 	queryTokens := strings.Fields(lower)
-	// queryVector := ... (Future: pass vector from upstream)
 
-	results := r.Scorer.Search(queryTokens, nil, 1)
+	results := r.Scorer.Search(queryTokens, queryVector, 1)
 	if len(results) > 0 {
 		// Threshold check?
 		// For now if scoring > 0.5 (arbitrary), take it

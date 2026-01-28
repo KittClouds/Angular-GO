@@ -4,6 +4,7 @@ package conductor
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/kittclouds/gokitt/pkg/dafsa"
 	"github.com/kittclouds/gokitt/pkg/scanner/chunker"
@@ -19,6 +20,7 @@ type ScanResult struct {
 	Text         string
 	CleanText    string
 	Syntax       []syntax.SyntaxMatch
+	Tokens       []chunker.Token
 	Chunks       []chunker.Chunk
 	Narrative    []NarrativeEvent
 	ResolvedRefs []ResolvedReference
@@ -75,6 +77,11 @@ func (c *Conductor) SetDictionary(dict *dafsa.RuntimeDictionary) {
 	c.implicitScanner = dict
 }
 
+// GetDictionary returns the Aho-Corasick implicit scanner
+func (c *Conductor) GetDictionary() *dafsa.RuntimeDictionary {
+	return c.implicitScanner
+}
+
 // Scan processes text through all pipeline stages
 func (c *Conductor) Scan(text string) ScanResult {
 	// 1. Syntax Pass (Explicit Tags/Links)
@@ -127,12 +134,12 @@ func (c *Conductor) Scan(text string) ScanResult {
 				}
 
 				// Resolve Entity IDs for final output
-				subjID := c.resolver.Resolve(subjText)
+				subjID := c.resolver.Resolve(subjText, nil)
 				if subjID == "" {
 					subjID = subjText
 				}
 
-				objID := c.resolver.Resolve(objText)
+				objID := c.resolver.Resolve(objText, nil)
 				if objID == "" {
 					objID = objText
 				}
@@ -153,7 +160,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 	for _, token := range chunkResult.Tokens {
 		if token.POS == chunker.Pronoun || token.POS == chunker.ProperNoun {
 			word := token.Text
-			if id := c.resolver.Resolve(word); id != "" {
+			if id := c.resolver.Resolve(word, nil); id != "" {
 				resolvedRefs = append(resolvedRefs, ResolvedReference{
 					Text:     word,
 					EntityID: id,
@@ -167,6 +174,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 		Text:         text,
 		CleanText:    text,
 		Syntax:       synMatches,
+		Tokens:       chunkResult.Tokens,
 		Chunks:       chunkResult.Chunks,
 		Narrative:    narrativeEvents,
 		ResolvedRefs: resolvedRefs,
@@ -224,4 +232,53 @@ func (c *Conductor) resolveKind(text string) dafsa.EntityKind {
 // GetMatcher returns the narrative matcher for external use (Projection)
 func (c *Conductor) GetMatcher() *narrative.NarrativeMatcher {
 	return c.narrativeMatcher
+}
+
+// GetCandidates returns unrelated candidates from Discovery Engine
+func (c *Conductor) GetCandidates() interface{} {
+	return c.discoveryEngine.Registry.GetCandidates()
+}
+
+// ScanDiscovery runs the full discovery pipeline (Harvester + Virus)
+func (c *Conductor) ScanDiscovery(text string) {
+	// Phase 1: Harvester - Observe ALL capitalized words
+	tokens := strings.Fields(text)
+	for _, token := range tokens {
+		// Check if capitalized (potential entity)
+		if len(token) > 0 {
+			first := []rune(token)[0]
+			if unicode.IsUpper(first) {
+				c.discoveryEngine.ObserveToken(token)
+			}
+		}
+	}
+
+	// Phase 2: Virus - Find relational patterns
+	c.discoveryEngine.ScanText(text)
+}
+
+// SeedDiscovery pre-populates the discovery registry with known entities
+// This gives ScanText promoted sources to work with
+func (c *Conductor) SeedDiscovery(entities []dafsa.RegisteredEntity) {
+	for _, e := range entities {
+		// Add token and force promotion
+		c.discoveryEngine.Registry.AddToken(e.Label)
+		stats := c.discoveryEngine.Registry.GetStats(e.Label)
+		if stats != nil {
+			stats.Status = discovery.StatusPromoted
+			// Parse Kind from interface{}
+			var kind dafsa.EntityKind
+			switch v := e.Kind.(type) {
+			case string:
+				kind = dafsa.ParseKind(v)
+			case float64:
+				kind = dafsa.EntityKind(int(v))
+			case dafsa.EntityKind:
+				kind = v
+			default:
+				kind = dafsa.KindOther
+			}
+			stats.InferredKind = &kind
+		}
+	}
 }

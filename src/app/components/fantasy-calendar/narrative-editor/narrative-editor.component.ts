@@ -10,6 +10,7 @@ import {
 import { CalendarService, EditorScope } from '../../../services/calendar.service';
 import { CalendarEvent } from '../../../lib/fantasy-calendar/types';
 import { getEventTypeById } from '../../../lib/fantasy-calendar/event-type-registry';
+import { EventEditDialogComponent } from '../event-edit-dialog/event-edit-dialog.component';
 
 const SCOPE_CONFIG: Record<EditorScope, { icon: string; label: string; description: string }> = {
   day: { icon: 'lucideCalendar', label: 'Day', description: 'Events for selected day' },
@@ -29,7 +30,7 @@ type StatusKey = keyof typeof STATUS_CONFIG;
 @Component({
   selector: 'app-narrative-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, NgIcon],
+  imports: [CommonModule, FormsModule, NgIcon, EventEditDialogComponent],
   providers: [provideIcons({
     lucideSearch, lucideCalendar, lucideCalendarDays, lucideCalendarRange,
     lucideLayers, lucideCircle, lucideClock, lucideCheckCircle2, lucidePlus,
@@ -202,17 +203,11 @@ type StatusKey = keyof typeof STATUS_CONFIG;
         </div>
       </div>
 
-      <!-- Selected Event Panel (simple version) -->
-      <div *ngIf="selectedEvent()" class="fixed inset-y-0 right-0 w-[400px] bg-card border-l shadow-xl z-50 p-4 overflow-y-auto">
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-semibold">{{ selectedEvent()?.title }}</h3>
-          <button (click)="selectedEventId.set(null)" class="p-1 hover:bg-muted rounded">✕</button>
-        </div>
-        <p class="text-sm text-muted-foreground mb-4">{{ selectedEvent()?.description || 'No description' }}</p>
-        <div class="text-xs text-muted-foreground">
-          Day {{ (selectedEvent()?.date?.dayIndex || 0) + 1 }}, Year {{ selectedEvent()?.date?.year }}
-        </div>
-      </div>
+      <app-event-edit-dialog
+        [(visible)]="isDialogOpen"
+        [eventId]="selectedEventId()"
+        (visibleChange)="onDialogClose($event)"
+      ></app-event-edit-dialog>
     </div>
   `,
   styles: [`
@@ -229,7 +224,10 @@ export class NarrativeEditorComponent {
   quickAddColumn: StatusKey | null = null;
   quickAddTitle = '';
 
+  // Dialog State
+  isDialogOpen = false;
   readonly selectedEventId = signal<string | null>(null);
+
   readonly editorScope = this.calendarService.editorScope;
   readonly viewDate = this.calendarService.viewDate;
   readonly currentMonth = this.calendarService.currentMonth;
@@ -267,12 +265,6 @@ export class NarrativeEditorComponent {
         : 0,
       withCausality: events.filter(e => e.causedBy?.length || e.causes?.length).length,
     };
-  });
-
-  readonly selectedEvent = computed(() => {
-    const id = this.selectedEventId();
-    if (!id) return null;
-    return this.calendarService.events().find(e => e.id === id) || null;
   });
 
   readonly scopeLabel = computed(() => {
@@ -315,6 +307,14 @@ export class NarrativeEditorComponent {
 
   selectEvent(event: CalendarEvent) {
     this.selectedEventId.set(event.id);
+    this.isDialogOpen = true;
+  }
+
+  onDialogClose(visible: boolean) {
+    this.isDialogOpen = visible;
+    if (!visible) {
+      this.selectedEventId.set(null);
+    }
   }
 
   toggleStatus(e: MouseEvent, eventId: string) {
@@ -327,10 +327,10 @@ export class NarrativeEditorComponent {
     this.quickAddTitle = '';
   }
 
-  quickAdd(col: StatusKey) {
+  async quickAdd(col: StatusKey) {
     if (!this.quickAddTitle.trim()) return;
 
-    this.calendarService.addEvent({
+    await this.calendarService.addEvent({
       title: this.quickAddTitle.trim(),
       date: { ...this.viewDate() },
       status: col,

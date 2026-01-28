@@ -4,10 +4,20 @@ import (
 	"testing"
 )
 
+func filterKind(matches []SyntaxMatch, k SyntaxKind) []SyntaxMatch {
+	var out []SyntaxMatch
+	for _, m := range matches {
+		if m.Kind == k {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func TestWikilinks(t *testing.T) {
 	s := New()
 	text := "Check [[Target]] and [[Target|Label]] links."
-	matches := s.scanWikilinks(text)
+	matches := filterKind(s.Scan(text), KindWikilink)
 
 	if len(matches) != 2 {
 		t.Errorf("Expected 2 wikilinks, got %d", len(matches))
@@ -25,7 +35,7 @@ func TestWikilinks(t *testing.T) {
 func TestBacklinks(t *testing.T) {
 	s := New()
 	text := "Refs <<Source>> and <<Source|Label>> back."
-	matches := s.scanBacklinks(text)
+	matches := filterKind(s.Scan(text), KindBacklink)
 
 	if len(matches) != 2 {
 		t.Errorf("Expected 2 backlinks, got %d", len(matches))
@@ -39,7 +49,7 @@ func TestBacklinks(t *testing.T) {
 func TestEntities(t *testing.T) {
 	s := New()
 	text := "Meet [CHARACTER:Luffy] and [!ITEM|Gum-Gum Fruit|DevilFruit]."
-	matches := s.scanEntities(text)
+	matches := filterKind(s.Scan(text), KindEntity)
 
 	if len(matches) != 2 {
 		t.Errorf("Expected 2 entities, got %d", len(matches))
@@ -63,7 +73,7 @@ func TestTriples(t *testing.T) {
 	s := New()
 	// [Subject] -[Predicate]-> [Object]
 	text := "[CHARACTER:Luffy] -[DEFEATED]-> [CHARACTER:Kaido]"
-	matches := s.scanTriples(text)
+	matches := filterKind(s.Scan(text), KindTriple)
 
 	if len(matches) != 1 {
 		t.Errorf("Expected 1 triple, got %d", len(matches))
@@ -78,7 +88,7 @@ func TestTriples(t *testing.T) {
 func TestInlineRelations(t *testing.T) {
 	s := New()
 	text := "Saw [CHARACTER:Luffy@CAPTAIN] there."
-	matches := s.scanInlineRelations(text)
+	matches := filterKind(s.Scan(text), KindInlineRelation)
 
 	if len(matches) != 1 {
 		t.Errorf("Expected 1 inline relation, got %d", len(matches))
@@ -93,7 +103,7 @@ func TestInlineRelations(t *testing.T) {
 func TestTags(t *testing.T) {
 	s := New()
 	text := "Valid #tag and #valid-tag. Invalid # empty tag."
-	matches := s.scanTags(text)
+	matches := filterKind(s.Scan(text), KindTag)
 
 	if len(matches) != 2 {
 		t.Errorf("Expected 2 tags, got %d", len(matches))
@@ -110,7 +120,7 @@ func TestTags(t *testing.T) {
 func TestMentions(t *testing.T) {
 	s := New()
 	text := "Hello @user-name!"
-	matches := s.scanMentions(text)
+	matches := filterKind(s.Scan(text), KindMention)
 
 	if len(matches) != 1 {
 		t.Errorf("Expected 1 mention, got %d", len(matches))

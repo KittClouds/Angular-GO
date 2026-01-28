@@ -203,12 +203,15 @@ export const entityHighlighter = $prose(() => {
                         continue;
                     }
 
-                    // NER CANDIDATE HIGHLIGHTS: Gray underline for potential entities
+                    // NER CANDIDATE HIGHLIGHTS: Use centralized styles (Yellow dotted)
                     if (span.type === 'entity_candidate') {
+                        if (span.label?.toLowerCase() === 'elbaph') {
+                            console.log(`[EntityHighlighter:DIAG] Rendering Elbaph candidate at ${span.from}-${span.to}`);
+                        }
                         decorations.push(
                             Decoration.inline(span.from, span.to, {
-                                class: 'entity-candidate',
-                                style: 'text-decoration: underline; text-decoration-color: #666; text-decoration-style: dashed;',
+                                class: highlighterApi.getClass(span),
+                                style: highlighterApi.getStyle(span),
                                 title: `Potential entity: ${span.label} (score: ${span.matchedText || 'unknown'})`
                             })
                         );
