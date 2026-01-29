@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"syscall/js"
 	"time"
 
@@ -39,12 +41,12 @@ func main() {
 	var err error
 	pipeline, err = conductor.New()
 	if err != nil {
-		println("[GoKitt] FATAL: Failed to initialize conductor:", err.Error())
+		fmt.Println("[GoKitt] FATAL: Failed to initialize conductor:", err.Error())
 	}
 
 	// Initialize Searcher
 	searcher = resorank.NewScorer(resorank.DefaultConfig())
-	println("[GoKitt] WASM Ready v" + Version)
+	fmt.Println("[GoKitt] WASM Ready v" + Version)
 
 	// Register exports
 	js.Global().Set("GoKitt", js.ValueOf(map[string]interface{}{
@@ -54,6 +56,7 @@ func main() {
 		"scanImplicit":  js.FuncOf(scanImplicit),
 		"scanDiscovery": js.FuncOf(scanDiscovery),
 		"indexDocument": js.FuncOf(indexDocument),
+		"indexNote":     js.FuncOf(indexNote), // New: Scan & Index raw text
 		"search":        js.FuncOf(search),
 		// Vector Store API
 		"initVectors":   js.FuncOf(initVectors),
@@ -196,11 +199,74 @@ func indexDocument(this js.Value, args []js.Value) interface{} {
 	if vectorStore != nil && len(meta.Embedding) > 0 {
 		uid := getVectorID(id)
 		// Ignore error for now (e.g. dim mismatch), just log?
-		// We could return error but that might block indexing.
-		// For now silent fail or specific code?
-		// Let's assume embeddings are clean.
 		vectorStore.Add(uid, meta.Embedding)
 	}
+
+	return successResult("indexed " + id)
+}
+
+// indexNote: [id string, text string]
+// Scans text with Conductor and indexes it in ResoRank
+func indexNote(this js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return errorResult("requires 2 args: id, text")
+	}
+	id := args[0].String()
+	text := args[1].String()
+
+	if pipeline == nil || searcher == nil {
+		return errorResult("pipeline or searcher not initialized")
+	}
+
+	// 1. Scan (Conductor)
+	scanRes := pipeline.Scan(text)
+
+	// 2. Transform to ResoRank Metadata
+	docLen := len(scanRes.Tokens)
+	if docLen == 0 {
+		return successResult("indexed empty note " + id)
+	}
+
+	docMeta := resorank.DocumentMetadata{
+		FieldLengths:    map[string]int{"content": docLen},
+		TotalTokenCount: docLen,
+	}
+
+	tokens := make(map[string]resorank.TokenMetadata)
+
+	// Use fixed 50 tokens per segment for now (or read from config)
+	const tokensPerSeg = 50
+	maxSegs := searcher.Config.MaxSegments
+
+	for i, tok := range scanRes.Tokens {
+		// Normalized term (lowercase)
+		term := strings.ToLower(tok.Text)
+
+		meta, exists := tokens[term]
+		if !exists {
+			meta = resorank.TokenMetadata{
+				FieldOccurrences: make(map[string]resorank.FieldOccurrence),
+				SegmentMask:      0,
+			}
+		}
+
+		// Update stats for "content" field
+		occ := meta.FieldOccurrences["content"]
+		occ.TF++
+		occ.FieldLength = docLen
+		meta.FieldOccurrences["content"] = occ
+
+		// Segment Mask
+		segIdx := uint32(i / tokensPerSeg)
+		if segIdx < maxSegs {
+			meta.SegmentMask |= (1 << segIdx)
+		}
+
+		tokens[term] = meta
+	}
+
+	// 3. Index
+	searcher.IndexDocument(id, docMeta, tokens)
 
 	return successResult("indexed " + id)
 }
@@ -272,8 +338,8 @@ func initialize(this js.Value, args []js.Value) interface{} {
 			}
 			pipeline.SetDictionary(dict)
 			pipeline.SeedDiscovery(entities)
-			println("[GoKitt] ✅ Dictionary compiled:", len(entities), "entities")
-			println("[GoKitt] ✅ Discovery seeded:", len(entities), "entities")
+			fmt.Println("[GoKitt] ✅ Dictionary compiled:", len(entities), "entities")
+			fmt.Println("[GoKitt] ✅ Discovery seeded:", len(entities), "entities")
 		}
 	}
 
@@ -302,6 +368,23 @@ func scanImplicit(this js.Value, args []js.Value) interface{} {
 	spans := make([]map[string]interface{}, 0, len(matches))
 
 	for _, m := range matches {
+		// Check Word Boundaries
+		// 1. Previous char must be non-alphanumeric (or start of string)
+		if m.Start > 0 {
+			prevChar := text[m.Start-1]
+			if isWordChar(prevChar) {
+				continue // "trigger" matching "ge" -> 'g' is word char, skip
+			}
+		}
+
+		// 2. Next char must be non-alphanumeric (or end of string)
+		if m.End < len(text) {
+			nextChar := text[m.End]
+			if isWordChar(nextChar) {
+				continue // "trigger" matching "ge" -> 'r' is word char, skip
+			}
+		}
+
 		if len(m.Entities) > 0 {
 			best := dict.SelectBest(getEntityIDs(m.Entities))
 			if best != nil {
@@ -319,6 +402,10 @@ func scanImplicit(this js.Value, args []js.Value) interface{} {
 
 	bytes, _ := json.Marshal(spans)
 	return string(bytes)
+}
+
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // getEntityIDs extracts IDs from EntityInfo slice

@@ -165,20 +165,46 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 content = JSON.parse(note.content || '{}');
             } catch {
                 // Fallback: treat as markdown
-                content = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: note.markdownContent || '' }] }] };
+                content = null;
+            }
+
+            // If parsed content is not a valid doc (e.g. empty object from new note), create default
+            if (!content || !content.type || !content.content) {
+                // If we have markdown, try to use it (simple text node)
+                if (note.markdownContent) {
+                    content = {
+                        type: 'doc',
+                        content: [{
+                            type: 'paragraph',
+                            content: [{ type: 'text', text: note.markdownContent }]
+                        }]
+                    };
+                } else {
+                    // Default empty doc
+                    content = {
+                        type: 'doc',
+                        content: [{ type: 'paragraph' }]
+                    };
+                }
             }
 
             // Set editor content
             // Milkdown/Crepe uses ProseMirror, so we need to set the document
             const editorView = this.crepe.editor.ctx.get(editorViewCtx);
-            if (editorView && content.content) {
+            if (editorView) {
                 const { state } = editorView;
-                const newDoc = state.schema.nodeFromJSON(content);
-                const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
-                editorView.dispatch(tr);
+                try {
+                    const newDoc = state.schema.nodeFromJSON(content);
+                    const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
+                    editorView.dispatch(tr);
 
-                // Restore scroll and cursor position after content loads
-                this.restoreEditorPosition(editorView);
+                    // Restore scroll and cursor position after content loads
+                    this.restoreEditorPosition(editorView);
+                } catch (err) {
+                    console.error('[EditorComponent] Failed to inflate document JSON:', err);
+                    // Fallback to clearing
+                    this.clearEditor();
+                }
             }
 
             // Update highlighter API with current note context

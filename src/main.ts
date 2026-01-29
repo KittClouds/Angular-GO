@@ -10,6 +10,11 @@ import { preloadBootCache } from './app/lib/core/boot-cache';
 // Polyfill for Go WASM environment
 (window as any).global = window;
 
+// Fix Vue 3 Feature Flags Warning (for @tiptap/vue-3)
+(window as any).__VUE_OPTIONS_API__ = true;
+(window as any).__VUE_PROD_DEVTOOLS__ = false;
+(window as any).__VUE_PROD_HYDRATION_MISMATCH_DETAILS__ = false;
+
 // Polyfill 'fs' to redirect writes to console (fixes panic masking)
 (window as any).fs = {
   constants: {

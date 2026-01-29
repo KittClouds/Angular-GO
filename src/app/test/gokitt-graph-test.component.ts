@@ -64,30 +64,27 @@ export class GokittGraphTestComponent implements OnInit {
         }
     }
 
-    runScan() {
+    async runScan() {
         this.status = 'Scanning...';
         this.scanResult = null;
 
-        // Use setTimeout to allow UI to update
-        setTimeout(() => {
-            try {
-                const result = this.goKitt.scan(this.sampleText);
-                console.log('Scan Result:', result);
-                this.scanResult = result;
+        try {
+            const result = await this.goKitt.scan(this.sampleText);
+            console.log('Scan Result:', result);
+            this.scanResult = result;
 
-                const edgeCount = result.graph?.Edges?.length ?? 0;
-                const nodeCount = result.graph?.Nodes ? Object.keys(result.graph.Nodes).length : 0;
+            const edgeCount = result.graph?.Edges?.length ?? 0;
+            const nodeCount = result.graph?.Nodes ? Object.keys(result.graph.Nodes).length : 0;
 
-                if (result.error) {
-                    this.status = 'Error in Scan Result: ' + result.error;
-                } else {
-                    this.status = `Scan Complete. Nodes: ${nodeCount}, Edges: ${edgeCount}.`;
-                }
-            } catch (err) {
-                console.error(err);
-                this.status = 'Exception: ' + err;
+            if (result.error) {
+                this.status = 'Error in Scan Result: ' + result.error;
+            } else {
+                this.status = `Scan Complete. Nodes: ${nodeCount}, Edges: ${edgeCount}.`;
             }
-        }, 50);
+        } catch (err) {
+            console.error(err);
+            this.status = 'Exception: ' + err;
+        }
     }
 
     getKeys(obj: any): string[] {

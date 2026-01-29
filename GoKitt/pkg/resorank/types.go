@@ -6,11 +6,23 @@ type ResoRankConfig struct {
 	B                   float64               `json:"b"`
 	ProximityAlpha      float64               `json:"proximityAlpha"`
 	ProximityDecay      float64               `json:"proximityDecayLambda"`
+	ProximityStrategy   string                `json:"proximityStrategy"` // "global", "per-term", "pairwise", "idf-weighted"
 	MaxSegments         uint32                `json:"maxSegments"`
 	UseAdaptiveSegments bool                  `json:"useAdaptiveSegments"`
 	FieldWeights        map[string]float64    `json:"fieldWeights"`
 	FieldParams         map[string]FieldParam `json:"fieldParams"`
 	VectorAlpha         float64               `json:"vectorAlpha"` // Weight for vector score (0-1)
+
+	// BMX / Entropy
+	EnableBMXEntropy    bool     `json:"enableBmxEntropy"`
+	EnableBMXSimilarity bool     `json:"enableBmxSimilarity"`
+	UseAdaptiveAlpha    bool     `json:"useAdaptiveAlpha"`
+	EntropyDenomWeight  *float64 `json:"entropyDenomWeight"` // Optional gamma override
+
+	// Phrase
+	EnablePhraseBoost     bool    `json:"enablePhraseBoost"`
+	PhraseBoostMultiplier float64 `json:"phraseBoostMultiplier"`
+	IDFProximityScale     float64 `json:"idfProximityScale"` // For IdfWeighted
 }
 
 type FieldParam struct {
@@ -20,14 +32,21 @@ type FieldParam struct {
 
 func DefaultConfig() ResoRankConfig {
 	return ResoRankConfig{
-		K1:             1.2,
-		B:              0.75,
-		ProximityAlpha: 0.5,
-		ProximityDecay: 0.1,
-		MaxSegments:    32,
-		FieldWeights:   make(map[string]float64),
-		FieldParams:    make(map[string]FieldParam),
-		VectorAlpha:    0.0, // Default to pure BM25
+		K1:                    1.2,
+		B:                     0.75,
+		ProximityAlpha:        0.5,
+		ProximityDecay:        0.1,
+		ProximityStrategy:     "idf-weighted",
+		MaxSegments:           32,
+		FieldWeights:          make(map[string]float64),
+		FieldParams:           make(map[string]FieldParam),
+		VectorAlpha:           0.0,
+		EnableBMXEntropy:      false,
+		EnableBMXSimilarity:   false,
+		UseAdaptiveAlpha:      false,
+		EnablePhraseBoost:     true,
+		PhraseBoostMultiplier: 1.5,
+		IDFProximityScale:     5.0,
 	}
 }
 

@@ -95,7 +95,13 @@ func (c *Conductor) Scan(text string) ScanResult {
 	for _, chunk := range chunkResult.Chunks {
 		if chunk.Kind == chunker.NounPhrase {
 			head := chunk.HeadText(text)
-			c.discoveryEngine.ObserveToken(head)
+			// Only observe if capitalized (heuristic for Proper Noun)
+			if len(head) > 0 {
+				first := []rune(head)[0]
+				if unicode.IsUpper(first) {
+					c.discoveryEngine.ObserveToken(head)
+				}
+			}
 		}
 	}
 

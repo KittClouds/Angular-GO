@@ -1,14 +1,16 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
-import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe } from 'lucide-angular';
+import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../lib/registry';
 import { GraphDetailComponent } from './graph-detail/graph-detail.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
+import { ScopeService, GLOBAL_SCOPE } from '../../../../lib/services/scope.service';
+import { db } from '../../../../lib/dexie/db';
 
 // Entity styling
 const ENTITY_COLORS: Record<string, string> = {
@@ -57,12 +59,17 @@ interface EntityGroup {
     styleUrl: './graph-tab.component.css'
 })
 export class GraphTabComponent implements OnInit {
+    private scopeService = inject(ScopeService);
+
     // Icons
     PlusIcon = Plus;
     Trash2Icon = Trash2;
     ChevronRightIcon = ChevronRight;
     ChevronDownIcon = ChevronDown;
     GlobeIcon = Globe;
+    FolderIcon = Folder;
+    BookIcon = BookOpen;
+    FileIcon = FileText;
 
     // State
     entities = signal<RegisteredEntity[]>([]);
@@ -70,6 +77,41 @@ export class GraphTabComponent implements OnInit {
     expandedKinds = signal<Set<string>>(new Set());
     isCreatorOpen = signal(false);
     editingEntity = signal<EntityCreatorData | undefined>(undefined);
+
+    // Scope state
+    activeScope = this.scopeService.activeScope;
+    scopeLabel = signal<string>('Global');
+    scopeIcon = computed(() => {
+        const scope = this.activeScope();
+        if (scope.id === 'vault:global') return this.GlobeIcon;
+        if (scope.type === 'narrative') return this.BookIcon;
+        if (scope.type === 'folder') return this.FolderIcon;
+        return this.FileIcon;
+    });
+
+    constructor() {
+        // Update scope label when scope changes
+        effect(() => {
+            this.updateScopeLabel();
+        });
+    }
+
+    private async updateScopeLabel() {
+        const scope = this.activeScope();
+        if (scope.id === 'vault:global') {
+            this.scopeLabel.set('Global');
+            return;
+        }
+        if (scope.type === 'folder' || scope.type === 'narrative') {
+            const folder = await db.folders.get(scope.id);
+            this.scopeLabel.set(folder?.name || 'Folder');
+        } else if (scope.type === 'note') {
+            const note = await db.notes.get(scope.id);
+            this.scopeLabel.set(note?.title || 'Note');
+        }
+        // Also refresh entities when scope changes
+        this.refreshEntities();
+    }
 
     // Computed: Group entities by kind
     groupedEntities = computed<EntityGroup[]>(() => {
@@ -104,13 +146,31 @@ export class GraphTabComponent implements OnInit {
         }
     }
 
-    refreshEntities() {
-        const allEntities = smartGraphRegistry.getAllEntities();
+    async refreshEntities() {
+        const scope = this.activeScope();
+        let allEntities: RegisteredEntity[];
+
+        if (scope.id === 'vault:global') {
+            // Global: show all
+            allEntities = smartGraphRegistry.getAllEntities();
+        } else {
+            // Scoped: filter by notes in scope
+            const noteIds = await this.scopeService.getNotesInScope(scope);
+            allEntities = smartGraphRegistry.getAllEntities().filter(e => {
+                // Entity is in scope if its noteId is in the scope
+                return noteIds.includes(e.noteId || '');
+            });
+        }
+
         this.entities.set(allEntities);
 
         // Expand any new kinds
         const newKinds = new Set(allEntities.map(e => e.kind));
         this.expandedKinds.update(current => new Set([...current, ...newKinds]));
+    }
+
+    resetToGlobal() {
+        this.scopeService.resetToGlobal();
     }
 
     toggleKind(kind: string) {

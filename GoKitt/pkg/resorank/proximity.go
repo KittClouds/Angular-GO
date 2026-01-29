@@ -98,3 +98,43 @@ func DetectPhraseMatch(queryTerms []string, docMasks map[string]uint32) bool {
 	}
 	return true
 }
+
+// PerTermProximityMultiplier computes overlap between one term and all others
+func PerTermProximityMultiplier(termMask uint32, otherMasks []uint32, alpha float64, maxSegs uint32) float64 {
+	if len(otherMasks) == 0 || maxSegs == 0 {
+		return 1.0
+	}
+
+	totalOverlap := 0
+	for _, other := range otherMasks {
+		totalOverlap += PopCount(termMask & other)
+	}
+
+	avgOverlap := float64(totalOverlap) / float64(len(otherMasks))
+	normOverlap := avgOverlap / float64(maxSegs)
+
+	return 1.0 + alpha*normOverlap
+}
+
+// PairwiseProximityBonus computes average pairwise overlap
+func PairwiseProximityBonus(termMasks []uint32, alpha float64, maxSegs uint32) float64 {
+	if len(termMasks) < 2 || maxSegs == 0 {
+		return 0.0
+	}
+
+	totalProximity := 0.0
+	pairCount := 0
+
+	for i := 0; i < len(termMasks); i++ {
+		for j := i + 1; j < len(termMasks); j++ {
+			overlap := PopCount(termMasks[i] & termMasks[j])
+			totalProximity += float64(overlap) / float64(maxSegs)
+			pairCount++
+		}
+	}
+
+	if pairCount > 0 {
+		return alpha * (totalProximity / float64(pairCount))
+	}
+	return 0.0
+}

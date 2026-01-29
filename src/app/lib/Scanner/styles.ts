@@ -82,15 +82,18 @@ function getAmbiguousStyle(mode: HighlightMode): string {
 }
 
 function getCandidateStyle(mode: HighlightMode): string {
-  // Yellow dotted underline for candidates
+  // Tealish-gray (CadetBlue) dotted underline for candidates
+  // Replaces the previous yellow (#eab308)
+  const color = '#5f9ea0'; // CadetBlue
+
   if (mode === 'vivid') {
     return `
-        border-bottom: 2px dotted #eab308; 
-        background-color: rgba(234, 179, 8, 0.1);
+        border-bottom: 2px dotted ${color}; 
+        background-color: rgba(95, 158, 160, 0.15);
         cursor: help;
       `;
   }
-  return `border-bottom: 2px dotted #eab308;`;
+  return `border-bottom: 2px dotted ${color};`;
 }
 
 /**

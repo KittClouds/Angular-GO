@@ -12,6 +12,7 @@ import { flattenTree, toggleExpansion } from '../../../lib/arborist/flatten';
 import { FolderService } from '../../../lib/services/folder.service';
 import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
+import { ScopeService } from '../../../lib/services/scope.service';
 
 @Component({
     selector: 'app-file-tree',
@@ -141,6 +142,7 @@ export class FileTreeComponent {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
+    private scopeService = inject(ScopeService);
 
     // Input: the nested tree data
     @Input() set tree(value: TreeNode[]) {
@@ -242,6 +244,9 @@ export class FileTreeComponent {
 
     onSelect(node: FlatTreeNode): void {
         this.selectedId.set(node.id);
+
+        // Update active scope when selection changes
+        this.scopeService.setScopeFromNode(node);
 
         if (node.type === 'folder') {
             // Toggle folder expansion

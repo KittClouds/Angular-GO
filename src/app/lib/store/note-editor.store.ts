@@ -41,7 +41,7 @@ export class NoteEditorStore {
     readonly isNoteOpen = computed(() => this.activeNoteId() !== null);
 
     /** Pending save content (debounced) */
-    private saveSubject = new Subject<{ json: object; markdown: string }>();
+    private saveSubject = new Subject<{ noteId: string; json: object; markdown: string }>();
 
     /** Cached editor position for restoration */
     private pendingPosition: EditorPosition | null = null;
@@ -78,11 +78,15 @@ export class NoteEditorStore {
         this.restoreActiveNote();
 
         // Debounce saves by 300ms to avoid hammering IndexedDB
+        // IMPORTANT: Use noteId from payload, NOT activeNoteId() - to avoid race conditions
         this.saveSubject.pipe(
             debounceTime(300)
-        ).subscribe(async ({ json, markdown }) => {
-            const noteId = this.activeNoteId();
-            if (!noteId) return;
+        ).subscribe(async ({ noteId, json, markdown }) => {
+            // Verify the note is still the active one to avoid saving stale content
+            if (this.activeNoteId() !== noteId) {
+                console.log(`[NoteEditorStore] Skipped save for ${noteId} (no longer active)`);
+                return;
+            }
 
             try {
                 await ops.updateNote(noteId, {
@@ -212,9 +216,12 @@ export class NoteEditorStore {
     /**
      * Queue a content save (debounced).
      * Called by EditorComponent on every document change.
+     * Captures noteId at call time to prevent race conditions when switching notes.
      */
     saveContent(json: object, markdown: string): void {
-        this.saveSubject.next({ json, markdown });
+        const noteId = this.activeNoteId();
+        if (!noteId) return;
+        this.saveSubject.next({ noteId, json, markdown });
     }
 
     /**

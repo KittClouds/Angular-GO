@@ -355,8 +355,8 @@ class DefaultHighlighterApi implements HighlighterApi {
 
         const scanPromises = batch.map(async (item) => {
             try {
-                // Use Aho-Corasick implicit scanner from GoKitt if available
-                let implicitSpans = goKittService?.scanImplicit(item.text) ?? [];
+                // Use Aho-Corasick implicit scanner from GoKitt if available (async via worker)
+                let implicitSpans = await goKittService?.scanImplicitAsync(item.text) ?? [];
 
                 // Also run regex scanner for explicit patterns
                 const explicitSpans = scanForPatternsSync(item.text);
@@ -450,46 +450,49 @@ class DefaultHighlighterApi implements HighlighterApi {
     private triggerDiscoveryScan(text: string): void {
         if (!goKittService) return;
 
-        // Non-blocking scan
-        setTimeout(() => {
-            const candidates = goKittService!.scanDiscovery(text);
+        // Non-blocking async scan (worker-based)
+        (async () => {
+            try {
+                const candidates = await goKittService!.scanDiscovery(text);
 
-            if (candidates && candidates.length > 0) {
-                // HARD FILTER (Sync): Reject candidates that are already KNOWN entities in Registry
-                // This prevents race conditions where Discovery runs before Implicit scan finishes
-                const unknownCandidates = candidates.filter((c: any) => {
-                    // Status check: 0=Watching, 1=Promoted
-                    if (c.status !== 0 && c.status !== 1) return false;
+                if (candidates && candidates.length > 0) {
+                    // HARD FILTER (Sync): Reject candidates that are already KNOWN entities in Registry
+                    const unknownCandidates = candidates.filter((c: any) => {
+                        // Status check: 0=Watching, 1=Promoted
+                        if (c.status !== 0 && c.status !== 1) return false;
 
-                    // CRITICAL: Check Registry (sync, authoritative source of truth)
-                    const isKnown = smartGraphRegistry.isRegisteredEntity(c.token);
-                    if (isKnown) {
-                        console.log(`[Discovery:HardFilter] Rejected '${c.token}' - already in Registry`);
-                        return false;
-                    }
-                    return true;
-                });
+                        // CRITICAL: Check Registry (sync, authoritative source of truth)
+                        const isKnown = smartGraphRegistry.isRegisteredEntity(c.token);
+                        if (isKnown) {
+                            console.log(`[Discovery:HardFilter] Rejected '${c.token}' - already in Registry`);
+                            return false;
+                        }
+                        return true;
+                    });
 
-                if (unknownCandidates.length > 0) {
-                    console.log(`[Discovery:GoKitt] Found ${unknownCandidates.length} truly unknown candidates`);
+                    if (unknownCandidates.length > 0) {
+                        console.log(`[Discovery:GoKitt] Found ${unknownCandidates.length} truly unknown candidates`);
 
-                    // Emit to DiscoveryStore
-                    discoveryStore.addCandidates(unknownCandidates);
+                        // Emit to DiscoveryStore
+                        discoveryStore.addCandidates(unknownCandidates);
 
-                    // Create highlight spans for discovered tokens
-                    const candidateSpans = this.createCandidateSpans(text, unknownCandidates);
-                    if (candidateSpans.length > 0) {
-                        console.log(`[Discovery:HighlightApi] Created ${candidateSpans.length} candidate spans`);
-                        // Merge with existing implicitDecorations
-                        this.implicitDecorations = [
-                            ...this.implicitDecorations.filter(d => d.type !== 'entity_candidate'),
-                            ...candidateSpans
-                        ];
-                        this.notifyListeners();
+                        // Create highlight spans for discovered tokens
+                        const candidateSpans = this.createCandidateSpans(text, unknownCandidates);
+                        if (candidateSpans.length > 0) {
+                            console.log(`[Discovery:HighlightApi] Created ${candidateSpans.length} candidate spans`);
+                            // Merge with existing implicitDecorations
+                            this.implicitDecorations = [
+                                ...this.implicitDecorations.filter(d => d.type !== 'entity_candidate'),
+                                ...candidateSpans
+                            ];
+                            this.notifyListeners();
+                        }
                     }
                 }
+            } catch (e) {
+                console.error('[HighlighterApi] Discovery scan error:', e);
             }
-        }, 100);
+        })();
     }
 
     private escapeRegex(str: string): string {
@@ -565,45 +568,39 @@ class DefaultHighlighterApi implements HighlighterApi {
 
         console.log(`[HighlighterApi] Triggering GoKitt scan (implicit count: ${implicitSpans.length})`);
 
-        // Blocking or Async? GoKittService.scan is synchronous (Wasm), so we should wrap in timeout
-        // to avoid freezing UI
-        setTimeout(() => {
-            const result = goKittService!.scan(text);
-            console.log(`[HighlighterApi] GoKitt scan result:`, result);
+        // Async scan via worker (non-blocking)
+        (async () => {
+            try {
+                const result = await goKittService!.scan(text);
+                console.log(`[HighlighterApi] GoKitt scan result:`, result);
 
-            // Process Relations
-            if (result && result.graph && result.graph.Edges) {
-                const edges = result.graph.Edges;
-                console.log(`[HighlighterApi] Found ${edges.length} edges in graph projection`);
+                // Process Relations
+                if (result && result.graph && result.graph.Edges) {
+                    const edges = result.graph.Edges;
+                    console.log(`[HighlighterApi] Found ${edges.length} edges in graph projection`);
 
-                edges.forEach((edge: any) => {
-                    // GoKitt Edge: { Source: Node, Target: Node, Relation: "rel", ... }
-                    // Source/Target might be objects with ID or just IDs depending on Projection
-                    // In main.go: conceptGraph := projection.Project(...)
-                    // Looking at pkg/graph/graph.go (if I could see it), usually Edge has pointers.
-                    // But JSON marshal usually flattens or refs. 
-                    // Let's assume the JSON structure based on typical Go JSON marshaling of structs.
-                    // If it's `type ConceptEdge struct { Source *ConceptNode ... }`:
-                    // JSON would embed source.
+                    edges.forEach((edge: any) => {
+                        const sourceId = edge.Source?.ID || edge.Source;
+                        const targetId = edge.Target?.ID || edge.Target;
+                        const relType = edge.Relation;
 
-                    // SAFEGUARD: Check properties
-                    const sourceId = edge.Source?.ID || edge.Source;
-                    const targetId = edge.Target?.ID || edge.Target;
-                    const relType = edge.Relation;
-
-                    if (sourceId && targetId && relType) {
-                        smartGraphRegistry.upsertRelationship({
-                            source: sourceId, // Note: Registry expects labels usually, but we are passing IDs.
-                            target: targetId, // We might need to ensure IDs match what registry uses (clean labels)
-                            type: relType,
-                            sourceNote: this.currentNoteId
-                        });
-                    }
-                });
+                        if (sourceId && targetId && relType) {
+                            smartGraphRegistry.upsertRelationship({
+                                source: sourceId,
+                                target: targetId,
+                                type: relType,
+                                sourceNote: this.currentNoteId
+                            });
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('[HighlighterApi] GoKitt scan error:', e);
             }
-        }, 10);
+        })();
     }
 }
+
 
 let _instance: HighlighterApi | null = null;
 

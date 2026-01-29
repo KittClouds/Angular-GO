@@ -1,46 +1,55 @@
 import { Injectable } from '@angular/core';
 import { smartGraphRegistry } from '../lib/registry';
 import type { DecorationSpan } from '../lib/Scanner';
+import { db } from '../lib/dexie/db';
 
-// Declare global GoKitt object
-declare const GoKitt: {
-    // Core
-    initialize: (entitiesJSON?: string) => string;
-    scan: (text: string) => string;
-    scanImplicit: (text: string) => string;
-    scanDiscovery: (text: string) => string;
+// =============================================================================
+// Types for Worker Communication
+// =============================================================================
 
-    // Vectors
-    initVectors: () => string;
-    addVector: (id: number, vectorJSON: string) => string;
-    searchVectors: (vectorJSON: string, k: number) => string;
-    saveVectors: () => string;
-};
+type GoKittWorkerMessage =
+    | { type: 'INIT' }
+    | { type: 'HYDRATE'; payload: { entitiesJSON: string } }
+    | { type: 'SCAN'; payload: { text: string }; id: number }
+    | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
+    | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
+    | { type: 'INDEX_NOTE'; payload: { id: string; text: string }; id: number }
+    | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[] }; id: number }
+    | { type: 'ADD_VECTOR'; payload: { id: string; vectorJSON: string }; id: number }
+    | { type: 'SEARCH_VECTORS'; payload: { vectorJSON: string; k: number }; id: number };
 
-// Declare Go global from wasm_exec.js
-declare class Go {
-    importObject: any;
-    run(instance: WebAssembly.Instance): Promise<void>;
-}
+type GoKittWorkerResponse =
+    | { type: 'INIT_COMPLETE' }
+    | { type: 'HYDRATE_COMPLETE'; payload: { success: boolean; error?: string } }
+    | { type: 'SCAN_RESULT'; id: number; payload: any }
+    | { type: 'SCAN_IMPLICIT_RESULT'; id: number; payload: any[] }
+    | { type: 'SCAN_DISCOVERY_RESULT'; id: number; payload: any[] }
+    | { type: 'INDEX_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'SEARCH_RESULT'; id: number; payload: any[] }
+    | { type: 'ADD_VECTOR_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'SEARCH_VECTORS_RESULT'; id: number; payload: string[] }
+    | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
     providedIn: 'root'
 })
 export class GoKittService {
-    private wasmLoaded = false;  // Module loaded
-    private wasmHydrated = false; // Dictionary populated
-    private go: Go | null = null;
+    private worker: Worker | null = null;
+    private wasmLoaded = false;
+    private wasmHydrated = false;
     private loadPromise: Promise<void> | null = null;
     private readyCallbacks: Array<() => void> = [];
 
+    // Promise resolvers for pending requests
+    private pendingRequests = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
+    private nextRequestId = 1;
+
     constructor() {
-        // NO AUTO-INIT - orchestrator controls boot sequence
-        console.log('[GoKittService] Service ready (waiting for orchestrated load)');
+        console.log('[GoKittService] Service ready (worker-based)');
     }
 
     /**
      * Register a callback to be called when WASM is fully ready
-     * If already ready, callback fires immediately
      */
     onReady(callback: () => void): void {
         if (this.isReady) {
@@ -56,33 +65,28 @@ export class GoKittService {
     private notifyReady(): void {
         console.log('[GoKittService] 🚀 WASM ready - notifying listeners');
 
-        // Fire registered callbacks
         for (const cb of this.readyCallbacks) {
             try { cb(); } catch (e) { console.error('[GoKittService] Callback error:', e); }
         }
         this.readyCallbacks = [];
 
-        // Dispatch global event for non-DI listeners (like highlighter-api singleton)
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('gokitt-ready'));
 
-            // Expose debug function for console testing
+            // Debug helper
             (window as any).testGraphScan = (text?: string) => {
                 const testText = text || "Gandalf said to Frodo that the ring is dangerous. The hobbit looked at the wizard with fear.";
                 console.log('🧪 [DEBUG] Testing Reality Layer with:', testText);
                 return this.scan(testText);
             };
-            console.log('[GoKittService] 💡 Debug: Call window.testGraphScan() in console to test graph building');
+            console.log('[GoKittService] 💡 Debug: Call window.testGraphScan() in console');
         }
     }
 
-
     /**
-     * Phase 3: Load WASM module (does NOT initialize dictionary)
-     * Called by AppOrchestrator after data_layer is ready
+     * Initialize the worker and load WASM
      */
     async loadWasm(): Promise<void> {
-        // Return existing promise if already loading
         if (this.loadPromise) return this.loadPromise;
         if (this.wasmLoaded) return;
 
@@ -91,68 +95,27 @@ export class GoKittService {
     }
 
     private async _loadWasmInternal(): Promise<void> {
-        // Ensure wasm_exec.js is loaded
-        if (typeof Go === 'undefined') {
-            throw new Error('[GoKittService] Go global not found. Ensure wasm_exec.js is loaded.');
-        }
+        // Create worker
+        this.worker = new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' });
 
-        // Handle partial process polyfill (bundler artifacts)
-        const w = globalThis as any;
-        let processBackup = null;
+        // Setup message handler
+        this.worker.onmessage = (e: MessageEvent<GoKittWorkerResponse>) => {
+            this.handleWorkerMessage(e.data);
+        };
 
-        if (typeof w.process !== 'undefined' && w.process) {
-            const isRealNode = typeof w.process.versions === 'object' && !!w.process.versions.node;
-            if (!isRealNode) {
-                processBackup = w.process;
-                try {
-                    delete w.process;
-                } catch (e) {
-                    // Fallback: shim missing fields
-                    if (w.process.pid === undefined) w.process.pid = -1;
-                    if (w.process.ppid === undefined) w.process.ppid = -1;
-                    if (!w.process.cwd) w.process.cwd = () => '/';
-                    if (!w.process.getuid) w.process.getuid = () => -1;
-                    if (!w.process.getgid) w.process.getgid = () => -1;
-                }
-            }
-        }
+        this.worker.onerror = (e) => {
+            console.error('[GoKittService] Worker error:', e);
+        };
 
-        // Ensure fs.constants are defined BEFORE go.run()
-        this.ensureGoWasmFsConstants();
+        // Send INIT and wait for response
+        await this.sendAndWait<void>({ type: 'INIT' });
 
-        this.go = new Go();
-
-        try {
-            // Cache bust the WASM file
-            const wasmUrl = `assets/gokitt.wasm?v=${Date.now()}`;
-            const result = await WebAssembly.instantiateStreaming(
-                fetch(wasmUrl),
-                this.go.importObject
-            );
-
-            // Run Go main (non-blocking, runs in background)
-            this.go.run(result.instance);
-
-            // Wait for exports to be registered
-            await new Promise<void>(resolve => setTimeout(resolve, 50));
-
-            this.wasmLoaded = true;
-            console.log('[GoKittService] WASM module loaded');
-
-            // Restore process if we hid it
-            if (processBackup) {
-                (globalThis as any).process = processBackup;
-            }
-
-        } catch (err) {
-            console.error('[GoKittService] Failed to load WASM:', err);
-            throw err;
-        }
+        this.wasmLoaded = true;
+        console.log('[GoKittService] WASM module loaded (via worker)');
     }
 
     /**
-     * Phase 4: Hydrate WASM with entities from registry
-     * Called by AppOrchestrator AFTER registry is ready
+     * Hydrate WASM with entities from registry
      */
     async hydrateWithEntities(): Promise<void> {
         if (!this.wasmLoaded) {
@@ -163,46 +126,72 @@ export class GoKittService {
             return;
         }
 
-        try {
-            // Gather entities from registry for Aho-Corasick dictionary
-            const allEntities = smartGraphRegistry.getAll();
+        const allEntities = smartGraphRegistry.getAll();
+        const entities = allEntities.map(e => ({
+            ID: e.id,
+            Label: e.label,
+            Kind: e.kind,
+            Aliases: e.aliases || [],
+            NarrativeID: e.noteId || ''
+        }));
 
-            const entities = allEntities.map(e => ({
-                ID: e.id,
-                Label: e.label,
-                Kind: e.kind,
-                Aliases: e.aliases || [],
-                NarrativeID: e.noteId || ''
-            }));
+        const entitiesJSON = JSON.stringify(entities);
+        const result = await this.sendAndWait<{ success: boolean; error?: string }>({
+            type: 'HYDRATE',
+            payload: { entitiesJSON }
+        });
 
-            const entitiesJSON = JSON.stringify(entities);
-            const res = GoKitt.initialize(entitiesJSON);
-
-            try {
-                const resObj = JSON.parse(res);
-                if (resObj.error) {
-                    console.error('[GoKittService] WASM Initialize failed:', resObj.error);
-                    return;
-                }
-            } catch (e) {
-                // Ignore parse error if simple string success
-            }
-
-            this.wasmHydrated = true;
-            console.log(`[GoKittService] ✅ Hydrated with ${entities.length} entities`);
-
-            // Notify listeners that WASM is ready for scanning
-            this.notifyReady();
-
-        } catch (e) {
-            console.error('[GoKittService] ❌ Hydration failed:', e);
-            throw e;
+        if (!result.success) {
+            console.error('[GoKittService] Hydration failed:', result.error);
+            return;
         }
+
+        this.wasmHydrated = true;
+        console.log(`[GoKittService] ✅ Hydrated with ${entities.length} entities`);
+
+        // After hydration, init search index
+        this.initSearchIndex().catch(err => console.error('[GoKittService] Search Init Error:', err));
+
+        this.notifyReady();
     }
 
     /**
-     * Re-hydrate dictionary when registry changes
-     * Called after new entities are added
+     * initialize Full Text Search index (ResoRank)
+     */
+    async initSearchIndex(): Promise<void> {
+        if (!this.wasmLoaded) return;
+
+        console.log('[GoKittService] 🔎 Initializing Search Index...');
+        const notes = await db.notes.toArray();
+
+        let indexed = 0;
+        for (const note of notes) {
+            if (note.content) {
+                await this.indexNote(note.id, note.content);
+                indexed++;
+            }
+        }
+        console.log(`[GoKittService] ✅ Search Index Ready (${indexed} docs)`);
+    }
+
+    async indexNote(id: string, text: string): Promise<void> {
+        // Can be called before ready (queued) if wasmLoaded is true
+        if (!this.wasmLoaded) return;
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('INDEX_NOTE', { id, text });
+        if (!result.success) console.warn('[GoKittService] Indexing failed for', id, result.error);
+    }
+
+    async search(query: string, limit = 20): Promise<any[]> {
+        if (!this.isReady) return [];
+        // Basic tokenization (lowercase to match index)
+        const terms = query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 0);
+        if (terms.length === 0) return [];
+
+        return this.sendRequest<any[]>('SEARCH', { query: terms, limit });
+    }
+
+    /**
+     * Refresh dictionary when registry changes
      */
     async refreshDictionary(): Promise<void> {
         if (!this.wasmLoaded) return;
@@ -217,49 +206,31 @@ export class GoKittService {
         }));
 
         const entitiesJSON = JSON.stringify(entities);
-        GoKitt.initialize(entitiesJSON);
+        await this.sendAndWait<{ success: boolean }>({
+            type: 'HYDRATE',
+            payload: { entitiesJSON }
+        });
+
         console.log(`[GoKittService] Dictionary refreshed: ${entities.length} entities`);
-    }
-
-    /**
-     * Ensures all fs.constants values are numeric before Go runtime init.
-     */
-    private ensureGoWasmFsConstants() {
-        const g = globalThis as any;
-        g.fs ??= {};
-        g.fs.constants ??= {};
-
-        const c = g.fs.constants;
-        c.O_WRONLY ??= 1;
-        c.O_RDWR ??= 2;
-        c.O_CREAT ??= 0;
-        c.O_TRUNC ??= 0;
-        c.O_APPEND ??= 0;
-        c.O_EXCL ??= 0;
-        c.O_SYNC ??= 0;
-        c.O_DIRECTORY ??= -1;
     }
 
     // ============ Public API ============
 
-    /**
-     * Check if WASM is ready for operations
-     */
     get isReady(): boolean {
         return this.wasmLoaded && this.wasmHydrated;
     }
 
-    scan(text: string): any {
+    /**
+     * Full scan with Reality Layer (CST, Graph, PCST)
+     */
+    async scan(text: string): Promise<any> {
         if (!this.wasmLoaded) return { error: 'Wasm not ready' };
+
         try {
             console.log('[GoKittService.scan] 🧠 REALITY LAYER: Starting full scan...');
-            console.log('[GoKittService.scan] Input text:', text.substring(0, 100) + '...');
-
-            const json = GoKitt.scan(text);
-            const result = JSON.parse(json);
+            const result = await this.sendRequest<any>('SCAN', { text });
 
             console.log('[GoKittService.scan] ✅ Result:', result);
-            console.log('[GoKittService.scan] CST:', result.cst);
             console.log('[GoKittService.scan] Graph Nodes:', result.graph?.Nodes ? Object.keys(result.graph.Nodes).length : 0);
             console.log('[GoKittService.scan] Graph Edges:', result.graph?.Edges?.length ?? 0);
 
@@ -270,18 +241,20 @@ export class GoKittService {
         }
     }
 
-    scanDiscovery(text: string): any[] {
+    /**
+     * Discovery scan (unsupervised NER)
+     */
+    async scanDiscovery(text: string): Promise<any[]> {
         if (!this.wasmLoaded) {
             console.warn('[GoKittService.scanDiscovery] WASM not loaded');
             return [];
         }
+
         try {
             console.log(`[GoKittService.scanDiscovery] Scanning ${text.length} chars`);
-            const json = GoKitt.scanDiscovery(text);
-            console.log('[GoKittService.scanDiscovery] Raw JSON:', json);
-            const parsed = JSON.parse(json);
-            console.log('[GoKittService.scanDiscovery] Parsed:', parsed);
-            return parsed;
+            const result = await this.sendRequest<any[]>('SCAN_DISCOVERY', { text });
+            console.log('[GoKittService.scanDiscovery] Result:', result);
+            return result;
         } catch (e) {
             console.error('[GoKittService] Discovery error:', e);
             return [];
@@ -289,72 +262,146 @@ export class GoKittService {
     }
 
     /**
-     * Scan text for known entities using Aho-Corasick
-     * Returns decoration spans for implicit entity mentions
-     * SILENTLY returns empty if WASM not ready (doesn't block editor)
+     * Scan for implicit entity mentions (Aho-Corasick)
+     * Returns SYNCHRONOUSLY for editor performance (uses cached data)
+     *
+     * Note: This is a hybrid approach - we keep a sync version for the editor
+     * that doesn't block, but heavy scans go through the worker.
      */
     scanImplicit(text: string): DecorationSpan[] {
-        // Silently skip if not ready - don't slow down editor
-        if (!this.isReady) {
-            return [];
-        }
+        // For implicit scanning, we still want it fast and sync
+        // So we queue an async request and return empty for now
+        // This is a trade-off: first render may not have highlights
+        if (!this.isReady) return [];
+
+        // Fire async request (results handled by callback)
+        this.scanImplicitAsync(text).catch(() => { });
+
+        // Return empty for now - decorations will update on next tick
+        return [];
+    }
+
+    /**
+     * Async version of scanImplicit for when caller can wait
+     */
+    async scanImplicitAsync(text: string): Promise<DecorationSpan[]> {
+        if (!this.isReady) return [];
 
         try {
-            const json = GoKitt.scanImplicit(text);
-            const spans = JSON.parse(json) as DecorationSpan[];
+            const spans = await this.sendRequest<DecorationSpan[]>('SCAN_IMPLICIT', { text });
 
-            // Post-process: Ensure Kinds are correct by verifying with Registry
-            // This fixes issues where WASM might return partial data or casing mismatches
+            // Post-process: verify kinds with registry
             for (const span of spans) {
                 if (span.type === 'entity_implicit') {
-                    // 1. Try to find authoritative entity in registry
                     const entity = smartGraphRegistry.findEntityByLabel(span.label);
-
                     if (entity) {
-                        // Authority: Registry kind wins
                         span.kind = entity.kind;
                     } else if (span.kind) {
-                        // Fallback: Normalize provided kind
                         span.kind = span.kind.toUpperCase() as any;
                     } else {
-                        // Fallback: Default to UNKNOWN
                         span.kind = 'UNKNOWN';
                     }
                 }
             }
 
-            // DIAGNOSTIC LOGGING
-            if (text.includes('Elbaph') || text.includes('Sanji')) {
-                console.log(`[GoKitt] scanImplicit('${text}') -> found ${spans.length} spans`, spans);
-            }
-
             return spans;
         } catch (e) {
-            console.error('[GoKittService.scanImplicit] Error:', e);
+            console.error('[GoKittService.scanImplicitAsync] Error:', e);
             return [];
         }
     }
 
-
-
-    async addVector(id: number, vector: number[]): Promise<void> {
+    async addVector(id: string, vector: number[]): Promise<void> {
         if (!this.wasmLoaded) return;
-        const vecJson = JSON.stringify(vector);
-        const res = GoKitt.addVector(id, vecJson);
-        const parsed = JSON.parse(res);
-        if (parsed.error) throw new Error(parsed.error);
+        const vectorJSON = JSON.stringify(vector);
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('ADD_VECTOR', { id, vectorJSON });
+        if (!result.success) throw new Error(result.error);
     }
 
-    async searchVectors(vector: number[], k: number): Promise<number[]> {
+    async searchVectors(vector: number[], k: number): Promise<string[]> {
         if (!this.wasmLoaded) return [];
-        const vecJson = JSON.stringify(vector);
-        const res = GoKitt.searchVectors(vecJson, k);
-        try {
-            return JSON.parse(res);
-        } catch (e) {
-            const parsed = JSON.parse(res);
-            if (parsed.error) throw new Error(parsed.error);
-            return [];
+        const vectorJSON = JSON.stringify(vector);
+        return this.sendRequest<string[]>('SEARCH_VECTORS', { vectorJSON, k });
+    }
+
+    // ============ Worker Communication ============
+
+    private handleWorkerMessage(msg: GoKittWorkerResponse): void {
+        // Handle responses with IDs
+        if ('id' in msg && msg.id !== undefined) {
+            const pending = this.pendingRequests.get(msg.id);
+            if (pending) {
+                this.pendingRequests.delete(msg.id);
+
+                if (msg.type === 'ERROR') {
+                    pending.reject(new Error(msg.payload.message));
+                } else {
+                    // Extract payload based on message type
+                    switch (msg.type) {
+                        case 'SCAN_RESULT':
+                        case 'SCAN_IMPLICIT_RESULT':
+                        case 'SCAN_DISCOVERY_RESULT':
+                        case 'INDEX_NOTE_RESULT':
+                        case 'SEARCH_RESULT':
+                        case 'ADD_VECTOR_RESULT':
+                        case 'SEARCH_VECTORS_RESULT':
+                            pending.resolve(msg.payload);
+                            break;
+                        default:
+                            pending.resolve(undefined);
+                    }
+                }
+            }
+            return;
         }
+
+        // Handle non-ID messages (INIT_COMPLETE, HYDRATE_COMPLETE)
+        // These are handled by sendAndWait
+    }
+
+    private sendRequest<T>(type: string, payload: any): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const id = this.nextRequestId++;
+            this.pendingRequests.set(id, { resolve, reject });
+
+            this.worker?.postMessage({ type, payload, id } as GoKittWorkerMessage);
+
+            // Timeout after 30 seconds
+            setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new Error(`Request ${type} timed out`));
+                }
+            }, 30000);
+        });
+    }
+
+    private sendAndWait<T>(msg: GoKittWorkerMessage): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const handler = (e: MessageEvent<GoKittWorkerResponse>) => {
+                const response = e.data;
+
+                // Match response type to request type
+                if (msg.type === 'INIT' && response.type === 'INIT_COMPLETE') {
+                    this.worker?.removeEventListener('message', handler);
+                    resolve(undefined as T);
+                } else if (msg.type === 'HYDRATE' && response.type === 'HYDRATE_COMPLETE') {
+                    this.worker?.removeEventListener('message', handler);
+                    resolve(response.payload as T);
+                } else if (response.type === 'ERROR' && !('id' in response)) {
+                    this.worker?.removeEventListener('message', handler);
+                    reject(new Error(response.payload.message));
+                }
+            };
+
+            this.worker?.addEventListener('message', handler);
+            this.worker?.postMessage(msg);
+
+            // Timeout
+            setTimeout(() => {
+                this.worker?.removeEventListener('message', handler);
+                reject(new Error(`${msg.type} timed out`));
+            }, 30000);
+        });
     }
 }

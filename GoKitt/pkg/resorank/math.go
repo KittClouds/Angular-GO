@@ -76,3 +76,40 @@ func AdaptiveSegmentCount(docLen int, tokensPerSeg int) uint32 {
 func Sigmoid(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
+
+// CalculateAdaptiveAlpha computes α based on doc length (BMX Eq 3)
+// α = clamp(avgDocLen / 100, 0.5, 1.5)
+func CalculateAdaptiveAlpha(avgDocLen float64) float64 {
+	val := avgDocLen / 100.0
+	if val < 0.5 {
+		return 0.5
+	}
+	if val > 1.5 {
+		return 1.5
+	}
+	return val
+}
+
+// CalculateBeta computes β for similarity boost (BMX Eq 3)
+// β = 1 / ln(1 + N)
+func CalculateBeta(totalDocs int) float64 {
+	if totalDocs <= 0 {
+		return 1.0 // Fallback
+	}
+	return 1.0 / math.Log(1.0+float64(totalDocs))
+}
+
+// NormalizeScore standardizes score 0-1 (BMX Eq 10-11)
+func NormalizeScore(rawScore float64, queryLen int, totalDocs int) float64 {
+	if queryLen == 0 || totalDocs == 0 {
+		return 0.0
+	}
+	// Max potential IDF approximation
+	maxIDFApprox := math.Log(1.0 + (float64(totalDocs)-0.5)/1.5)
+	scoreMax := float64(queryLen) * (maxIDFApprox + 1.0)
+
+	if scoreMax <= 0 {
+		return 0.0
+	}
+	return rawScore / scoreMax
+}
