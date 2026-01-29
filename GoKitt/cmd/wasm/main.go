@@ -12,6 +12,7 @@ import (
 
 	"github.com/hack-pad/hackpadfs/indexeddb"
 	"github.com/kittclouds/gokitt/pkg/dafsa"
+	"github.com/kittclouds/gokitt/pkg/hierarchy"
 	"github.com/kittclouds/gokitt/pkg/reality/builder"
 	"github.com/kittclouds/gokitt/pkg/reality/pcst"
 	"github.com/kittclouds/gokitt/pkg/reality/projection"
@@ -418,7 +419,7 @@ func getEntityIDs(entities []*dafsa.EntityInfo) []string {
 }
 
 // scan processes text and returns result
-// Args: [text string]
+// Args: [text string, provenanceJSON string (optional)]
 func scan(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return errorResult("scan requires at least 1 argument: text")
@@ -429,6 +430,25 @@ func scan(this js.Value, args []js.Value) interface{} {
 
 	text := args[0].String()
 	start := time.Now()
+
+	// Parse optional provenance context
+	var prov *hierarchy.ProvenanceContext
+	if len(args) > 1 && args[1].String() != "" && args[1].String() != "null" {
+		var provInput struct {
+			VaultID    string `json:"vaultId"`
+			WorldID    string `json:"worldId"`
+			ParentPath string `json:"parentPath"`
+			FolderType string `json:"folderType"`
+		}
+		if err := json.Unmarshal([]byte(args[1].String()), &provInput); err == nil {
+			prov = &hierarchy.ProvenanceContext{
+				VaultID:    provInput.VaultID,
+				WorldID:    provInput.WorldID,
+				ParentPath: provInput.ParentPath,
+				FolderType: provInput.FolderType,
+			}
+		}
+	}
 
 	// 1. Scan (The Senses)
 	result := pipeline.Scan(text)
@@ -443,7 +463,7 @@ func scan(this js.Value, args []js.Value) interface{} {
 		entityMap[ref.Range.Start] = ref.EntityID
 	}
 
-	conceptGraph := projection.Project(cstRoot, pipeline.GetMatcher(), entityMap, text)
+	conceptGraph := projection.Project(cstRoot, pipeline.GetMatcher(), entityMap, text, prov)
 	conceptGraph.ToSerializable() // Populate edges for JSON output
 
 	// 4. PCST (The Summary)

@@ -1,15 +1,13 @@
 import { Injectable } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
-import { from, Observable, BehaviorSubject } from 'rxjs';
+import { from, Observable } from 'rxjs';
 import {
     db,
     Entity,
     EntityMetadata,
-    EntityCard,
     FactSheetCardSchema,
     FactSheetFieldSchema,
 } from '../../lib/dexie';
-import { smartGraphRegistry } from '../../lib/registry';
 import { DEFAULT_ENTITY_SCHEMAS } from '../../lib/schemas/entity-fact-sheet-schemas';
 
 // ============================================================================
@@ -138,8 +136,6 @@ export class FactSheetService {
     constructor() {
         // Pre-populate cache with defaults synchronously
         this.initializeFromDefaults();
-        // Seed demo entity into memory SYNCHRONOUSLY (no async)
-        this.seedDemoEntitySync();
         // Then sync to Dexie in background (fire and forget)
         this.syncToDexie();
     }
@@ -264,107 +260,8 @@ export class FactSheetService {
                 console.log('[FactSheetService] Synced CHARACTER schema to Dexie');
             }
 
-            // Create demo entity if none exist
-            const entityCount = await db.entities.count();
-            if (entityCount === 0) {
-                await this.createDemoEntity();
-            }
         } catch (err) {
             console.error('[FactSheetService] Error syncing to Dexie:', err);
         }
-    }
-
-    // =========================================================================
-    // SYNC DEMO ENTITY SEEDING - Instant, no async
-    // =========================================================================
-
-    /** Demo entity data - shared between sync seed and async persist */
-    private readonly DEMO_ENTITY = {
-        id: 'character_jon_snow',  // Must match registry's generateEntityId format
-        label: 'Jon Snow',
-        kind: 'CHARACTER',
-        subtype: 'Protagonist',
-        aliases: [] as string[],
-        firstNote: 'demo-note',
-        totalMentions: 1,
-        createdBy: 'auto' as const,
-    };
-
-    private readonly DEMO_ATTRS: Record<string, any> = {
-        fullName: 'Jon Snow',
-        occupation: 'Lord Commander',
-        age: 23,
-        species: 'Human',
-        gender: 'Male',
-        level: 1,
-        xpCurrent: 24,
-        xpRequired: 100,
-        healthCurrent: 85,
-        healthMax: 100,
-        manaCurrent: 0,
-        manaMax: 100,
-        staminaCurrent: 70,
-        staminaMax: 100,
-        stats: {
-            strength: 14,
-            dexterity: 12,
-            constitution: 13,
-            intelligence: 10,
-            wisdom: 11,
-            charisma: 12,
-        },
-    };
-
-    /**
-     * Seed demo entity SYNCHRONOUSLY into memory caches.
-     * ONLY if no entities exist yet - don't overwrite real data.
-     * This makes the fact sheet render instantly on first load.
-     */
-    private seedDemoEntitySync(): void {
-        // Skip if registry already has entities (hydrated from Dexie)
-        if (smartGraphRegistry.getAllEntities().length > 0) {
-            console.log('[FactSheetService] Skipping demo seed - entities already exist');
-            return;
-        }
-
-        // 1. Populate attribute cache
-        this.attributeCache.set(this.DEMO_ENTITY.id, { ...this.DEMO_ATTRS });
-
-        // 2. Register in smartGraphRegistry (will write-through to Dexie)
-        smartGraphRegistry.registerEntity(
-            this.DEMO_ENTITY.label,
-            this.DEMO_ENTITY.kind as any,
-            this.DEMO_ENTITY.firstNote,
-            {
-                subtype: this.DEMO_ENTITY.subtype,
-                source: this.DEMO_ENTITY.createdBy,
-            }
-        );
-
-        console.log('[FactSheetService] Seeded demo entity to memory (sync)');
-    }
-
-    /**
-     * Persist demo entity to Dexie (background, async)
-     * Called only if entity doesn't already exist in Dexie
-     */
-    private async createDemoEntity(): Promise<void> {
-        const now = Date.now();
-        const demoEntity = {
-            ...this.DEMO_ENTITY,
-            createdAt: now,
-            updatedAt: now,
-        };
-
-        await db.entities.put(demoEntity);
-
-        const attrs = Object.entries(this.DEMO_ATTRS).map(([key, value]) => ({
-            entityId: demoEntity.id,
-            key,
-            value: typeof value === 'string' ? `"${value}"` : JSON.stringify(value),
-        }));
-        await db.entityMetadata.bulkPut(attrs);
-
-        console.log('[FactSheetService] Persisted demo entity to Dexie');
     }
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/kittclouds/gokitt/pkg/graph"
+	"github.com/kittclouds/gokitt/pkg/hierarchy"
 	"github.com/kittclouds/gokitt/pkg/reality/cst"
 	rsyntax "github.com/kittclouds/gokitt/pkg/reality/syntax"
 	"github.com/kittclouds/gokitt/pkg/scanner/narrative"
@@ -13,14 +14,25 @@ import (
 type EntityMap map[int]string
 
 // Project walks the CST and builds a semantic graph
-func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, entities EntityMap, text string) *graph.ConceptGraph {
+func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, entities EntityMap, text string, prov *hierarchy.ProvenanceContext) *graph.ConceptGraph {
 	g := graph.NewGraph()
+
+	// 0. Create World Node (if provenance provided)
+	var worldNode *graph.ConceptNode
+	if prov != nil && prov.WorldID != "" {
+		worldID := "world:" + prov.WorldID
+		worldLabel := prov.ParentPath // Use path as label for now
+		if worldLabel == "" {
+			worldLabel = prov.WorldID
+		}
+		worldNode = g.EnsureNode(worldID, worldLabel, graph.KindWorld)
+	}
 
 	// Recursive walk looking for Sentences
 	var walk func(n *cst.Node)
 	walk = func(n *cst.Node) {
 		if n.Kind == rsyntax.KindSentence {
-			processSentence(n, g, matcher, entities, text)
+			processSentence(n, g, matcher, entities, text, worldNode)
 		}
 
 		for _, child := range n.Children {
@@ -32,7 +44,7 @@ func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, entities Entit
 	return g
 }
 
-func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.NarrativeMatcher, entities EntityMap, source string) {
+func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.NarrativeMatcher, entities EntityMap, source string, worldNode *graph.ConceptNode) {
 	// 1. Flatten children into sequential list
 	var nodes []*cst.Node
 	var gather func(n *cst.Node)
@@ -138,6 +150,20 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 						1.0,
 						manner, location, time, recipientID,
 					)
+
+					// Link to World (if exists and hasn't been linked yet)
+					if worldNode != nil {
+						// Link Subject
+						subjNode, _ := g.Nodes[subjID] // Should exist after AddQuadPlus
+						if subjNode != nil {
+							ensureWorldLink(g, worldNode, subjNode)
+						}
+						// Link Target
+						targetNode, _ := g.Nodes[targetID]
+						if targetNode != nil {
+							ensureWorldLink(g, worldNode, targetNode)
+						}
+					}
 				}
 			}
 		}
@@ -244,4 +270,21 @@ func findToken(nodes []*cst.Node, startIdx int, tokenText string, source string,
 		}
 	}
 	return -1
+}
+
+// ensureWorldLink creates a WORLD_CONTAINS edge if it doesn't represent
+func ensureWorldLink(g *graph.ConceptGraph, world *graph.ConceptNode, entity *graph.ConceptNode) {
+	// Optimization: Check existing outbound edges first to avoid duplicates
+	// (Naive linear check is fine for small graphs per-sentence)
+	for _, edge := range world.Outbound {
+		if edge.Target == entity && edge.Relation == graph.RelWorldContains {
+			return
+		}
+	}
+
+	edge := &graph.ConceptEdge{
+		Relation: graph.RelWorldContains,
+		Weight:   1.0,
+	}
+	g.AddEdge(world, entity, edge)
 }

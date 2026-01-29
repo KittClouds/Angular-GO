@@ -1,12 +1,13 @@
 module github.com/kittclouds/gokitt
 
-go 1.24.0
+go 1.25.4
 
 require (
+	github.com/coregx/ahocorasick v0.1.0
 	github.com/fogfish/hnsw v0.0.5
 	github.com/hack-pad/hackpadfs v0.2.4
 	github.com/kshard/vector v0.1.1
-	github.com/petar-dambovaliev/aho-corasick v0.0.0-20230725210150-fb29fc3c913e
+	github.com/orsinium-labs/stopwords v1.0.2
 	github.com/stretchr/testify v1.11.1
 )
 
@@ -21,7 +22,6 @@ require (
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
 	github.com/hack-pad/safejs v0.1.0 // indirect
 	github.com/kelindar/binary v1.0.19 // indirect
-	github.com/orsinium-labs/stopwords v1.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

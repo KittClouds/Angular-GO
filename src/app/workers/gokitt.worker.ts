@@ -10,11 +10,19 @@
 // Types
 // =============================================================================
 
+/** Provenance context for folder-aware graph projection */
+interface ProvenanceContext {
+    vaultId?: string;
+    worldId: string;
+    parentPath?: string;
+    folderType?: string;
+}
+
 /** Incoming messages from main thread */
 type GoKittWorkerMessage =
     | { type: 'INIT' }
     | { type: 'HYDRATE'; payload: { entitiesJSON: string } }
-    | { type: 'SCAN'; payload: { text: string }; id: number }
+    | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
     | { type: 'INDEX_NOTE'; payload: { id: string; text: string }; id: number }
@@ -96,7 +104,7 @@ let goInstance: any = null;
 // Declare GoKitt global (created by Go WASM)
 declare const GoKitt: {
     initialize: (entitiesJSON?: string) => string;
-    scan: (text: string) => string;
+    scan: (text: string, provenanceJSON?: string) => string;
     scanImplicit: (text: string) => string;
     scanDiscovery: (text: string) => string;
     indexNote: (id: string, text: string) => string;
@@ -206,7 +214,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     return;
                 }
 
-                const json = GoKitt.scan(msg.payload.text);
+                const provJSON = msg.payload.provenance
+                    ? JSON.stringify(msg.payload.provenance)
+                    : '';
+                const json = GoKitt.scan(msg.payload.text, provJSON);
                 const result = JSON.parse(json);
 
                 self.postMessage({

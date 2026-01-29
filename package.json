@@ -44,6 +44,7 @@
     "@omnedia/ngx-gradient-text": "^4.0.1",
     "@omnedia/ngx-number-ticker": "^4.0.1",
     "@omnedia/ngx-swapy": "^4.0.1",
+    "@omnedia/ngx-timeline": "^4.0.1",
     "@omnedia/ngx-tracing-beam": "^4.0.1",
     "@primeng/themes": "^21.0.4",
     "@spartan-ng/brain": "^0.0.1-alpha.609",

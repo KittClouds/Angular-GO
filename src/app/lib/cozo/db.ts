@@ -15,9 +15,7 @@ import { initContentRepo } from './content';
 import { createGraphSchemas } from './graph/GraphSchema';
 
 // Relations to persist (graph + content)
-// Graph relations
-export const PERSISTED_RELATIONS: string[] = [];
-/* const PERSISTED_RELATIONS = [
+export const PERSISTED_RELATIONS = [
     // Graph relations
     'entities', 'entity_edge', 'entity_mentions', 'entity_aliases', 'entity_metadata',
     'relationship_provenance', 'relationship_attributes', 'discovery_candidates',
@@ -31,7 +29,7 @@ export const PERSISTED_RELATIONS: string[] = [];
     // Network & Cross-Doc
     'network_instance', 'network_membership', 'network_relationship',
     'node_vectors', 'entity_clusters', 'cluster_members', 'cooccurrence_edges'
-]; */
+];
 
 export class CozoDbService {
     private db: CozoDb | null = null;
@@ -87,9 +85,61 @@ export class CozoDbService {
      * Internal initialization logic
      */
     private async doInit(): Promise<void> {
-        console.warn('[CozoDB] ⚠️ CozoDB initialization is DISABLED by user request.');
-        this.wasmReady = false;
-        return Promise.resolve();
+        console.log('[CozoDB] Initializing...');
+        const startTime = Date.now();
+
+        try {
+            // Wait for preload if in progress, or start fresh
+            if (this.preloadPromise) {
+                await this.preloadPromise;
+            } else if (!this.wasmReady) {
+                await init(wasmUrl);
+                this.wasmReady = true;
+            }
+
+            // Create in-memory DB instance
+            this.db = CozoDb.new();
+            console.log('[CozoDB] ✅ WASM loaded, DB instance created');
+
+            // Create schemas first (before restoring data)
+            await this.createSchemas();
+
+            // Restore from persistence (snapshot + WAL replay)
+            await this.restoreFromPersistence();
+
+            // Initialize content repo (notes/folders schemas)
+            initContentRepo();
+
+            const elapsed = Date.now() - startTime;
+            console.log(`[CozoDB] ✅ Initialized in ${elapsed}ms`);
+
+        } catch (err) {
+            console.error('[CozoDB] ❌ Initialization failed:', err);
+            this.db = null;
+            this.wasmReady = false;
+            throw err;
+        }
+    }
+
+    /**
+     * Create all CozoDB schemas (relations)
+     * Safe to call multiple times - will ignore "already exists" errors
+     */
+    private async createSchemas(): Promise<void> {
+        // Graph schemas
+        const graphSchemas = createGraphSchemas();
+        for (const script of graphSchemas) {
+            try {
+                this.db!.run(script, '{}', false);
+            } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : String(e);
+                // Ignore "already exists" errors
+                if (!msg.includes('AlreadyExists') && !msg.includes('already exists')) {
+                    console.error('[CozoDB] Schema error:', msg);
+                }
+            }
+        }
+        console.log('[CozoDB] ✅ Schemas ready');
     }
 
     /**

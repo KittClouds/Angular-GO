@@ -44,6 +44,7 @@ export class AppOrchestrator {
     // Timing data for diagnostics
     private phases: Map<BootPhase, PhaseInfo> = new Map();
     private bootStart = Date.now();
+    private readyLogged = false; // Prevent duplicate ready logs
 
     // Derived state
     readonly isReady = computed(() => this._currentPhase() === 'ready');
@@ -105,8 +106,9 @@ export class AppOrchestrator {
 
         this.phaseComplete$.next(phase);
 
-        // Log if ready
-        if (phase === 'ready' || (phase === 'wasm_hydrate' && this._currentPhase() === 'ready')) {
+        // Log once when fully ready (prevent duplicate)
+        if (phase === 'ready' && !this.readyLogged) {
+            this.readyLogged = true;
             const totalTime = Date.now() - this.bootStart;
             console.log(`[Orchestrator] 🚀 App ready in ${totalTime}ms`);
             this.logTimings();
@@ -185,6 +187,7 @@ export class AppOrchestrator {
         this._currentPhase.set('shell');
         this.phases.clear();
         this.bootStart = Date.now();
+        this.readyLogged = false;
         this.startPhase('shell');
     }
 }

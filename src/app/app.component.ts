@@ -9,6 +9,8 @@ import { seedDefaultSchemas } from './lib/folders/seed';
 import { GoKittService } from './services/gokitt.service';
 import { setGoKittService } from './api/highlighter-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
+import { DexieCozoBridge } from './lib/bridge';
+import { cozoDb } from './lib/cozo/db';
 
 @Component({
   selector: 'app-root',
@@ -22,6 +24,7 @@ export class AppComponent implements OnInit {
   private spinner = inject(NgxSpinnerService);
   private goKitt = inject(GoKittService);
   private orchestrator = inject(AppOrchestrator);
+  private bridge = inject(DexieCozoBridge);
 
   async ngOnInit() {
     // Phase 0: Shell - spinner visible
@@ -44,10 +47,23 @@ export class AppComponent implements OnInit {
       console.log('[AppComponent] ✓ Seed complete');
       this.orchestrator.completePhase('data_layer');
 
-      // Phase 2: Registry - hydrate from Dexie (parallel with WASM load)
-      const registryPromise = smartGraphRegistry.init().then(() => {
+      // Phase 2: Registry + CozoDB - hydrate from Dexie (parallel with WASM load)
+      const registryPromise = smartGraphRegistry.init().then(async () => {
         console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
         this.orchestrator.completePhase('registry');
+
+        // Initialize CozoDB (WASM + persistence)
+        await cozoDb.init();
+
+        // Initialize Dexie-CozoDB bridge (will enable sync now that CozoDB is ready)
+        await this.bridge.init();
+
+        // If bridge has CozoDB sync enabled, do initial full sync from Dexie → CozoDB
+        if (this.bridge.hasCozoSync()) {
+          console.log('[AppComponent] Starting initial Dexie → CozoDB sync...');
+          const report = await this.bridge.fullSync();
+          console.log(`[AppComponent] ✓ Initial sync complete: ${report.notes.synced} notes, ${report.entities.synced} entities`);
+        }
       });
 
       // Phase 3: WASM Load - load module (parallel with registry)

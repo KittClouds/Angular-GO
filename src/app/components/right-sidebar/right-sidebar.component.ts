@@ -6,10 +6,11 @@ import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-sheet-container/fact-sheet-container.component';
 import { FactSheetService } from '../fact-sheets/fact-sheet.service';
 import { AnalyticsPanelComponent } from '../analytics-panel';
+import { TimelineViewComponent } from './timeline-view/timeline-view.component';
 import { smartGraphRegistry } from '../../lib/registry';
 import { db } from '../../lib/dexie';
 
-type SidebarView = 'entities' | 'analytics';
+type SidebarView = 'entities' | 'analytics' | 'timeline';
 
 interface ViewOption {
     value: SidebarView;
@@ -20,6 +21,7 @@ interface ViewOption {
 const VIEW_OPTIONS: ViewOption[] = [
     { value: 'entities', label: 'Entities', icon: 'sparkles' },
     { value: 'analytics', label: 'Analytics', icon: 'bar-chart-3' },
+    { value: 'timeline', label: 'Timeline', icon: 'clock' },
 ];
 
 const STORAGE_KEY = 'right-sidebar:tab';
@@ -27,7 +29,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
 @Component({
     selector: 'app-right-sidebar',
     standalone: true,
-    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent],
+    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent],
     template: `
         <aside
             class="h-full border-l border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out overflow-hidden"
@@ -109,6 +111,13 @@ const STORAGE_KEY = 'right-sidebar:tab';
                             <!-- Analytics Panel -->
                             <div class="flex-1 overflow-auto custom-scrollbar p-3">
                                 <app-analytics-panel />
+                            </div>
+                        }
+
+                        @case ('timeline') {
+                            <!-- Timeline View -->
+                            <div class="flex-1 overflow-auto custom-scrollbar">
+                                <app-timeline-view />
                             </div>
                         }
                     }
@@ -216,8 +225,8 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     private loadSavedView(): SidebarView {
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved === 'entities' || saved === 'analytics') {
-            return saved;
+        if (saved === 'entities' || saved === 'analytics' || saved === 'timeline') {
+            return saved as SidebarView;
         }
         return 'entities';
     }

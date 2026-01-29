@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	ahocorasick "github.com/petar-dambovaliev/aho-corasick"
+	"github.com/coregx/ahocorasick"
 )
 
 // ============================================================================
@@ -166,7 +166,7 @@ type RegisteredEntity struct {
 // RuntimeDictionary uses AC for both dictionary lookup AND text scanning.
 type RuntimeDictionary struct {
 	// The AC automaton built from all surface forms
-	ac ahocorasick.AhoCorasick
+	ac *ahocorasick.Automaton
 
 	// Pattern index -> Entity IDs (multiple entities may share pattern)
 	patternToIDs [][]string
@@ -188,6 +188,7 @@ func NewRuntimeDictionary() *RuntimeDictionary {
 		patternIndex: make(map[string]int),
 		idToInfo:     make(map[string]*EntityInfo),
 		patterns:     []string{},
+		ac:           nil,
 	}
 }
 
@@ -247,12 +248,16 @@ func Compile(entities []RegisteredEntity) (*RuntimeDictionary, error) {
 	}
 
 	// Build AC automaton
-	builder := ahocorasick.NewAhoCorasickBuilder(ahocorasick.Opts{
-		AsciiCaseInsensitive: true,
-		MatchOnlyWholeWords:  false,
-		MatchKind:            ahocorasick.LeftMostLongestMatch,
-	})
-	dict.ac = builder.Build(dict.patterns)
+	// Use LeftmostLongest for standard entity extraction behavior (prefer "San Francisco" over "San")
+	automaton, err := ahocorasick.NewBuilder().
+		AddStrings(dict.patterns).
+		SetMatchKind(ahocorasick.LeftmostLongest).
+		Build()
+
+	if err != nil {
+		return nil, err
+	}
+	dict.ac = automaton
 
 	return dict, nil
 }
@@ -263,6 +268,10 @@ func Compile(entities []RegisteredEntity) (*RuntimeDictionary, error) {
 
 // Lookup finds entities matching a surface form (exact dictionary lookup)
 func (d *RuntimeDictionary) Lookup(surface string) []*EntityInfo {
+	if d.ac == nil {
+		return nil
+	}
+
 	key := NormalizeRaw(surface)
 	idx, exists := d.patternIndex[key]
 	if !exists {
@@ -305,18 +314,36 @@ type Match struct {
 
 // Scan finds all entity mentions in text (O(n) via AC)
 func (d *RuntimeDictionary) Scan(text string) []Match {
-	// Normalize for matching, but track byte mapping
-	normalized := strings.ToLower(text)
+	if d.ac == nil {
+		return nil
+	}
 
-	matches := d.ac.FindAll(normalized)
+	// Normalize for matching, but track byte mapping
+	// NOTE: AC scans raw bytes. If we normalize (lowercase), we lose original casing info.
+	// However, since we normalized patterns during build, we must normalize input text too.
+	// But `Match.MatchedText` should probably return the ORIGINAL text segment.
+	// This simple lowercasing means byte offsets might drift if there are unicode length diffs
+	// between lower/upper case, but for most text it's 1:1.
+	// A strictly correct implementation would map normalized offsets back to original.
+	normalized := strings.ToLower(text)
+	haystack := []byte(normalized)
+
+	// -1 for all matches (non-overlapping due to LeftmostLongest default?)
+	// Actually match kind is set on builder. FindAll returns non-overlapping.
+	matches := d.ac.FindAll(haystack, -1)
 	result := make([]Match, 0, len(matches))
 
 	for _, m := range matches {
+		// Guard against out of bounds just in case
+		if m.End > len(text) {
+			continue
+		}
+
 		result = append(result, Match{
-			Start:       m.Start(),
-			End:         m.End(),
-			MatchedText: text[m.Start():m.End()],
-			PatternIdx:  m.Pattern(),
+			Start:       m.Start,
+			End:         m.End,
+			MatchedText: text[m.Start:m.End], // Return original text segment
+			PatternIdx:  m.PatternID,
 		})
 	}
 

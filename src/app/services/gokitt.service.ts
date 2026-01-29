@@ -7,10 +7,18 @@ import { db } from '../lib/dexie/db';
 // Types for Worker Communication
 // =============================================================================
 
+/** Provenance context for folder-aware graph projection */
+export interface ProvenanceContext {
+    vaultId?: string;
+    worldId: string;
+    parentPath?: string;
+    folderType?: string;
+}
+
 type GoKittWorkerMessage =
     | { type: 'INIT' }
     | { type: 'HYDRATE'; payload: { entitiesJSON: string } }
-    | { type: 'SCAN'; payload: { text: string }; id: number }
+    | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
     | { type: 'INDEX_NOTE'; payload: { id: string; text: string }; id: number }
@@ -222,13 +230,18 @@ export class GoKittService {
 
     /**
      * Full scan with Reality Layer (CST, Graph, PCST)
+     * @param text - The text to scan
+     * @param provenance - Optional folder/vault context for graph projection
      */
-    async scan(text: string): Promise<any> {
+    async scan(text: string, provenance?: ProvenanceContext): Promise<any> {
         if (!this.wasmLoaded) return { error: 'Wasm not ready' };
 
         try {
             console.log('[GoKittService.scan] 🧠 REALITY LAYER: Starting full scan...');
-            const result = await this.sendRequest<any>('SCAN', { text });
+            if (provenance) {
+                console.log('[GoKittService.scan] 📂 With provenance:', provenance.worldId);
+            }
+            const result = await this.sendRequest<any>('SCAN', { text, provenance });
 
             console.log('[GoKittService.scan] ✅ Result:', result);
             console.log('[GoKittService.scan] Graph Nodes:', result.graph?.Nodes ? Object.keys(result.graph.Nodes).length : 0);
@@ -246,7 +259,7 @@ export class GoKittService {
      */
     async scanDiscovery(text: string): Promise<any[]> {
         if (!this.wasmLoaded) {
-            console.warn('[GoKittService.scanDiscovery] WASM not loaded');
+            // WASM not loaded yet - silently return empty (expected during boot)
             return [];
         }
 

@@ -141,7 +141,7 @@ async function syncNoteToCozo(noteId: string): Promise<void> {
     if (!note) return;
 
     // TODO: Add kittCore.cozoUpsertNote() when Rust schema includes notes
-    console.log('[Dexie] Synced note to Cozo:', noteId);
+    // Currently a no-op stub
 }
 
 export async function hydrateFromCozo(): Promise<void> {

@@ -16,12 +16,14 @@ export { characterSchema } from './character.schema';
 
 import { EntityKind, EntityFactSheetSchema } from '../types';
 import { characterSchema } from './character.schema';
+import { sceneSchema } from './scene.schema';
 
 /**
  * Schema registry - maps EntityKind to its schema
  */
 export const SCHEMAS: Partial<Record<EntityKind, EntityFactSheetSchema>> = {
     CHARACTER: characterSchema,
+    SCENE: sceneSchema,
     // Add others as implemented
 };
 

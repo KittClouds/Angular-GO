@@ -571,7 +571,14 @@ class DefaultHighlighterApi implements HighlighterApi {
         // Async scan via worker (non-blocking)
         (async () => {
             try {
-                const result = await goKittService!.scan(text);
+                // Build provenance context for folder-aware graph projection
+                const provenance = this.currentNoteId ? {
+                    worldId: this.currentNoteId,
+                    vaultId: this.currentNarrativeId,
+                    parentPath: '', // Could be enriched with folder path if needed
+                } : undefined;
+
+                const result = await goKittService!.scan(text, provenance);
                 console.log(`[HighlighterApi] GoKitt scan result:`, result);
 
                 // Process Relations

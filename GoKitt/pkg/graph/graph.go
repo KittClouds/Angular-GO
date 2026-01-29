@@ -4,6 +4,22 @@ package graph
 
 import "strings"
 
+// Hierarchy node kinds
+const (
+	KindUniverse    = "Universe"    // Vault root / Narrative Timeline
+	KindGalaxy      = "Galaxy"      // Typed Folder
+	KindSolarSystem = "SolarSystem" // Plain Folder
+	KindWorld       = "World"       // Note/Document
+)
+
+// Hierarchy edge relations
+const (
+	RelContains      = "CONTAINS"
+	RelWormhole      = "WORMHOLE"
+	RelContainsWorld = "CONTAINS_WORLD" // Folder -> World
+	RelWorldContains = "WORLD_CONTAINS" // World -> Entity
+)
+
 // ConceptNode represents an entity in the graph
 type ConceptNode struct {
 	ID    string `json:"id"`

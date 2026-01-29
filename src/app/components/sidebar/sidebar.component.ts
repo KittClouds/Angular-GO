@@ -104,13 +104,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
     ngOnInit(): void {
         // Subscribe to live folder updates
         this.foldersSubscription = this.folderService.getAllFolders$().subscribe(folders => {
-            console.log('[Sidebar] Folders updated:', folders.length);
             this.folders.set(folders);
         });
 
         // Subscribe to live note updates  
         this.notesSubscription = this.notesService.getAllNotes$().subscribe(notes => {
-            console.log('[Sidebar] Notes updated:', notes.length);
             this.notes.set(notes);
         });
     }

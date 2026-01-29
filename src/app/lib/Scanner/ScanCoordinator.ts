@@ -184,7 +184,7 @@ export class ScanCoordinator {
 
         // Guard: Skip scan if no text provided (idle flush without context)
         if (!request.sentenceText || request.sentenceText.length === 0) {
-            console.log(`[ScanCoordinator] Skipping scan - no sentenceText (trigger=${request.trigger}, entities=${request.entities.length})`);
+            // Expected during idle flushes without content context
             return;
         }
 

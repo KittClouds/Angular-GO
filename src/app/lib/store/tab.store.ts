@@ -56,7 +56,7 @@ export class TabStore {
             if (activeNoteId) {
                 this.ensureTabOpen(activeNoteId);
             }
-        }, { allowSignalWrites: true });
+        });
     }
 
     // ─────────────────────────────────────────────────────────────
