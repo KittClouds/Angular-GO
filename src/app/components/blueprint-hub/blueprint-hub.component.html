@@ -1,6 +1,12 @@
 <div class="absolute bottom-8 left-0 right-0 z-40 bg-hub text-hub-foreground border-t border-hub-border shadow-[0_-5px_10px_rgba(0,0,0,0.1)] flex flex-col transition-transform duration-300 ease-in-out"
     [class.translate-y-full]="!hubService.isHubOpen()" [class.translate-y-0]="hubService.isHubOpen()"
-    [attr.data-hub-ready]="true" style="height: 60vh;">
+    [attr.data-hub-ready]="true" [style.height.px]="hubHeight">
+
+    <!-- Resize Handle -->
+    <div class="absolute top-0 left-0 right-0 h-1.5 -mt-1 cursor-row-resize z-50 hover:bg-primary/50 transition-colors"
+        (mousedown)="startResize($event)">
+    </div>
+
     <!-- Header/Tabs -->
     <div
         class="flex items-center border-b border-hub-border bg-muted/40 px-2 overflow-x-auto shrink-0 h-10 backdrop-blur-sm">
@@ -29,6 +35,8 @@
             <app-graph-tab *ngSwitchCase="'graph'" class="h-full w-full block"></app-graph-tab>
             <app-theme-tab *ngSwitchCase="'theme'" class="h-full w-full block"></app-theme-tab>
             <app-patterns-tab *ngSwitchCase="'patterns'" class="h-full w-full block"></app-patterns-tab>
+            <app-story-beats-tab *ngSwitchCase="'story-beats'" class="h-full w-full block"></app-story-beats-tab>
+            <app-worldbuilding-tab *ngSwitchCase="'worldbuilding'" class="h-full w-full block"></app-worldbuilding-tab>
 
             <div *ngSwitchDefault class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
                 <div

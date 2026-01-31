@@ -1,11 +1,11 @@
-import { Component, ChangeDetectionStrategy, signal, inject, computed, OnInit, OnDestroy } from '@angular/core';
+import { Component, ChangeDetectionStrategy, signal, inject, computed, OnInit, OnDestroy, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgxTimelineComponent, NgxTimelineEntryComponent } from '@omnedia/ngx-timeline';
 import { LucideAngularModule, Plus, Trash2, Edit3, Lock, Unlock, Link } from 'lucide-angular';
-import { TimelineService } from '../../../lib/services/timeline.service';
+import { CodexService } from '../../../lib/services/codex.service';
 import { ScopeService } from '../../../lib/services/scope.service';
-import { db, TimelineEvent, Entity } from '../../../lib/dexie/db';
+import { db, CodexEntry, Entity } from '../../../lib/dexie/db';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -142,7 +142,7 @@ import { Subscription } from 'rxjs';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class TimelineViewComponent implements OnInit, OnDestroy {
-  private timelineService = inject(TimelineService);
+  private codexService = inject(CodexService);
   private scopeService = inject(ScopeService);
 
   // Icons
@@ -154,7 +154,7 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
   LinkIcon = Link;
 
   // State
-  events = signal<TimelineEvent[]>([]);
+  events = signal<CodexEntry[]>([]);
   isAddingEvent = signal(false);
   newEventTitle = '';
   newEventDescription = '';
@@ -172,38 +172,53 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
     return 'Scope: ' + scope.type;
   });
 
+  constructor() {
+    effect(() => {
+      // Track scope changes
+      const scope = this.scopeService.activeScope();
+      this.loadEvents(scope);
+    });
+  }
+
   ngOnInit() {
-    this.loadEvents();
+    // Initial load handled by effect
   }
 
   ngOnDestroy() {
     this.eventsSub?.unsubscribe();
   }
 
-  private loadEvents() {
-    const scope = this.scopeService.activeScope();
+  private loadEvents(scope: any) { // Type 'ActiveScope' but I don't want to import it if not already imported. Actually ScopeService is imported.
+    this.eventsSub?.unsubscribe();
+    const narrativeId = scope.narrativeId || (scope.id === 'vault:global' ? '' : scope.id);
 
-    // Subscribe to events based on scope
+    // If global or no narrative, we might want to handle it differently, 
+    // but for now CodexService methods usually require narrativeId or return filtered list.
+    // Let's assume activeNarrativeId is available via scope service or passed.
+
+    if (!narrativeId && scope.id !== 'vault:global') {
+      // Fallback for non-narrative scopes (folder/note) -> find narrative or show empty?
+      // CodexService events are narrative-scoped.
+      this.events.set([]);
+      return;
+    }
+
     if (scope.id === 'vault:global') {
-      this.eventsSub = this.timelineService.getAllEvents$().subscribe(events => {
-        this.events.set(events);
-        this.cacheEntityLabels(events);
-      });
-    } else if (scope.narrativeId) {
-      this.eventsSub = this.timelineService.getEventsForNarrative$(scope.narrativeId).subscribe(events => {
-        this.events.set(events);
-        this.cacheEntityLabels(events);
-      });
+      // TODO: CodexService.getAllEvents() or similar? 
+      // For now, let's just create a simplified query if needed or require narrative focus.
+      // Actually, let's try to get events for ALL narratives if global.
+      // But CodexService.getEvents$ takes a narrativeId.
+      // For now, we will just clear if no narrative.
+      this.events.set([]);
     } else {
-      // Fallback: show all
-      this.eventsSub = this.timelineService.getAllEvents$().subscribe(events => {
+      this.eventsSub = this.codexService.getEvents$(narrativeId!).subscribe(events => {
         this.events.set(events);
         this.cacheEntityLabels(events);
       });
     }
   }
 
-  private async cacheEntityLabels(events: TimelineEvent[]) {
+  private async cacheEntityLabels(events: CodexEntry[]) {
     const allIds = new Set<string>();
     events.forEach(e => e.entityIds.forEach(id => allIds.add(id)));
 
@@ -240,9 +255,15 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
     if (!this.newEventTitle.trim()) return;
 
     const scope = this.scopeService.activeScope();
-    const narrativeId = scope.narrativeId || scope.id;
+    const narrativeId = scope.narrativeId;
 
-    await this.timelineService.createEvent(
+    if (!narrativeId) {
+      // Cannot create event without narrative context
+      console.warn('Cannot create event: No active narrative scope');
+      return;
+    }
+
+    await this.codexService.createEvent(
       narrativeId,
       this.newEventTitle.trim(),
       this.newEventDescription.trim()
@@ -253,7 +274,7 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
   }
 
   async deleteEvent(id: string) {
-    await this.timelineService.deleteEvent(id);
+    await this.codexService.deleteEntry(id);
   }
 
   openEntity(entityId: string) {
@@ -266,7 +287,7 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
     console.log('[Timeline] Open note:', noteId);
   }
 
-  trackEvent(index: number, event: TimelineEvent): string {
+  trackEvent(index: number, event: CodexEntry): string {
     return event.id;
   }
 }

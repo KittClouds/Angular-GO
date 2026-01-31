@@ -1,0 +1,183 @@
+<div class="flex flex-col h-full bg-hub text-hub-foreground">
+    <!-- Header -->
+    <div class="relative h-40 shrink-0 overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-br from-cyan-900 via-slate-900 to-slate-800"></div>
+        <div class="absolute inset-0 opacity-10"
+            style="background-image: radial-gradient(#06b6d4 1px, transparent 1px); background-size: 30px 30px;">
+        </div>
+        <div class="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent"></div>
+
+        <div class="absolute bottom-0 left-0 right-0 p-6 z-10">
+            <div class="flex items-end justify-between">
+                <div class="flex items-end gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+                        <i class="pi pi-globe text-cyan-500 text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-foreground">Worldbuilding</h1>
+                        <p class="text-sm text-muted-foreground">
+                            <ng-container *ngIf="hasEntityFocus(); else defaultDesc">
+                                Facts and metadata for {{ focusedEntityLabel() }}
+                            </ng-container>
+                            <ng-template #defaultDesc>
+                                Quick facts and metadata about your world
+                            </ng-template>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Scope indicator -->
+                <ng-container *ngIf="hasEntityFocus()">
+                    <p-tag
+                        [style]="{'background': 'transparent', 'border': '1px solid rgba(6, 182, 212, 0.5)', 'color': '#22d3ee'}"
+                        styleClass="gap-1.5 px-3 py-1.5">
+                        <i class="pi pi-user text-xs"></i>
+                        <span class="text-xs">{{ focusedEntityLabel() }}</span>
+                    </p-tag>
+                </ng-container>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scope Banner -->
+    <div *ngIf="hasEntityFocus()" class="px-6 py-3 bg-cyan-500/10 border-b border-cyan-500/20 flex items-center gap-3">
+        <span class="text-sm text-cyan-400">
+            Viewing worldbuilding scoped to <strong>{{ focusedEntityLabel() }}</strong>
+        </span>
+        <span class="text-xs text-muted-foreground">
+            • Clear entity focus to see all worldbuilding
+        </span>
+    </div>
+
+    <!-- Content -->
+    <p-scrollPanel [style]="{ width: '100%', height: 'calc(100% - 160px)' }" styleClass="custom-scrollbar">
+        <div class="p-6">
+            <!-- Category Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div *ngFor="let catData of categoriesWithFacts()"
+                    class="group flex flex-col rounded-xl border border-border bg-card/50 hover:bg-card hover:border-primary/30 hover:shadow-lg transition-all duration-200"
+                    [class.ring-2]="selectedCategory() === catData.category.id"
+                    [class.ring-cyan-500]="selectedCategory() === catData.category.id">
+
+                    <!-- Category Header (clickable) -->
+                    <button class="flex flex-col p-5 text-left focus:outline-none w-full"
+                        (click)="onCategoryClick(catData.category)">
+                        <div class="flex items-start justify-between mb-3 w-full">
+                            <div class="w-10 h-10 rounded-lg flex items-center justify-center"
+                                [ngStyle]="getIconContainerStyle(catData.category)">
+                                <i [class]="catData.category.icon" [ngStyle]="getIconStyle(catData.category)"></i>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <p-tag *ngIf="catData.facts.length > 0" severity="secondary" styleClass="text-[10px]"
+                                    [value]="catData.facts.length + ' fact' + (catData.facts.length !== 1 ? 's' : '')">
+                                </p-tag>
+                                <button class="p-1.5 rounded hover:bg-cyan-500/20 transition-colors"
+                                    (click)="openAddFactDialog(catData.category, $event)" title="Add fact">
+                                    <i class="pi pi-plus text-xs text-cyan-400"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <h3
+                            class="font-semibold text-sm text-foreground group-hover:text-primary transition-colors mb-1">
+                            {{ catData.category.label }}
+                        </h3>
+
+                        <p class="text-xs text-muted-foreground line-clamp-2 mb-3">
+                            <ng-container *ngIf="hasEntityFocus(); else catDesc">
+                                {{ focusedEntityLabel() }}'s {{ catData.category.description?.toLowerCase() }}
+                            </ng-container>
+                            <ng-template #catDesc>
+                                {{ catData.category.description }}
+                            </ng-template>
+                        </p>
+
+                        <div class="flex items-center justify-between mt-auto pt-2 border-t border-border w-full">
+                            <span class="text-[10px] text-muted-foreground">
+                                {{ catData.facts.length === 0 ? 'Add facts' : 'Click to expand' }}
+                            </span>
+                            <i class="pi text-muted-foreground group-hover:text-primary transition-all text-xs"
+                                [class.pi-chevron-down]="selectedCategory() === catData.category.id"
+                                [class.pi-chevron-right]="selectedCategory() !== catData.category.id"></i>
+                        </div>
+                    </button>
+
+                    <!-- Expanded Facts List -->
+                    <div *ngIf="selectedCategory() === catData.category.id && catData.facts.length > 0"
+                        class="border-t border-border bg-muted/30 p-3 space-y-2">
+                        <div *ngFor="let fact of catData.facts"
+                            class="group/fact p-3 rounded-lg border border-border bg-card hover:border-cyan-500/30 transition-colors">
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1 min-w-0">
+                                    <h4 class="font-medium text-sm text-foreground">{{ fact.title }}</h4>
+                                    <p *ngIf="fact.description" class="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                        {{ fact.description }}
+                                    </p>
+                                </div>
+                                <button
+                                    class="opacity-0 group-hover/fact:opacity-100 p-1 hover:bg-red-500/20 rounded transition-opacity"
+                                    (click)="deleteFact(fact.id, $event)">
+                                    <i class="pi pi-trash text-xs text-red-400"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Empty state when expanded -->
+                    <div *ngIf="selectedCategory() === catData.category.id && catData.facts.length === 0"
+                        class="border-t border-border bg-muted/30 p-6 text-center">
+                        <i class="pi pi-inbox text-2xl text-muted-foreground/50 mb-2"></i>
+                        <p class="text-xs text-muted-foreground">No facts yet. Click + to add one.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Info Box -->
+            <div class="mt-8 p-4 rounded-xl border border-border bg-muted/30">
+                <h4 class="font-medium text-sm mb-2 text-foreground">What goes here?</h4>
+                <p class="text-xs text-muted-foreground">
+                    Worldbuilding is for quick facts and metadata that don't need full notes.
+                    <span *ngIf="hasEntityFocus()" class="text-cyan-400">
+                        Currently showing only facts relevant to {{ focusedEntityLabel() }}.
+                    </span>
+                </p>
+            </div>
+        </div>
+    </p-scrollPanel>
+</div>
+
+<!-- Add Fact Dialog -->
+<p-dialog header="Add Worldbuilding Fact" [(visible)]="showAddDialog" [modal]="true" [style]="{width: '450px'}"
+    [draggable]="false" [resizable]="false">
+
+    <div class="flex flex-col gap-4">
+        <div *ngIf="addingToCategory" class="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+                [ngStyle]="getIconContainerStyle(addingToCategory)">
+                <i [class]="addingToCategory.icon" [ngStyle]="getIconStyle(addingToCategory)"></i>
+            </div>
+            <span class="text-sm font-medium">{{ addingToCategory.label }}</span>
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Fact Title</label>
+            <input pInputText [(ngModel)]="newFactTitle" placeholder="e.g., The capital city is..." class="w-full" />
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Description (optional)</label>
+            <textarea pTextarea [(ngModel)]="newFactDescription" placeholder="Add more detail..." rows="3"
+                class="w-full"></textarea>
+        </div>
+    </div>
+
+    <ng-template pTemplate="footer">
+        <div class="flex gap-2 justify-end">
+            <p-button label="Cancel" [text]="true" (onClick)="cancelAdd()"></p-button>
+            <p-button label="Add Fact" icon="pi pi-check" (onClick)="createFact()"
+                [disabled]="!newFactTitle.trim()"></p-button>
+        </div>
+    </ng-template>
+</p-dialog>
+
+<p-toast position="bottom-right"></p-toast>

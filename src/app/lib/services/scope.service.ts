@@ -62,6 +62,9 @@ export class ScopeService {
         return this._activeScope;
     }
 
+    // Computed: Active narrative ID (convenience for Codex queries)
+    activeNarrativeId = computed(() => this._activeScope().narrativeId ?? this._activeScope().id);
+
     // ==========================================================================
     // SCOPE COMPUTATION (Pure Functions)
     // ==========================================================================

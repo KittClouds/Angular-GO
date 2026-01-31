@@ -251,6 +251,56 @@ export interface TimelineEvent {
 }
 
 // =============================================================================
+// UNIFIED CODEX SYSTEM
+// =============================================================================
+
+/**
+ * CodexEntry - The atomic unit of the Codex.
+ * Unified model for Worldbuilding Facts, Story Beats, and Timeline Events.
+ * All entries can link back to source Spans for provenance.
+ */
+export interface CodexEntry {
+    id: string;
+    narrativeId: string;              // Scoped to narrative
+
+    // Type discrimination
+    entryType: 'fact' | 'beat' | 'event';
+
+    // Common fields
+    title: string;
+    description: string;
+    status: 'draft' | 'planned' | 'complete' | 'locked';
+
+    // Category (for facts/beats)
+    category?: string;                // e.g., 'geography', 'magic', 'act1'
+    subcategory?: string;             // e.g., 'opening-image', 'theme-stated'
+
+    // Ordering
+    order: number;
+    parentId?: string;                // Hierarchical (beat inside act, fact inside category)
+
+    // Provenance: Link to source span
+    sourceSpanId?: string;            // The span this was extracted from
+    sourceNoteId?: string;            // Quick lookup
+
+    // Linked entities
+    entityIds: string[];              // Characters, locations involved
+
+    // Timeline-specific
+    temporalOrder?: number;           // For timeline sequencing
+    date?: { year: number; monthIndex: number; dayIndex: number };
+    displayTime?: string;             // Human readable: "14:00", "Dawn"
+    linkedNoteId?: string;            // Jump to this note
+
+    // Visual
+    color?: string;                   // Accent color
+
+    // Metadata
+    createdAt: number;
+    updatedAt: number;
+}
+
+// =============================================================================
 // DECORATION & CACHE INTERFACES
 // =============================================================================
 
@@ -490,6 +540,9 @@ export class CrepeDatabase extends Dexie {
     // Timeline Codex (v5)
     timelineEvents!: Table<TimelineEvent>;
 
+    // Unified Codex (v6)
+    codexEntries!: Table<CodexEntry>;
+
     constructor() {
         super('CrepeNotes');
 
@@ -567,6 +620,12 @@ export class CrepeDatabase extends Dexie {
         this.version(5).stores({
             // NEW: TimelineEvent - scene/beat manager for narrative
             timelineEvents: 'id, narrativeId, order, status, [narrativeId+order]'
+        });
+
+        // Version 6: Unified Codex System
+        this.version(6).stores({
+            // NEW: CodexEntry - unified facts, beats, and events
+            codexEntries: 'id, narrativeId, entryType, category, subcategory, parentId, order, status, sourceSpanId, sourceNoteId, createdAt, [narrativeId+entryType], [narrativeId+category], [narrativeId+entryType+category]'
         });
     }
 }

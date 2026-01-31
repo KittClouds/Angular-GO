@@ -224,8 +224,8 @@ export function scanForPatternsSync(text: string): DecorationSpan[] {
         const targetEnd = index + fullMatch.length;
 
         // Extract entity kind/label from source
-        const sourceMatch = source.match(/\[([A-Z_]+)\|([^\]]+)\]/);
-        const targetMatch = target.match(/\[([A-Z_]+)\|([^\]]+)\]/);
+        const sourceMatch = source.match(/\[([A-Z_]+)\|([^|\]]+)/);
+        const targetMatch = target.match(/\[([A-Z_]+)\|([^|\]]+)/);
 
         // Emit subject entity span
         if (sourceMatch) {
@@ -284,8 +284,8 @@ export function scanForPatternsSync(text: string): DecorationSpan[] {
         const targetStart = index + fullMatch.length - target.length;
         const targetEnd = index + fullMatch.length;
 
-        const sourceMatch = source.match(/\[([A-Z_]+)\|([^\]]+)\]/);
-        const targetMatch = target.match(/\[([A-Z_]+)\|([^\]]+)\]/);
+        const sourceMatch = source.match(/\[([A-Z_]+)\|([^|\]]+)/);
+        const targetMatch = target.match(/\[([A-Z_]+)\|([^|\]]+)/);
 
         // Emit subject entity span
         if (sourceMatch) {
@@ -344,8 +344,8 @@ export function scanForPatternsSync(text: string): DecorationSpan[] {
         const targetStart = index + fullMatch.length - target.length;
         const targetEnd = index + fullMatch.length;
 
-        const sourceMatch = source.match(/\[([A-Z_]+)\|([^\]]+)\]/);
-        const targetMatch = target.match(/\[([A-Z_]+)\|([^\]]+)\]/);
+        const sourceMatch = source.match(/\[([A-Z_]+)\|([^|\]]+)/);
+        const targetMatch = target.match(/\[([A-Z_]+)\|([^|\]]+)/);
 
         // Emit first entity span (object in backward syntax)
         if (sourceMatch) {
@@ -533,8 +533,8 @@ async function scanWithPatternAsync(
 }
 
 function extractEntityName(ref: string): string {
-    // [KIND|Name] → Name
-    const tagMatch = ref.match(/\[([A-Z_]+)\|([^\]]+)\]/);
+    // [KIND|Name] or [KIND|Name|{metadata}] → Name (stop at | or ])
+    const tagMatch = ref.match(/\[([A-Z_]+)\|([^|\]]+)/);
     if (tagMatch) return tagMatch[2];
 
     // [[Name]] → Name

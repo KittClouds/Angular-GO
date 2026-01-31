@@ -1,0 +1,154 @@
+<div class="flex flex-col h-full bg-hub">
+    <!-- Header -->
+    <div class="relative h-32 shrink-0 overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-br from-orange-900 via-slate-900 to-slate-800"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent"></div>
+
+        <div class="absolute bottom-0 left-0 right-0 p-6 z-10">
+            <div class="flex items-center justify-between">
+                <div class="flex items-end gap-4">
+                    <div class="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center">
+                        <i class="pi pi-video text-orange-500 text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-foreground">Story Beats</h1>
+                        <p class="text-sm text-muted-foreground">
+                            <ng-container *ngIf="hasEntityFocus(); else defaultDesc">
+                                {{ focusedEntityLabel() }}'s story arc
+                            </ng-container>
+                            <ng-template #defaultDesc>
+                                Plan your narrative structure
+                            </ng-template>
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <ng-container *ngIf="hasEntityFocus()">
+                        <p-tag
+                            [style]="{'background': 'transparent', 'border': '1px solid rgba(249, 115, 22, 0.5)', 'color': '#fb923c'}"
+                            styleClass="gap-1.5 px-3 py-1.5">
+                            <i class="pi pi-user text-xs"></i>
+                            <span class="text-xs">{{ focusedEntityLabel() }}</span>
+                        </p-tag>
+                    </ng-container>
+                    <p-button label="Info" icon="pi pi-info-circle" size="small"
+                        [styleClass]="'bg-orange-600 border-none hover:bg-orange-700'"
+                        (onClick)="onAddAct()"></p-button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scope Banner -->
+    <div *ngIf="hasEntityFocus()"
+        class="px-6 py-3 bg-orange-500/10 border-b border-orange-500/20 flex items-center gap-3">
+        <span class="text-sm text-orange-400">
+            Viewing beats for <strong>{{ focusedEntityLabel() }}</strong>
+        </span>
+        <span class="text-xs text-muted-foreground">
+            • Clear entity focus to see all story beats
+        </span>
+    </div>
+
+    <!-- Kanban Board -->
+    <div class="flex-1 overflow-x-auto overflow-y-hidden">
+        <div class="h-full p-6 inline-flex gap-4 min-w-full">
+            <div *ngFor="let actData of actsWithBeats()" class="w-80 shrink-0 flex flex-col h-full">
+                <!-- Act Header -->
+                <div class="flex items-center justify-between px-3 py-2 rounded-t-lg"
+                    [ngStyle]="getActHeaderStyle(actData.act)">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full" [ngStyle]="getActDotStyle(actData.act)"></div>
+                        <span class="font-semibold text-sm text-foreground">{{ actData.act.name }}</span>
+                        <p-tag [value]="actData.beats.length.toString()" severity="secondary"
+                            [styleClass]="'text-[10px] px-1.5 py-0 h-5'"></p-tag>
+                    </div>
+                    <p-button icon="pi pi-ellipsis-v" [text]="true" [rounded]="true" size="small"
+                        styleClass="h-6 w-6"></p-button>
+                </div>
+
+                <!-- Act Column -->
+                <div
+                    class="flex-1 p-2 space-y-2 bg-muted/20 rounded-b-lg border border-t-0 border-border overflow-y-auto custom-scrollbar">
+
+                    <!-- Empty state -->
+                    <div *ngIf="actData.beats.length === 0" class="text-center py-8 text-muted-foreground">
+                        <i class="pi pi-inbox text-2xl mb-2 opacity-50"></i>
+                        <p class="text-xs">No beats yet</p>
+                    </div>
+
+                    <!-- Beat cards -->
+                    <div *ngFor="let beat of actData.beats"
+                        class="beat-card group p-3 rounded-lg border border-border bg-card hover:border-primary/30 hover:shadow-md cursor-pointer relative">
+                        <div class="flex items-start gap-2 mb-2">
+                            <i
+                                class="pi pi-bars h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground shrink-0 mt-0.5 cursor-grab"></i>
+                            <div class="flex-1 min-w-0">
+                                <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium mb-1.5"
+                                    [ngStyle]="getBeatTypeStyle(beat.subcategory)">
+                                    {{ getBeatTypeLabel(beat.subcategory) }}
+                                </span>
+                                <h4 class="font-medium text-sm text-foreground leading-tight">{{ beat.title }}</h4>
+                            </div>
+                            <!-- Delete button on hover -->
+                            <button
+                                class="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/20 rounded"
+                                (click)="deleteBeat(beat.id); $event.stopPropagation()">
+                                <i class="pi pi-trash text-xs text-red-400"></i>
+                            </button>
+                        </div>
+                        <p class="text-xs text-muted-foreground line-clamp-3 ml-6 mb-3">
+                            {{ beat.description }}
+                        </p>
+                        <div class="flex items-center justify-between ml-6">
+                            <p-tag [value]="formatStatus(beat.status)" [severity]="getStatusSeverity(beat.status)"
+                                [styleClass]="'text-[9px] px-1.5 py-0 h-4'"></p-tag>
+                        </div>
+                    </div>
+
+                    <button
+                        class="w-full py-2 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:bg-muted/50 rounded transition-colors"
+                        (click)="openAddBeatDialog(actData.act)">
+                        <i class="pi pi-plus text-xs"></i>
+                        Add beat
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Beat Dialog -->
+<p-dialog header="Add Story Beat" [(visible)]="showAddDialog" [modal]="true" [style]="{width: '450px'}"
+    [draggable]="false" [resizable]="false">
+
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Title</label>
+            <input pInputText [(ngModel)]="newBeatTitle" placeholder="Enter beat title..." class="w-full" />
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Beat Type</label>
+            <p-select [options]="selectedAct ? getBeatTypesForAct(selectedAct.id) : []" [(ngModel)]="selectedBeatType"
+                optionLabel="label" placeholder="Select beat type (optional)" [showClear]="true" styleClass="w-full">
+            </p-select>
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Description</label>
+            <textarea pTextarea [(ngModel)]="newBeatDescription" placeholder="Describe this beat..." rows="3"
+                class="w-full"></textarea>
+        </div>
+    </div>
+
+    <ng-template pTemplate="footer">
+        <div class="flex gap-2 justify-end">
+            <p-button label="Cancel" [text]="true" (onClick)="cancelAdd()"></p-button>
+            <p-button label="Create Beat" icon="pi pi-check" (onClick)="createBeat()"
+                [disabled]="!newBeatTitle.trim()"></p-button>
+        </div>
+    </ng-template>
+</p-dialog>
+
+<p-toast position="bottom-right"></p-toast>

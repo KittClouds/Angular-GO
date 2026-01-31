@@ -9,6 +9,7 @@ import { from } from 'rxjs';
 import { db } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
+import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
 
 export interface FooterStats {
     backlinks: number;
@@ -30,8 +31,8 @@ export class FooterStatsService {
     // Internal state
     // ─────────────────────────────────────────────────────────────
 
-    /** Current markdown content from editor (for word/char count) */
-    private currentMarkdown = signal<string>('');
+    /** Current JSON content from editor (for analytics) */
+    private currentContent = signal<string>('');
 
     /** Save state tracking */
     readonly isSaved = signal(true);
@@ -83,24 +84,25 @@ export class FooterStatsService {
     readonly backlinks = toSignal(this.backlinks$, { initialValue: 0 });
 
     // ─────────────────────────────────────────────────────────────
-    // Computed Stats from Editor Content
+    // Computed Stats from Editor Content (using text-analytics)
     // ─────────────────────────────────────────────────────────────
 
-    /** Word count - computed from markdown */
-    readonly wordCount = computed(() => {
-        const md = this.currentMarkdown();
-        if (!md || md.trim().length === 0) return 0;
+    /** Full text analytics - same as Analytics Panel */
+    readonly analytics = computed<TextAnalytics>(() => {
+        const content = this.currentContent();
+        if (!content) return getEmptyAnalytics();
 
-        // Split on whitespace and filter empty
-        const words = md.trim().split(/\s+/).filter(w => w.length > 0);
-        return words.length;
+        const plainText = parseContentToPlainText(content);
+        if (!plainText.trim()) return getEmptyAnalytics();
+
+        return analyzeText(plainText);
     });
 
-    /** Character count - computed from markdown */
-    readonly charCount = computed(() => {
-        const md = this.currentMarkdown();
-        return md.length;
-    });
+    /** Word count - from analytics */
+    readonly wordCount = computed(() => this.analytics().wordCount);
+
+    /** Character count - from analytics */
+    readonly charCount = computed(() => this.analytics().characterCount);
 
     // ─────────────────────────────────────────────────────────────
     // Constructor: Subscribe to editor content updates
@@ -109,7 +111,8 @@ export class FooterStatsService {
     constructor() {
         // Listen to editor content changes
         this.editorService.content$.subscribe(({ json, markdown }) => {
-            this.currentMarkdown.set(markdown);
+            // Use JSON content for analytics (same as Analytics Panel)
+            this.currentContent.set(JSON.stringify(json));
 
             // Mark as unsaved, then saved after debounce
             this.isSaved.set(false);
@@ -129,10 +132,11 @@ export class FooterStatsService {
             distinctUntilChanged((a, b) => a?.id === b?.id)
         ).subscribe(note => {
             if (note) {
-                this.currentMarkdown.set(note.markdownContent || '');
+                // Use JSON content (note.content) for consistency with analytics
+                this.currentContent.set(note.content || '');
                 this.isSaved.set(true);
             } else {
-                this.currentMarkdown.set('');
+                this.currentContent.set('');
                 this.isSaved.set(true);
             }
         });
