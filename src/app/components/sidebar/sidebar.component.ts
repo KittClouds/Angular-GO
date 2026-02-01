@@ -4,7 +4,7 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain, MoveVertical } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { FolderService } from '../../lib/services/folder.service';
@@ -12,6 +12,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { ThemeService } from '../../lib/services/theme.service';
 import { EditorService } from '../../services/editor.service';
+import { ReorderService } from '../../lib/services/reorder.service';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import { SearchPanelComponent } from '../search-panel/search-panel.component';
 import { NerPanelComponent } from './ner-panel/ner-panel.component';
@@ -51,6 +52,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     sidebarService = inject(SidebarService);
     themeService = inject(ThemeService);
     editorService = inject(EditorService);
+    reorderService = inject(ReorderService);
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
@@ -78,6 +80,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly Sun = Sun;
     readonly Moon = Moon;
     readonly Brain = Brain; // Add Brain icon for NER
+    readonly MoveVertical = MoveVertical; // Add MoveVertical icon for reorder mode
 
     // Entity folder options for dropdown
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;
@@ -151,10 +154,13 @@ export class SidebarComponent implements OnInit, OnDestroy {
             }
         }
 
+        // Helper to sort by order
+        const sortByOrder = (a: { order: number }, b: { order: number }) => a.order - b.order;
+
         // Recursively build tree
         const buildFolderNode = (folder: DexieFolder): TreeNode => {
-            const childFolders = folderChildrenMap.get(folder.id) || [];
-            const childNotes = notesByFolder.get(folder.id) || [];
+            const childFolders = (folderChildrenMap.get(folder.id) || []).sort(sortByOrder);
+            const childNotes = (notesByFolder.get(folder.id) || []).sort(sortByOrder);
 
             const children: TreeNode[] = [
                 ...childFolders.map(buildFolderNode),
@@ -174,6 +180,9 @@ export class SidebarComponent implements OnInit, OnDestroy {
         };
 
         // Build root level
+        rootFolders.sort(sortByOrder);
+        rootNotes.sort(sortByOrder);
+
         const rootNodes: TreeNode[] = [
             ...rootFolders.map(buildFolderNode),
             ...rootNotes.map(note => this.noteToTreeNode(note)),
@@ -239,6 +248,14 @@ export class SidebarComponent implements OnInit, OnDestroy {
         console.log('[Sidebar] Creating new Narrative Vault');
         const id = await this.folderService.createNarrativeVault('New Narrative');
         console.log(`[Sidebar] Created narrative vault: ${id}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Reorder Mode
+    // ─────────────────────────────────────────────────────────────
+
+    toggleReorderMode(): void {
+        this.reorderService.toggleReorderMode();
     }
 
     // ─────────────────────────────────────────────────────────────

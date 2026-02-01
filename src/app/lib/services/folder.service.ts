@@ -5,6 +5,7 @@ import { Injectable } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Folder, FolderSchema, AllowedSubfolderDef, AllowedNoteTypeDef } from '../dexie/db';
+import { getNextFolderOrder } from '../dexie/operations';
 
 @Injectable({
     providedIn: 'root'
@@ -23,28 +24,40 @@ export class FolderService {
 
     /**
      * Get folders by parent ID (for tree building)
+     * Sorted by order field for drag-and-drop reordering.
      */
     getFolderChildren$(parentId: string): Observable<Folder[]> {
         return from(liveQuery(() =>
-            db.folders.where('parentId').equals(parentId).toArray()
+            db.folders
+                .where('parentId')
+                .equals(parentId)
+                .sortBy('order')
         ) as DexieObservable<Folder[]>);
     }
 
     /**
      * Get root folders (no parent)
+     * Sorted by order field for drag-and-drop reordering.
      */
     getRootFolders$(): Observable<Folder[]> {
         return from(liveQuery(() =>
-            db.folders.where('parentId').equals('').toArray()
+            db.folders
+                .where('parentId')
+                .equals('')
+                .sortBy('order')
         ) as DexieObservable<Folder[]>);
     }
 
     /**
      * Get folders by narrative ID (all in a vault)
+     * Sorted by order field.
      */
     getFoldersByNarrative$(narrativeId: string): Observable<Folder[]> {
         return from(liveQuery(() =>
-            db.folders.where('narrativeId').equals(narrativeId).toArray()
+            db.folders
+                .where('narrativeId')
+                .equals(narrativeId)
+                .sortBy('order')
         ) as DexieObservable<Folder[]>);
     }
 
@@ -96,13 +109,15 @@ export class FolderService {
     /**
      * Create a new folder
      */
-    async createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    async createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder(folder.parentId);
 
         await db.folders.add({
             ...folder,
             id,
+            order,
             createdAt: now,
             updatedAt: now,
         });
@@ -117,6 +132,7 @@ export class FolderService {
     async createNarrativeVault(name: string = 'New Narrative'): Promise<string> {
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder('');
 
         await db.folders.add({
             id,
@@ -133,6 +149,7 @@ export class FolderService {
             ownerId: '',
             narrativeId: id,           // Self-referencing for vault root
             isNarrativeRoot: true,
+            order,
             createdAt: now,
             updatedAt: now,
         });
@@ -146,6 +163,7 @@ export class FolderService {
     async createRootFolder(name: string = 'New Folder'): Promise<string> {
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder('');
 
         await db.folders.add({
             id,
@@ -162,6 +180,7 @@ export class FolderService {
             ownerId: '',
             narrativeId: '',           // Global scope
             isNarrativeRoot: false,
+            order,
             createdAt: now,
             updatedAt: now,
         });
@@ -175,6 +194,7 @@ export class FolderService {
     async createTypedRootFolder(entityKind: string, name: string): Promise<string> {
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder('');
 
         await db.folders.add({
             id,
@@ -191,6 +211,7 @@ export class FolderService {
             ownerId: '',
             narrativeId: '',           // Global scope (not in a vault)
             isNarrativeRoot: false,
+            order,
             createdAt: now,
             updatedAt: now,
         });
@@ -221,6 +242,7 @@ export class FolderService {
 
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder(parentId);
 
         // If this IS a narrative root, its narrativeId is itself
         if (isNarrativeRoot) {
@@ -242,6 +264,7 @@ export class FolderService {
             ownerId: parent.ownerId,
             narrativeId,
             isNarrativeRoot,
+            order,
             createdAt: now,
             updatedAt: now,
         });
@@ -266,6 +289,7 @@ export class FolderService {
 
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder(parentId);
 
         await db.folders.add({
             id,
@@ -282,6 +306,7 @@ export class FolderService {
             ownerId: parent.ownerId,
             narrativeId: parent.narrativeId, // Inherit scope
             isNarrativeRoot: false,
+            order,
             createdAt: now,
             updatedAt: now,
             metadata: { date }
@@ -318,6 +343,7 @@ export class FolderService {
 
         const id = crypto.randomUUID();
         const now = Date.now();
+        const order = await getNextFolderOrder(parentId);
 
         await db.folders.add({
             id,
@@ -334,6 +360,7 @@ export class FolderService {
             ownerId: parent.ownerId,
             narrativeId: parent.narrativeId, // Inherit scope
             isNarrativeRoot: false,
+            order,
             createdAt: now,
             updatedAt: now,
         });

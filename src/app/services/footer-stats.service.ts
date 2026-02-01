@@ -6,7 +6,7 @@ import { toSignal, toObservable } from '@angular/core/rxjs-interop';
 import { combineLatest, of, switchMap, map, startWith, distinctUntilChanged, debounceTime } from 'rxjs';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from } from 'rxjs';
-import { db } from '../lib/dexie/db';
+import { db, Mention } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
 import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
@@ -71,7 +71,7 @@ export class FooterStatsService {
                     const mentions = await db.mentions
                         .where('entityId')
                         .equals(entityId)
-                        .filter(m => m.noteId !== noteId)
+                        .filter((m: Mention) => m.noteId !== noteId)
                         .count();
                     backlinkCount += mentions;
                 }

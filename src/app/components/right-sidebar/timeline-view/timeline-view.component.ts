@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, signal, inject, computed, OnInit, OnDestroy, effect } from '@angular/core';
+import { Component, ChangeDetectionStrategy, signal, inject, computed, OnInit, OnDestroy, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgxTimelineComponent, NgxTimelineEntryComponent } from '@omnedia/ngx-timeline';
@@ -289,5 +289,46 @@ export class TimelineViewComponent implements OnInit, OnDestroy {
 
   trackEvent(index: number, event: CodexEntry): string {
     return event.id;
+  }
+
+  // Drag and Drop Handling
+  @HostListener('dragover', ['$event'])
+  onDragOver(event: DragEvent) {
+    if (event.dataTransfer?.types.includes('application/x-shuga-note-id')) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  @HostListener('drop', ['$event'])
+  async onDrop(event: DragEvent) {
+    const noteId = event.dataTransfer?.getData('application/x-shuga-note-id');
+    const noteTitle = event.dataTransfer?.getData('text/plain');
+
+    if (noteId && noteTitle) {
+      event.preventDefault();
+      await this.createEventFromNote(noteId, noteTitle);
+    }
+  }
+
+  private async createEventFromNote(noteId: string, noteTitle: string) {
+    const scope = this.scopeService.activeScope();
+    const narrativeId = scope.narrativeId;
+
+    if (!narrativeId) {
+      console.warn('[Timeline] Cannot create linked event: No active narrative scope');
+      return;
+    }
+
+    // Default to 'Unscheduled' (no displayTime) or ask user
+    // For now, we creates a basic event linked to the note
+    await this.codexService.createEvent(
+      narrativeId,
+      `Event: ${noteTitle}`,
+      `Linked to ${noteTitle}`,
+      [], // entityIds
+      undefined, // displayTime
+      noteId // linkedNoteId
+    );
   }
 }

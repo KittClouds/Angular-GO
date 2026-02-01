@@ -26,7 +26,8 @@ export const NOTES_SCHEMA = `
     owner_id: String,
     created_at: Float,
     updated_at: Float,
-    narrative_id: String
+    narrative_id: String,
+    order: Float
 }
 `;
 
@@ -50,7 +51,8 @@ export const FOLDERS_SCHEMA = `
     narrative_id: String,
     is_narrative_root: Bool,
     network_id: String,
-    metadata: Json
+    metadata: Json,
+    order: Float
 }
 `;
 

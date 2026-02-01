@@ -8,6 +8,8 @@ import {
     FactSheetCardSchema,
     FactSheetFieldSchema,
 } from '../../lib/dexie';
+import { ChapterService } from '../../lib/services/chapter.service';
+import { inject } from '@angular/core';
 import { DEFAULT_ENTITY_SCHEMAS } from '../../lib/schemas/entity-fact-sheet-schemas';
 
 // ============================================================================
@@ -130,7 +132,14 @@ export interface CardWithFields {
 export class FactSheetService {
     // In-memory cache - populated synchronously from defaults
     private schemaCache: Map<string, CardWithFields[]> = new Map();
+    // Cache is now Map<entityId, Map<contextId, Record<string, any>>> ?
+    // Or just simple cache of the "current view"?
+    // For simplicity, we cache the LAST LOADED view so synchronous getters work for the active view.
     private attributeCache: Map<string, Record<string, any>> = new Map();
+
+    // We also need the ChapterService for inheritance, but circular dependency risk if not careful.
+    // We'll inject it.
+    private chapterService = inject(ChapterService);
     private initialized = false;
 
     constructor() {
@@ -194,7 +203,7 @@ export class FactSheetService {
     /**
      * Set a single attribute - updates cache immediately, persists to Dexie
      */
-    async setAttribute(entityId: string, key: string, value: any): Promise<void> {
+    async setAttribute(entityId: string, key: string, value: any, contextId: string = 'global'): Promise<void> {
         // Update cache immediately (optimistic)
         const cached = this.attributeCache.get(entityId) || {};
         cached[key] = value;
@@ -202,15 +211,40 @@ export class FactSheetService {
 
         // Persist to Dexie
         const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-        await db.entityMetadata.put({ entityId, key, value: serialized });
+
+        // Use put to upsert based on composite key [entityId+key+contextId]
+        await db.entityMetadata.put({
+            entityId,
+            key,
+            value: serialized,
+            contextId
+        });
     }
 
     /**
-     * Load attributes for an entity into cache
+     * Load attributes for an entity into cache with INHERITANCE
+     * contextId: The specific chapter/scope to view.
      */
-    async loadAttributes(entityId: string): Promise<Record<string, any>> {
-        const rows = await db.entityMetadata.where('entityId').equals(entityId).toArray();
+    async loadAttributes(entityId: string, contextId: string = 'global'): Promise<Record<string, any>> {
+        // 1. Get inheritance chain (e.g., ['global', 'ch1', 'ch2', 'ch3'])
+        const chain = this.chapterService.getInheritanceChain(contextId);
+
+        // 2. Fetch all metadata for this entity where contextId is in the chain
+        const rows = await db.entityMetadata
+            .where('entityId').equals(entityId)
+            .filter(row => chain.includes(row.contextId || 'global')) // 'global' fallback for old data
+            .toArray();
+
+        // 3. Merge values in order of the chain
         const result: Record<string, any> = {};
+
+        // Sort rows by chain index to ensure correct override order
+        rows.sort((a, b) => {
+            const idxA = chain.indexOf(a.contextId || 'global');
+            const idxB = chain.indexOf(b.contextId || 'global');
+            return idxA - idxB;
+        });
+
         for (const row of rows) {
             try {
                 result[row.key] = JSON.parse(row.value);
@@ -218,6 +252,7 @@ export class FactSheetService {
                 result[row.key] = row.value;
             }
         }
+
         this.attributeCache.set(entityId, result);
         return result;
     }

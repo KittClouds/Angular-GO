@@ -3,7 +3,7 @@ import { Component, inject, computed, signal, importProvidersFrom } from '@angul
 import { CommonModule } from '@angular/common';
 import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
-import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
+
 import { FlowScoreComponent } from './flow-score/flow-score.component';
 import { analyzeText, parseContentToPlainText, getEmptyAnalytics, TextAnalytics } from '../../lib/analytics';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
@@ -16,7 +16,7 @@ import { EditorService } from '../../services/editor.service';
         CommonModule,
         LucideAngularModule,
         NgxNumberTickerComponent,
-        NgxGradientTextComponent,
+
         FlowScoreComponent
     ],
     template: `

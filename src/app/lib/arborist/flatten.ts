@@ -19,22 +19,27 @@ export function flattenTree(
 ): FlatTreeNode[] {
     const result: FlatTreeNode[] = [];
 
+    // Global counters per narrative (Act 1, 2... Chapter 1, 2... Arc 1, 2...)
+    const narrativeCounters = new Map<string, { acts: number, chapters: number, arcs: number }>();
+
     function traverse(
         node: TreeNode,
         level: number,
-        parentExpanded: boolean,
+        parentVisible: boolean,
         ancestorHasSibling: boolean[],
         isLastChild: boolean,
-        inheritedNarrativeId: string | undefined
+        inheritedNarrativeId: string | undefined,
+        passedManuscriptIndex: number | undefined,
+        parentKind?: string
     ): void {
-        if (!parentExpanded && level > 0) return;
+        // NOTE: We do NOT return early even if !parentVisible. 
+        // We must traverse hidden nodes to update global counters.
 
         const isFolder = node.type === 'folder';
         const hasChildren = !!(node.children && node.children.length > 0);
         const isExpanded = expansion.has(node.id);
 
-        // Determine narrativeId: if this is a vault root, use its own id
-        // Otherwise inherit from parent
+        // Determine narrativeId
         let effectiveNarrativeId = inheritedNarrativeId;
         if (node.isNarrativeRoot) {
             effectiveNarrativeId = node.id;
@@ -42,15 +47,44 @@ export function flattenTree(
             effectiveNarrativeId = node.narrativeId;
         }
 
+        // Initialize counters for this narrative if needed
+        const currentNarrativeId = effectiveNarrativeId || 'global';
+        if (!narrativeCounters.has(currentNarrativeId)) {
+            narrativeCounters.set(currentNarrativeId, { acts: 0, chapters: 0, arcs: 0 });
+        }
+        const counters = narrativeCounters.get(currentNarrativeId)!;
+
         // Compute effective color
-        // Narrative roots get a special color (purple/violet)
         let effectiveColor: string | undefined;
         if (node.isNarrativeRoot) {
-            effectiveColor = 'hsl(270, 70%, 60%)'; // Distinct narrative color
+            effectiveColor = 'hsl(270, 70%, 60%)';
         } else if (node.entityKind) {
             effectiveColor = getEntityColor(node.entityKind);
         } else if (node.color) {
             effectiveColor = node.color;
+        }
+
+        // Manuscript Mode Logic - Global vs Local
+        let manuscriptIndex: number | undefined = passedManuscriptIndex;
+        let manuscriptLabel: string | undefined;
+
+        if (node.entityKind === 'ACT') {
+            counters.acts++;
+            manuscriptIndex = counters.acts;
+            manuscriptLabel = `Act ${manuscriptIndex}. `;
+        } else if (node.entityKind === 'CHAPTER') {
+            counters.chapters++;
+            manuscriptIndex = counters.chapters;
+            manuscriptLabel = `${manuscriptIndex}. `;
+        } else if (node.entityKind === 'ARC') {
+            counters.arcs++;
+            manuscriptIndex = counters.arcs;
+            manuscriptLabel = `Arc ${manuscriptIndex}. `;
+        } else if (passedManuscriptIndex !== undefined) {
+            // Local or Shared numbering passed from parent loop
+            if (parentKind === 'CHAPTER' || parentKind === 'ARC') {
+                manuscriptLabel = `${passedManuscriptIndex}. `;
+            }
         }
 
         const flatNode: FlatTreeNode = {
@@ -63,22 +97,58 @@ export function flattenTree(
             isLastChild,
             ancestorHasSibling: [...ancestorHasSibling],
             narrativeId: effectiveNarrativeId,
+            manuscriptIndex,
+            manuscriptLabel
         };
 
-        result.push(flatNode);
+        // Only add to result if visually visible
+        if (parentVisible) {
+            result.push(flatNode);
+        }
 
-        // Recurse into children if expanded
-        if (hasChildren && isExpanded && node.children) {
+        // Recurse into children
+        if (hasChildren && node.children) {
+            const childrenVisible = parentVisible && isExpanded;
+
+            // Track if we've found the first note in this Chapter/Arc folder
+            // The first note inherits the identifier; subsequent notes increment it.
+            let firstNoteFound = false;
+
             const childCount = node.children.length;
             node.children.forEach((child, idx) => {
                 const childIsLast = idx === childCount - 1;
+
+                // Calculate manuscript index for child
+                let childManuscriptIndex: number | undefined;
+
+                if ((node.entityKind === 'CHAPTER' || node.entityKind === 'ARC') &&
+                    (child.type === 'note' || child.entityKind === 'SCENE' || child.entityKind === 'ARC')) {
+                    // Start of complex shared numbering logic
+                    if (!firstNoteFound) {
+                        // The FIRST note inside the Folder inherits its number
+                        childManuscriptIndex = manuscriptIndex;
+                        firstNoteFound = true;
+                    } else {
+                        // Subsequent notes overflow and increment appropriate counter
+                        if (node.entityKind === 'CHAPTER') {
+                            counters.chapters++;
+                            childManuscriptIndex = counters.chapters;
+                        } else if (node.entityKind === 'ARC') {
+                            counters.arcs++;
+                            childManuscriptIndex = counters.arcs;
+                        }
+                    }
+                }
+
                 traverse(
                     child,
                     level + 1,
-                    true,
+                    childrenVisible,
                     [...ancestorHasSibling, !isLastChild],
                     childIsLast,
-                    effectiveNarrativeId
+                    effectiveNarrativeId,
+                    childManuscriptIndex,
+                    node.entityKind || (node.isNarrativeRoot ? 'NARRATIVE' : undefined)
                 );
             });
         }
@@ -87,7 +157,7 @@ export function flattenTree(
     const rootCount = nodes.length;
     nodes.forEach((node, idx) => {
         const isLast = idx === rootCount - 1;
-        traverse(node, 0, true, [], isLast, node.narrativeId);
+        traverse(node, 0, true, [], isLast, node.narrativeId, undefined, undefined);
     });
 
     return result;

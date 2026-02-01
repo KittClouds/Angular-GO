@@ -1,8 +1,9 @@
 import { Component, inject, signal, OnInit, OnDestroy, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Sparkles, BarChart3, ChevronDown } from 'lucide-angular';
+import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, BookOpen } from 'lucide-angular';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
+import { ChapterService } from '../../lib/services/chapter.service';
 import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-sheet-container/fact-sheet-container.component';
 import { FactSheetService } from '../fact-sheets/fact-sheet.service';
 import { AnalyticsPanelComponent } from '../analytics-panel';
@@ -76,8 +77,27 @@ const STORAGE_KEY = 'right-sidebar:tab';
                     @switch (activeView()) {
                         @case ('entities') {
                             <!-- Entity Selector (only for entities view) -->
-                            @if (entities().length > 0) {
-                                <div class="p-2 border-b border-border/50 shrink-0">
+                            <div class="p-2 border-b border-border/50 shrink-0 space-y-2">
+                                <!-- Chapter Selector -->
+                                <div class="flex items-center gap-2">
+                                    <div class="relative w-full">
+                                        <select
+                                            class="w-full pl-8 pr-2 py-1.5 text-xs bg-background/50 border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                                            [ngModel]="chapterService.activeChapterId()"
+                                            (ngModelChange)="onChapterSelect($event)"
+                                        >
+                                            <option value="global">Global Context</option>
+                                            @for (chap of chapterService.chapters(); track chap.id) {
+                                                <option [value]="chap.id">{{ chap.title }}</option>
+                                            }
+                                        </select>
+                                        <lucide-icon name="book-open" class="absolute left-2.5 top-1.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none"></lucide-icon>
+                                        <lucide-icon name="chevron-down" class="absolute right-2 top-1.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none opacity-50"></lucide-icon>
+                                    </div>
+                                </div>
+
+                                <!-- Entity Selector -->
+                                @if (entities().length > 0) {
                                     <select
                                         class="w-full px-2 py-1.5 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
                                         [ngModel]="selectedEntityId()"
@@ -87,12 +107,16 @@ const STORAGE_KEY = 'right-sidebar:tab';
                                             <option [value]="ent.id">{{ ent.kind }} | {{ ent.label }}</option>
                                         }
                                     </select>
-                                </div>
-                            }
+
+                                }
+                            </div>
                             
                             <!-- Fact Sheet -->
                             <div class="flex-1 overflow-hidden">
-                                <app-fact-sheet-container [entity]="selectedEntity()" />
+                                <app-fact-sheet-container 
+                                    [entity]="selectedEntity()" 
+                                    [contextId]="chapterService.activeChapterId()"
+                                />
                             </div>
 
                             <!-- Empty state for entities -->
@@ -187,6 +211,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
 })
 export class RightSidebarComponent implements OnInit, OnDestroy {
     service = inject(RightSidebarService);
+    chapterService = inject(ChapterService);
     private factSheetService = inject(FactSheetService);
 
     readonly viewOptions = VIEW_OPTIONS;
@@ -329,5 +354,10 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     onEntitySelect(entityId: string) {
         this.selectedEntityId.set(entityId);
+    }
+
+    onChapterSelect(chapterId: string) {
+        const val = chapterId === 'global' ? 'global' : chapterId;
+        this.chapterService.setManualChapter(val);
     }
 }

@@ -104,6 +104,18 @@
                 <!-- Divider -->
                 <div class="w-px h-3 bg-white/20 mx-1"></div>
 
+                <!-- Reorder Mode Toggle (only for files view) -->
+                <button *ngIf="viewMode() === 'files'" class="p-1.5 rounded-md transition-colors"
+                    [class.bg-amber-500/20]="reorderService.isReorderMode()"
+                    [class.text-amber-300]="reorderService.isReorderMode()"
+                    [class.text-white/80]="!reorderService.isReorderMode()"
+                    [class.hover:text-white]="!reorderService.isReorderMode()"
+                    [class.hover:bg-white/10]="!reorderService.isReorderMode()"
+                    [title]="reorderService.isReorderMode() ? 'Exit Reorder Mode' : 'Enter Reorder Mode'"
+                    (click)="toggleReorderMode()">
+                    <lucide-icon [img]="MoveVertical" size="14"></lucide-icon>
+                </button>
+
                 <!-- Folder Actions (only for files view) -->
                 <div *ngIf="viewMode() === 'files'" class="relative">
                     <button class="p-1.5 rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"

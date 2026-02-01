@@ -22,19 +22,41 @@ export const NARRATIVE_FOLDER_SCHEMA: FolderSchema = {
     createdAt: now,
     updatedAt: now,
     allowedSubfolders: [
-        { entityKind: 'CHARACTER', label: 'Characters', icon: 'users', description: 'Character folder' },
-        { entityKind: 'LOCATION', label: 'Locations', icon: 'map-pin', description: 'Location folder' },
-        { entityKind: 'ITEM', label: 'Items', icon: 'package', description: 'Item folder' },
-        { entityKind: 'CONCEPT', label: 'World Building', icon: 'lightbulb', description: 'Concept folder' },
-        { entityKind: 'EVENT', label: 'Events', icon: 'calendar', description: 'Event folder' },
-        { entityKind: 'TIMELINE', label: 'Timelines', icon: 'clock', description: 'Timeline folder' },
-        { entityKind: 'ARC', label: 'Story Arcs', icon: 'git-branch', description: 'Arc folder' },
         { entityKind: 'ACT', label: 'Acts', icon: 'layers', description: 'Act folder' },
-        { entityKind: 'CHAPTER', label: 'Chapters', icon: 'book', description: 'Chapter folder' },
         { entityKind: 'SCENE', label: 'Scenes', icon: 'film', description: 'Scene folder' },
+        { entityKind: 'CONCEPT', label: 'World Building', icon: 'lightbulb', description: 'Concept folder' },
     ],
     allowedNoteTypes: [
         { entityKind: 'NARRATIVE', label: 'Story Overview', icon: 'file-text' },
+    ],
+};
+
+// ... (skipping unchanged schemas)
+
+// =============================================================================
+// ACT FOLDER SCHEMA
+// =============================================================================
+
+export const ACT_FOLDER_SCHEMA: FolderSchema = {
+    id: 'ACT',
+    entityKind: 'ACT',
+    name: 'Acts',
+    description: 'Story acts',
+    isVaultRoot: false,
+    containerOnly: false,
+    propagateKindToChildren: false,
+    icon: 'layers',
+    isSystem: true,
+    createdAt: now,
+    updatedAt: now,
+    allowedSubfolders: [
+        { entityKind: 'ARC', label: 'Story Arc', icon: 'git-branch' },
+        { entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' },
+        { entityKind: 'SCENE', label: 'Scene', icon: 'film' },
+    ],
+    allowedNoteTypes: [
+        { entityKind: 'ACT', label: 'Act Overview', icon: 'file-text' },
+        { entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' },
     ],
 };
 
@@ -105,39 +127,14 @@ export const ARC_FOLDER_SCHEMA: FolderSchema = {
     isSystem: true,
     createdAt: now,
     updatedAt: now,
-    allowedSubfolders: [
-        { entityKind: 'ACT', label: 'Act', icon: 'layers' },
-        { entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' },
-    ],
+    allowedSubfolders: [],
     allowedNoteTypes: [
         { entityKind: 'ARC', label: 'Arc Overview', icon: 'file-text' },
-    ],
-};
-
-// =============================================================================
-// ACT FOLDER SCHEMA
-// =============================================================================
-
-export const ACT_FOLDER_SCHEMA: FolderSchema = {
-    id: 'ACT',
-    entityKind: 'ACT',
-    name: 'Acts',
-    description: 'Story acts',
-    isVaultRoot: false,
-    containerOnly: false,
-    propagateKindToChildren: false,
-    icon: 'layers',
-    isSystem: true,
-    createdAt: now,
-    updatedAt: now,
-    allowedSubfolders: [
         { entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' },
-        { entityKind: 'SCENE', label: 'Scene', icon: 'film' },
-    ],
-    allowedNoteTypes: [
-        { entityKind: 'ACT', label: 'Act Overview', icon: 'file-text' },
     ],
 };
+
+
 
 // =============================================================================
 // CHAPTER FOLDER SCHEMA

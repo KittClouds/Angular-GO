@@ -4,7 +4,7 @@
 import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Folder, FolderOpen, FileText, Star, BookOpen, MoreVertical } from 'lucide-angular';
+import { LucideAngularModule, Folder, FolderOpen, FileText, Star, BookOpen, MoreVertical, GripVertical } from 'lucide-angular';
 import type { FlatTreeNode } from '../../../lib/arborist/types';
 
 @Component({
@@ -17,10 +17,24 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
             [class.bg-accent]="selected"
             [class.hover:bg-muted/50]="!selected && !isEditing"
             [class.narrative-root]="node.isNarrativeRoot"
+            [class.opacity-50]="isBeingDragged"
+            [class.grab]="isReorderMode"
+            [class.cursor-grab]="isReorderMode"
             [style.paddingLeft.px]="node.level * 16"
+            [draggable]="!isReorderMode && node.type === 'note'"
             (click)="onNodeClick()"
+            (dragstart)="onNoteDragStart($event)"
             (mouseenter)="isHovered = true"
             (mouseleave)="isHovered = false">
+
+            <!-- Drag Handle (reorder mode only) -->
+            <button
+                *ngIf="isReorderMode"
+                class="drag-handle shrink-0 z-10 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-grab active:cursor-grabbing"
+                (mousedown)="onDragStart($event)"
+                (click)="$event.stopPropagation()">
+                <lucide-icon [img]="GripVertical" size="14"></lucide-icon>
+            </button>
 
             <!-- Connector Lines (VS Code structured style) -->
             <ng-container *ngIf="node.level > 0">
@@ -98,6 +112,7 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
                 [class.font-semibold]="node.isNarrativeRoot"
                 [style.color]="(node.type === 'folder' && (node.isTypedRoot || node.isNarrativeRoot)) ? node.effectiveColor : null"
                 (dblclick)="startEditing($event)">
+                <span *ngIf="node.manuscriptLabel" class="opacity-50 mr-1 font-mono tracking-tighter">{{ node.manuscriptLabel }}</span>
                 {{ node.name || (node.type === 'folder' ? 'New Folder' : 'Untitled') }}
             </span>
 
@@ -166,6 +181,8 @@ export class TreeNodeComponent implements AfterViewChecked {
     @Input() node!: FlatTreeNode;
     @Input() selected = false;
     @Input() isEditing = false;
+    @Input() isReorderMode = false;
+    @Input() isBeingDragged = false;
 
     isHovered = false;
 
@@ -187,6 +204,7 @@ export class TreeNodeComponent implements AfterViewChecked {
     readonly Star = Star;
     readonly BookOpen = BookOpen;
     readonly MoreVertical = MoreVertical;
+    readonly GripVertical = GripVertical;
 
     ngAfterViewChecked(): void {
         if (this.needsFocus && this.editInput) {
@@ -231,5 +249,19 @@ export class TreeNodeComponent implements AfterViewChecked {
 
     cancelEditing(): void {
         this.rename.emit({ node: this.node, newName: this.node.name || '' }); // No change
+    }
+
+    onDragStart(event: MouseEvent): void {
+        // Notify parent that drag started
+        // The actual Swapy drag handling is done at the file-tree level
+        console.log(`[TreeNode] Drag start for ${this.node.id}`);
+    }
+
+    onNoteDragStart(event: DragEvent): void {
+        if (!event.dataTransfer || this.isReorderMode || this.node.type !== 'note') return;
+
+        event.dataTransfer.setData('application/x-shuga-note-id', this.node.id);
+        event.dataTransfer.setData('text/plain', this.node.name);
+        event.dataTransfer.effectAllowed = 'copyLink';
     }
 }

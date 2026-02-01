@@ -382,6 +382,7 @@ export class FactSheetContainerComponent implements OnInit {
   private factSheetService = inject(FactSheetService);
 
   entity = input<ParsedEntity | null>(null);
+  contextId = input<string>('global'); // Default to global context
 
   private cards = computed(() => {
     const ent = this.entity();
@@ -407,15 +408,15 @@ export class FactSheetContainerComponent implements OnInit {
 
     effect(() => {
       const ent = this.entity();
+      const ctx = this.contextId(); // React to context changes
+
       if (ent) {
-        const cached = this.factSheetService.getAttributesSync(ent.id);
-        if (Object.keys(cached).length > 0) {
-          this.loadAttributesIntoModels(cached);
-        } else {
-          this.factSheetService.loadAttributes(ent.id).then((attrs) => {
-            this.loadAttributesIntoModels(attrs);
-          });
-        }
+        // Always load generic attributes first, then context specific?
+        // Service handles merging now.
+        // We force load to ensure we get the merged view for this context.
+        this.factSheetService.loadAttributes(ent.id, ctx).then((attrs) => {
+          this.loadAttributesIntoModels(attrs);
+        });
       } else {
         this.attributes.set({});
         this.resetModels();
@@ -424,13 +425,7 @@ export class FactSheetContainerComponent implements OnInit {
   }
 
   ngOnInit() {
-    const ent = this.entity();
-    if (ent) {
-      const cached = this.factSheetService.getAttributesSync(ent.id);
-      if (Object.keys(cached).length > 0) {
-        this.loadAttributesIntoModels(cached);
-      }
-    }
+    // Initial load handled by effect
   }
 
   private loadAttributesIntoModels(attrs: Record<string, any>) {
@@ -540,7 +535,7 @@ export class FactSheetContainerComponent implements OnInit {
     if (!entity) return;
 
     this.attributes.update(a => ({ ...a, [fieldName]: value }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, value);
+    await this.factSheetService.setAttribute(entity.id, fieldName, value, this.contextId());
   }
 
   async onNumberChange(fieldName: string, value: number) {
@@ -549,7 +544,7 @@ export class FactSheetContainerComponent implements OnInit {
 
     this.numberModels.update(m => ({ ...m, [fieldName]: value }));
     this.attributes.update(a => ({ ...a, [fieldName]: value }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, value);
+    await this.factSheetService.setAttribute(entity.id, fieldName, value, this.contextId());
   }
 
   async onDropdownChange(fieldName: string, value: string) {
@@ -557,7 +552,7 @@ export class FactSheetContainerComponent implements OnInit {
     if (!entity) return;
 
     this.attributes.update(a => ({ ...a, [fieldName]: value }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, value);
+    await this.factSheetService.setAttribute(entity.id, fieldName, value, this.contextId());
   }
 
   async addArrayItem(fieldName: string, event: Event) {
@@ -573,7 +568,7 @@ export class FactSheetContainerComponent implements OnInit {
 
     this.arrayModels.update(m => ({ ...m, [fieldName]: newArray }));
     this.attributes.update(a => ({ ...a, [fieldName]: newArray }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, newArray);
+    await this.factSheetService.setAttribute(entity.id, fieldName, newArray, this.contextId());
 
     input.value = ''; // Clear input
   }
@@ -587,7 +582,7 @@ export class FactSheetContainerComponent implements OnInit {
 
     this.arrayModels.update(m => ({ ...m, [fieldName]: newArray }));
     this.attributes.update(a => ({ ...a, [fieldName]: newArray }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, newArray);
+    await this.factSheetService.setAttribute(entity.id, fieldName, newArray, this.contextId());
   }
 
   async addPlaceholderRelationship(fieldName: string) {
@@ -600,7 +595,7 @@ export class FactSheetContainerComponent implements OnInit {
 
     this.arrayModels.update(m => ({ ...m, [fieldName]: newArray }));
     this.attributes.update(a => ({ ...a, [fieldName]: newArray }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, newArray);
+    await this.factSheetService.setAttribute(entity.id, fieldName, newArray, this.contextId());
   }
 
   async onProgressChange(field: FactSheetFieldSchema, value: number) {
@@ -610,7 +605,7 @@ export class FactSheetContainerComponent implements OnInit {
     const fieldName = field.fieldName;
     this.progressModels.update(m => ({ ...m, [fieldName]: value }));
     this.attributes.update(a => ({ ...a, [field.currentField!]: value }));
-    await this.factSheetService.setAttribute(entity.id, field.currentField!, value);
+    await this.factSheetService.setAttribute(entity.id, field.currentField!, value, this.contextId());
   }
 
   async onStatChange(statName: string, value: number) {
@@ -622,7 +617,7 @@ export class FactSheetContainerComponent implements OnInit {
     const currentStats = this.attributes()['stats'] || {};
     const newStats = { ...currentStats, [statName]: value };
     this.attributes.update(a => ({ ...a, stats: newStats }));
-    await this.factSheetService.setAttribute(entity.id, 'stats', newStats);
+    await this.factSheetService.setAttribute(entity.id, 'stats', newStats, this.contextId());
   }
 
   onDrop(event: CdkDragDrop<CardWithFields[]>) {

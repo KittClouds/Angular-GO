@@ -276,7 +276,9 @@ export class CodexService {
         narrativeId: string,
         title: string,
         description: string = '',
-        entityIds: string[] = []
+        entityIds: string[] = [],
+        displayTime?: string,
+        linkedNoteId?: string
     ): Promise<string> {
         const maxOrder = await this.getMaxOrder(narrativeId, 'event');
         return this.createEntry({
@@ -287,6 +289,8 @@ export class CodexService {
             status: 'draft',
             order: maxOrder + 1,
             entityIds,
+            displayTime,
+            linkedNoteId
         });
     }
 

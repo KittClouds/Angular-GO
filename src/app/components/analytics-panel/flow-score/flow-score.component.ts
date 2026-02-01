@@ -3,7 +3,7 @@ import { Component, input, computed, importProvidersFrom } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LucideAngularModule, TrendingUp, AlertCircle, Sparkles } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
-import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
+
 import type { SentenceLengthDistribution, FlowInsights } from '../../../lib/analytics';
 
 interface CategoryConfig {
@@ -69,7 +69,7 @@ const CATEGORIES: CategoryConfig[] = [
 @Component({
     selector: 'app-flow-score',
     standalone: true,
-    imports: [CommonModule, LucideAngularModule, NgxNumberTickerComponent, NgxGradientTextComponent],
+    imports: [CommonModule, LucideAngularModule, NgxNumberTickerComponent],
     template: `
         <div class="space-y-4">
             <!-- Header with Score -->

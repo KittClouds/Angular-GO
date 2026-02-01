@@ -1,7 +1,7 @@
 // src/app/components/sidebar/file-tree/file-tree.component.ts
 // Main file tree component with virtual scroll and context menu - WIRED to Dexie
 
-import { Component, signal, computed, Input, inject } from '@angular/core';
+import { Component, signal, computed, Input, inject, ViewChild, ElementRef, AfterViewInit, OnDestroy, effect, Injector, runInInjectionContext, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ScrollerModule } from 'primeng/scroller';
 import { LucideAngularModule, Plus, FolderPlus, Pencil, Trash2, Users, MapPin, Calendar, Film, Zap, GitBranch, Layers, BookOpen, Clock, Lightbulb, Package, Shield, FileText } from 'lucide-angular';
@@ -13,13 +13,14 @@ import { FolderService } from '../../../lib/services/folder.service';
 import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 import { ScopeService } from '../../../lib/services/scope.service';
+import { ReorderService } from '../../../lib/services/reorder.service';
 
 @Component({
     selector: 'app-file-tree',
     standalone: true,
     imports: [CommonModule, ScrollerModule, TreeNodeComponent, LucideAngularModule],
     template: `
-        <div class="h-full w-full flex flex-col relative">
+        <div class="h-full w-full flex flex-col relative" #treeContainer>
             <!-- Virtual Scroller -->
             <p-scroller
                 [items]="flatNodes()"
@@ -28,16 +29,27 @@ import { ScopeService } from '../../../lib/services/scope.service';
                 styleClass="h-full w-full"
                 [lazy]="false">
                 <ng-template pTemplate="item" let-node let-options="options">
-                    <app-tree-node
-                        [node]="node"
-                        [selected]="selectedId() === node.id"
-                        [isEditing]="editingNodeId() === node.id"
-                        (toggle)="onToggle($event)"
-                        (select)="onSelect($event)"
-                        (menuClick)="onMenuClick($event)"
-                        (startRename)="onStartRename($event)"
-                        (rename)="onRename($event)">
-                    </app-tree-node>
+                    <!-- Swapy slot wrapper (only in reorder mode) -->
+                    <div
+                        [attr.data-swapy-slot]="reorderService.isReorderMode() ? 'slot-' + node.id : null"
+                        class="w-full">
+                        <div
+                            [attr.data-swapy-item]="reorderService.isReorderMode() ? 'item-' + node.id : null"
+                            class="w-full">
+                            <app-tree-node
+                                [node]="node"
+                                [selected]="selectedId() === node.id"
+                                [isEditing]="editingNodeId() === node.id"
+                                [isReorderMode]="reorderService.isReorderMode()"
+                                [isBeingDragged]="reorderService.draggedNodeId() === node.id"
+                                (toggle)="onToggle($event)"
+                                (select)="onSelect($event)"
+                                (menuClick)="onMenuClick($event)"
+                                (startRename)="onStartRename($event)"
+                                (rename)="onRename($event)">
+                            </app-tree-node>
+                        </div>
+                    </div>
                 </ng-template>
             </p-scroller>
 
@@ -138,11 +150,17 @@ import { ScopeService } from '../../../lib/services/scope.service';
         }
     `]
 })
-export class FileTreeComponent {
+export class FileTreeComponent implements AfterViewInit, OnDestroy {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
     private scopeService = inject(ScopeService);
+    reorderService = inject(ReorderService);
+    private injector = inject(Injector);
+    private destroyRef = inject(DestroyRef);
+
+    // ViewChild for Swapy container
+    @ViewChild('treeContainer') treeContainer!: ElementRef<HTMLDivElement>;
 
     // Input: the nested tree data
     @Input() set tree(value: TreeNode[]) {
@@ -427,5 +445,40 @@ export class FileTreeComponent {
     private async deleteNote(note: FlatTreeNode): Promise<void> {
         console.log(`[FileTree] Deleting note: ${note.name}`);
         await this.notesService.deleteNote(note.id);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Lifecycle Hooks for Swapy Integration
+    // ─────────────────────────────────────────────────────────────
+
+    ngAfterViewInit(): void {
+        // Set container for reorder service
+        if (this.treeContainer) {
+            this.reorderService.setContainer(this.treeContainer.nativeElement);
+        }
+
+        // Watch for reorder mode changes - run in injection context
+        runInInjectionContext(this.injector, () => {
+            const reorderEffect = effect(() => {
+                if (this.reorderService.isReorderMode()) {
+                    // Enable Swapy when reorder mode is active
+                    if (this.treeContainer) {
+                        this.reorderService.enableReorderMode(this.treeContainer.nativeElement, 'siblings-only');
+                    }
+                } else {
+                    // Swapy is disabled via service
+                }
+            });
+
+            // Clean up effect when component is destroyed
+            this.destroyRef.onDestroy(() => {
+                reorderEffect.destroy();
+            });
+        });
+    }
+
+    ngOnDestroy(): void {
+        // Clean up Swapy
+        this.reorderService.disableReorderMode();
     }
 }

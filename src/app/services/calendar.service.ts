@@ -361,7 +361,8 @@ export class CalendarService {
             isPinned: false,
             favorite: false,
             ownerId: 'local',
-            narrativeId: ''
+            narrativeId: '',
+            order: 0 // Default order
         };
     }
 

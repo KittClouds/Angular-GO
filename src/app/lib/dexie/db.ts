@@ -25,6 +25,8 @@ export interface Note {
     updatedAt: number;
     // Scope hierarchy
     narrativeId: string;          // Vault this note belongs to ('' if global)
+    // Ordering
+    order: number;                // Float-based order within folder (1000, 2000, etc.)
 }
 
 export interface Folder {
@@ -51,6 +53,10 @@ export interface Folder {
     metadata?: {
         date?: { year: number; monthIndex: number; dayIndex: number };
     };
+    // Generic attributes for World Building, etc.
+    attributes?: Record<string, any>;
+    // Ordering
+    order: number;                // Float-based order within parent (1000, 2000, etc.)
 }
 
 export interface Tag {
@@ -338,6 +344,7 @@ export interface EntityMetadata {
     entityId: string;
     key: string;
     value: string;
+    contextId?: string; // Scope ID (e.g. "global", "chapter-id")
 }
 
 export interface EntityCard {
@@ -544,7 +551,7 @@ export class CrepeDatabase extends Dexie {
     codexEntries!: Table<CodexEntry>;
 
     constructor() {
-        super('CrepeNotes');
+        super('CrepeNotesDB');
 
         // Version 3: Added scope hierarchy and schema tables
         this.version(3).stores({
@@ -627,9 +634,182 @@ export class CrepeDatabase extends Dexie {
             // NEW: CodexEntry - unified facts, beats, and events
             codexEntries: 'id, narrativeId, entryType, category, subcategory, parentId, order, status, sourceSpanId, sourceNoteId, createdAt, [narrativeId+entryType], [narrativeId+category], [narrativeId+entryType+category]'
         });
+
+        // Version 7: Drag-and-Drop Reordering
+        // Added order field to notes and folders for manual reordering
+        this.version(7).stores({
+            // Notes: added order index for manual sorting
+            notes: 'id, worldId, folderId, title, entityKind, isEntity, isPinned, favorite, updatedAt, narrativeId, order, [folderId+order]',
+
+            // Folders: added order index for manual sorting
+            folders: 'id, worldId, parentId, entityKind, isTypedRoot, isSubtypeRoot, narrativeId, isNarrativeRoot, order, [parentId+order]'
+        }).upgrade(async (tx) => {
+            // Migration: Populate order field for existing items
+            // Use createdAt as initial ordering to preserve insertion order
+
+            // Migrate folders
+            const folders = await tx.table('folders').toArray();
+            const foldersByParent = new Map<string, typeof folders>();
+            for (const folder of folders) {
+                const parentId = folder.parentId || '';
+                if (!foldersByParent.has(parentId)) {
+                    foldersByParent.set(parentId, []);
+                }
+                foldersByParent.get(parentId)!.push(folder);
+            }
+
+            for (const [parentId, siblings] of foldersByParent) {
+                // Sort by createdAt to preserve insertion order
+                siblings.sort((a, b) => a.createdAt - b.createdAt);
+                for (let i = 0; i < siblings.length; i++) {
+                    await tx.table('folders').update(siblings[i].id, { order: (i + 1) * 1000 });
+                }
+            }
+
+            // Migrate notes
+            const notes = await tx.table('notes').toArray();
+            const notesByFolder = new Map<string, typeof notes>();
+            for (const note of notes) {
+                const folderId = note.folderId || '';
+                if (!notesByFolder.has(folderId)) {
+                    notesByFolder.set(folderId, []);
+                }
+                notesByFolder.get(folderId)!.push(note);
+            }
+
+            for (const [folderId, siblings] of notesByFolder) {
+                // Sort by createdAt to preserve insertion order
+                siblings.sort((a, b) => a.createdAt - b.createdAt);
+                for (let i = 0; i < siblings.length; i++) {
+                    await tx.table('notes').update(siblings[i].id, { order: (i + 1) * 1000 });
+                }
+            }
+
+            console.log('[Dexie] Migration to v7 complete: order fields populated');
+        });
+
+        // Version 8: Chapter-Scoped Entity State
+        // Added contextId to EntityMetadata for historical tracking
+        this.version(8).stores({
+            // key is now composite with contextId
+            entityMetadata: '[entityId+key+contextId], entityId, [entityId+contextId]'
+        }).upgrade(async (tx) => {
+            // Migration: Set default contextId to 'global' for existing records
+            await tx.table('entityMetadata').toCollection().modify((item: EntityMetadata) => {
+                if (!item.contextId) {
+                    item.contextId = 'global';
+                }
+            });
+            console.log('[Dexie] Migration to v8 complete: entityMetadata contextId populated');
+        });
+
+        // Version 9: Index Folder Name
+        // Added 'name' to folders index to support efficient lookups (e.g. finding "Chapters" folder)
+        this.version(9).stores({
+            folders: 'id, worldId, parentId, name, entityKind, isTypedRoot, isSubtypeRoot, narrativeId, isNarrativeRoot, order, [parentId+order]'
+        });
+
+        // Version 10: Switch Chapters to Notes
+        // Updating ACT schema to allow CHAPTER as a note type
+        this.version(10).upgrade(async (tx) => {
+            // We need to import the new schema here or redefine it slightly to avoid circular dependencies if importing from default-schemas
+            // For safety, we'll manually specify the update
+            const ACT_SCHEMA_ID = 'ACT';
+
+            const actSchema = await tx.table('folderSchemas').get(ACT_SCHEMA_ID);
+            if (actSchema) {
+                // Remove CHAPTER from subfolders
+                actSchema.allowedSubfolders = actSchema.allowedSubfolders.filter((s: any) => s.entityKind !== 'CHAPTER');
+
+                // Add CHAPTER to note types if not present
+                if (!actSchema.allowedNoteTypes.find((n: any) => n.entityKind === 'CHAPTER')) {
+                    actSchema.allowedNoteTypes.push({ entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' });
+                }
+
+                await tx.table('folderSchemas').put(actSchema);
+                console.log('[Dexie] Upgrade to v10: Updated ACT schema to support Chapter Notes');
+            }
+        });
+
+        // Version 11: Move Story Arcs to Act Notes
+        // Updating NARRATIVE schema to remove ARC subfolder
+        // Updating ACT schema to add ARC note type
+        this.version(11).upgrade(async (tx) => {
+            const NARRATIVE_SCHEMA_ID = 'NARRATIVE';
+            const ACT_SCHEMA_ID = 'ACT';
+
+            // 1. Update NARRATIVE: Remove ARC from subfolders
+            const narrativeSchema = await tx.table('folderSchemas').get(NARRATIVE_SCHEMA_ID);
+            if (narrativeSchema) {
+                narrativeSchema.allowedSubfolders = narrativeSchema.allowedSubfolders.filter((s: any) => s.entityKind !== 'ARC');
+                await tx.table('folderSchemas').put(narrativeSchema);
+                console.log('[Dexie] Upgrade to v11: Removed ARC from Narrative subfolders');
+            }
+
+            // 2. Update ACT: Add ARC to note types
+            const actSchema = await tx.table('folderSchemas').get(ACT_SCHEMA_ID);
+            if (actSchema) {
+                if (!actSchema.allowedNoteTypes.find((n: any) => n.entityKind === 'ARC')) {
+                    actSchema.allowedNoteTypes.push({ entityKind: 'ARC', label: 'Story Arc', icon: 'git-branch' });
+                }
+                await tx.table('folderSchemas').put(actSchema);
+                console.log('[Dexie] Upgrade to v11: Added ARC to Act note types');
+            }
+        });
+
+        // Version 12: Convert Story Arc to Folder
+        // 1. ARC schema: Remove ACT subfolder, add CHAPTER note type
+        // 2. ACT schema: Add ARC subfolder, remove ARC note type
+        this.version(12).upgrade(async (tx) => {
+            const ACT_SCHEMA_ID = 'ACT';
+            const ARC_SCHEMA_ID = 'ARC';
+
+            // Update ARC Schema
+            const arcSchema = await tx.table('folderSchemas').get(ARC_SCHEMA_ID);
+            if (arcSchema) {
+                // Clear subfolders (remove ACT/CHAPTER folders)
+                arcSchema.allowedSubfolders = [];
+
+                // Add CHAPTER note type
+                if (!arcSchema.allowedNoteTypes.find((n: any) => n.entityKind === 'CHAPTER')) {
+                    arcSchema.allowedNoteTypes.push({ entityKind: 'CHAPTER', label: 'Chapter', icon: 'book' });
+                }
+                await tx.table('folderSchemas').put(arcSchema);
+            }
+
+            // Update ACT Schema
+            const actSchema = await tx.table('folderSchemas').get(ACT_SCHEMA_ID);
+            if (actSchema) {
+                // Remove ARC from notes
+                actSchema.allowedNoteTypes = actSchema.allowedNoteTypes.filter((n: any) => n.entityKind !== 'ARC');
+
+                // Add ARC to subfolders
+                if (!actSchema.allowedSubfolders.find((s: any) => s.entityKind === 'ARC')) {
+                    actSchema.allowedSubfolders.unshift({ entityKind: 'ARC', label: 'Story Arc', icon: 'git-branch' });
+                }
+                await tx.table('folderSchemas').put(actSchema);
+                console.log('[Dexie] Upgrade to v12: Converted Story Arc to Folder structure');
+            }
+        });
+
+        // Version 13: Restrict Narrative Subfolders
+        // Only Act, Scene, and Concept (World Building) allowed
+        this.version(13).upgrade(async (tx) => {
+            const NARRATIVE_SCHEMA_ID = 'NARRATIVE';
+            const schema = await tx.table('folderSchemas').get(NARRATIVE_SCHEMA_ID);
+
+            if (schema) {
+                const allowedKinds = ['ACT', 'SCENE', 'CONCEPT'];
+                schema.allowedSubfolders = schema.allowedSubfolders.filter((s: any) =>
+                    allowedKinds.includes(s.entityKind)
+                );
+                await tx.table('folderSchemas').put(schema);
+                console.log('[Dexie] Upgrade to v13: Restricted Narrative subfolders');
+            }
+        });
     }
+
 }
 
+
 export const db = new CrepeDatabase();
-
-

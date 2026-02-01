@@ -44,6 +44,11 @@ export interface FlatTreeNode extends TreeNode {
     isLastChild: boolean;
     /** Ancestor expansion state for drawing connector lines */
     ancestorHasSibling: boolean[];
+
+    // Manuscript Mode
+    manuscriptIndex?: number;
+    manuscriptLabel?: string;
+    worldDate?: string;
 }
 
 /**

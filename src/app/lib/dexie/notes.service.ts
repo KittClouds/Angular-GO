@@ -28,9 +28,15 @@ export class NotesService {
 
     /**
      * Get notes in a specific folder
+     * Sorted by order field for drag-and-drop reordering.
      */
     getNotesByFolder$(folderId: string): Observable<Note[]> {
-        return from(liveQuery(() => db.notes.where('folderId').equals(folderId).toArray()) as DexieObservable<Note[]>);
+        return from(liveQuery(() =>
+            db.notes
+                .where('folderId')
+                .equals(folderId)
+                .sortBy('order')
+        ) as DexieObservable<Note[]>);
     }
 
     /**
@@ -79,7 +85,7 @@ export class NotesService {
     // CRUD OPERATIONS (pass-through to operations module)
     // ==========================================================================
 
-    async createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    async createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
         return ops.createNote(note);
     }
 
@@ -104,7 +110,7 @@ export class NotesService {
         return ops.deleteNote(id);
     }
 
-    async createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    async createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
         return ops.createFolder(folder);
     }
 

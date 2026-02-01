@@ -27,6 +27,7 @@ export interface CozoNote {
     created_at: number;
     updated_at: number;
     narrative_id: string;
+    order: number;
 }
 
 export interface CozoFolder {
@@ -101,6 +102,7 @@ export const DexieToCozo = {
         created_at: n.createdAt,
         updated_at: n.updatedAt,
         narrative_id: n.narrativeId || '',
+        order: n.order || 0,
     }),
 
     folder: (f: Folder): CozoFolder => ({
@@ -185,6 +187,7 @@ export const CozoToDexie = {
         createdAt: row[12] as number,
         updatedAt: row[13] as number,
         narrativeId: row[14] as string,
+        order: (row[15] as number) || 0,
     }),
 
     /**
