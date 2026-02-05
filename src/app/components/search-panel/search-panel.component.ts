@@ -5,7 +5,7 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideSearch, lucideCpu, lucideZap, lucideLayers, lucideLoader2,
   lucideCheckCircle2, lucideAlertCircle, lucideChevronDown, lucideFileText,
-  lucideSparkles, lucideMicrochip
+  lucideSparkles, lucideMicrochip, lucideFolder, lucideGlobe
 } from '@ng-icons/lucide';
 import { SemanticSearchService } from '../../lib/services/semantic-search.service';
 
@@ -35,7 +35,7 @@ interface RagStats {
   providers: [provideIcons({
     lucideSearch, lucideCpu, lucideZap, lucideLayers, lucideLoader2,
     lucideCheckCircle2, lucideAlertCircle, lucideChevronDown, lucideFileText,
-    lucideSparkles, lucideMicrochip
+    lucideSparkles, lucideMicrochip, lucideFolder, lucideGlobe
   })],
   template: `
     <div class="flex flex-col h-full text-foreground bg-sidebar">
@@ -228,6 +228,24 @@ interface RagStats {
         </div>
       </div>
 
+      <!-- Folder Scope Selector -->
+      <div class="mb-3 shrink-0">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mb-1.5 px-1">Index Scope</div>
+        <div class="relative">
+          <ng-icon name="lucideGlobe" *ngIf="indexScope() === 'global'" class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-teal-500"></ng-icon>
+          <ng-icon name="lucideFolder" *ngIf="indexScope() !== 'global'" class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-500"></ng-icon>
+          <select
+            [ngModel]="indexScope()"
+            (ngModelChange)="indexScope.set($event)"
+            class="w-full h-9 pl-9 pr-3 rounded-md bg-zinc-900/60 border border-zinc-700/50 text-zinc-200 text-xs focus:outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20 transition-all appearance-none cursor-pointer"
+          >
+            <option value="global">Global (All Notes)</option>
+            <option *ngFor="let f of folders()" [value]="f.id">{{ f.name }}</option>
+          </select>
+          <ng-icon name="lucideChevronDown" class="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none"></ng-icon>
+        </div>
+      </div>
+
       <!-- Action Buttons -->
       <div class="flex gap-2 mb-4 shrink-0">
         <button
@@ -357,6 +375,10 @@ export class SearchPanelComponent implements OnInit {
   showAdvanced = signal(false);
   embedMode = signal<EmbedMode>('typescript');
 
+  // Indexing scope
+  indexScope = signal<'global' | string>('global');
+  folders = signal<Array<{ id: string; name: string }>>([]);
+
   // Constants
   readonly modes: { id: SearchMode, label: string, icon: string }[] = [
     { id: 'vector', label: 'Vector', icon: 'lucideZap' },
@@ -395,13 +417,15 @@ export class SearchPanelComponent implements OnInit {
   }
 
   async ngOnInit() {
-    // Load initial stats
+    // Load folders for scope selection
     try {
-      const s = await this.searchService.getStats();
-      this.stats.set(s);
+      const { getAllFolders } = await import('../../lib/nebula/operations');
+      const allFolders = await getAllFolders();
+      this.folders.set(allFolders.map(f => ({ id: f.id, name: f.name })));
     } catch (err) {
-      console.warn('[SearchPanel] Failed to load stats:', err);
+      console.warn('[SearchPanel] Failed to load folders:', err);
     }
+    // Stats are loaded after indexing, not on init (avoids Cozo not-ready error)
   }
 
   toggleAdvanced() {
@@ -434,12 +458,32 @@ export class SearchPanelComponent implements OnInit {
     this.error.set(null);
 
     try {
-      // TODO: Get notes from Dexie and pass to service
-      // For now, simulate indexing
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { getAllNotes, getNotesByFolder } = await import('../../lib/nebula/operations');
+      const scope = this.indexScope();
 
+      // Fetch notes based on selected scope
+      let notes;
+      if (scope === 'global') {
+        notes = await getAllNotes();
+      } else {
+        notes = await getNotesByFolder(scope);
+      }
+
+      console.log(`[SearchPanel] Indexing ${notes.length} notes (scope: ${scope})`);
+
+      // Pass to semantic search service
+      await this.searchService.indexNotes(
+        notes.map(n => ({
+          id: n.id,
+          narrativeId: (n as any).narrativeId ?? '',
+          title: n.title ?? 'Untitled',
+          content: n.content ?? ''
+        }))
+      );
+
+      // Update stats after indexing
       const s = await this.searchService.getStats();
-      this.stats.set(s);
+      this.stats.set({ ...s, notes: notes.length });
       this.status.set('ready');
     } catch (err) {
       console.error('[SearchPanel] Indexing failed:', err);

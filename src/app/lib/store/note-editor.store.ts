@@ -9,7 +9,7 @@ import { Observable, Subject, from, of, switchMap, debounceTime, distinctUntilCh
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { db, Note } from '../dexie/db';
-import * as ops from '../dexie/operations';
+import * as ops from '../nebula/operations';
 
 const ACTIVE_NOTE_KEY = 'kittclouds-active-note';
 const EDITOR_POSITION_KEY = 'kittclouds-editor-position';

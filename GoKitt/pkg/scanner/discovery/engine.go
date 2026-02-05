@@ -1,7 +1,6 @@
 package discovery
 
 import (
-	"strings"
 	"unicode"
 
 	implicitmatcher "github.com/kittclouds/gokitt/pkg/implicit-matcher"
@@ -41,12 +40,19 @@ func (e *DiscoveryEngine) ObserveRelation(sourceKind implicitmatcher.EntityKind,
 }
 
 // ScanText is a simple heuristic scanner (The Virus) that looks for patterns in raw text.
-// It assumes tokens are whitespace-separated for now.
-// In production, Conductor might call heuristics using Chunker output instead.
+// Uses TokenizeWithOffsets to properly split on punctuation.
 func (e *DiscoveryEngine) ScanText(text string) {
-	tokens := strings.Fields(text)
-	if len(tokens) < 3 {
+	tokenObjs := implicitmatcher.TokenizeWithOffsets(text)
+	if len(tokenObjs) < 3 {
 		return
+	}
+
+	// Extract raw tokens from text for matching
+	tokens := make([]string, len(tokenObjs))
+	for i, tok := range tokenObjs {
+		if tok.Start < len(text) && tok.End <= len(text) {
+			tokens[i] = text[tok.Start:tok.End]
+		}
 	}
 
 	for i := 0; i < len(tokens)-2; i++ {

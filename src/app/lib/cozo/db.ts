@@ -481,3 +481,33 @@ export class CozoDbService {
 // Singleton instance
 export const cozoDb = new CozoDbService();
 
+// Debug utilities (accessible from browser console)
+if (typeof window !== 'undefined') {
+    (window as any).cozoDebug = {
+        // Clear the stale WAL (fixes duplicate entity issue)
+        clearWal: async () => {
+            const { cozoPersistence } = await import('./persistence/CozoPersistenceService');
+            await cozoPersistence.clearWal();
+            console.log('✅ WAL cleared. Refresh the page to see changes.');
+        },
+        // Query entities count
+        queryEntities: () => {
+            const result = cozoDb.runQuery('?[count(id)] := *entities{id}');
+            console.log('Entities count:', result.rows?.[0]?.[0] ?? 0);
+            return result;
+        },
+        // List all entities
+        listEntities: () => {
+            const result = cozoDb.runQuery('?[id, label, kind] := *entities{id, label, kind}');
+            console.table(result.rows?.map((r: any) => ({ id: r[0], label: r[1], kind: r[2] })));
+            return result;
+        },
+        // Delete all entities (nuclear option)
+        clearEntities: () => {
+            const result = cozoDb.runQuery('?[id] := *entities{id} :rm entities {id}');
+            console.log('Cleared entities:', result);
+            return result;
+        }
+    };
+    console.log('[CozoDB] 🔧 Debug: window.cozoDebug.clearWal() to fix duplicate entities');
+}

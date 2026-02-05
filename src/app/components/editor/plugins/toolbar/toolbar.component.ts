@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Ctx } from '@milkdown/kit/ctx';
-import { commandsCtx } from '@milkdown/kit/core';
+import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
 import { toggleStrongCommand, toggleEmphasisCommand, toggleInlineCodeCommand, linkSchema, strongSchema, emphasisSchema, inlineCodeSchema } from '@milkdown/kit/preset/commonmark';
 import { toggleStrikethroughCommand, strikethroughSchema } from '@milkdown/kit/preset/gfm';
 import { toggleLinkCommand } from '@milkdown/kit/component/link-tooltip';
@@ -12,7 +12,7 @@ import {
     Bold, Italic, Underline, Strikethrough, Code, Link2,
     AlignLeft, AlignCenter, AlignRight, AlignJustify,
     Sparkles, Type, Highlighter, ALargeSmall,
-    Indent, Outdent
+    Indent, Outdent, Tag, User, MapPin, Users, Shield, Calendar, Lightbulb, Plus
 } from 'lucide-angular';
 
 import { ToolbarDropdownComponent, DropdownItem } from './toolbar-dropdown.component';
@@ -24,6 +24,10 @@ import {
     underlineSchema
 } from '../marks';
 import { setTextAlignCommand, indentCommand, outdentCommand } from '../nodes';
+
+// Registry for entity creation
+import { smartGraphRegistry } from '../../../../lib/registry';
+import type { EntityKind } from '../../../../lib/Scanner/types';
 
 @Component({
     selector: 'app-editor-toolbar',
@@ -61,6 +65,15 @@ import { setTextAlignCommand, indentCommand, outdentCommand } from '../nodes';
             <button type="button" [class.bg-teal-50]="isActive(linkSchema)" [class.text-teal-900]="isActive(linkSchema)" class="btn-icon" (click)="exec(toggleLinkCommand)" title="Link">
                 <lucide-icon [img]="LinkIcon" class="w-4 h-4"></lucide-icon>
             </button>
+
+            <div class="w-px h-5 bg-toolbar-border mx-1"></div>
+
+            <!-- Entity Tagging Dropdown -->
+            <app-toolbar-dropdown [items]="entityItems" (select)="onEntityAction($event)">
+                <div trigger class="flex items-center gap-1 px-1" title="Tag as Entity">
+                    <lucide-icon [img]="TagIcon" class="w-4 h-4 text-purple-500"></lucide-icon>
+                </div>
+            </app-toolbar-dropdown>
 
             <div class="w-px h-5 bg-toolbar-border mx-1"></div>
 
@@ -132,6 +145,7 @@ import { setTextAlignCommand, indentCommand, outdentCommand } from '../nodes';
 export class EditorToolbarComponent {
     @Input() ctx!: Ctx;
     @Input() editorState?: EditorState;
+    @Input() noteId?: string; // Current note ID for entity registration
     @Output() hide = new EventEmitter<void>();
 
     // Icons
@@ -148,6 +162,7 @@ export class EditorToolbarComponent {
     readonly IndentIcon = Indent;
     readonly TypeIcon = Type;
     readonly SizeIcon = ALargeSmall;
+    readonly TagIcon = Tag;
 
     // Schemas for checking active state
     strongSchema = strongSchema;
@@ -193,6 +208,17 @@ export class EditorToolbarComponent {
         { id: 'normal', label: 'Normal' },
         { id: 'large', label: 'Large' },
         { id: 'huge', label: 'Huge' },
+    ];
+
+    // Entity type dropdown items
+    entityItems: DropdownItem[] = [
+        { id: 'CHARACTER', label: 'Character', icon: User },
+        { id: 'LOCATION', label: 'Location', icon: MapPin },
+        { id: 'NPC', label: 'NPC', icon: Users },
+        { id: 'FACTION', label: 'Faction', icon: Shield },
+        { id: 'EVENT', label: 'Event', icon: Calendar },
+        { id: 'CONCEPT', label: 'Concept', icon: Lightbulb },
+        { id: 'CUSTOM', label: 'Custom...', icon: Plus },
     ];
 
     constructor(private cdr: ChangeDetectorRef) { }
@@ -255,4 +281,60 @@ export class EditorToolbarComponent {
     setTextColor(color: string | null) {
         this.exec(setTextColorCommand, color);
     }
+
+    /**
+     * Handle entity tagging from dropdown.
+     * Wraps selected text in [TYPE|Text] syntax and registers the entity.
+     */
+    onEntityAction(item: DropdownItem) {
+        if (!this.ctx || !this.editorState) return;
+
+        // Handle custom type (prompt user)
+        let entityType = item.id;
+        if (entityType === 'CUSTOM') {
+            const customType = prompt('Enter custom entity type:');
+            if (!customType || customType.trim() === '') return;
+            entityType = customType.trim().toUpperCase();
+        }
+
+        try {
+            const view = this.ctx.get(editorViewCtx);
+            const { state } = view;
+            const { selection, doc } = state;
+            const { from, to, empty } = selection;
+
+            if (empty) {
+                console.log('[EntityTag] No text selected');
+                return;
+            }
+
+            // Get the selected text
+            const selectedText = doc.textBetween(from, to, ' ');
+            if (!selectedText.trim()) return;
+
+            // Create the entity syntax: [TYPE|Label]
+            const entitySyntax = `[${entityType}|${selectedText}]`;
+
+            // Replace the selected text with the entity syntax
+            const tr = state.tr.replaceWith(from, to, state.schema.text(entitySyntax));
+            view.dispatch(tr);
+
+            // Register the entity in the registry
+            const noteIdToUse = this.noteId || 'unknown-note';
+            smartGraphRegistry.registerEntity(
+                selectedText.trim(),
+                entityType as EntityKind,
+                noteIdToUse,
+                { source: 'user' }
+            );
+
+            console.log(`[EntityTag] Created entity: ${entitySyntax}`);
+
+            // Hide toolbar after action
+            this.hide.emit();
+        } catch (e) {
+            console.error('[EntityTag] Failed to tag entity:', e);
+        }
+    }
 }
+

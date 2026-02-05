@@ -248,13 +248,17 @@ func (c *Conductor) GetCandidates() interface{} {
 // ScanDiscovery runs the full discovery pipeline (Harvester + Virus)
 func (c *Conductor) ScanDiscovery(text string) {
 	// Phase 1: Harvester - Observe ALL capitalized words
-	tokens := strings.Fields(text)
-	for _, token := range tokens {
-		// Check if capitalized (potential entity)
-		if len(token) > 0 {
-			first := []rune(token)[0]
-			if unicode.IsUpper(first) {
-				c.discoveryEngine.ObserveToken(token)
+	// Use TokenizeWithOffsets to properly split on punctuation (not just whitespace)
+	tokens := implicitmatcher.TokenizeWithOffsets(text)
+	for _, tok := range tokens {
+		// Check if capitalized in original text (potential entity)
+		if tok.Start < len(text) && tok.End <= len(text) {
+			rawToken := text[tok.Start:tok.End]
+			if len(rawToken) > 0 {
+				first := []rune(rawToken)[0]
+				if unicode.IsUpper(first) {
+					c.discoveryEngine.ObserveToken(rawToken)
+				}
 			}
 		}
 	}

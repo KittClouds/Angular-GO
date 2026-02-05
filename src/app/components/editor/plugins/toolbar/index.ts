@@ -14,7 +14,8 @@ export class AngularToolbarPluginView implements PluginView {
         private ctx: Ctx,
         private view: EditorView,
         private injector: EnvironmentInjector,
-        private appRef: ApplicationRef
+        private appRef: ApplicationRef,
+        private getNoteId?: () => string | undefined
     ) {
         // Create container element
         this.content = document.createElement('div');
@@ -30,6 +31,11 @@ export class AngularToolbarPluginView implements PluginView {
 
         // Pass inputs
         this.componentRef.instance.ctx = this.ctx;
+
+        // Listen for hide event
+        this.componentRef.instance.hide.subscribe(() => {
+            this.content.style.display = 'none';
+        });
 
         // Attach to app for change detection
         this.appRef.attachView(this.componentRef.hostView);
@@ -91,6 +97,10 @@ export class AngularToolbarPluginView implements PluginView {
         this.tooltipProvider.update(view, prevState);
         // Update Angular component state
         this.componentRef.instance.update(view.state);
+        // Update noteId if getter provided
+        if (this.getNoteId) {
+            this.componentRef.instance.noteId = this.getNoteId();
+        }
     };
 
     destroy = () => {
@@ -105,10 +115,14 @@ export class AngularToolbarPluginView implements PluginView {
 export const angularSelectionTooltip = tooltipFactory('ANGULAR_SELECTION_TOOLBAR');
 
 // Configuration factory
-export function configureAngularToolbar(injector: EnvironmentInjector, appRef: ApplicationRef) {
+export function configureAngularToolbar(
+    injector: EnvironmentInjector,
+    appRef: ApplicationRef,
+    getNoteId?: () => string | undefined
+) {
     return (ctx: Ctx) => {
         ctx.set(angularSelectionTooltip.key, {
-            view: (view: EditorView) => new AngularToolbarPluginView(ctx, view, injector, appRef),
+            view: (view: EditorView) => new AngularToolbarPluginView(ctx, view, injector, appRef, getNoteId),
         });
 
         // Return the plugin to be used
@@ -119,3 +133,4 @@ export function configureAngularToolbar(injector: EnvironmentInjector, appRef: A
 }
 
 export const angularToolbarPlugin = angularSelectionTooltip;
+

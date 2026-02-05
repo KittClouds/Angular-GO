@@ -76,7 +76,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         this.crepe.editor
             .use(gfm)
             .use(history)
-            .config(configureAngularToolbar(this.injector, this.appRef))
+            .config(configureAngularToolbar(this.injector, this.appRef, () => this.currentNoteId ?? undefined))
             .use(angularToolbarPlugin)
             .config(configureAngularBlockHandle(this.injector, this.appRef))
             .use(angularBlockHandlePlugin)

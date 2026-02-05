@@ -359,6 +359,27 @@ export interface EntityCard {
     updatedAt: number;
 }
 
+// Custom slider definitions for fact sheets (e.g., Health, Mana, Sanity)
+export interface CustomSliderDef {
+    id: string;              // UUID
+    entityKind: string;      // CHARACTER, NPC, etc.
+    name: string;            // Internal name: "health", "sanity"
+    label: string;           // Display: "Health", "Sanity"
+    // Color gradient: from low value to high value
+    colorLow: string;        // e.g., "#ef4444" (red) - critical state
+    colorMid?: string;       // e.g., "#f59e0b" (amber) - warning
+    colorHigh: string;       // e.g., "#22c55e" (green) - healthy
+    // Umbra preset name (optional, for quick styling)
+    umbraPreset?: string;    // "vitals", "magic", "corruption", "neutral"
+    min: number;             // Default 0
+    max: number;             // Default 100
+    icon?: string;           // Lucide icon name
+    isSystem: boolean;       // System sliders can't be deleted
+    displayOrder: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
 // Global per-kind card schema (all CHARACTERs share this layout)
 export interface FactSheetCardSchema {
     id: string;                      // e.g., "CHARACTER::identity"
@@ -525,6 +546,7 @@ export class CrepeDatabase extends Dexie {
     // Fact sheets - per-entity data
     entityMetadata!: Table<EntityMetadata>;
     entityCards!: Table<EntityCard>;
+    customSliderDefs!: Table<CustomSliderDef>;
 
     // Fact sheet schemas - global per-kind definitions
     factSheetCardSchemas!: Table<FactSheetCardSchema>;
@@ -806,6 +828,25 @@ export class CrepeDatabase extends Dexie {
                 await tx.table('folderSchemas').put(schema);
                 console.log('[Dexie] Upgrade to v13: Restricted Narrative subfolders');
             }
+        });
+
+        // Version 14: Custom Slider Definitions
+        // Dynamic user-defined sliders for fact sheets (Health, Mana, Sanity, etc.)
+        this.version(14).stores({
+            customSliderDefs: 'id, entityKind, displayOrder, isSystem'
+        }).upgrade(async (tx) => {
+            // Seed default sliders for CHARACTER entity kind
+            const now = Date.now();
+            const defaultSliders = [
+                { id: 'sys-xp', entityKind: 'CHARACTER', name: 'xp', label: 'XP', colorLow: '#6366f1', colorMid: '#8b5cf6', colorHigh: '#a855f7', umbraPreset: 'magic', min: 0, max: 100, icon: 'Sparkles', isSystem: true, displayOrder: 0, createdAt: now, updatedAt: now },
+                { id: 'sys-health', entityKind: 'CHARACTER', name: 'health', label: 'Health', colorLow: '#ef4444', colorMid: '#f59e0b', colorHigh: '#22c55e', umbraPreset: 'vitals', min: 0, max: 100, icon: 'Heart', isSystem: true, displayOrder: 1, createdAt: now, updatedAt: now },
+                { id: 'sys-mana', entityKind: 'CHARACTER', name: 'mana', label: 'Mana', colorLow: '#0ea5e9', colorMid: '#3b82f6', colorHigh: '#6366f1', umbraPreset: 'magic', min: 0, max: 100, icon: 'Droplet', isSystem: true, displayOrder: 2, createdAt: now, updatedAt: now },
+                { id: 'sys-stamina', entityKind: 'CHARACTER', name: 'stamina', label: 'Stamina', colorLow: '#f97316', colorMid: '#eab308', colorHigh: '#84cc16', umbraPreset: 'vitals', min: 0, max: 100, icon: 'Zap', isSystem: true, displayOrder: 3, createdAt: now, updatedAt: now },
+            ];
+            for (const slider of defaultSliders) {
+                await tx.table('customSliderDefs').put(slider);
+            }
+            console.log('[Dexie] Upgrade to v14: Seeded default custom sliders');
         });
     }
 

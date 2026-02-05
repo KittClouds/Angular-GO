@@ -10,12 +10,13 @@ import { seedDefaultSchemas } from './lib/folders/seed';
 import { GoKittService } from './services/gokitt.service';
 import { setGoKittService } from './api/highlighter-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
-import { DexieCozoBridge } from './lib/bridge';
+import { NebulaCozoBridge } from './lib/bridge';
 import { cozoDb } from './lib/cozo/db';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
+import { setNebulaBridge } from './lib/nebula/operations';
 
 @Component({
   selector: 'app-root',
@@ -29,10 +30,11 @@ export class AppComponent implements OnInit, OnDestroy {
   private spinner = inject(NgxSpinnerService);
   private goKitt = inject(GoKittService);
   private orchestrator = inject(AppOrchestrator);
-  private bridge = inject(DexieCozoBridge);
+  private nebulaBridge = inject(NebulaCozoBridge);
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
+
 
   // Navigation API subscriptions
   private notesSub: Subscription | null = null;
@@ -70,15 +72,12 @@ export class AppComponent implements OnInit, OnDestroy {
         // Initialize CozoDB (WASM + persistence)
         await cozoDb.init();
 
-        // Initialize Dexie-CozoDB bridge (will enable sync now that CozoDB is ready)
-        await this.bridge.init();
+        // Initialize NebulaDB-CozoDB bridge (hydrates from Cozo, primary data layer)
+        await this.nebulaBridge.init();
 
-        // If bridge has CozoDB sync enabled, do initial full sync from Dexie → CozoDB
-        if (this.bridge.hasCozoSync()) {
-          console.log('[AppComponent] Starting initial Dexie → CozoDB sync...');
-          const report = await this.bridge.fullSync();
-          console.log(`[AppComponent] ✓ Initial sync complete: ${report.notes.synced} notes, ${report.entities.synced} entities`);
-        }
+        // Wire up bridge for non-DI contexts (operations.ts)
+        setNebulaBridge(this.nebulaBridge);
+        console.log('[AppComponent] ✓ NebulaDB bridge initialized and wired');
       });
 
       // Phase 3: WASM Load - load module (parallel with registry)

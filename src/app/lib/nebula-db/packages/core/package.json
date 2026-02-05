@@ -1,0 +1,44 @@
+{
+  "name": "@nebula-db/core",
+  "version": "0.4.0",
+  "description": "Core package for NebulaDB",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nom-nom-hub/NebulaDB.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('fs-extra').removeSync('dist')\"",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "database",
+    "nosql",
+    "embedded",
+    "typescript"
+  ],
+  "author": "Nom-nom-hub",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^3.1.2"
+  },
+  "dependencies": {
+    "@preact/signals-core": "^1.5.1",
+    "vite": "^6.4.1"
+  }
+}

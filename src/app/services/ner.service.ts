@@ -19,9 +19,21 @@ export class NerService {
     private goKitt = inject(GoKittService);
     private noteStore = inject(NoteEditorStore);
 
+    constructor() {
+        // Init from localStorage
+        if (typeof localStorage !== 'undefined') {
+            const stored = localStorage.getItem('ner_fst_enabled');
+            if (stored !== null) {
+                const enabled = stored === 'true';
+                this.fstEnabled.set(enabled);
+                _globalFstEnabled = enabled; // Sync global accessor
+            }
+        }
+    }
+
     // State
     readonly suggestions = signal<NerSuggestion[]>([]);
-    readonly fstEnabled = signal<boolean>(true);
+    readonly fstEnabled = signal<boolean>(true); // Default true, but updated in constructor
     readonly isAnalyzing = signal<boolean>(false);
 
     // Current note content
@@ -124,8 +136,32 @@ export class NerService {
 
     toggleFst(enabled: boolean) {
         this.fstEnabled.set(enabled);
+
+        // Persist
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('ner_fst_enabled', String(enabled));
+        }
+
         if (!enabled) {
             this.suggestions.set([]);
         }
+        // Update global accessor for non-Angular code (highlighter-api)
+        _globalFstEnabled = enabled;
+        // Dispatch event to notify highlighter to refresh
+        window.dispatchEvent(new CustomEvent('fst-toggle', { detail: { enabled } }));
     }
+}
+
+// Global accessor for non-Angular code (highlighter-api.ts)
+// Default to localStorage value if available, else true
+let _globalFstEnabled = true;
+if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('ner_fst_enabled');
+    if (stored !== null) {
+        _globalFstEnabled = stored === 'true';
+    }
+}
+
+export function isFstEnabled(): boolean {
+    return _globalFstEnabled;
 }

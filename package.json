@@ -46,6 +46,7 @@
     "@omnedia/ngx-swapy": "^4.0.1",
     "@omnedia/ngx-timeline": "^4.0.1",
     "@omnedia/ngx-tracing-beam": "^4.0.1",
+    "@preact/signals-core": "^1.13.0",
     "@primeng/themes": "^21.0.4",
     "@spartan-ng/brain": "^0.0.1-alpha.609",
     "@spartan-ng/ui-core": "^0.0.1-alpha.380",
@@ -62,7 +63,8 @@
     "rxjs": "~7.8.0",
     "swapy": "^1.0.5",
     "tailwind-merge": "^3.4.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@angular/build": "^21.1.1",

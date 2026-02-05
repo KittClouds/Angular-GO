@@ -11,7 +11,8 @@ type Scorer struct {
 
 	// Indexes
 	DocumentIndex map[string]DocumentMetadata         `json:"documentIndex"`
-	TokenIndex    map[string]map[string]TokenMetadata `json:"tokenIndex"` // term -> docID -> meta
+	TokenIndex    map[string]map[string]TokenMetadata `json:"tokenIndex"` // term -> docID -> meta (mutable overlay)
+	FrozenIndex   *FSTIndex                           `json:"-"`          // Immutable FST-backed base layer
 
 	// Caches
 	IDFCache     map[int]float64
@@ -64,12 +65,10 @@ func (s *Scorer) IndexDocument(docID string, meta DocumentMetadata, tokens map[s
 func (s *Scorer) Search(query []string, queryVector []float32, limit int) []SearchResult {
 	candidates := make(map[string]bool)
 
-	// 1. Text-based Candidates
+	// 1. Text-based Candidates (from both frozen and mutable indexes)
 	for _, term := range query {
-		if docs, ok := s.TokenIndex[term]; ok {
-			for docID := range docs {
-				candidates[docID] = true
-			}
+		for docID := range s.getTermPostings(term) {
+			candidates[docID] = true
 		}
 	}
 
@@ -135,7 +134,8 @@ func (s *Scorer) Score(query []string, queryVector []float32, docID string) floa
 
 	// 2. Score Terms
 	for _, term := range query {
-		tMeta, ok := s.TokenIndex[term][docID]
+		postings := s.getTermPostings(term)
+		tMeta, ok := postings[docID]
 		if !ok {
 			continue
 		}
@@ -274,4 +274,53 @@ func remapSegmentMask(mask uint32, fromSegs uint32, toSegs uint32) uint32 {
 		}
 	}
 	return newMask
+}
+
+// getTermPostings returns postings for a term, merging frozen and mutable indexes
+// Mutable overlay takes precedence (for updates)
+func (s *Scorer) getTermPostings(term string) map[string]TokenMetadata {
+	result := make(map[string]TokenMetadata)
+
+	// First, load from frozen index if available
+	if s.FrozenIndex != nil {
+		if frozen, ok := s.FrozenIndex.Get(term); ok {
+			for docID, meta := range frozen {
+				result[docID] = meta
+			}
+		}
+	}
+
+	// Then overlay mutable index (overwrites frozen entries)
+	if mutable, ok := s.TokenIndex[term]; ok {
+		for docID, meta := range mutable {
+			result[docID] = meta
+		}
+	}
+
+	return result
+}
+
+// Compact freezes the current mutable TokenIndex into the FrozenIndex
+// This significantly reduces memory usage for large indexes
+func (s *Scorer) Compact() error {
+	if len(s.TokenIndex) == 0 {
+		return nil // Nothing to compact
+	}
+
+	// Build new FST index from mutable data
+	newFrozen, err := BuildFSTIndex(s.TokenIndex)
+	if err != nil {
+		return err
+	}
+
+	// Close old frozen index if exists
+	if s.FrozenIndex != nil {
+		s.FrozenIndex.Close()
+	}
+
+	// Swap
+	s.FrozenIndex = newFrozen
+	s.TokenIndex = make(map[string]map[string]TokenMetadata) // Clear mutable
+
+	return nil
 }

@@ -16,6 +16,62 @@ const (
 	StatusIgnored
 )
 
+// nerStopwords - Common capitalized words that are NOT named entities
+// These bypass the standard English stopwords list because they're often:
+// - Adjectives at sentence start (Beautiful, Pure, Huge)
+// - Verbs at line start (Loves, Hates, Tease)
+// - Abstract nouns too generic for entities (Conflict, Resolution, Trauma)
+// - Document structure words (Profiles, Species, Height)
+var nerStopwords = map[string]bool{
+	// Adjectives (often sentence-initial)
+	"beautiful": true, "pure": true, "huge": true, "tiny": true,
+	"visual": true, "biological": true, "kinetic": true, "dynamic": true,
+	"solar": true, "pale": true, "white": true, "red": true, "yellow": true,
+	"blonde": true, "amber": true, "tall": true, "big": true, "small": true,
+	"great": true, "good": true, "bad": true, "new": true, "old": true,
+	"tight": true, "loose": true, "bright": true, "dark": true, "light": true,
+	"heavy": true, "dense": true, "lean": true, "fit": true, "solid": true,
+	"cute": true, "pretty": true, "handsome": true, "ugly": true,
+	"serious": true, "funny": true, "scary": true, "creepy": true,
+	"loud": true, "quiet": true, "soft": true, "hard": true,
+	"long": true, "short": true, "wide": true, "narrow": true,
+	"fast": true, "slow": true, "quick": true, "gentle": true,
+	"scrappy": true, "grumpy": true, "manic": true, "calm": true,
+
+	// Verbs/Actions (often at line starts in character sheets)
+	"tease": true, "loves": true, "hates": true, "hides": true, "flaunts": true,
+	"snaps": true, "eat": true, "spank": true, "move": true, "step": true,
+	"walk": true, "run": true, "jump": true, "fly": true, "float": true,
+	"hide": true, "show": true, "look": true, "see": true, "watch": true,
+	"give": true, "take": true, "make": true, "get": true, "let": true,
+	"try": true, "want": true, "need": true, "use": true, "find": true,
+	"keep": true, "put": true, "think": true, "say": true, "tell": true,
+
+	// Abstract nouns (too generic for entities)
+	"conflict": true, "resolution": true, "trauma": true, "biology": true,
+	"chaos": true, "contrast": true, "interaction": true, "dynamics": true,
+	"fun": true, "reality": true, "bond": true, "core": true, "void": true,
+	"disaster": true, "disasters": true, "friction": true, "tension": true,
+	"love": true, "hate": true, "fear": true, "anger": true, "joy": true,
+	"power": true, "strength": true, "weakness": true, "energy": true,
+	"life": true, "death": true, "time": true, "space": true,
+
+	// Document structure words (often in RPG character sheets)
+	"profiles": true, "archetypes": true, "summary": true, "height": true,
+	"species": true, "handler": true, "controller": true, "floater": true,
+	"factions": true, "lineage": true, "variant": true, "traits": true,
+	"visuals": true, "vibe": true, "notes": true, "section": true,
+	"chapter": true, "introduction": true, "conclusion": true,
+	"hair": true, "eyes": true, "wings": true, "skin": true, "horns": true,
+
+	// Common relationship/role descriptors
+	"sister": true, "brother": true, "mother": true, "father": true,
+	"daughter": true, "son": true, "cousin": true, "twin": true,
+	"friend": true, "enemy": true, "rival": true, "ally": true,
+	"leader": true, "member": true, "general": true, "captain": true,
+	"girl": true, "boy": true, "man": true, "woman": true,
+}
+
 // CandidateStats tracks info about a potential entity
 type CandidateStats struct {
 	Count        int
@@ -74,7 +130,12 @@ func (r *CandidateRegistry) AddToken(raw string) bool {
 		return false
 	}
 
-	// 2. Get/Create stats
+	// 3. Check NER-specific stopwords (common capitalized words)
+	if nerStopwords[string(key)] {
+		return false
+	}
+
+	// 4. Get/Create stats
 	stats, exists := r.Stats[key]
 	if !exists {
 		stats = &CandidateStats{

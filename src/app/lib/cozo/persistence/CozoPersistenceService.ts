@@ -178,6 +178,16 @@ class CozoPersistenceServiceImpl {
     }
 
     /**
+     * Clear the WAL without saving a snapshot (for debugging/reset)
+     * WARNING: This will lose any un-compacted changes
+     */
+    async clearWal(): Promise<void> {
+        await this.init();
+        await this.sendToWorker('TRUNCATE_WAL');
+        console.log('[CozoPersistence] WAL cleared');
+    }
+
+    /**
      * Get the count of pending WAL entries (for compaction heuristics)
      */
     get pendingWalCount(): number {

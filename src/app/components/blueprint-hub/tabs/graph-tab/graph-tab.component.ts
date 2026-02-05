@@ -232,15 +232,18 @@ export class GraphTabComponent implements OnInit, OnDestroy {
         let allEntities: RegisteredEntity[];
 
         if (scope.id === 'vault:global') {
-            // Global: show all
+            // Global: show all entities from the registry
             allEntities = smartGraphRegistry.getAllEntities();
         } else {
-            // Scoped: filter by notes in scope
-            const noteIds = await this.scopeService.getNotesInScope(scope);
-            allEntities = smartGraphRegistry.getAllEntities().filter(e => {
-                // Entity is in scope if its noteId is in the scope
-                return noteIds.includes(e.noteId || '');
-            });
+            // Scoped: get entities that are MENTIONED in notes within this scope
+            // This uses the mentions table, not just firstNote
+            const scopedDbEntities = await this.scopeService.getEntitiesInScope(scope);
+            const scopedEntityIds = new Set(scopedDbEntities.map(e => e.id));
+
+            // Filter registry entities by the scoped IDs
+            allEntities = smartGraphRegistry.getAllEntities().filter(e =>
+                scopedEntityIds.has(e.id)
+            );
         }
 
         this.entities.set(allEntities);

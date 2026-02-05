@@ -10,6 +10,7 @@ import { InputNumber } from 'primeng/inputnumber';
 import { FactSheetCardComponent } from '../fact-sheet-card/fact-sheet-card.component';
 import { FactSheetService, CardWithFields } from '../fact-sheet.service';
 import { FactSheetFieldSchema } from '../../../lib/dexie';
+import { SliderManagerComponent } from '../fields/slider-manager.component';
 
 export interface ParsedEntity {
   id: string;
@@ -33,6 +34,7 @@ export interface ParsedEntity {
     InputText,
     InputNumber,
     FactSheetCardComponent,
+    SliderManagerComponent,
   ],
   template: `
     @if (entity(); as ent) {
@@ -225,6 +227,14 @@ export interface ParsedEntity {
                                  <button class="text-xs text-primary hover:underline mt-1" (click)="addPlaceholderRelationship(field.fieldName)">+ Add Another</button>
                              }
                         </div>
+                      }
+
+                      <!-- DYNAMIC SLIDERS (Custom Stats) -->
+                      @case ('dynamic-sliders') {
+                        <app-slider-manager
+                          [entityKind]="ent.kind"
+                          [entityId]="ent.id"
+                        />
                       }
 
                       @default {

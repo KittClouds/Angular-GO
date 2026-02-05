@@ -23,6 +23,7 @@ import {
 
 import { smartGraphRegistry } from '../lib/registry';
 import { discoveryStore } from '../lib/store/discoveryStore';
+import { isFstEnabled } from '../services/ner.service';
 
 let goKittService: GoKittService | null = null;
 
@@ -114,6 +115,23 @@ class DefaultHighlighterApi implements HighlighterApi {
                 this.pendingRescan = true;
                 this.notifyListeners();
             });
+
+            // Listen for FST toggle to clear/show candidate spans
+            window.addEventListener('fst-toggle', ((e: CustomEvent) => {
+                const enabled = e.detail?.enabled;
+                console.log('[HighlighterApi] FST toggle:', enabled);
+                if (!enabled) {
+                    // Clear discovery candidate spans when FST is disabled
+                    this.implicitDecorations = this.implicitDecorations.filter(
+                        d => d.type !== 'entity_candidate'
+                    );
+                    this.notifyListeners();
+                } else {
+                    // Trigger rescan when enabled
+                    this.pendingRescan = true;
+                    this.notifyListeners();
+                }
+            }) as EventListener);
         }
 
         // Subscribe to store changes
@@ -468,6 +486,12 @@ class DefaultHighlighterApi implements HighlighterApi {
      */
     private triggerDiscoveryScan(text: string): void {
         if (!goKittService) return;
+
+        // Don't run discovery if FST toggle is disabled
+        if (!isFstEnabled()) {
+            console.log('[HighlighterApi] FST disabled, skipping discovery scan');
+            return;
+        }
 
         // Non-blocking async scan (worker-based)
         (async () => {

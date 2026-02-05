@@ -1,0 +1,34 @@
+﻿=== RUN   TestEntropyCache_Basic
+--- PASS: TestEntropyCache_Basic (0.00s)
+=== RUN   TestEntropyCache_LRU
+--- PASS: TestEntropyCache_LRU (0.00s)
+=== RUN   TestCalculateQueryEntropyStats
+--- PASS: TestCalculateQueryEntropyStats (0.00s)
+=== RUN   TestSigmoid
+--- PASS: TestSigmoid (0.00s)
+=== RUN   TestFSTIndexMemory
+    fst_index_test.go:15: Generating index with 5000 terms, 50 docs/term...
+    fst_index_test.go:40: Building FST Index...
+    fst_index_test.go:50: FST Keys: 5000
+    fst_index_test.go:51: FST Postings Size: 4399500 bytes (4.20 MB)
+    fst_index_test.go:58: Verifying Correctness...
+    fst_index_test.go:83: Memory Test Complete
+--- PASS: TestFSTIndexMemory (0.12s)
+=== RUN   TestScorerCompact
+    fst_index_test.go:115: Before Compact: Found 10 results for 'term_0'
+    fst_index_test.go:127: After Compact: Found 10 results for 'term_0'
+    fst_index_test.go:144: Compact integration test passed!
+--- PASS: TestScorerCompact (0.00s)
+=== RUN   TestScorerBasic
+    scorer_test.go:74: Doc1: 4.24, Doc2: 1.65
+--- PASS: TestScorerBasic (0.00s)
+=== RUN   TestProximityBoost
+--- PASS: TestProximityBoost (0.00s)
+=== RUN   TestBM25Math
+--- PASS: TestBM25Math (0.00s)
+=== RUN   TestVectorScoring
+--- PASS: TestVectorScoring (0.00s)
+=== RUN   TestHybridSearch
+--- PASS: TestHybridSearch (0.00s)
+PASS
+ok  	github.com/kittclouds/gokitt/pkg/resorank	0.653s
