@@ -57,6 +57,11 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<vo
                 updatedAt: Date.now(),
             } as Note;
             await _bridge.syncNote(updatedNote);
+
+            // Sync content to GoKitt DocStore (if content was updated)
+            if (updates.content !== undefined) {
+                syncNoteToDocStore(id, updates.content, updatedNote.updatedAt);
+            }
             return;
         }
         // Note not in NebulaDB yet - fall through to Dexie fallback
@@ -71,9 +76,31 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<vo
         return;
     }
 
+    const now = Date.now();
     await db.notes.update(id, {
         ...updates,
-        updatedAt: Date.now(),
+        updatedAt: now,
+    });
+
+    // Sync content to GoKitt DocStore (if content was updated)
+    if (updates.content !== undefined) {
+        syncNoteToDocStore(id, updates.content, now);
+    }
+}
+
+// Lazy sync to GoKitt DocStore (fire-and-forget)
+function syncNoteToDocStore(id: string, content: any, version: number): void {
+    // Use the goKitt service from highlighter-api (already wired at startup)
+    import('../../api/highlighter-api').then((api) => {
+        const goKitt = (api as any).getGoKittService?.();
+        if (goKitt) {
+            const text = typeof content === 'string' ? content : JSON.stringify(content);
+            goKitt.upsertNote(id, text, version).catch((e: any) =>
+                console.warn('[NebulaOps] DocStore sync failed:', e)
+            );
+        }
+    }).catch(() => {
+        // Module not loaded - skip silently
     });
 }
 

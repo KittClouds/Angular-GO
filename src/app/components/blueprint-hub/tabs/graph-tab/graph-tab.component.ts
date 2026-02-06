@@ -214,7 +214,6 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
         // Subscribe to registry changes
         this.unsubscribeRegistry = smartGraphRegistry.subscribe(() => {
-            console.log('[GraphTab] Registry changed, refreshing entities...');
             this.refreshEntities();
         });
 

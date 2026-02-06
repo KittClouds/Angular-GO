@@ -79,7 +79,6 @@ export function createGraphSchemas(): string[] {
                     console.error(`[GraphSchema] ${name} failed:`, msg);
                 }
             } else {
-                console.log(`[GraphSchema] ${name} created`);
                 created.push(name);
             }
         } catch (err) {
@@ -91,7 +90,7 @@ export function createGraphSchemas(): string[] {
     }
 
     graphSchemasCreated = true;
-    console.log(`[GraphSchema] ✅ Complete (${created.length} schemas)`);
+    console.log(`[GraphSchema] ✅ ${created.length} schemas ready`);
     return created;
 }
 

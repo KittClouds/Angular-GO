@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { MainLayoutComponent } from './components/layout/main-layout/main-layout.component';
 import { NgxSpinnerModule, NgxSpinnerService } from 'ngx-spinner';
-import { Subscription } from 'rxjs';
+import { Subscription, firstValueFrom } from 'rxjs';
 
 import { smartGraphRegistry } from './lib/registry';
 import { entityColorStore } from './lib/store/entityColorStore';
@@ -93,6 +93,16 @@ export class AppComponent implements OnInit, OnDestroy {
       await this.goKitt.hydrateWithEntities();
       console.log('[AppComponent] ✓ WASM hydrated with entities');
       this.orchestrator.completePhase('wasm_hydrate');
+
+      // Phase 4.5: DocStore Hydrate - load all notes into Go memory
+      const allNotes = await firstValueFrom(this.notesService.getAllNotes$()) || [];
+      const noteData = allNotes.map((n: any) => ({
+        id: n.id,
+        text: typeof n.content === 'string' ? n.content : JSON.stringify(n.content),
+        version: n.updatedAt ?? 0
+      }));
+      await this.goKitt.hydrateNotes(noteData);
+      console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes`);
 
       // Phase 5: Ready
       this.orchestrator.completePhase('ready');

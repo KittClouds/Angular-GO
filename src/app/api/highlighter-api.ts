@@ -32,6 +32,11 @@ export function setGoKittService(service: GoKittService) {
     goKittService = service;
 }
 
+// Getter for non-DI contexts (e.g. operations.ts)
+export function getGoKittService(): GoKittService | null {
+    return goKittService;
+}
+
 // Mock for DiscoveryStore (still needed until fully Angularized)
 const useDiscoveryStore = {
     getState: () => ({
