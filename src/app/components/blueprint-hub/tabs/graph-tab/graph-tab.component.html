@@ -46,6 +46,17 @@
                 <lucide-icon [img]="PlusIcon" class="w-3.5 h-3.5"></lucide-icon>
                 Add Entity
             </button>
+            <button class="h-8 px-2.5 flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
+                [class.text-muted-foreground]="!isExtracting()" [class.hover:text-primary]="!isExtracting()"
+                [class.hover:bg-primary/10]="!isExtracting()" [class.text-primary]="isExtracting()"
+                [class.bg-primary/10]="isExtracting()" [disabled]="isExtracting()"
+                pTooltip="Extract entities from all notes using LLM" tooltipPosition="bottom"
+                (click)="extractAllFromNarrative()">
+                <lucide-icon [img]="WandIcon" class="w-3.5 h-3.5" [class.animate-pulse]="isExtracting()"></lucide-icon>
+                @if (isExtracting()) {
+                <span class="text-[10px]">{{ extractionProgress().current }}/{{ extractionProgress().total }}</span>
+                }
+            </button>
             <button
                 class="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 pTooltip="Flush Registry" tooltipPosition="bottom" (click)="flushRegistry()">

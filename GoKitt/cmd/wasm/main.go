@@ -217,14 +217,27 @@ func indexDocument(this js.Value, args []js.Value) interface{} {
 	return successResult("indexed " + id)
 }
 
-// indexNote: [id string, text string]
-// Scans text with Conductor and indexes it in ResoRank
+// indexNote: [id string, text string, scopeJSON string (optional)]
+// Scans text with Conductor and indexes it in ResoRank with optional scope metadata
 func indexNote(this js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
-		return errorResult("requires 2 args: id, text")
+		return errorResult("requires 2+ args: id, text, [scopeJSON]")
 	}
 	id := args[0].String()
 	text := args[1].String()
+
+	// Parse optional scope metadata
+	var narrativeID, folderPath string
+	if len(args) > 2 && args[2].String() != "" && args[2].String() != "null" {
+		var scopeInput struct {
+			NarrativeID string `json:"narrativeId"`
+			FolderPath  string `json:"folderPath"`
+		}
+		if err := json.Unmarshal([]byte(args[2].String()), &scopeInput); err == nil {
+			narrativeID = scopeInput.NarrativeID
+			folderPath = scopeInput.FolderPath
+		}
+	}
 
 	if pipeline == nil || searcher == nil {
 		return errorResult("pipeline or searcher not initialized")
@@ -242,6 +255,8 @@ func indexNote(this js.Value, args []js.Value) interface{} {
 	docMeta := resorank.DocumentMetadata{
 		FieldLengths:    map[string]int{"content": docLen},
 		TotalTokenCount: docLen,
+		NarrativeID:     narrativeID,
+		FolderPath:      folderPath,
 	}
 
 	tokens := make(map[string]resorank.TokenMetadata)
@@ -283,10 +298,10 @@ func indexNote(this js.Value, args []js.Value) interface{} {
 	return successResult("indexed " + id)
 }
 
-// search: [queryJSON string, limit int, vectorJSON string (optional)]
+// search: [queryJSON string, limit int, vectorJSON string (optional), scopeJSON string (optional)]
 func search(this js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
-		return errorResult("requires 2+ args: queryJSON, limit, [vectorJSON]")
+		return errorResult("requires 2+ args: queryJSON, limit, [vectorJSON], [scopeJSON]")
 	}
 
 	var query []string
@@ -303,7 +318,16 @@ func search(this js.Value, args []js.Value) interface{} {
 		}
 	}
 
-	results := searcher.Search(query, vector, limit)
+	// Parse optional scope filter
+	var scope *resorank.SearchScope
+	if len(args) > 3 && args[3].String() != "" && args[3].String() != "null" {
+		scope = &resorank.SearchScope{}
+		if err := json.Unmarshal([]byte(args[3].String()), scope); err != nil {
+			return errorResult("scope json: " + err.Error())
+		}
+	}
+
+	results := searcher.SearchScoped(query, vector, limit, scope)
 
 	bytes, _ := json.Marshal(results)
 	return string(bytes)

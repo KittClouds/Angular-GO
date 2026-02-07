@@ -6,11 +6,12 @@ import { LucideAngularModule, X, FileText } from 'lucide-angular';
 import { TabStore } from '../../../lib/store/tab.store';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 import { FormsModule } from '@angular/forms';
+import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
 
 @Component({
     selector: 'app-editor-tabs',
     standalone: true,
-    imports: [CommonModule, TabsModule, ButtonModule, LucideAngularModule, FormsModule],
+    imports: [CommonModule, TabsModule, ButtonModule, LucideAngularModule, FormsModule, NgxGradientTextComponent],
     template: `
         <div class="h-full w-full flex items-center overflow-hidden bg-transparent" style="background: transparent !important;">
             <p-tabs [value]="activeTabValue()" (valueChange)="onTabChange($event)" class="w-full h-full custom-tabs bg-transparent" style="background: transparent !important;">
@@ -23,22 +24,33 @@ import { FormsModule } from '@angular/forms';
                             [class.border-t-2]="tab.active"
                             [class.border-t-teal-400]="tab.active">
                             
-                            <lucide-icon [img]="FileText" size="12" class="text-teal-400"></lucide-icon>
+                            <lucide-icon [img]="FileText" size="12" [class.text-teal-400]="!tab.active" [class.text-violet-400]="tab.active"></lucide-icon>
                             
                             <!-- Title or Rename Input -->
                             <div class="flex-1 truncate relative" (dblclick)="startRenaming(tab.id, tab.title)">
-                                <span *ngIf="renamingId() !== tab.id">{{ tab.title }}</span>
-                                <input *ngIf="renamingId() === tab.id"
-                                    #renameInput
-                                    type="text"
-                                    [ngModel]="renamingTitle()"
-                                    (ngModelChange)="renamingTitle.set($event)"
-                                    (blur)="finishRenaming()"
-                                    (keydown.enter)="finishRenaming()"
-                                    (keydown.escape)="cancelRenaming()"
-                                    class="w-full bg-slate-800 text-white px-1 rounded outline-none border border-teal-500/50"
-                                    (click)="$event.stopPropagation()"
-                                >
+                                @if (renamingId() === tab.id) {
+                                    <input
+                                        #renameInput
+                                        type="text"
+                                        [ngModel]="renamingTitle()"
+                                        (ngModelChange)="renamingTitle.set($event)"
+                                        (blur)="finishRenaming()"
+                                        (keydown.enter)="finishRenaming()"
+                                        (keydown.escape)="cancelRenaming()"
+                                        class="w-full bg-slate-800 text-white px-1 rounded outline-none border border-teal-500/50"
+                                        (click)="$event.stopPropagation()"
+                                    >
+                                } @else if (tab.active) {
+                                    <!-- Gradient text for active tab -->
+                                    <om-gradient-text 
+                                        [text]="tab.title" 
+                                        gradientStart="#a78bfa" 
+                                        gradientEnd="#f472b6"
+                                        styleClass="active-tab-gradient">
+                                    </om-gradient-text>
+                                } @else {
+                                    <span>{{ tab.title }}</span>
+                                }
                             </div>
 
                             <!-- Close Button (visible on hover or active) -->
@@ -106,6 +118,12 @@ import { FormsModule } from '@angular/forms';
             background: transparent !important;
             color: white !important;
         }
+
+        /* Gradient text sizing for tabs */
+        ::ng-deep .active-tab-gradient {
+            font-size: 12px !important;
+            font-weight: 500 !important;
+        }
     `]
 })
 export class EditorTabsComponent {
@@ -168,3 +186,4 @@ export class EditorTabsComponent {
         this.renamingId.set(null);
     }
 }
+

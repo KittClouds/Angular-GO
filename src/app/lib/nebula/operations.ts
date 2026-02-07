@@ -3,6 +3,7 @@
 // Syncs to CozoDB via NebulaCozoBridge
 
 import { nebulaDb, Note, Folder, Entity, Edge } from './db';
+import { recordAction } from '../cozo/memory/EpisodeLogService';
 
 // Lazy accessor for NebulaCozoBridge
 let _bridge: any = null;
@@ -42,6 +43,17 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         // Fallback: direct insert to NebulaDB
         await nebulaDb.notes.insert(fullNote);
     }
+
+    // Log episode for LLM memory
+    recordAction(
+        note.folderId,           // scope = parent folder
+        id,                      // note affected
+        'created_note',
+        id,
+        'note',
+        { newValue: { title: note.title, folderId: note.folderId } },
+        note.narrativeId || ''
+    );
 
     return id;
 }
@@ -105,10 +117,26 @@ function syncNoteToDocStore(id: string, content: any, version: number): void {
 }
 
 export async function deleteNote(id: string): Promise<void> {
+    // Get note info before deletion for episode logging
+    const note = await nebulaDb.notes.findOne({ id }) as Note | null;
+
     if (_bridge?.isReady()) {
         await _bridge.deleteNote(id);
     } else {
         await nebulaDb.notes.delete({ id });
+    }
+
+    // Log episode for LLM memory
+    if (note) {
+        recordAction(
+            note.folderId,
+            id,
+            'deleted_note',
+            id,
+            'note',
+            { oldValue: { title: note.title, folderId: note.folderId } },
+            note.narrativeId || ''
+        );
     }
 }
 
@@ -212,23 +240,54 @@ export async function getFolderChildren(parentId: string): Promise<Folder[]> {
 // =============================================================================
 
 export async function upsertEntity(entity: Entity): Promise<void> {
+    const existing = await nebulaDb.entities.findOne({ id: entity.id }) as Entity | null;
+    const isNew = !existing;
+
     if (_bridge?.isReady()) {
         await _bridge.syncEntity(entity);
     } else {
-        const existing = await nebulaDb.entities.findOne({ id: entity.id });
         if (existing) {
             await nebulaDb.entities.update({ id: entity.id }, { $set: entity });
         } else {
             await nebulaDb.entities.insert(entity);
         }
     }
+
+    // Log episode for LLM memory
+    recordAction(
+        entity.narrativeId || '',
+        entity.firstNote || '',
+        isNew ? 'created_entity' : 'renamed_entity',
+        entity.id,
+        'entity',
+        isNew
+            ? { newValue: { label: entity.label, kind: entity.kind } }
+            : { oldValue: { label: existing?.label }, newValue: { label: entity.label } },
+        entity.narrativeId || ''
+    );
 }
 
 export async function deleteEntity(id: string): Promise<void> {
+    // Get entity info before deletion for episode logging
+    const entity = await nebulaDb.entities.findOne({ id }) as Entity | null;
+
     if (_bridge?.isReady()) {
         await _bridge.deleteEntity(id);
     } else {
         await nebulaDb.entities.delete({ id });
+    }
+
+    // Log episode for LLM memory
+    if (entity) {
+        recordAction(
+            entity.narrativeId || '',
+            entity.firstNote || '',
+            'deleted_entity',
+            id,
+            'entity',
+            { oldValue: { label: entity.label, kind: entity.kind } },
+            entity.narrativeId || ''
+        );
     }
 }
 

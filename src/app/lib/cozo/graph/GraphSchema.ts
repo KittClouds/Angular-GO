@@ -20,6 +20,12 @@ import {
     NODE_VECTORS_HNSW_128,
     type VectorDimension,
 } from '../schema/layer2-crossdoc';
+import {
+    EPISODE_LOG_SCHEMA,
+    BLOCKS_SCHEMA,
+    BLOCKS_HNSW_384,
+    CHAT_MESSAGES_SCHEMA,
+} from '../schema/layer4-memory';
 
 let graphSchemasCreated = false;
 
@@ -38,7 +44,7 @@ export function createGraphSchemas(): string[] {
     const basicSchemas = [
         { name: 'entities', script: `:create entities { id: String => label: String, normalized: String, kind: String, subtype: String?, first_note: String, created_at: Float, updated_at: Float, created_by: String, narrative_id: String }` },
         { name: 'entity_aliases', script: `:create entity_aliases { entity_id: String, normalized: String => alias: String }` },
-        { name: 'entity_mentions', script: `:create entity_mentions { entity_id: String, note_id: String => mention_count: Int, last_seen: Float, narrative_id: String }` },
+        { name: 'entity_mentions', script: `:create entity_mentions { entity_id: String, note_id: String => mention_count: Int, last_seen: Float, narrative_id: String, role: String default '' }` },
         { name: 'entity_metadata', script: `:create entity_metadata { entity_id: String, key: String => value: String }` },
         // Edges (aligned with CozoEntityEdge and layer2-unified)
         { name: 'entity_edge', script: `:create entity_edge { id: String => source_id: String, target_id: String, edge_type: String, confidence: Float, extraction_methods: [String], group_id: String, scope_type: String, created_at: Float, valid_at: Float, invalid_at: Float?, fact: String?, weight: Float, narrative_id: String }` },
@@ -65,6 +71,10 @@ export function createGraphSchemas(): string[] {
         { name: 'entity_clusters', script: ENTITY_CLUSTERS_SCHEMA.trim() },
         { name: 'cluster_members', script: CLUSTER_MEMBERS_SCHEMA.trim() },
         { name: 'cooccurrence_edges', script: COOCCURRENCE_EDGES_SCHEMA.trim() },
+        // Layer 4: LLM Memory
+        { name: 'episode_log', script: EPISODE_LOG_SCHEMA.trim() },
+        { name: 'blocks', script: BLOCKS_SCHEMA.trim() },
+        { name: 'chat_messages', script: CHAT_MESSAGES_SCHEMA.trim() },
     ];
 
     const created: string[] = [];
@@ -194,7 +204,49 @@ export function hasVectorHnswIndex(dimension: VectorDimension): boolean {
  */
 export function resetHnswIndexFlags(): void {
     hnswIndicesCreated.clear();
+    blocksHnswCreated = false;
+}
+
+// Track blocks HNSW index
+let blocksHnswCreated = false;
+
+/**
+ * Create HNSW index for blocks relation (LLM memory).
+ * Should be called after blocks relation exists.
+ * Safe to call multiple times - will skip if already created.
+ */
+export function createBlocksHnswIndex(): boolean {
+    if (blocksHnswCreated) {
+        console.log('[GraphSchema] Blocks HNSW index already created, skipping');
+        return false;
+    }
+
+    try {
+        const resultStr = cozoDb.run(BLOCKS_HNSW_384.trim());
+        const result = JSON.parse(resultStr);
+        if (result.ok === false) {
+            const msg = result.message || result.display || 'Unknown error';
+            if (msg.includes('already exists')) {
+                blocksHnswCreated = true;
+                return false;
+            }
+            console.error('[GraphSchema] Blocks HNSW failed:', msg);
+            return false;
+        }
+        console.log('[GraphSchema] ✅ Blocks HNSW index created');
+        blocksHnswCreated = true;
+        return true;
+    } catch (err) {
+        const errMsg = String(err);
+        if (errMsg.includes('already exists')) {
+            blocksHnswCreated = true;
+            return false;
+        }
+        console.error('[GraphSchema] Blocks HNSW creation failed:', err);
+        return false;
+    }
 }
 
 // Re-export VectorDimension type for external use
 export type { VectorDimension };
+

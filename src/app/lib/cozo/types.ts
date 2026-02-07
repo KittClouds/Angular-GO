@@ -1,19 +1,32 @@
 export type GraphScope = 'note' | 'folder' | 'vault' | 'narrative';
 
+/**
+ * Scope mode for LLM memory recall queries.
+ * - local_only: Only search within the exact scope
+ * - bubble_up: Search scope + all ancestor scopes (via folder_hierarchy)
+ * - global_fallback: Search locally first, fall back to global if no results
+ */
+export type ScopeMode = 'local_only' | 'bubble_up' | 'global_fallback';
+
 export interface ScopeIdentifier {
     scope: GraphScope;
     id: string;
     groupId: string;
+    mode?: ScopeMode;  // Query-time behavior modifier
 }
 
-export function buildScopeIdentifier(scope: GraphScope, id: string): ScopeIdentifier {
+export function buildScopeIdentifier(
+    scope: GraphScope,
+    id: string,
+    mode: ScopeMode = 'local_only'
+): ScopeIdentifier {
     // Vault is always global, narrative uses its root folder ID
     const groupId = scope === 'vault'
         ? 'vault:global'
         : scope === 'narrative'
             ? `narrative:${id}`
             : `${scope}:${id}`;
-    return { scope, id, groupId };
+    return { scope, id, groupId, mode };
 }
 
 export function parseScopeIdentifier(groupId: string): ScopeIdentifier {
@@ -22,8 +35,34 @@ export function parseScopeIdentifier(groupId: string): ScopeIdentifier {
         scope: scope as GraphScope,
         id: id || 'global',
         groupId,
+        mode: 'local_only',
     };
 }
+
+/**
+ * Build a scoped query prefix for Datalog based on scope mode.
+ * Returns the scope closure rule to prepend to queries.
+ */
+export function buildScopeClosureRule(scopeId: string, mode: ScopeMode): string {
+    switch (mode) {
+        case 'local_only':
+            return `scope_closure[sid] <- [["${scopeId}"]]`;
+
+        case 'bubble_up':
+            return `
+                scope_closure[sid] <- [["${scopeId}"]]
+                scope_closure[parent_id] :=
+                    scope_closure[child_id],
+                    *folder_hierarchy{parent_id, child_id, invalid_at},
+                    is_null(invalid_at)
+            `;
+
+        case 'global_fallback':
+            // Global fallback is handled at the service layer, not in Datalog
+            return `scope_closure[sid] <- [["${scopeId}"]]`;
+    }
+}
+
 
 export interface CozoEpisode {
     id: string;

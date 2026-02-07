@@ -4,12 +4,13 @@ import { FormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
-import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText } from 'lucide-angular';
+import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2 } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../lib/registry';
 import { GraphDetailComponent } from './graph-detail/graph-detail.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
 import { ScopeService, GLOBAL_SCOPE, ActiveScope } from '../../../../lib/services/scope.service';
+import { LlmEntityExtractorService } from '../../../../lib/services/llm-entity-extractor.service';
 import { db } from '../../../../lib/dexie/db';
 
 // Entity styling
@@ -60,6 +61,7 @@ interface EntityGroup {
 })
 export class GraphTabComponent implements OnInit, OnDestroy {
     private scopeService = inject(ScopeService);
+    private llmExtractor = inject(LlmEntityExtractorService);
 
     // Icons
     PlusIcon = Plus;
@@ -70,6 +72,7 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     FolderIcon = Folder;
     BookIcon = BookOpen;
     FileIcon = FileText;
+    WandIcon = Wand2;
 
     // State
     entities = signal<RegisteredEntity[]>([]);
@@ -85,6 +88,10 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     // Dropdown state
     isScopeMenuOpen = signal(false);
     hierarchyOptions = signal<{ label: string, type: string, scope: ActiveScope }[]>([]);
+
+    // LLM Extraction state
+    isExtracting = this.llmExtractor.isExtracting;
+    extractionProgress = this.llmExtractor.extractionProgress;
 
     scopeIcon = computed(() => {
         const scope = this.activeScope();
@@ -331,5 +338,63 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     getIcon(kind: string): any {
         return ENTITY_ICONS[kind] || Sparkles;
+    }
+
+    /**
+     * Extract entities from all notes in current narrative using LLM
+     * Shows confirmation with count before committing
+     */
+    async extractAllFromNarrative() {
+        const scope = this.activeScope();
+
+        // Must be in a narrative or folder scope
+        if (scope.id === 'vault:global') {
+            alert('Please select a narrative or folder scope first.');
+            return;
+        }
+
+        const narrativeId = scope.narrativeId || scope.id;
+
+        // Confirm action
+        if (!confirm(`Extract entities from all notes in "${this.scopeLabel()}" using LLM?\n\nThis may take a moment for large folders.`)) {
+            return;
+        }
+
+        try {
+            // Extract
+            const result = await this.llmExtractor.extractFromNarrative(narrativeId);
+
+            if (result.entities.length === 0) {
+                alert(`No new entities found in ${result.notesProcessed} notes.`);
+                return;
+            }
+
+            // Show count confirmation
+            const proceed = confirm(
+                `Found ${result.entities.length} entities in ${result.notesProcessed} notes.\n\n` +
+                `Click OK to add them to the registry.\n` +
+                `(Already registered entities will be skipped.)`
+            );
+
+            if (!proceed) return;
+
+            // Commit to registry
+            const commitResult = await this.llmExtractor.commitToRegistry(result.entities, narrativeId);
+
+            // Show result
+            alert(
+                `✅ Extraction complete!\n\n` +
+                `• ${commitResult.created} new entities added\n` +
+                `• ${commitResult.skipped} already registered (skipped)\n` +
+                `• ${commitResult.updated} updated`
+            );
+
+            // Refresh entity list
+            this.refreshEntities();
+
+        } catch (err) {
+            console.error('[GraphTab] Extraction failed:', err);
+            alert(`Extraction failed: ${err}`);
+        }
     }
 }

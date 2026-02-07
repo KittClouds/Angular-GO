@@ -23,14 +23,20 @@ export interface ProvenanceContext {
     folderType?: string;
 }
 
+/** Scope filter for search */
+export interface SearchScope {
+    narrativeId?: string;
+    folderPath?: string;
+}
+
 type GoKittWorkerMessage =
     | { type: 'INIT' }
     | { type: 'HYDRATE'; payload: { entitiesJSON: string } }
     | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
-    | { type: 'INDEX_NOTE'; payload: { id: string; text: string }; id: number }
-    | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[] }; id: number }
+    | { type: 'INDEX_NOTE'; payload: { id: string; text: string; scope?: SearchScope }; id: number }
+    | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[]; scope?: SearchScope }; id: number }
     | { type: 'ADD_VECTOR'; payload: { id: string; vectorJSON: string }; id: number }
     | { type: 'SEARCH_VECTORS'; payload: { vectorJSON: string; k: number }; id: number }
     // DocStore API
@@ -206,20 +212,30 @@ export class GoKittService {
         console.log(`[GoKittService] ✅ Search Index Ready (${indexed} docs)`);
     }
 
-    async indexNote(id: string, text: string): Promise<void> {
+    async indexNote(id: string, text: string, scope?: SearchScope): Promise<void> {
         // Can be called before ready (queued) if wasmLoaded is true
         if (!this.wasmLoaded) return;
-        const result = await this.sendRequest<{ success: boolean; error?: string }>('INDEX_NOTE', { id, text });
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('INDEX_NOTE', { id, text, scope });
         if (!result.success) console.warn('[GoKittService] Indexing failed for', id, result.error);
     }
 
     async search(query: string, limit = 20): Promise<any[]> {
+        return this.searchScoped(query, limit);
+    }
+
+    /**
+     * Scoped search - filter results by narrative or folder
+     * @param query Search query string
+     * @param limit Max results
+     * @param scope Optional narrative/folder filter
+     */
+    async searchScoped(query: string, limit = 20, scope?: SearchScope): Promise<any[]> {
         if (!this.isReady) return [];
         // Basic tokenization (lowercase to match index)
         const terms = query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 0);
         if (terms.length === 0) return [];
 
-        return this.sendRequest<any[]>('SEARCH', { query: terms, limit });
+        return this.sendRequest<any[]>('SEARCH', { query: terms, limit, scope });
     }
 
     /**

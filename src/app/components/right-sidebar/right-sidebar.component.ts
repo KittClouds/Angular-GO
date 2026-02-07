@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit, OnDestroy, computed, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, BookOpen } from 'lucide-angular';
+import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, BookOpen, Bot, Clock } from 'lucide-angular';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { ChapterService } from '../../lib/services/chapter.service';
 import { ScopeService, ActiveScope } from '../../lib/services/scope.service';
@@ -9,21 +9,23 @@ import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-s
 import { FactSheetService } from '../fact-sheets/fact-sheet.service';
 import { AnalyticsPanelComponent } from '../analytics-panel';
 import { TimelineViewComponent } from './timeline-view/timeline-view.component';
+import { AiChatPanelComponent } from './ai-chat-panel/ai-chat-panel.component';
 import { smartGraphRegistry } from '../../lib/registry';
 import { db, Entity } from '../../lib/dexie';
 
-type SidebarView = 'entities' | 'analytics' | 'timeline';
+type SidebarView = 'entities' | 'analytics' | 'timeline' | 'ai';
 
 interface ViewOption {
     value: SidebarView;
     label: string;
-    icon: string;
+    icon: any; // Lucide icon object
 }
 
 const VIEW_OPTIONS: ViewOption[] = [
-    { value: 'entities', label: 'Entities', icon: 'sparkles' },
-    { value: 'analytics', label: 'Analytics', icon: 'bar-chart-3' },
-    { value: 'timeline', label: 'Timeline', icon: 'clock' },
+    { value: 'entities', label: 'Entities', icon: Sparkles },
+    { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+    { value: 'timeline', label: 'Timeline', icon: Clock },
+    { value: 'ai', label: 'AI', icon: Bot },
 ];
 
 const STORAGE_KEY = 'right-sidebar:tab';
@@ -31,7 +33,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
 @Component({
     selector: 'app-right-sidebar',
     standalone: true,
-    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent],
+    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent, AiChatPanelComponent],
     template: `
         <aside
             class="h-full border-l border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out overflow-hidden"
@@ -44,7 +46,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
                     <div class="view-selector-wrapper h-8 relative">
                         <!-- Trigger Button -->
                         <div class="view-selector-display" (click)="toggleDropdown()">
-                            <lucide-icon [name]="currentViewIcon()" class="h-4 w-4"></lucide-icon>
+                            <lucide-icon [img]="currentViewIcon()" class="h-4 w-4"></lucide-icon>
                             <span>{{ currentViewLabel() }}</span>
                             <lucide-icon name="chevron-down" class="h-4 w-4 ml-auto opacity-50 transition-transform duration-200"
                                 [class.rotate-180]="isDropdownOpen()"></lucide-icon>
@@ -64,7 +66,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
                                         [class.bg-teal-900-10]="activeView() === opt.value"
                                         (click)="onViewChange(opt.value)"
                                     >
-                                        <lucide-icon [name]="opt.icon" class="h-4 w-4 opacity-70"></lucide-icon>
+                                        <lucide-icon [img]="opt.icon" class="h-4 w-4 opacity-70"></lucide-icon>
                                         {{ opt.label }}
                                     </button>
                                 }
@@ -152,6 +154,13 @@ const STORAGE_KEY = 'right-sidebar:tab';
                                 <app-timeline-view />
                             </div>
                         }
+
+                        @case ('ai') {
+                            <!-- AI Chat Panel -->
+                            <div class="flex-1 overflow-hidden">
+                                <app-ai-chat-panel />
+                            </div>
+                        }
                     }
                 </div>
 
@@ -159,6 +168,8 @@ const STORAGE_KEY = 'right-sidebar:tab';
                 <div class="h-8 flex items-center px-3 border-t border-sidebar-border shrink-0 text-xs bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1),0_-2px_4px_-1px_rgba(0,0,0,0.06)] relative z-10 transition-colors duration-300">
                     @if (activeView() === 'entities') {
                         <span>{{ entities().length }} entities</span>
+                    } @else if (activeView() === 'ai') {
+                        <span>Kammi AI</span>
                     } @else {
                         <span>Real-time analysis</span>
                     }
@@ -269,12 +280,12 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     currentViewIcon = computed(() => {
         const opt = VIEW_OPTIONS.find(o => o.value === this.activeView());
-        return opt?.icon || 'sparkles';
+        return opt?.icon || Sparkles;
     });
 
     private loadSavedView(): SidebarView {
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved === 'entities' || saved === 'analytics' || saved === 'timeline') {
+        if (saved === 'entities' || saved === 'analytics' || saved === 'timeline' || saved === 'ai') {
             return saved as SidebarView;
         }
         return 'entities';

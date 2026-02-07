@@ -68,6 +68,15 @@ type DocumentMetadata struct {
 	FieldLengths    map[string]int `json:"fieldLengths"`
 	TotalTokenCount int            `json:"totalTokenCount"`
 	Embedding       []float32      `json:"embedding,omitempty"` // for hybrid search
+	// Scope metadata for filtered search
+	NarrativeID string `json:"narrativeId,omitempty"`
+	FolderPath  string `json:"folderPath,omitempty"`
+}
+
+// SearchScope defines optional filters for scoped search
+type SearchScope struct {
+	NarrativeID string `json:"narrativeId,omitempty"` // Filter to specific narrative
+	FolderPath  string `json:"folderPath,omitempty"`  // Filter to folder prefix
 }
 
 // SearchResult represents a scored match

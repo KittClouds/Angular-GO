@@ -21,6 +21,20 @@ export class EditorService {
         this.crepe = crepe;
     }
 
+    /**
+     * Get the Crepe editor instance (for EditorAgentBridge)
+     */
+    getCrepe(): Crepe | undefined {
+        return this.crepe;
+    }
+
+    /**
+     * Check if editor is registered and ready
+     */
+    hasEditor(): boolean {
+        return !!this.crepe;
+    }
+
     undo() {
         if (this.crepe) {
             try {

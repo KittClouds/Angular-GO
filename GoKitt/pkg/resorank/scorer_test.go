@@ -136,3 +136,102 @@ func TestBM25Math(t *testing.T) {
 		t.Errorf("Expected 1.0, got %f", sat)
 	}
 }
+
+func TestScopedSearch(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.FieldWeights["content"] = 1.0
+
+	scorer := NewScorer(cfg)
+	scorer.CorpusStats.TotalDocuments = 10
+	scorer.CorpusStats.AverageDocLength = 100
+	scorer.CorpusStats.AverageFieldLengths["content"] = 100
+
+	// Index 3 docs with different scopes
+	// Doc 1: narrative-A, folder "Timeline/Chapter1"
+	meta1 := DocumentMetadata{
+		TotalTokenCount: 100,
+		FieldLengths:    map[string]int{"content": 100},
+		NarrativeID:     "narrative-A",
+		FolderPath:      "Timeline/Chapter1",
+	}
+	tokens1 := map[string]TokenMetadata{
+		"dragon": {CorpusDocFreq: 3, FieldOccurrences: map[string]FieldOccurrence{"content": {TF: 2, FieldLength: 100}}},
+	}
+	scorer.IndexDocument("doc1", meta1, tokens1)
+
+	// Doc 2: narrative-A, folder "Timeline/Chapter2"
+	meta2 := DocumentMetadata{
+		TotalTokenCount: 100,
+		FieldLengths:    map[string]int{"content": 100},
+		NarrativeID:     "narrative-A",
+		FolderPath:      "Timeline/Chapter2",
+	}
+	tokens2 := map[string]TokenMetadata{
+		"dragon": {CorpusDocFreq: 3, FieldOccurrences: map[string]FieldOccurrence{"content": {TF: 1, FieldLength: 100}}},
+	}
+	scorer.IndexDocument("doc2", meta2, tokens2)
+
+	// Doc 3: narrative-B, folder "Notes"
+	meta3 := DocumentMetadata{
+		TotalTokenCount: 100,
+		FieldLengths:    map[string]int{"content": 100},
+		NarrativeID:     "narrative-B",
+		FolderPath:      "Notes",
+	}
+	tokens3 := map[string]TokenMetadata{
+		"dragon": {CorpusDocFreq: 3, FieldOccurrences: map[string]FieldOccurrence{"content": {TF: 5, FieldLength: 100}}},
+	}
+	scorer.IndexDocument("doc3", meta3, tokens3)
+
+	// Test 1: Search without scope - should return all 3 docs
+	results := scorer.SearchScoped([]string{"dragon"}, nil, 10, nil)
+	if len(results) != 3 {
+		t.Errorf("Unscoped: Expected 3 results, got %d", len(results))
+	}
+
+	// Test 2: Search with narrative scope - should return only narrative-A docs
+	scopeNarrativeA := &SearchScope{NarrativeID: "narrative-A"}
+	results = scorer.SearchScoped([]string{"dragon"}, nil, 10, scopeNarrativeA)
+	if len(results) != 2 {
+		t.Errorf("Narrative-A scope: Expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.DocID != "doc1" && r.DocID != "doc2" {
+			t.Errorf("Unexpected doc in narrative-A scope: %s", r.DocID)
+		}
+	}
+
+	// Test 3: Search with folder scope - should return only Timeline/* docs
+	scopeTimeline := &SearchScope{FolderPath: "Timeline"}
+	results = scorer.SearchScoped([]string{"dragon"}, nil, 10, scopeTimeline)
+	if len(results) != 2 {
+		t.Errorf("Timeline folder scope: Expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.DocID != "doc1" && r.DocID != "doc2" {
+			t.Errorf("Unexpected doc in Timeline scope: %s", r.DocID)
+		}
+	}
+
+	// Test 4: Search with specific subfolder - should return only Chapter1
+	scopeChapter1 := &SearchScope{FolderPath: "Timeline/Chapter1"}
+	results = scorer.SearchScoped([]string{"dragon"}, nil, 10, scopeChapter1)
+	if len(results) != 1 {
+		t.Errorf("Chapter1 folder scope: Expected 1 result, got %d", len(results))
+	}
+	if len(results) > 0 && results[0].DocID != "doc1" {
+		t.Errorf("Expected doc1, got %s", results[0].DocID)
+	}
+
+	// Test 5: Combined scope - narrative-B should have no Timeline docs
+	scopeNarrativeB := &SearchScope{NarrativeID: "narrative-B"}
+	results = scorer.SearchScoped([]string{"dragon"}, nil, 10, scopeNarrativeB)
+	if len(results) != 1 {
+		t.Errorf("Narrative-B scope: Expected 1 result, got %d", len(results))
+	}
+	if len(results) > 0 && results[0].DocID != "doc3" {
+		t.Errorf("Expected doc3, got %s", results[0].DocID)
+	}
+
+	t.Log("TestScopedSearch: All scope filters working correctly!")
+}

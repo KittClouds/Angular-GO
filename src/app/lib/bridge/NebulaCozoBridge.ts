@@ -162,16 +162,16 @@ export class NebulaCozoBridge {
                 report.notes = notes.length;
             }
 
-            // Hydrate entities
-            const entitiesResult = this.queryGraph<unknown[]>(`
-                ?[id, label, kind, subtype, first_note, created_at, updated_at, created_by, narrative_id] := 
-                    *entities{id, label, kind, subtype, first_note, created_at, updated_at, created_by, narrative_id}
-            `);
-            if (entitiesResult.length > 0) {
-                const entities = entitiesResult.map(row => CozoToDexie.entity(row));
-                await nebulaDb.hydrateCollection(nebulaDb.entities, entities);
-                report.entities = entities.length;
-            }
+            // IMPORTANT: DO NOT hydrate entities from Cozo
+            // GraphRegistry (CozoGraphRegistry) is the SINGLE SOURCE OF TRUTH for entities.
+            // If we hydrate entities here, we create duplicate entries because:
+            // 1. GraphRegistry stores entities in Cozo's `entities` table
+            // 2. NebulaBridge also writes to Cozo and would hydrate back
+            // This causes entity accumulation bug where graph nodes get hydrated as entities.
+            // 
+            // Entity flow: GraphRegistry -> UI (via hotCache/signals)
+            // NOT: Cozo -> Nebula -> UI
+            report.entities = 0;
 
             // Hydrate edges
             const edgesResult = this.queryGraph<unknown[]>(`
@@ -229,9 +229,14 @@ export class NebulaCozoBridge {
     }
 
     /**
-     * Sync an entity - writes to Nebula immediately, queues to Cozo
+     * Sync an entity - DEPRECATED
+     * GraphRegistry is the single source of truth for entities.
+     * This method is kept for API compatibility but no longer syncs to Cozo.
+     * Use GraphRegistry.registerEntity() instead.
      */
     async syncEntity(entity: Entity): Promise<void> {
+        // Only write to Nebula for local reactivity if caller needs it
+        // But DO NOT sync to Cozo - GraphRegistry handles that
         const existing = await nebulaDb.entities.findOne({ id: entity.id });
         if (existing) {
             await nebulaDb.entities.update({ id: entity.id }, { $set: entity });
@@ -239,7 +244,9 @@ export class NebulaCozoBridge {
             await nebulaDb.entities.insert(entity);
         }
 
-        this.syncQueue.enqueueUpsert('entities', entity.id, entity);
+        // IMPORTANT: Do NOT enqueue to Cozo - GraphRegistry is the source of truth
+        // this.syncQueue.enqueueUpsert('entities', entity.id, entity);
+        console.warn('[NebulaBridge] syncEntity called - use GraphRegistry.registerEntity instead');
     }
 
     /**
@@ -310,7 +317,7 @@ export class NebulaCozoBridge {
                         cozoDb.runMutation(CozoQueries.deleteFolder(op.id));
                         break;
                     case 'entities':
-                        cozoDb.runMutation(CozoQueries.deleteEntity(op.id));
+                        // Skip - GraphRegistry handles entity persistence
                         break;
                     case 'edges':
                         cozoDb.runMutation(CozoQueries.deleteEdge(op.id));
@@ -329,11 +336,10 @@ export class NebulaCozoBridge {
                         cozoDb.runMutation(CozoQueries.upsertFolder(cozoFolder));
                         break;
                     }
-                    case 'entities': {
-                        const cozoEntity = DexieToCozo.entity(op.data as Entity);
-                        cozoDb.runMutation(CozoQueries.upsertEntity(cozoEntity));
+                    case 'entities':
+                        // Skip - GraphRegistry handles entity persistence directly
+                        // This prevents duplicate writes and entity accumulation
                         break;
-                    }
                     case 'edges': {
                         const cozoEdge = DexieToCozo.edge(op.data as Edge);
                         cozoDb.runMutation(CozoQueries.upsertEdge(cozoEdge));

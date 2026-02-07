@@ -18,6 +18,12 @@ interface ProvenanceContext {
     folderType?: string;
 }
 
+/** Scope filter for search */
+interface SearchScope {
+    narrativeId?: string;
+    folderPath?: string;
+}
+
 /** Incoming messages from main thread */
 type GoKittWorkerMessage =
     | { type: 'INIT' }
@@ -25,8 +31,8 @@ type GoKittWorkerMessage =
     | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
-    | { type: 'INDEX_NOTE'; payload: { id: string; text: string }; id: number }
-    | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[] }; id: number }
+    | { type: 'INDEX_NOTE'; payload: { id: string; text: string; scope?: SearchScope }; id: number }
+    | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[]; scope?: SearchScope }; id: number }
     | { type: 'ADD_VECTOR'; payload: { id: string; vectorJSON: string }; id: number }
     | { type: 'SEARCH_VECTORS'; payload: { vectorJSON: string; k: number }; id: number }
     // DocStore API
@@ -119,8 +125,8 @@ declare const GoKitt: {
     scan: (text: string, provenanceJSON?: string) => string;
     scanImplicit: (text: string) => string;
     scanDiscovery: (text: string) => string;
-    indexNote: (id: string, text: string) => string;
-    search: (queryJSON: string, limit: number, vectorJSON?: string) => string;
+    indexNote: (id: string, text: string, scopeJSON?: string) => string;
+    search: (queryJSON: string, limit: number, vectorJSON?: string, scopeJSON?: string) => string;
     initVectors: () => string;
     addVector: (id: string, vectorJSON: string) => string;
     searchVectors: (vectorJSON: string, k: number) => string;
@@ -298,7 +304,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     return;
                 }
 
-                const res = GoKitt.indexNote(msg.payload.id, msg.payload.text);
+                const scopeJSON = msg.payload.scope
+                    ? JSON.stringify(msg.payload.scope)
+                    : '';
+                const res = GoKitt.indexNote(msg.payload.id, msg.payload.text, scopeJSON);
                 const parsed = JSON.parse(res);
 
                 self.postMessage({
@@ -325,8 +334,11 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 if (msg.payload.vector) {
                     vectorJSON = JSON.stringify(msg.payload.vector);
                 }
+                const scopeJSON = msg.payload.scope
+                    ? JSON.stringify(msg.payload.scope)
+                    : '';
 
-                const res = GoKitt.search(queryJSON, limit, vectorJSON);
+                const res = GoKitt.search(queryJSON, limit, vectorJSON, scopeJSON);
                 const results = JSON.parse(res);
 
                 self.postMessage({

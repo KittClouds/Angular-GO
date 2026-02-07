@@ -74,6 +74,9 @@ export class CrepeNebulaDB {
     // Timeline
     timelineEvents: ICollection;
 
+    // AI Chat
+    chatMessages: ICollection;
+
     constructor() {
         // Initialize with MemoryAdapter (no IndexedDB)
         // Persistence is handled by Cozo + OPFS
@@ -145,6 +148,15 @@ export class CrepeNebulaDB {
         this.timelineEvents = this.db.collection('timelineEvents', {
             indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
         });
+
+        // AI Chat messages
+        this.chatMessages = this.db.collection('chatMessages', {
+            indexes: [
+                { name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE },
+                { name: 'sessionId_idx', fields: ['sessionId'], type: IndexType.SINGLE },
+                { name: 'createdAt_idx', fields: ['createdAt'], type: IndexType.SINGLE }
+            ]
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -197,6 +209,7 @@ export class CrepeNebulaDB {
             this.spanMentions,
             this.claims,
             this.timelineEvents,
+            this.chatMessages,
         ];
 
         for (const col of collections) {

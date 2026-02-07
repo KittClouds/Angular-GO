@@ -12,7 +12,7 @@ import init, { CozoDb } from 'cozo-lib-wasm';
 const wasmUrl = '/assets/cozo_lib_wasm_bg.wasm';
 import { cozoPersistence } from './persistence/CozoPersistenceService';
 import { initContentRepo } from './content';
-import { createGraphSchemas } from './graph/GraphSchema';
+import { createGraphSchemas, createBlocksHnswIndex } from './graph/GraphSchema';
 
 // Relations to persist (graph + content)
 export const PERSISTED_RELATIONS = [
@@ -28,7 +28,9 @@ export const PERSISTED_RELATIONS = [
     'folder_schemas', 'entity_cards', 'fact_sheet_card_schemas', 'fact_sheet_field_schemas',
     // Network & Cross-Doc
     'network_instance', 'network_membership', 'network_relationship',
-    'node_vectors', 'entity_clusters', 'cluster_members', 'cooccurrence_edges'
+    'node_vectors', 'entity_clusters', 'cluster_members', 'cooccurrence_edges',
+    // LLM Memory relations
+    'episode_log', 'blocks', 'chat_messages'
 ];
 
 export class CozoDbService {
@@ -140,6 +142,9 @@ export class CozoDbService {
             }
         }
         console.log('[CozoDB] ✅ Schemas ready');
+
+        // Note: Blocks HNSW index is created lazily on first block insert
+        // (requires data in the relation for CozoDB to create the index)
     }
 
     /**

@@ -63,6 +63,11 @@ func (s *Scorer) IndexDocument(docID string, meta DocumentMetadata, tokens map[s
 
 // Search executes a query (Hybrid)
 func (s *Scorer) Search(query []string, queryVector []float32, limit int) []SearchResult {
+	return s.SearchScoped(query, queryVector, limit, nil)
+}
+
+// SearchScoped executes a query with optional scope filtering
+func (s *Scorer) SearchScoped(query []string, queryVector []float32, limit int, scope *SearchScope) []SearchResult {
 	candidates := make(map[string]bool)
 
 	// 1. Text-based Candidates (from both frozen and mutable indexes)
@@ -81,6 +86,11 @@ func (s *Scorer) Search(query []string, queryVector []float32, limit int) []Sear
 
 	var results []SearchResult
 	for docID := range candidates {
+		// Apply scope filter BEFORE scoring (optimization)
+		if scope != nil && !s.matchesScope(docID, scope) {
+			continue
+		}
+
 		score := s.Score(query, queryVector, docID)
 		if score > 0 {
 			results = append(results, SearchResult{DocID: docID, Score: score})
@@ -96,6 +106,40 @@ func (s *Scorer) Search(query []string, queryVector []float32, limit int) []Sear
 		results = results[:limit]
 	}
 	return results
+}
+
+// matchesScope checks if a document matches the given scope filter
+func (s *Scorer) matchesScope(docID string, scope *SearchScope) bool {
+	meta, ok := s.DocumentIndex[docID]
+	if !ok {
+		return false
+	}
+
+	// Filter by NarrativeID (exact match)
+	if scope.NarrativeID != "" && meta.NarrativeID != scope.NarrativeID {
+		return false
+	}
+
+	// Filter by FolderPath (prefix match for hierarchy)
+	if scope.FolderPath != "" {
+		if meta.FolderPath == "" {
+			return false
+		}
+		// Check if document's folder starts with the scope folder (hierarchical match)
+		if meta.FolderPath != scope.FolderPath && !hasPathPrefix(meta.FolderPath, scope.FolderPath) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// hasPathPrefix checks if path starts with prefix (folder hierarchy)
+func hasPathPrefix(path, prefix string) bool {
+	if len(path) <= len(prefix) {
+		return false
+	}
+	return path[:len(prefix)] == prefix && (path[len(prefix)] == '/' || path[len(prefix)] == '\\')
 }
 
 // Score calculates relevance for a doc (Hybrid: BM25 + Vector)

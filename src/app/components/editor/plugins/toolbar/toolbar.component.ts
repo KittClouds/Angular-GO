@@ -258,9 +258,74 @@ export class EditorToolbarComponent {
         }
     }
 
-    onAIAction(item: DropdownItem) {
-        console.log('AI Action', item.id);
-        // Stub for AI
+    async onAIAction(item: DropdownItem) {
+        if (!this.ctx || !this.editorState) return;
+
+        try {
+            const view = this.ctx.get(editorViewCtx);
+            const { state } = view;
+            const { selection, doc } = state;
+            const { from, to, empty } = selection;
+
+            if (empty) {
+                console.log('[AI] No text selected');
+                return;
+            }
+
+            // Get selected text
+            const selectedText = doc.textBetween(from, to, ' ');
+            if (!selectedText.trim()) return;
+
+            // Dynamically import OpenRouterService to avoid circular deps
+            const { OpenRouterService } = await import('../../../../lib/services/openrouter.service');
+            const openRouter = new OpenRouterService();
+
+            if (!openRouter.isConfigured()) {
+                alert('Please configure your OpenRouter API key in the AI chat panel settings first.');
+                return;
+            }
+
+            // Build action-specific prompt
+            const prompts: Record<string, string> = {
+                'improve': 'Improve this text for clarity, flow, and impact. Only output the improved text, nothing else.',
+                'shorten': 'Shorten this text while preserving its meaning. Only output the shortened text, nothing else.',
+                'fix': 'Fix all grammar, spelling, and punctuation errors in this text. Only output the corrected text, nothing else.',
+                'continue': 'Continue writing from this text in the same style and tone. Only output the continuation, nothing else.',
+            };
+
+            const systemPrompt = prompts[item.id] || prompts['improve'];
+
+            // Call OpenRouter
+            let result = '';
+            await openRouter.streamChat(
+                [{ role: 'user', content: selectedText }],
+                {
+                    onChunk: (chunk) => { result += chunk; },
+                    onComplete: (fullResponse) => {
+                        // For "continue", append instead of replace
+                        if (item.id === 'continue') {
+                            const tr = state.tr.insertText(fullResponse, to);
+                            view.dispatch(tr);
+                        } else {
+                            // Replace selected text with result
+                            const tr = state.tr.replaceWith(from, to, state.schema.text(fullResponse));
+                            view.dispatch(tr);
+                        }
+                        console.log(`[AI] ${item.id} complete`);
+                    },
+                    onError: (error) => {
+                        console.error('[AI] OpenRouter error:', error);
+                        alert(`AI Error: ${error.message}`);
+                    },
+                },
+                systemPrompt
+            );
+
+            // Hide toolbar after initiating action
+            this.hide.emit();
+        } catch (e) {
+            console.error('[AI] Action failed:', e);
+        }
     }
 
     onAlignAction(item: DropdownItem) {
