@@ -65,7 +65,11 @@ type GoKittWorkerMessage =
     | { type: 'MERGER_GET_GRAPH'; id: number }
     | { type: 'MERGER_GET_STATS'; id: number }
     // Phase 4: PCST Coherence Filter
-    | { type: 'MERGER_RUN_PCST'; payload: { prizesJSON: string; rootID?: string }; id: number };
+    | { type: 'MERGER_RUN_PCST'; payload: { prizesJSON: string; rootID?: string }; id: number }
+    // Phase 5: SharedArrayBuffer Zero-Copy
+    | { type: 'SAB_INIT'; payload: { sab: SharedArrayBuffer }; id: number }
+    | { type: 'SAB_SCAN_TO_BUFFER'; payload: { text: string }; id: number }
+    | { type: 'SAB_GET_STATUS'; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -109,6 +113,10 @@ type GoKittWorkerResponse =
     | { type: 'MERGER_GET_STATS_RESULT'; id: number; payload: any }
     // Phase 4: PCST response
     | { type: 'MERGER_RUN_PCST_RESULT'; id: number; payload: any }
+    // Phase 5: SharedArrayBuffer responses
+    | { type: 'SAB_INIT_RESULT'; id: number; payload: { success: boolean; initialized: boolean; bufferSize: number; error?: string } }
+    | { type: 'SAB_SCAN_TO_BUFFER_RESULT'; id: number; payload: { success: boolean; spans: number; payloadSize: number; error?: string } }
+    | { type: 'SAB_GET_STATUS_RESULT'; id: number; payload: { success: boolean; initialized: boolean; bufferSize: number; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -214,6 +222,10 @@ declare const GoKitt: {
     mergerGetStats: () => string;
     // Phase 4: PCST Coherence Filter
     mergerRunPCST: (prizesJSON: string, rootID?: string) => string;
+    // Phase 5: SharedArrayBuffer Zero-Copy
+    sabInit: (sab: SharedArrayBuffer) => string;
+    sabScanToBuffer: (text: string) => string;
+    sabGetBufferStatus: () => string;
 };
 
 /**
@@ -1081,6 +1093,73 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     type: 'MERGER_RUN_PCST_RESULT',
                     id: msg.id,
                     payload: result
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // Phase 5: SharedArrayBuffer Zero-Copy Handlers
+            // =================================================================
+
+            case 'SAB_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'SAB_INIT_RESULT',
+                        id: msg.id,
+                        payload: { success: false, initialized: false, bufferSize: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.sabInit(msg.payload.sab);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'SAB_INIT_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'SAB_SCAN_TO_BUFFER': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'SAB_SCAN_TO_BUFFER_RESULT',
+                        id: msg.id,
+                        payload: { success: false, spans: 0, payloadSize: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.sabScanToBuffer(msg.payload.text);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'SAB_SCAN_TO_BUFFER_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'SAB_GET_STATUS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'SAB_GET_STATUS_RESULT',
+                        id: msg.id,
+                        payload: { success: false, initialized: false, bufferSize: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.sabGetBufferStatus();
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'SAB_GET_STATUS_RESULT',
+                    id: msg.id,
+                    payload: parsed
                 } as GoKittWorkerResponse);
                 break;
             }

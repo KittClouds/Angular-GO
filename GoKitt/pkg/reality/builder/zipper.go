@@ -42,7 +42,8 @@ func Zip(text string, scan conductor.ScanResult) *cst.Node {
 		return (spans[i].end - spans[i].start) > (spans[j].end - spans[j].start)
 	})
 
-	b := cst.NewBuilder()
+	// Use PooledBuilder for reduced GC pressure
+	b := cst.NewPooledBuilder()
 	b.StartNode(rsyntax.KindDocument, 0)
 
 	type event struct {

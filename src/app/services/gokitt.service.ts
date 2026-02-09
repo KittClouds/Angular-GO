@@ -89,6 +89,10 @@ type GoKittWorkerResponse =
     | { type: 'MERGER_GET_STATS_RESULT'; id: number; payload: any }
     // Phase 4: PCST response
     | { type: 'MERGER_RUN_PCST_RESULT'; id: number; payload: any }
+    // Phase 5: SharedArrayBuffer responses
+    | { type: 'SAB_INIT_RESULT'; id: number; payload: { success: boolean; initialized: boolean; bufferSize: number; error?: string } }
+    | { type: 'SAB_SCAN_TO_BUFFER_RESULT'; id: number; payload: { success: boolean; spans: number; payloadSize: number; error?: string } }
+    | { type: 'SAB_GET_STATUS_RESULT'; id: number; payload: { success: boolean; initialized: boolean; bufferSize: number; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
@@ -590,6 +594,58 @@ export class GoKittService {
         return this.sendRequest('MERGER_RUN_PCST', { prizesJSON, rootID });
     }
 
+    // ==========================================================================
+    // Phase 5: SharedArrayBuffer Zero-Copy API
+    // ==========================================================================
+
+    /**
+     * Initialize SharedArrayBuffer for zero-copy communication
+     * @param sab The SharedArrayBuffer to use for data transfer
+     */
+    async sabInit(sab: SharedArrayBuffer): Promise<{
+        success: boolean;
+        initialized: boolean;
+        bufferSize: number;
+        error?: string;
+    }> {
+        if (!this.wasmLoaded) {
+            return { success: false, initialized: false, bufferSize: 0, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('SAB_INIT', { sab });
+    }
+
+    /**
+     * Perform a scan and write results directly to SharedArrayBuffer
+     * This bypasses JSON serialization for hot-path performance
+     * @param text The text to scan
+     */
+    async sabScanToBuffer(text: string): Promise<{
+        success: boolean;
+        spans: number;
+        payloadSize: number;
+        error?: string;
+    }> {
+        if (!this.wasmLoaded) {
+            return { success: false, spans: 0, payloadSize: 0, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('SAB_SCAN_TO_BUFFER', { text });
+    }
+
+    /**
+     * Get the current status of the SharedArrayBuffer
+     */
+    async sabGetStatus(): Promise<{
+        success: boolean;
+        initialized: boolean;
+        bufferSize: number;
+        error?: string;
+    }> {
+        if (!this.wasmLoaded) {
+            return { success: false, initialized: false, bufferSize: 0, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('SAB_GET_STATUS', {});
+    }
+
     /**
      * Scan for implicit entity mentions (Aho-Corasick)
      * Returns SYNCHRONOUSLY for editor performance (uses cached data)
@@ -728,6 +784,10 @@ export class GoKittService {
                         case 'MERGER_GET_STATS_RESULT':
                         // Phase 4: PCST response
                         case 'MERGER_RUN_PCST_RESULT':
+                        // Phase 5: SharedArrayBuffer responses
+                        case 'SAB_INIT_RESULT':
+                        case 'SAB_SCAN_TO_BUFFER_RESULT':
+                        case 'SAB_GET_STATUS_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:

@@ -22,6 +22,7 @@ import (
 	"github.com/kittclouds/gokitt/pkg/reality/projection"
 	"github.com/kittclouds/gokitt/pkg/reality/validator"
 	"github.com/kittclouds/gokitt/pkg/resorank"
+	"github.com/kittclouds/gokitt/pkg/sab"
 	"github.com/kittclouds/gokitt/pkg/scanner/conductor"
 	"github.com/kittclouds/gokitt/pkg/vector"
 )
@@ -33,9 +34,10 @@ const Version = "0.4.0" // SQLite Store
 var pipeline *conductor.Conductor
 var searcher *resorank.Scorer
 var vectorStore *vector.Store
-var docs *docstore.Store        // In-memory document store
-var sqlStore *store.SQLiteStore // SQLite persistent store
-var graphMerger *merger.Merger  // Phase 3: Graph merger instance
+var docs *docstore.Store           // In-memory document store
+var sqlStore *store.SQLiteStore    // SQLite persistent store
+var graphMerger *merger.Merger     // Phase 3: Graph merger instance
+var sharedBuffer *sab.SharedBuffer // Phase 5: SharedArrayBuffer for zero-copy
 
 // ID Mapping for Vector Store (String -> Uint32)
 // Since HNSW only supports uint32, we map our string IDs.
@@ -107,6 +109,10 @@ func main() {
 		"mergerGetStats":   js.FuncOf(mergerGetStats),
 		// Phase 4: PCST Coherence Filter
 		"mergerRunPCST": js.FuncOf(mergerRunPCST),
+		// Phase 5: SharedArrayBuffer Zero-Copy
+		"sabInit":            js.FuncOf(sabInit),
+		"sabScanToBuffer":    js.FuncOf(sabScanToBuffer),
+		"sabGetBufferStatus": js.FuncOf(sabGetBufferStatus),
 	}))
 
 	select {}
@@ -1382,4 +1388,104 @@ func mergerRunPCST(this js.Value, args []js.Value) interface{} {
 	}
 
 	return string(bytes)
+}
+
+// =============================================================================
+// Phase 5: SharedArrayBuffer Zero-Copy API
+// =============================================================================
+
+// sabInit initializes the SharedArrayBuffer for zero-copy communication
+// Args: [SharedArrayBuffer]
+func sabInit(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return errorResult("sabInit requires SharedArrayBuffer argument")
+	}
+
+	sabValue := args[0]
+	if sabValue.IsUndefined() || sabValue.IsNull() {
+		return errorResult("SharedArrayBuffer is undefined or null")
+	}
+
+	sharedBuffer = sab.New(sabValue)
+	if sharedBuffer == nil {
+		return errorResult("Failed to wrap SharedArrayBuffer")
+	}
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"success":     true,
+		"initialized": true,
+		"bufferSize":  sharedBuffer.Length(),
+	})
+	return string(result)
+}
+
+// sabScanToBuffer performs a scan and writes results directly to SharedArrayBuffer
+// Args: [text string]
+// This bypasses JSON serialization for hot-path performance
+func sabScanToBuffer(this js.Value, args []js.Value) interface{} {
+	if sharedBuffer == nil {
+		return errorResult("SharedArrayBuffer not initialized - call sabInit first")
+	}
+
+	if len(args) < 1 {
+		return errorResult("sabScanToBuffer requires text argument")
+	}
+
+	text := args[0].String()
+
+	// Run the scan
+	if pipeline == nil {
+		return errorResult("Pipeline not initialized")
+	}
+
+	scanResult := pipeline.Scan(text)
+
+	// Build the CST
+	root := builder.Zip(text, scanResult)
+	if root == nil {
+		// Write empty result
+		sharedBuffer.WriteMessage(sab.MsgTypeEntitySpans, []byte{0, 0, 0, 0})
+		result, _ := json.Marshal(map[string]interface{}{
+			"success": true,
+			"spans":   0,
+		})
+		return string(result)
+	}
+
+	// Collect entity spans for binary encoding (skip projection for now)
+	var spans []sab.EntitySpan
+	for _, m := range scanResult.Syntax {
+		spans = append(spans, sab.EntitySpan{
+			Start:   uint32(m.Start),
+			End:     uint32(m.End),
+			Kind:    uint16(m.Kind),
+			LabelID: 0, // Could map labels to IDs for further optimization
+		})
+	}
+
+	// Encode and write to SharedArrayBuffer
+	payload := sab.EncodeSpans(spans)
+	sharedBuffer.WriteMessage(sab.MsgTypeEntitySpans, payload)
+
+	// Return count (JS can read details from SAB)
+	result, _ := json.Marshal(map[string]interface{}{
+		"success":     true,
+		"spans":       len(spans),
+		"payloadSize": len(payload),
+	})
+	return string(result)
+}
+
+// sabGetBufferStatus returns the current state of the SharedArrayBuffer
+func sabGetBufferStatus(this js.Value, args []js.Value) interface{} {
+	if sharedBuffer == nil {
+		return errorResult("SharedArrayBuffer not initialized")
+	}
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"success":     true,
+		"initialized": true,
+		"bufferSize":  sharedBuffer.Length(),
+	})
+	return string(result)
 }
