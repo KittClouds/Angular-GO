@@ -123,6 +123,8 @@ export interface TextQuoteSelector {
 /**
  * Span - The atomic immutable fact. All derived data traces back here.
  * Uses Web Annotation's TextPositionSelector + TextQuoteSelector for resilient anchoring.
+ *
+ * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
  */
 export interface Span {
     id: string;                        // UUID
@@ -149,6 +151,8 @@ export interface Span {
 /**
  * Wormhole - A contract binding two spans together.
  * Spans can be in same or different documents. Wormholes are NOT entity-to-entity.
+ *
+ * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
  */
 export interface Wormhole {
     id: string;
@@ -170,6 +174,8 @@ export interface Wormhole {
 /**
  * SpanMention - Links a Span to a candidate Entity.
  * The span is the ground truth; entity linkage is derived/optional.
+ *
+ * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
  */
 export interface SpanMention {
     id: string;
@@ -560,10 +566,9 @@ export class CrepeDatabase extends Dexie {
     networkInstances!: Table<NetworkInstance>;
     networkRelationships!: Table<NetworkRelationship>;
 
-    // Span-first data model (v4)
-    spans!: Table<Span>;
-    wormholes!: Table<Wormhole>;
-    spanMentions!: Table<SpanMention>;
+    // Span-first data model (v4) - REMOVED: spans, wormholes, spanMentions migrated to CozoDB
+    // See: src/app/lib/cozo/schema/layer2-span-model.ts
+    // Only claims remains in Dexie for now (will migrate later)
     claims!: Table<Claim>;
 
     // Timeline Codex (v5)
@@ -628,20 +633,12 @@ export class CrepeDatabase extends Dexie {
         });
 
         // Version 4: Span-first data model (Immutable Facts Layer)
-        // All derived data (entities, claims) traces back to Spans
-        // Only need to specify NEW tables - existing ones are inherited
+        // DEPRECATED: spans, wormholes, spanMentions migrated to CozoDB
+        // See: src/app/lib/cozo/schema/layer2-span-model.ts
+        // Only claims remains here (will migrate later)
         this.version(4).stores({
-            // NEW: Span - immutable fact with Web Annotation selectors
-            // Indexed by content hash (O(1)) and position range (O(log n))
-            spans: 'id, worldId, noteId, narrativeId, status, createdAt, contentHash, [noteId+status], [worldId+start+end]',
-
-            // NEW: Wormhole - binding contracts between spans
-            wormholes: 'id, srcSpanId, dstSpanId, mode, wormholeType, [srcSpanId+dstSpanId]',
-
-            // NEW: SpanMention - span → candidate entity evidence
-            spanMentions: 'id, spanId, candidateEntityId, status, [spanId+candidateEntityId]',
-
-            // NEW: Claim - SVO quads referencing spans
+            // REMOVED: spans, wormholes, spanMentions - now in CozoDB
+            // Claim - SVO quads referencing spans
             claims: 'id, worldId, narrativeId, subjectSpanId, objectSpanId, verb, sourceNoteId, [subjectEntityId+verb+objectEntityId]'
         });
 

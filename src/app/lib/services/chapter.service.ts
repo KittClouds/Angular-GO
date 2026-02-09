@@ -1,7 +1,10 @@
 import { Injectable, inject, signal, computed, Injector, effect } from '@angular/core';
 import { liveQuery } from 'dexie';
 import { from, Observable, combineLatest, map } from 'rxjs';
-import { db, Folder, Note } from '../dexie/db';
+// TODO: This service uses liveQuery for reactivity - needs event system from GoSQLite
+// For now, keeping Dexie liveQuery for the reactive subscription
+import { db } from '../dexie/db';
+import type { Folder, Note } from '../dexie/db';
 import { FolderService } from './folder.service'; // Assuming available
 import { NoteEditorStore } from '../store/note-editor.store'; // To get active note
 

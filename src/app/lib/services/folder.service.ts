@@ -1,11 +1,12 @@
 // src/app/lib/services/folder.service.ts
 // Angular service for folder CRUD with liveQuery
+// TODO: This still uses Dexie directly - needs full migration to GoSQLite
 
 import { Injectable } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Folder, FolderSchema, AllowedSubfolderDef, AllowedNoteTypeDef } from '../dexie/db';
-import { getNextFolderOrder } from '../dexie/operations';
+import { getNextFolderOrder } from '../operations';
 
 @Injectable({
     providedIn: 'root'

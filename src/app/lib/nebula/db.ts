@@ -65,10 +65,8 @@ export class CrepeNebulaDB {
     tags: ICollection;
     noteTags: ICollection;
 
-    // Span-first model
-    spans: ICollection;
-    wormholes: ICollection;
-    spanMentions: ICollection;
+    // Span-first model - REMOVED: spans, wormholes, spanMentions migrated to CozoDB
+    // See: src/app/lib/cozo/schema/layer2-span-model.ts
     claims: ICollection;
 
     // Timeline
@@ -133,15 +131,8 @@ export class CrepeNebulaDB {
         this.noteTags = this.db.collection('noteTags', {
             indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
         });
-        this.spans = this.db.collection('spans', {
-            indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
-        });
-        this.wormholes = this.db.collection('wormholes', {
-            indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
-        });
-        this.spanMentions = this.db.collection('spanMentions', {
-            indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
-        });
+        // REMOVED: spans, wormholes, spanMentions - migrated to CozoDB
+        // See: src/app/lib/cozo/schema/layer2-span-model.ts
         this.claims = this.db.collection('claims', {
             indexes: [{ name: 'id_idx', fields: ['id'], type: IndexType.UNIQUE }]
         });
@@ -204,9 +195,7 @@ export class CrepeNebulaDB {
             this.mentions,
             this.tags,
             this.noteTags,
-            this.spans,
-            this.wormholes,
-            this.spanMentions,
+            // REMOVED: spans, wormholes, spanMentions - migrated to CozoDB
             this.claims,
             this.timelineEvents,
             this.chatMessages,
@@ -270,11 +259,11 @@ export class CrepeNebulaDB {
 // =============================================================================
 // SINGLETON EXPORT
 // =============================================================================
-// Singleton instance
+// Singleton instance (LEGACY - being replaced by GoSqliteCozoBridge)
 export const nebulaDb = new CrepeNebulaDB();
 
 // Debug access
 if (typeof window !== 'undefined') {
     (window as any).nebulaDb = nebulaDb;
-    console.log('[NebulaDB] 🔧 Debug: window.nebulaDb');
+    // console.log('[NebulaDB] 🔧 Debug: window.nebulaDb'); // Silenced - legacy
 }

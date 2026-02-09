@@ -49,13 +49,17 @@
             <button class="h-8 px-2.5 flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
                 [class.text-muted-foreground]="!isExtracting()" [class.hover:text-primary]="!isExtracting()"
                 [class.hover:bg-primary/10]="!isExtracting()" [class.text-primary]="isExtracting()"
-                [class.bg-primary/10]="isExtracting()" [disabled]="isExtracting()"
-                pTooltip="Extract entities from all notes using LLM" tooltipPosition="bottom"
-                (click)="extractAllFromNarrative()">
+                [class.bg-primary/10]="isExtracting()" [disabled]="isExtracting()" pTooltip="Extract entities using LLM"
+                tooltipPosition="bottom" (click)="extractAllFromNarrative()">
                 <lucide-icon [img]="WandIcon" class="w-3.5 h-3.5" [class.animate-pulse]="isExtracting()"></lucide-icon>
                 @if (isExtracting()) {
                 <span class="text-[10px]">{{ extractionProgress().current }}/{{ extractionProgress().total }}</span>
                 }
+            </button>
+            <button
+                class="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                pTooltip="LLM Settings" tooltipPosition="bottom" (click)="openLlmSettings()">
+                <lucide-icon [img]="SettingsIcon" class="w-3.5 h-3.5"></lucide-icon>
             </button>
             <button
                 class="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
@@ -151,3 +155,108 @@
 <!-- Entity Creator Dialog -->
 <app-entity-creator-dialog [(visible)]="isCreatorOpen" [editEntity]="editingEntity()"
     (save)="onSaveEntity($event)"></app-entity-creator-dialog>
+
+<!-- LLM Batch Settings Dialog -->
+@if (showLlmSettings()) {
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" (click)="showLlmSettings.set(false)">
+    <div class="bg-card border border-border rounded-lg shadow-xl w-[420px] max-h-[80vh] overflow-auto"
+        (click)="$event.stopPropagation()">
+        <!-- Header -->
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+            <h2 class="text-sm font-semibold">LLM Extraction Settings</h2>
+            <span class="text-[10px] text-muted-foreground bg-accent/50 px-2 py-0.5 rounded">Separate from AI
+                Chat</span>
+        </div>
+
+        <div class="p-4 space-y-4">
+            <!-- Provider Toggle -->
+            <div class="space-y-2">
+                <label class="text-xs font-medium text-muted-foreground">Provider</label>
+                <div class="flex gap-2">
+                    <button class="flex-1 px-3 py-2 text-xs rounded-md border transition-colors"
+                        [class.bg-primary]="llmSettingsProvider() === 'google'"
+                        [class.text-primary-foreground]="llmSettingsProvider() === 'google'"
+                        [class.border-primary]="llmSettingsProvider() === 'google'"
+                        [class.bg-background]="llmSettingsProvider() !== 'google'"
+                        [class.border-border]="llmSettingsProvider() !== 'google'"
+                        (click)="llmSettingsProvider.set('google')">
+                        Google GenAI
+                    </button>
+                    <button class="flex-1 px-3 py-2 text-xs rounded-md border transition-colors"
+                        [class.bg-primary]="llmSettingsProvider() === 'openrouter'"
+                        [class.text-primary-foreground]="llmSettingsProvider() === 'openrouter'"
+                        [class.border-primary]="llmSettingsProvider() === 'openrouter'"
+                        [class.bg-background]="llmSettingsProvider() !== 'openrouter'"
+                        [class.border-border]="llmSettingsProvider() !== 'openrouter'"
+                        (click)="llmSettingsProvider.set('openrouter')">
+                        OpenRouter
+                    </button>
+                </div>
+            </div>
+
+            <!-- Google Settings -->
+            @if (llmSettingsProvider() === 'google') {
+            <div class="space-y-3 p-3 bg-accent/30 rounded-lg">
+                <div class="space-y-1.5">
+                    <label class="text-xs font-medium text-muted-foreground">Google API Key</label>
+                    <input type="password"
+                        class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md"
+                        placeholder="AIza..." [value]="llmSettingsGoogleKey()"
+                        (input)="llmSettingsGoogleKey.set($any($event.target).value)" />
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-medium text-muted-foreground">Model</label>
+                    <select class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md"
+                        [value]="llmSettingsGoogleModel()"
+                        (change)="llmSettingsGoogleModel.set($any($event.target).value)">
+                        @for (model of googleModels; track model.id) {
+                        <option [value]="model.id">{{ model.name }}</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            }
+
+            <!-- OpenRouter Settings -->
+            @if (llmSettingsProvider() === 'openrouter') {
+            <div class="space-y-3 p-3 bg-accent/30 rounded-lg">
+                <div class="space-y-1.5">
+                    <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
+                    <input type="password"
+                        class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md"
+                        placeholder="sk-or-..." [value]="llmSettingsOrKey()"
+                        (input)="llmSettingsOrKey.set($any($event.target).value)" />
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-medium text-muted-foreground">Model</label>
+                    <select class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md"
+                        [value]="llmSettingsOrModel()" (change)="llmSettingsOrModel.set($any($event.target).value)">
+                        @for (model of openRouterModels; track model.id) {
+                        <option [value]="model.id">{{ model.name }} ({{ model.provider }})</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            }
+
+            <!-- Info -->
+            <p class="text-[10px] text-muted-foreground">
+                These settings are used ONLY for entity extraction. AI Chat uses its own separate settings.
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-4 py-3 border-t border-border flex gap-2 justify-end">
+            <button class="px-4 py-2 text-xs rounded-md bg-accent hover:bg-accent/80 transition-colors"
+                (click)="showLlmSettings.set(false)">
+                Cancel
+            </button>
+            <button
+                class="px-4 py-2 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                (click)="saveLlmSettings()">
+                Save
+            </button>
+        </div>
+    </div>
+</div>
+}

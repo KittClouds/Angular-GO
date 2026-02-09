@@ -1,15 +1,16 @@
 /**
  * AI Chat Service
  * 
- * Manages AI chat history with Nebula + Cozo persistence.
+ * Manages AI chat history with CozoDB persistence.
  * Provides session management and message CRUD operations.
+ * 
+ * NO NEBULA - CozoDB is the only persistence layer for chat.
  */
 
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { nebulaDb } from '../../lib/nebula/db';
-import { cozoDb } from '../../lib/cozo/db';
-import { ChatMessage } from '../../lib/cozo/schema/layer4-memory';
-import { ScopeService } from '../../lib/services/scope.service';
+import { cozoDb } from '../cozo/db';
+import { ChatMessage } from '../cozo/schema/layer4-memory';
+import { ScopeService } from './scope.service';
 
 // Session identifier generator
 function generateSessionId(): string {
@@ -23,7 +24,7 @@ export class AiChatService {
     // Current session ID
     private _sessionId = signal<string>(this.loadOrCreateSession());
 
-    // All messages in current session
+    // All messages in current session (in-memory cache)
     private _messages = signal<ChatMessage[]>([]);
 
     // Loading state
@@ -76,13 +77,10 @@ export class AiChatService {
             narrativeId: scope.narrativeId || '',
         };
 
-        // Add to local state immediately
+        // Add to local state immediately (optimistic update)
         this._messages.update(msgs => [...msgs, message]);
 
-        // Persist to Nebula
-        await nebulaDb.chatMessages.insert(message);
-
-        // Persist to Cozo (fire-and-forget)
+        // Persist to Cozo
         this.persistToCozo(message);
 
         return message;
@@ -110,14 +108,30 @@ export class AiChatService {
         this._messages.update(msgs =>
             msgs.map(m => m.id === messageId ? { ...m, content: m.content + chunk } : m)
         );
+
+        // Debounced persist (don't persist every chunk)
+        // Will persist on final message or next non-streaming message
+    }
+
+    /** Finalize a streamed message (persist final content) */
+    async finalizeMessage(messageId: string): Promise<void> {
+        const message = this._messages().find(m => m.id === messageId);
+        if (message) {
+            this.persistToCozo(message);
+        }
     }
 
     // -------------------------------------------------------------------------
-    // Persistence
+    // Persistence (CozoDB only)
     // -------------------------------------------------------------------------
 
     private persistToCozo(message: ChatMessage): void {
         try {
+            if (!cozoDb.isReady()) {
+                console.warn('[AiChatService] CozoDB not ready, message not persisted');
+                return;
+            }
+
             const query = `
                 ?[id, session_id, role, content, created_at, narrative_id, metadata] <- [[
                     $id, $session_id, $role, $content, $created_at, $narrative_id, $metadata
@@ -145,24 +159,8 @@ export class AiChatService {
         this._loading.set(true);
         try {
             const sessionId = this._sessionId();
-
-            // Try Nebula first (in-memory, fast)
-            const nebulaMsgs = await nebulaDb.chatMessages.find({ sessionId }) as ChatMessage[];
-
-            if (nebulaMsgs.length > 0) {
-                // Sort by createdAt
-                nebulaMsgs.sort((a, b) => a.createdAt - b.createdAt);
-                this._messages.set(nebulaMsgs);
-            } else {
-                // Fallback to Cozo
-                const cozoMsgs = this.loadFromCozo(sessionId);
-                this._messages.set(cozoMsgs);
-
-                // Hydrate Nebula
-                for (const msg of cozoMsgs) {
-                    await nebulaDb.chatMessages.insert(msg);
-                }
-            }
+            const messages = this.loadFromCozo(sessionId);
+            this._messages.set(messages);
         } catch (err) {
             console.error('[AiChatService] Load failed:', err);
             this._messages.set([]);
@@ -173,7 +171,6 @@ export class AiChatService {
 
     private loadFromCozo(sessionId: string): ChatMessage[] {
         try {
-            // Check if CozoDB is initialized
             if (!cozoDb.isReady()) {
                 console.log('[AiChatService] CozoDB not yet initialized, skipping load');
                 return [];
@@ -211,26 +208,28 @@ export class AiChatService {
     async clearSession(): Promise<void> {
         const sessionId = this._sessionId();
 
-        // Clear Nebula
-        await nebulaDb.chatMessages.delete({ sessionId });
-
-        // Clear Cozo
+        // Clear from Cozo
         try {
-            const query = `
-                ?[id] := *chat_messages{id, session_id}, session_id == $session_id
-                :rm chat_messages { id }
-            `;
-            cozoDb.run(query, { session_id: sessionId });
+            if (cozoDb.isReady()) {
+                const query = `
+                    ?[id] := *chat_messages{id, session_id}, session_id == $session_id
+                    :rm chat_messages { id }
+                `;
+                cozoDb.run(query, { session_id: sessionId });
+            }
         } catch (err) {
             console.error('[AiChatService] Cozo clear failed:', err);
         }
 
+        // Clear local state
         this._messages.set([]);
     }
 
     /** Get all sessions (for history browser) */
     getAllSessions(): string[] {
         try {
+            if (!cozoDb.isReady()) return [this._sessionId()];
+
             const query = `
                 ?[session_id, count(id), min(created_at)] :=
                     *chat_messages{session_id, id, created_at}

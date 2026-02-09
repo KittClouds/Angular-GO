@@ -24,7 +24,27 @@ import {
     underlineAttr, underlineSchema, setUnderlineCommand
 } from './plugins/marks';
 import { textAlignPlugin, setTextAlignCommand, indentPlugin, indentCommand, outdentCommand } from './plugins/nodes';
-import { entityHighlighter } from './plugins/entityHighlighter';
+
+// =============================================================================
+// ENTITY HIGHLIGHTER A/B/C TESTING
+// =============================================================================
+// Option A: Original decoration-based (has flicker on redraw)
+// Option B: Experimental overlay-based (reduced ProseMirror mutation)
+// Option C: TRUE MARK-BASED (like text color - stored in document JSON, no flicker)
+// Toggle by commenting/uncommenting the import and .use() below
+// =============================================================================
+
+// OPTION A: Original (decoration-based) - DISABLED
+// import { entityHighlighter } from './plugins/entityHighlighter';
+
+// OPTION B: Experimental (hybrid overlay + decorations) - DISABLED
+// import { entityHighlighterExperimental } from './plugins/entityHighlighterExperimental';
+
+// OPTION C: True Mark-Based (Highlighter C) - CURRENTLY ACTIVE
+// Entity marks are stored in document JSON like text color - applied once, never rebuilt
+import { entitySchema } from './plugins/marks/entity';
+import { entityHighlighterC } from './plugins/entityHighlighterC';
+
 import { detailsNodes, detailsInteractivePlugin } from './plugins/details';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
@@ -95,7 +115,21 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             .config(indentPlugin)
             .use(indentCommand)
             .use(outdentCommand)
-            .use(entityHighlighter)
+            // ─────────────────────────────────────────────────────────────
+            // ENTITY HIGHLIGHTER - A/B/C Testing
+            // ─────────────────────────────────────────────────────────────
+            // OPTION A: Original decoration-based - DISABLED
+            // .use(entityHighlighter)
+            // 
+            // OPTION B: Experimental hybrid - DISABLED
+            // .use(entityHighlighterExperimental)
+            //
+            // OPTION C: True Mark-Based - CURRENTLY ACTIVE
+            // entitySchema defines the mark type (like textColor schema)
+            // entityHighlighterC applies marks on note open (like clicking color picker)
+            .use(entitySchema)
+            .use(entityHighlighterC)
+            // ─────────────────────────────────────────────────────────────
             .use(detailsNodes)
             .use(detailsInteractivePlugin);
 

@@ -19,6 +19,7 @@ import { SearchPanelComponent } from '../search-panel/search-panel.component';
 import { NerPanelComponent } from './ner-panel/ner-panel.component';
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note, FolderSchema } from '../../lib/dexie/db';
+import { AppStore } from '../../lib/ngrx';
 
 // Entity folder types for the dropdown (matches reference)
 interface EntityFolderOption {
@@ -59,6 +60,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private noteEditorStore = inject(NoteEditorStore);
     private goKittService = inject(GoKittService);
     private router = inject(Router);
+    private appStore = inject(AppStore);
 
     // Subscriptions
     private foldersSubscription?: Subscription;
@@ -298,6 +300,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         if (node.type === 'note') {
             // Open note in editor
             this.noteEditorStore.openNote(node.id);
+            this.appStore.openNote(node.id);
         } else {
             // Expand sidebar to show folder contents
             this.sidebarService.open();

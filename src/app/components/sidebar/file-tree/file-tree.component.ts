@@ -14,6 +14,7 @@ import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 import { ScopeService } from '../../../lib/services/scope.service';
 import { ReorderService } from '../../../lib/services/reorder.service';
+import { AppStore } from '../../../lib/ngrx';
 
 @Component({
     selector: 'app-file-tree',
@@ -158,6 +159,7 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     reorderService = inject(ReorderService);
     private injector = inject(Injector);
     private destroyRef = inject(DestroyRef);
+    private appStore = inject(AppStore);
 
     // ViewChild for Swapy container
     @ViewChild('treeContainer') treeContainer!: ElementRef<HTMLDivElement>;
@@ -272,6 +274,7 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         } else if (node.type === 'note') {
             // Open note in editor
             this.noteEditorStore.openNote(node.id);
+            this.appStore.openNote(node.id);
         }
     }
 

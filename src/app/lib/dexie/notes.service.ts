@@ -1,11 +1,12 @@
 // src/app/lib/dexie/notes.service.ts
 // Angular service for reactive note operations using Dexie liveQuery
+// TODO: This still uses Dexie for liveQuery - needs full migration to GoSQLite
 
 import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Note, Folder, Entity } from './db';
-import * as ops from './operations';
+import * as ops from '../operations';
 import { EmbeddingQueueService } from '../services/embedding-queue.service';
 
 @Injectable({

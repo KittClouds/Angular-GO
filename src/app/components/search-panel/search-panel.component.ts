@@ -419,7 +419,7 @@ export class SearchPanelComponent implements OnInit {
   async ngOnInit() {
     // Load folders for scope selection
     try {
-      const { getAllFolders } = await import('../../lib/nebula/operations');
+      const { getAllFolders } = await import('../../lib/operations');
       const allFolders = await getAllFolders();
       this.folders.set(allFolders.map(f => ({ id: f.id, name: f.name })));
     } catch (err) {
@@ -458,7 +458,7 @@ export class SearchPanelComponent implements OnInit {
     this.error.set(null);
 
     try {
-      const { getAllNotes, getNotesByFolder } = await import('../../lib/nebula/operations');
+      const { getAllNotes, getNotesByFolder } = await import('../../lib/operations');
       const scope = this.indexScope();
 
       // Fetch notes based on selected scope

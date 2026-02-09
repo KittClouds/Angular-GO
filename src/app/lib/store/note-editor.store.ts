@@ -9,7 +9,7 @@ import { Observable, Subject, from, of, switchMap, debounceTime, distinctUntilCh
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { db, Note } from '../dexie/db';
-import * as ops from '../nebula/operations';
+import * as ops from '../operations';
 
 const ACTIVE_NOTE_KEY = 'kittclouds-active-note';
 const EDITOR_POSITION_KEY = 'kittclouds-editor-position';
@@ -131,12 +131,13 @@ export class NoteEditorStore {
                 }
             }
 
-            // Verify note still exists before opening
-            db.notes.get(storedNoteId).then(note => {
+            // Verify note still exists before opening (using GoSQLite)
+            ops.getNote(storedNoteId).then(note => {
                 if (note) {
                     this.activeNoteId.set(storedNoteId);
                 } else {
-                    console.warn(`[NoteEditorStore] Stored note ${storedNoteId} no longer exists`);
+                    // Not a warning - just cleanup of stale reference
+                    console.log(`[NoteEditorStore] Stored note ${storedNoteId} no longer exists, clearing`);
                     localStorage.removeItem(ACTIVE_NOTE_KEY);
                     localStorage.removeItem(EDITOR_POSITION_KEY);
                 }

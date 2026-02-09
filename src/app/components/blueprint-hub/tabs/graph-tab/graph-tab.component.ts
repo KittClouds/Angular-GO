@@ -4,29 +4,18 @@ import { FormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
-import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2 } from 'lucide-angular';
+import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2, Settings } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../lib/registry';
 import { GraphDetailComponent } from './graph-detail/graph-detail.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
 import { ScopeService, GLOBAL_SCOPE, ActiveScope } from '../../../../lib/services/scope.service';
 import { LlmEntityExtractorService } from '../../../../lib/services/llm-entity-extractor.service';
+import { LlmBatchService, BATCH_GOOGLE_MODELS, BATCH_OPENROUTER_MODELS } from '../../../../lib/services/llm-batch.service';
 import { db } from '../../../../lib/dexie/db';
+import { entityColorStore } from '../../../../lib/store/entityColorStore';
 
-// Entity styling
-const ENTITY_COLORS: Record<string, string> = {
-    'CHARACTER': '#a855f7',
-    'LOCATION': '#22c55e',
-    'NPC': '#f59e0b',
-    'ITEM': '#eab308',
-    'FACTION': '#ef4444',
-    'EVENT': '#3b82f6',
-    'CONCEPT': '#8b5cf6',
-    'OBJECT': '#6366f1',
-    'LORE': '#06b6d4',
-    'SPECIES': '#ec4899',
-};
-
+// Entity icons (colors come from entityColorStore)
 const ENTITY_ICONS: Record<string, any> = {
     'CHARACTER': User,
     'LOCATION': MapPin,
@@ -62,6 +51,7 @@ interface EntityGroup {
 export class GraphTabComponent implements OnInit, OnDestroy {
     private scopeService = inject(ScopeService);
     private llmExtractor = inject(LlmEntityExtractorService);
+    llmBatch = inject(LlmBatchService); // Public for template
 
     // Icons
     PlusIcon = Plus;
@@ -73,6 +63,11 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     BookIcon = BookOpen;
     FileIcon = FileText;
     WandIcon = Wand2;
+    SettingsIcon = Settings;
+
+    // Model lists for settings
+    googleModels = BATCH_GOOGLE_MODELS;
+    openRouterModels = BATCH_OPENROUTER_MODELS;
 
     // State
     entities = signal<RegisteredEntity[]>([]);
@@ -92,6 +87,14 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     // LLM Extraction state
     isExtracting = this.llmExtractor.isExtracting;
     extractionProgress = this.llmExtractor.extractionProgress;
+
+    // LLM Settings dialog state
+    showLlmSettings = signal(false);
+    llmSettingsProvider = signal<'google' | 'openrouter'>('openrouter');
+    llmSettingsGoogleKey = signal('');
+    llmSettingsGoogleModel = signal('gemini-2.0-flash');
+    llmSettingsOrKey = signal('');
+    llmSettingsOrModel = signal('google/gemini-2.0-flash-001');
 
     scopeIcon = computed(() => {
         const scope = this.activeScope();
@@ -333,16 +336,46 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     }
 
     getColor(kind: string): string {
-        return ENTITY_COLORS[kind] || '#6b7280';
+        // Use entityColorStore for color parity across the app
+        return entityColorStore.getEntityColor(kind);
     }
 
     getIcon(kind: string): any {
         return ENTITY_ICONS[kind] || Sparkles;
     }
 
+    // =========================================================================
+    // LLM Settings
+    // =========================================================================
+
+    openLlmSettings() {
+        // Load current config into form
+        const cfg = this.llmBatch.getConfig();
+        this.llmSettingsProvider.set(cfg.provider);
+        this.llmSettingsGoogleKey.set(cfg.googleApiKey);
+        this.llmSettingsGoogleModel.set(cfg.googleModel);
+        this.llmSettingsOrKey.set(cfg.openRouterApiKey);
+        this.llmSettingsOrModel.set(cfg.openRouterModel);
+        this.showLlmSettings.set(true);
+    }
+
+    saveLlmSettings() {
+        this.llmBatch.updateConfig({
+            provider: this.llmSettingsProvider(),
+            googleApiKey: this.llmSettingsGoogleKey(),
+            googleModel: this.llmSettingsGoogleModel(),
+            openRouterApiKey: this.llmSettingsOrKey(),
+            openRouterModel: this.llmSettingsOrModel()
+        });
+        this.showLlmSettings.set(false);
+    }
+
+    // =========================================================================
+    // LLM Entity Extraction
+    // =========================================================================
+
     /**
      * Extract entities from all notes in current narrative using LLM
-     * Shows confirmation with count before committing
      */
     async extractAllFromNarrative() {
         const scope = this.activeScope();
@@ -353,15 +386,32 @@ export class GraphTabComponent implements OnInit, OnDestroy {
             return;
         }
 
-        const narrativeId = scope.narrativeId || scope.id;
+        // Check if LLM is configured
+        if (!this.llmExtractor.isConfigured()) {
+            const configure = confirm(
+                'LLM not configured for entity extraction.\n\n' +
+                'This feature uses its OWN API settings (separate from AI Chat).\n\n' +
+                'Click OK to configure now.'
+            );
+            if (configure) {
+                this.openLlmSettings();
+            }
+            return;
+        }
 
-        // Confirm action
-        if (!confirm(`Extract entities from all notes in "${this.scopeLabel()}" using LLM?\n\nThis may take a moment for large folders.`)) {
+        const narrativeId = scope.narrativeId || scope.id;
+        const info = this.llmExtractor.getProviderInfo();
+
+        // Confirm action with provider info
+        if (!confirm(
+            `Extract entities from all notes in "${this.scopeLabel()}"?\n\n` +
+            `Using: ${info.provider} / ${info.model}\n\n` +
+            `(Click the gear icon to change LLM settings)`
+        )) {
             return;
         }
 
         try {
-            // Extract
             const result = await this.llmExtractor.extractFromNarrative(narrativeId);
 
             if (result.entities.length === 0) {
@@ -369,7 +419,6 @@ export class GraphTabComponent implements OnInit, OnDestroy {
                 return;
             }
 
-            // Show count confirmation
             const proceed = confirm(
                 `Found ${result.entities.length} entities in ${result.notesProcessed} notes.\n\n` +
                 `Click OK to add them to the registry.\n` +
@@ -378,18 +427,14 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
             if (!proceed) return;
 
-            // Commit to registry
-            const commitResult = await this.llmExtractor.commitToRegistry(result.entities, narrativeId);
+            const commitResult = await this.llmExtractor.commitToRegistry(result.entities);
 
-            // Show result
             alert(
                 `✅ Extraction complete!\n\n` +
                 `• ${commitResult.created} new entities added\n` +
-                `• ${commitResult.skipped} already registered (skipped)\n` +
-                `• ${commitResult.updated} updated`
+                `• ${commitResult.skipped} already registered (skipped)`
             );
 
-            // Refresh entity list
             this.refreshEntities();
 
         } catch (err) {

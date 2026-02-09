@@ -42,6 +42,10 @@ export interface Edge {
     type: string;
     confidence: number;
     sourceNote?: string;
+    /** Where this edge came from: 'scanner', 'llm', 'manual' */
+    provenance?: 'scanner' | 'llm' | 'manual';
+    /** Additional attributes like verb, manner, location, time */
+    attributes?: Record<string, any>;
 }
 
 // =============================================================================
@@ -58,6 +62,11 @@ export class CentralRegistry {
     private listeners = new Set<() => void>();
     private snapshot: RegisteredEntity[] = []; // Stable reference for signals/hooks
     private suppressEvents = false;
+
+    // Dictionary rebuild debounce (for implicit highlighting)
+    private dictionaryRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingDictionaryRebuild = false;
+    private isRebuildingDictionary = false;
 
     // =========================================================================
     // Initialization - Hydrate from BootCache (pre-loaded) or Dexie (fallback)
@@ -194,6 +203,14 @@ export class CentralRegistry {
         );
     }
 
+    /**
+     * Find an edge by source, target, and type
+     */
+    findEdge(sourceId: string, targetId: string, type: string): Edge | null {
+        const id = `${sourceId}-${type}-${targetId}`;
+        return this.edgeCache.get(id) || null;
+    }
+
     // =========================================================================
     // SYNC MUTATIONS
     // =========================================================================
@@ -257,7 +274,7 @@ export class CentralRegistry {
         // Write-through to Dexie (fire-and-forget)
         this.persistEntityToDexie(entity);
 
-        this.notify();
+        this.notify(true); // Entity change - needs dictionary rebuild
 
         return { entity, isNew, wasMerged: false };
     }
@@ -296,7 +313,7 @@ export class CentralRegistry {
             this.suppressEvents = false;
         }
 
-        this.notify();
+        this.notify(true); // Batch entity changes
         return results;
     }
 
@@ -311,7 +328,7 @@ export class CentralRegistry {
                 console.warn('[CentralRegistry] Failed to delete entity from Dexie:', id, err);
             });
 
-            this.notify();
+            this.notify(true); // Entity deleted
             return true;
         }
         return false;
@@ -336,7 +353,7 @@ export class CentralRegistry {
             console.warn('[CentralRegistry] Failed to clear Dexie tables:', err);
         });
 
-        this.notify();
+        this.notify(true); // All entities cleared
         return count;
     }
 
@@ -373,7 +390,7 @@ export class CentralRegistry {
         // Write-through to Dexie (fire-and-forget)
         this.persistEntityToDexie(updated);
 
-        this.notify();
+        this.notify(true); // Entity updated
         return updated;
     }
 
@@ -381,15 +398,22 @@ export class CentralRegistry {
     // RELATIONSHIPS (Edges)
     // =========================================================================
 
-    createEdge(sourceId: string, targetId: string, type: string, options?: any): Edge {
+    createEdge(sourceId: string, targetId: string, type: string, options?: {
+        sourceNote?: string;
+        weight?: number;
+        provenance?: 'scanner' | 'llm' | 'manual';
+        attributes?: Record<string, any>;
+    }): Edge {
         const id = `${sourceId}-${type}-${targetId}`;
         const edge: Edge = {
             id,
             sourceId,
             targetId,
             type,
-            confidence: 1.0,
-            sourceNote: options?.sourceNote
+            confidence: options?.weight ?? 1.0,
+            sourceNote: options?.sourceNote,
+            provenance: options?.provenance,
+            attributes: options?.attributes,
         };
 
         this.edgeCache.set(id, edge);
@@ -400,13 +424,14 @@ export class CentralRegistry {
             sourceId,
             targetId,
             relType: type,
-            confidence: 1.0,
+            confidence: edge.confidence,
             bidirectional: false,
+            // Store provenance and attributes as JSON in Dexie if schema supports
         }).catch(err => {
             console.warn('[CentralRegistry] Failed to persist edge to Dexie:', id, err);
         });
 
-        this.notify(); // Edges change the graph state
+        this.notify(false); // Edge change - no dictionary rebuild needed
 
         return edge;
     }
@@ -429,7 +454,7 @@ export class CentralRegistry {
         return () => this.listeners.delete(listener);
     }
 
-    private notify(): void {
+    private notify(isEntityChange: boolean = false): void {
         if (this.suppressEvents) return;
 
         // Update snapshot
@@ -441,6 +466,82 @@ export class CentralRegistry {
         // Dispatch DOM event for legacy listeners
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('entities-changed'));
+        }
+
+        // Schedule dictionary rebuild ONLY for entity changes (not edges)
+        // Edges don't affect the Aho-Corasick dictionary
+        if (isEntityChange && !this.isRebuildingDictionary) {
+            this.scheduleDictionaryRebuild();
+        }
+    }
+
+    /**
+     * Schedule a dictionary rebuild with debouncing.
+     * Multiple rapid changes will only trigger one rebuild after settling.
+     */
+    private scheduleDictionaryRebuild(): void {
+        this.pendingDictionaryRebuild = true;
+
+        // Clear existing timer
+        if (this.dictionaryRebuildTimer) {
+            clearTimeout(this.dictionaryRebuildTimer);
+        }
+
+        // Debounce: wait 500ms after last change before rebuilding
+        this.dictionaryRebuildTimer = setTimeout(() => {
+            if (this.pendingDictionaryRebuild) {
+                this.performDictionaryRebuild();
+                this.pendingDictionaryRebuild = false;
+            }
+        }, 500);
+    }
+
+    /**
+     * Perform the actual dictionary rebuild.
+     * Collects all entities and sends them to GoKitt for AC recompilation.
+     */
+    private async performDictionaryRebuild(): Promise<void> {
+        // Guard: Prevent concurrent rebuilds
+        if (this.isRebuildingDictionary) {
+            console.log('[CentralRegistry] Dictionary rebuild already in progress, skipping');
+            return;
+        }
+        this.isRebuildingDictionary = true;
+
+        // Import GoKittService dynamically to avoid circular deps
+        try {
+            const { GoKittService } = await import('../services/gokitt.service');
+            const injector = (window as any).__angularInjector;
+            if (!injector) {
+                console.warn('[CentralRegistry] Angular injector not available for dictionary rebuild');
+                return;
+            }
+
+            const goKittService = injector.get(GoKittService) as InstanceType<typeof GoKittService>;
+            if (!goKittService) {
+                console.warn('[CentralRegistry] GoKittService not available');
+                return;
+            }
+
+            // Build entity list for AC dictionary
+            const entities = this.snapshot.map(e => ({
+                id: e.id,
+                label: e.label,
+                kind: e.kind,
+                aliases: e.aliases || [],
+            }));
+
+            console.log(`[CentralRegistry] Triggering dictionary rebuild with ${entities.length} entities`);
+            await goKittService.rebuildDictionary(entities);
+            console.log(`[CentralRegistry] ✅ Dictionary rebuild complete`);
+
+            // NOTE: We do NOT dispatch 'dictionary-rebuilt' event here!
+            // That event triggers a rescan which finds entities → registerEntity → notify → rebuild → LOOP
+            // The implicit scanner will pick up new entities on the next natural scan (keystroke, note open, etc.)
+        } catch (err) {
+            console.error('[CentralRegistry] Dictionary rebuild failed:', err);
+        } finally {
+            this.isRebuildingDictionary = false;
         }
     }
 

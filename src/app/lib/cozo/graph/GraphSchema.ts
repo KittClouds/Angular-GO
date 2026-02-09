@@ -9,6 +9,7 @@ import { FOLDER_HIERARCHY_SCHEMA } from '../schema/layer2-folder-hierarchy';
 import { NETWORK_INSTANCE_SCHEMA } from '../schema/layer2-network-instance';
 import { NETWORK_MEMBERSHIP_SCHEMA } from '../schema/layer2-network-membership';
 import { NETWORK_RELATIONSHIP_SCHEMA } from '../schema/layer2-network-relationship';
+import { SPANS_SCHEMA, WORMHOLES_SCHEMA, SPAN_MENTIONS_SCHEMA } from '../schema/layer2-span-model';
 import {
     NODE_VECTORS_SCHEMA,
     ENTITY_CLUSTERS_SCHEMA,
@@ -42,12 +43,12 @@ export function createGraphSchemas(): string[] {
     console.log('[GraphSchema] Creating graph schemas...');
 
     const basicSchemas = [
-        { name: 'entities', script: `:create entities { id: String => label: String, normalized: String, kind: String, subtype: String?, first_note: String, created_at: Float, updated_at: Float, created_by: String, narrative_id: String }` },
+        { name: 'entities', script: `:create entities { id: String => label: String, normalized: String, kind: String, subtype: String?, first_note: String, created_at: Float, updated_at: Float, created_by: String, narrative_id: String? }` },
         { name: 'entity_aliases', script: `:create entity_aliases { entity_id: String, normalized: String => alias: String }` },
-        { name: 'entity_mentions', script: `:create entity_mentions { entity_id: String, note_id: String => mention_count: Int, last_seen: Float, narrative_id: String, role: String default '' }` },
+        { name: 'entity_mentions', script: `:create entity_mentions { entity_id: String, note_id: String => mention_count: Int, last_seen: Float, narrative_id: String?, role: String default '' }` },
         { name: 'entity_metadata', script: `:create entity_metadata { entity_id: String, key: String => value: String }` },
         // Edges (aligned with CozoEntityEdge and layer2-unified)
-        { name: 'entity_edge', script: `:create entity_edge { id: String => source_id: String, target_id: String, edge_type: String, confidence: Float, extraction_methods: [String], group_id: String, scope_type: String, created_at: Float, valid_at: Float, invalid_at: Float?, fact: String?, weight: Float, narrative_id: String }` },
+        { name: 'entity_edge', script: `:create entity_edge { id: String => source_id: String, target_id: String, edge_type: String, confidence: Float, extraction_methods: [String], group_id: String, scope_type: String, created_at: Float, valid_at: Float, invalid_at: Float?, fact: String?, weight: Float, narrative_id: String? }` },
         { name: 'relationship_provenance', script: `:create relationship_provenance { relationship_id: String, source: String, origin_id: String => confidence: Float, timestamp: Float, context: String? }` },
         { name: 'relationship_attributes', script: `:create relationship_attributes { relationship_id: String, key: String => value: String }` },
         // Unsupervised NER ("Discovery Engine") candidates
@@ -66,6 +67,10 @@ export function createGraphSchemas(): string[] {
         { name: 'network_instance', script: NETWORK_INSTANCE_SCHEMA.trim() },
         { name: 'network_membership', script: NETWORK_MEMBERSHIP_SCHEMA.trim() },
         { name: 'network_relationship', script: NETWORK_RELATIONSHIP_SCHEMA.trim() },
+        // Span-first data model (immutable facts layer)
+        { name: 'spans', script: SPANS_SCHEMA.trim() },
+        { name: 'wormholes', script: WORMHOLES_SCHEMA.trim() },
+        { name: 'span_mentions', script: SPAN_MENTIONS_SCHEMA.trim() },
         // Cross-document knowledge graph schemas
         { name: 'node_vectors', script: NODE_VECTORS_SCHEMA.trim() },
         { name: 'entity_clusters', script: ENTITY_CLUSTERS_SCHEMA.trim() },

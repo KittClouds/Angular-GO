@@ -146,22 +146,170 @@ function createWidget(span: DecorationSpan, api: ReturnType<typeof getHighlighte
 
 /**
  * Entity Highlighter Milkdown Plugin
+ * 
+ * Uses ProseMirror plugin STATE to track decorations across transactions.
+ * Key insight: DecorationSet.map() keeps positions aligned with doc changes.
  */
 export const entityHighlighter = $prose(() => {
     const highlighterApi = getHighlighterApi();
-    let currentSpans: DecorationSpan[] = [];
     let unsubscribe: (() => void) | null = null;
+    let pendingUpdate = false;
+    let lastSpanHash = '';
+
+    const pluginKey = new PluginKey('ENTITY_HIGHLIGHTER');
+
+    /** Quick hash for change detection */
+    function hashSpans(spans: DecorationSpan[], mode: string): string {
+        if (spans.length === 0) return `empty-${mode}`;
+        const first = spans[0];
+        const last = spans[spans.length - 1];
+        return `${spans.length}-${first.from}-${first.to}-${last.from}-${last.to}-${mode}`;
+    }
+
+    /** Build decorations from spans */
+    function buildDecorations(
+        spans: DecorationSpan[],
+        selection: { from: number; to: number },
+        doc: EditorState['doc']
+    ): DecorationSet {
+        if (spans.length === 0) return DecorationSet.empty;
+
+        const currentMode = highlighterApi.getMode();
+        const decorations: Decoration[] = [];
+
+        for (const span of spans) {
+            // Skip invalid spans (position out of bounds)
+            if (span.from < 0 || span.to > doc.content.size) continue;
+
+            const isEditing = isCursorInside(span, selection);
+
+            // IMPLICIT HIGHLIGHTS: Always render as inline
+            if (span.type === 'entity_implicit') {
+                decorations.push(
+                    Decoration.inline(span.from, span.to, {
+                        class: highlighterApi.getClass(span),
+                        style: highlighterApi.getStyle(span),
+                        title: getTooltip(span)
+                    })
+                );
+                continue;
+            }
+
+            // PREDICATE HIGHLIGHTS
+            if (span.type === 'predicate') {
+                const vividClass = currentMode === 'vivid' ? ' vivid' : '';
+                decorations.push(
+                    Decoration.inline(span.from, span.to, {
+                        class: `predicate-highlight${vividClass}`,
+                        title: `${span.sourceEntity} → ${span.verb} → ${span.targetEntity}`,
+                    })
+                );
+                continue;
+            }
+
+            // NER CANDIDATE HIGHLIGHTS
+            if (span.type === 'entity_candidate') {
+                decorations.push(
+                    Decoration.inline(span.from, span.to, {
+                        class: highlighterApi.getClass(span),
+                        style: highlighterApi.getStyle(span),
+                        title: `Potential entity: ${span.label} (score: ${span.matchedText || 'unknown'})`
+                    })
+                );
+                continue;
+            }
+
+            if (isEditing) {
+                // EDITING MODE: Show raw text with subtle highlight
+                decorations.push(
+                    Decoration.inline(span.from, span.to, {
+                        class: 'entity-editing',
+                        style: getEditingStyle(span),
+                        'data-span-type': span.type,
+                    })
+                );
+            } else {
+                // VIEW MODE: Hide raw text, show widget
+                decorations.push(
+                    Decoration.inline(span.from, span.to, {
+                        class: 'entity-hidden',
+                        style: 'display: none;',
+                    })
+                );
+
+                decorations.push(
+                    Decoration.widget(span.from, () => createWidget(span, highlighterApi), {
+                        side: 0,
+                        // Use label+type for stable key (avoids recreation when positions shift)
+                        key: `widget-${currentMode}-${span.type}-${span.label}`,
+                    })
+                );
+            }
+        }
+
+        return DecorationSet.create(doc, decorations);
+    }
 
     return new Plugin({
-        key: new PluginKey('ENTITY_HIGHLIGHTER'),
+        key: pluginKey,
+
+        // STATE: Holds the DecorationSet, mapped through each transaction
+        state: {
+            init(_, state) {
+                const spans = highlighterApi.getDecorations(state.doc);
+                lastSpanHash = hashSpans(spans, highlighterApi.getMode());
+                return buildDecorations(spans, state.selection, state.doc);
+            },
+
+            apply(tr, oldDecorations, oldState, newState) {
+                // Get fresh spans from highlighter
+                const spans = highlighterApi.getDecorations(newState.doc);
+                const currentMode = highlighterApi.getMode();
+                const newHash = hashSpans(spans, currentMode);
+
+                // If spans changed (new scan result), rebuild from scratch
+                if (newHash !== lastSpanHash || tr.getMeta('forceDecorationUpdate')) {
+                    lastSpanHash = newHash;
+                    return buildDecorations(spans, newState.selection, newState.doc);
+                }
+
+                // If doc changed but spans are the same, MAP existing decorations
+                // This keeps positions aligned with document changes
+                if (tr.docChanged) {
+                    return oldDecorations.map(tr.mapping, tr.doc);
+                }
+
+                // Selection change only - rebuild for editing mode toggle
+                if (!tr.selection.eq(oldState.selection)) {
+                    return buildDecorations(spans, newState.selection, newState.doc);
+                }
+
+                return oldDecorations;
+            }
+        },
 
         view(editorView: EditorView) {
-            // Subscribe to highlighting store changes for live updates
+            // Subscribe to highlighting store changes (mode, settings)
             unsubscribe = highlighterApi.subscribe(() => {
-                // Force decoration recalculation when mode changes
-                const tr = editorView.state.tr;
-                tr.setMeta('forceDecorationUpdate', true);
-                editorView.dispatch(tr);
+                pendingUpdate = true;
+                requestAnimationFrame(() => {
+                    if (pendingUpdate) {
+                        pendingUpdate = false;
+
+                        // Lock scroll position to prevent jump during redraw
+                        const scrollContainer = editorView.dom.closest('.milkdown') || editorView.dom.parentElement;
+                        const scrollY = scrollContainer?.scrollTop ?? 0;
+
+                        const tr = editorView.state.tr;
+                        tr.setMeta('forceDecorationUpdate', true);
+                        editorView.dispatch(tr);
+
+                        // Restore scroll position after DOM updates
+                        if (scrollContainer) {
+                            scrollContainer.scrollTop = scrollY;
+                        }
+                    }
+                });
             });
 
             return {
@@ -175,90 +323,10 @@ export const entityHighlighter = $prose(() => {
         },
 
         props: {
-            decorations: (state: EditorState) => {
-                const { selection } = state;
-                const currentMode = highlighterApi.getMode();
-                currentSpans = highlighterApi.getDecorations(state.doc);
-
-                if (currentSpans.length === 0) {
-                    return DecorationSet.empty;
-                }
-
-                const decorations: Decoration[] = [];
-
-                for (const span of currentSpans) {
-                    const isEditing = isCursorInside(span, selection);
-
-                    // IMPLICIT HIGHLIGHTS: Always render as inline, never replace text
-                    if (span.type === 'entity_implicit') {
-                        decorations.push(
-                            Decoration.inline(span.from, span.to, {
-                                class: highlighterApi.getClass(span),
-                                style: highlighterApi.getStyle(span),
-                                title: getTooltip(span)
-                            })
-                        );
-                        continue;
-                    }
-
-                    // PREDICATE HIGHLIGHTS: Show as inline with subtle muted color
-                    if (span.type === 'predicate') {
-                        const mode = highlighterApi.getMode();
-                        const vividClass = mode === 'vivid' ? ' vivid' : '';
-                        decorations.push(
-                            Decoration.inline(span.from, span.to, {
-                                class: `predicate-highlight${vividClass}`,
-                                title: `${span.sourceEntity} → ${span.verb} → ${span.targetEntity}`,
-                            })
-                        );
-                        continue;
-                    }
-
-                    // NER CANDIDATE HIGHLIGHTS: Use centralized styles (Yellow dotted)
-                    if (span.type === 'entity_candidate') {
-                        if (span.label?.toLowerCase() === 'elbaph') {
-                            console.log(`[EntityHighlighter:DIAG] Rendering Elbaph candidate at ${span.from}-${span.to}`);
-                        }
-                        decorations.push(
-                            Decoration.inline(span.from, span.to, {
-                                class: highlighterApi.getClass(span),
-                                style: highlighterApi.getStyle(span),
-                                title: `Potential entity: ${span.label} (score: ${span.matchedText || 'unknown'})`
-                            })
-                        );
-                        continue;
-                    }
-
-                    if (isEditing) {
-                        // EDITING MODE: Show raw text with subtle highlight
-                        decorations.push(
-                            Decoration.inline(span.from, span.to, {
-                                class: 'entity-editing',
-                                style: getEditingStyle(span),
-                                'data-span-type': span.type,
-                            })
-                        );
-                    } else {
-                        // VIEW MODE: Hide raw text, show widget
-                        decorations.push(
-                            Decoration.inline(span.from, span.to, {
-                                class: 'entity-hidden',
-                                style: 'display: none;',
-                            })
-                        );
-
-                        // Include mode in key so widget is recreated when mode changes (clean↔vivid)
-                        decorations.push(
-                            Decoration.widget(span.from, () => createWidget(span, highlighterApi), {
-                                side: 0,
-                                key: `widget-${currentMode}-${span.from}-${span.to}`,
-                            })
-                        );
-                    }
-                }
-
-                return DecorationSet.create(state.doc, decorations);
-            },
-        },
+            decorations(state: EditorState) {
+                return pluginKey.getState(state);
+            }
+        }
     });
 });
+

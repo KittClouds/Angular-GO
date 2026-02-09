@@ -66,4 +66,9 @@ preloadBootCache()
     // =============================================================================
     return bootstrapApplication(AppComponent, appConfig);
   })
+  .then((appRef) => {
+    // Expose injector globally for non-DI contexts (e.g., registry dictionary rebuild)
+    (window as any).__angularInjector = appRef.injector;
+    console.log('[Main] Angular bootstrapped, injector exposed');
+  })
   .catch((err) => console.error('[Main] Boot failed:', err));

@@ -10,6 +10,7 @@ const (
 	KindGalaxy      = "Galaxy"      // Typed Folder
 	KindSolarSystem = "SolarSystem" // Plain Folder
 	KindWorld       = "World"       // Note/Document
+	KindConcept     = "Concept"     // Generic concept node
 )
 
 // Hierarchy edge relations
@@ -161,6 +162,21 @@ func (g *ConceptGraph) AddQuadPlus(
 		Location:  location,
 		Time:      time,
 		Recipient: recipient,
+	}
+	g.AddEdge(source, target, edge)
+}
+
+// AddLabeledEdge adds an edge between existing nodes by ID with a relation and weight
+func (g *ConceptGraph) AddLabeledEdge(sourceID, targetID, relation string, weight float64) {
+	source := g.Nodes[sourceID]
+	target := g.Nodes[targetID]
+	if source == nil || target == nil {
+		return // Silently skip if nodes don't exist
+	}
+
+	edge := &ConceptEdge{
+		Relation: strings.ToUpper(relation),
+		Weight:   weight,
 	}
 	g.AddEdge(source, target, edge)
 }

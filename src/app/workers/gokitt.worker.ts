@@ -31,16 +31,41 @@ type GoKittWorkerMessage =
     | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
+    | { type: 'REBUILD_DICTIONARY'; payload: { entitiesJSON: string }; id: number }
     | { type: 'INDEX_NOTE'; payload: { id: string; text: string; scope?: SearchScope }; id: number }
     | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[]; scope?: SearchScope }; id: number }
     | { type: 'ADD_VECTOR'; payload: { id: string; vectorJSON: string }; id: number }
     | { type: 'SEARCH_VECTORS'; payload: { vectorJSON: string; k: number }; id: number }
-    // DocStore API
     | { type: 'HYDRATE_NOTES'; payload: { notesJSON: string }; id: number }
     | { type: 'UPSERT_NOTE'; payload: { id: string; text: string; version?: number }; id: number }
     | { type: 'REMOVE_NOTE'; payload: { id: string }; id: number }
     | { type: 'SCAN_NOTE'; payload: { noteId: string; provenance?: ProvenanceContext }; id: number }
-    | { type: 'DOC_COUNT'; id: number };
+    | { type: 'VALIDATE_RELATIONS'; payload: { noteId: string; relationsJSON: string }; id: number }
+    | { type: 'DOC_COUNT'; id: number }
+    // SQLite Store API
+    | { type: 'STORE_INIT'; id: number }
+    | { type: 'STORE_UPSERT_NOTE'; payload: { noteJSON: string }; id: number }
+    | { type: 'STORE_GET_NOTE'; payload: { id: string }; id: number }
+    | { type: 'STORE_DELETE_NOTE'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_NOTES'; payload: { folderId?: string }; id: number }
+    | { type: 'STORE_UPSERT_ENTITY'; payload: { entityJSON: string }; id: number }
+    | { type: 'STORE_GET_ENTITY'; payload: { id: string }; id: number }
+    | { type: 'STORE_GET_ENTITY_BY_LABEL'; payload: { label: string }; id: number }
+    | { type: 'STORE_DELETE_ENTITY'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_ENTITIES'; payload: { kind?: string }; id: number }
+    | { type: 'STORE_UPSERT_EDGE'; payload: { edgeJSON: string }; id: number }
+    | { type: 'STORE_GET_EDGE'; payload: { id: string }; id: number }
+    | { type: 'STORE_DELETE_EDGE'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_EDGES'; payload: { entityId: string }; id: number }
+    // Phase 3: Graph Merger API
+    | { type: 'MERGER_INIT'; id: number }
+    | { type: 'MERGER_ADD_SCANNER'; payload: { noteId: string; graphJSON: string }; id: number }
+    | { type: 'MERGER_ADD_LLM'; payload: { edgesJSON: string }; id: number }
+    | { type: 'MERGER_ADD_MANUAL'; payload: { edgesJSON: string }; id: number }
+    | { type: 'MERGER_GET_GRAPH'; id: number }
+    | { type: 'MERGER_GET_STATS'; id: number }
+    // Phase 4: PCST Coherence Filter
+    | { type: 'MERGER_RUN_PCST'; payload: { prizesJSON: string; rootID?: string }; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -49,6 +74,7 @@ type GoKittWorkerResponse =
     | { type: 'SCAN_RESULT'; id: number; payload: any }
     | { type: 'SCAN_IMPLICIT_RESULT'; id: number; payload: any[] }
     | { type: 'SCAN_DISCOVERY_RESULT'; id: number; payload: any[] }
+    | { type: 'REBUILD_DICTIONARY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'INDEX_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'SEARCH_RESULT'; id: number; payload: any[] }
     | { type: 'ADD_VECTOR_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -59,6 +85,30 @@ type GoKittWorkerResponse =
     | { type: 'REMOVE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'SCAN_NOTE_RESULT'; id: number; payload: any }
     | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
+    | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
+    // SQLite Store responses
+    | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NOTE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_NOTES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_ENTITY_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_ENTITIES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_EDGE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_EDGES_RESULT'; id: number; payload: any[] }
+    // Phase 3: Graph Merger responses
+    | { type: 'MERGER_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'MERGER_ADD_SCANNER_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_ADD_LLM_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_ADD_MANUAL_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_GET_GRAPH_RESULT'; id: number; payload: any }
+    | { type: 'MERGER_GET_STATS_RESULT'; id: number; payload: any }
+    // Phase 4: PCST response
+    | { type: 'MERGER_RUN_PCST_RESULT'; id: number; payload: any }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -125,6 +175,7 @@ declare const GoKitt: {
     scan: (text: string, provenanceJSON?: string) => string;
     scanImplicit: (text: string) => string;
     scanDiscovery: (text: string) => string;
+    rebuildDictionary: (entitiesJSON: string) => string;
     indexNote: (id: string, text: string, scopeJSON?: string) => string;
     search: (queryJSON: string, limit: number, vectorJSON?: string, scopeJSON?: string) => string;
     initVectors: () => string;
@@ -137,6 +188,32 @@ declare const GoKitt: {
     removeNote: (id: string) => string;
     scanNote: (noteId: string, provenanceJSON?: string) => string;
     docCount: () => number;
+    // Phase 2: CST Validation
+    validateRelations: (noteId: string, relationsJSON: string) => string;
+    // SQLite Store API
+    storeInit: () => string;
+    storeUpsertNote: (noteJSON: string) => string;
+    storeGetNote: (id: string) => string;
+    storeDeleteNote: (id: string) => string;
+    storeListNotes: (folderId?: string) => string;
+    storeUpsertEntity: (entityJSON: string) => string;
+    storeGetEntity: (id: string) => string;
+    storeGetEntityByLabel: (label: string) => string;
+    storeDeleteEntity: (id: string) => string;
+    storeListEntities: (kind?: string) => string;
+    storeUpsertEdge: (edgeJSON: string) => string;
+    storeGetEdge: (id: string) => string;
+    storeDeleteEdge: (id: string) => string;
+    storeListEdges: (entityId: string) => string;
+    // Phase 3: Graph Merger API
+    mergerInit: () => string;
+    mergerAddScanner: (noteId: string, graphJSON: string) => string;
+    mergerAddLLM: (edgesJSON: string) => string;
+    mergerAddManual: (edgesJSON: string) => string;
+    mergerGetGraph: () => string;
+    mergerGetStats: () => string;
+    // Phase 4: PCST Coherence Filter
+    mergerRunPCST: (prizesJSON: string, rootID?: string) => string;
 };
 
 /**
@@ -291,6 +368,34 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: candidates
                 } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'REBUILD_DICTIONARY': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'REBUILD_DICTIONARY_RESULT',
+                        id: msg.id,
+                        payload: { success: false as boolean, error: 'WASM not loaded' }
+                    });
+                    return;
+                }
+
+                try {
+                    const result = GoKitt.rebuildDictionary(msg.payload.entitiesJSON);
+                    const parsed = JSON.parse(result);
+                    self.postMessage({
+                        type: 'REBUILD_DICTIONARY_RESULT',
+                        id: msg.id,
+                        payload: { success: !parsed.error as boolean, error: parsed.error }
+                    });
+                } catch (e) {
+                    self.postMessage({
+                        type: 'REBUILD_DICTIONARY_RESULT',
+                        id: msg.id,
+                        payload: { success: false as boolean, error: String(e) }
+                    });
+                }
                 break;
             }
 
@@ -502,6 +607,480 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     type: 'DOC_COUNT_RESULT',
                     id: msg.id,
                     payload: count
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'VALIDATE_RELATIONS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'VALIDATE_RELATIONS_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded', relations: [], validCount: 0, totalInput: 0 }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const json = GoKitt.validateRelations(msg.payload.noteId, msg.payload.relationsJSON);
+                const result = JSON.parse(json);
+
+                self.postMessage({
+                    type: 'VALIDATE_RELATIONS_RESULT',
+                    id: msg.id,
+                    payload: result
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // SQLite Store API Handlers
+            // =================================================================
+
+            case 'STORE_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_INIT_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeInit();
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_INIT_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_UPSERT_NOTE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_UPSERT_NOTE_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeUpsertNote(msg.payload.noteJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_UPSERT_NOTE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_GET_NOTE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_GET_NOTE_RESULT',
+                        id: msg.id,
+                        payload: null
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeGetNote(msg.payload.id);
+                const note = res === 'null' ? null : JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_GET_NOTE_RESULT',
+                    id: msg.id,
+                    payload: note
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_DELETE_NOTE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_DELETE_NOTE_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeDeleteNote(msg.payload.id);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_DELETE_NOTE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_LIST_NOTES': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_LIST_NOTES_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeListNotes(msg.payload.folderId || '');
+                const notes = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_LIST_NOTES_RESULT',
+                    id: msg.id,
+                    payload: notes || []
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_UPSERT_ENTITY': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_UPSERT_ENTITY_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeUpsertEntity(msg.payload.entityJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_UPSERT_ENTITY_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_GET_ENTITY': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_GET_ENTITY_RESULT',
+                        id: msg.id,
+                        payload: null
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeGetEntity(msg.payload.id);
+                const entity = res === 'null' ? null : JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_GET_ENTITY_RESULT',
+                    id: msg.id,
+                    payload: entity
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_GET_ENTITY_BY_LABEL': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_GET_ENTITY_RESULT',
+                        id: msg.id,
+                        payload: null
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeGetEntityByLabel(msg.payload.label);
+                const entity = res === 'null' ? null : JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_GET_ENTITY_RESULT',
+                    id: msg.id,
+                    payload: entity
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_DELETE_ENTITY': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_DELETE_ENTITY_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeDeleteEntity(msg.payload.id);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_DELETE_ENTITY_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_LIST_ENTITIES': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_LIST_ENTITIES_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeListEntities(msg.payload.kind || '');
+                const entities = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_LIST_ENTITIES_RESULT',
+                    id: msg.id,
+                    payload: entities || []
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_UPSERT_EDGE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_UPSERT_EDGE_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeUpsertEdge(msg.payload.edgeJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_UPSERT_EDGE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_GET_EDGE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_GET_EDGE_RESULT',
+                        id: msg.id,
+                        payload: null
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeGetEdge(msg.payload.id);
+                const edge = res === 'null' ? null : JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_GET_EDGE_RESULT',
+                    id: msg.id,
+                    payload: edge
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_DELETE_EDGE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_DELETE_EDGE_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeDeleteEdge(msg.payload.id);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_DELETE_EDGE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_LIST_EDGES': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_LIST_EDGES_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeListEdges(msg.payload.entityId);
+                const edges = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_LIST_EDGES_RESULT',
+                    id: msg.id,
+                    payload: edges || []
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // Phase 3: Graph Merger Handlers
+            // =================================================================
+
+            case 'MERGER_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_INIT_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerInit();
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_INIT_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'MERGER_ADD_SCANNER': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_ADD_SCANNER_RESULT',
+                        id: msg.id,
+                        payload: { success: false, added: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerAddScanner(msg.payload.noteId, msg.payload.graphJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_ADD_SCANNER_RESULT',
+                    id: msg.id,
+                    payload: { success: parsed.success, added: parsed.added || 0, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'MERGER_ADD_LLM': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_ADD_LLM_RESULT',
+                        id: msg.id,
+                        payload: { success: false, added: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerAddLLM(msg.payload.edgesJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_ADD_LLM_RESULT',
+                    id: msg.id,
+                    payload: { success: parsed.success, added: parsed.added || 0, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'MERGER_ADD_MANUAL': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_ADD_MANUAL_RESULT',
+                        id: msg.id,
+                        payload: { success: false, added: 0, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerAddManual(msg.payload.edgesJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_ADD_MANUAL_RESULT',
+                    id: msg.id,
+                    payload: { success: parsed.success, added: parsed.added || 0, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'MERGER_GET_GRAPH': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_GET_GRAPH_RESULT',
+                        id: msg.id,
+                        payload: { nodes: {}, edges: {} }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerGetGraph();
+                const graph = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_GET_GRAPH_RESULT',
+                    id: msg.id,
+                    payload: graph
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'MERGER_GET_STATS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_GET_STATS_RESULT',
+                        id: msg.id,
+                        payload: { totalEdges: 0 }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerGetStats();
+                const stats = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_GET_STATS_RESULT',
+                    id: msg.id,
+                    payload: stats
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // Phase 4: PCST Coherence Filter Handler
+            // =================================================================
+
+            case 'MERGER_RUN_PCST': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'MERGER_RUN_PCST_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.mergerRunPCST(msg.payload.prizesJSON, msg.payload.rootID || '');
+                const result = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'MERGER_RUN_PCST_RESULT',
+                    id: msg.id,
+                    payload: result
                 } as GoKittWorkerResponse);
                 break;
             }

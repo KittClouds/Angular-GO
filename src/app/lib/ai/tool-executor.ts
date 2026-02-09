@@ -3,14 +3,14 @@
  * 
  * Executes tool calls from LLM responses.
  * Phase 1: Read, Search, Write tools only.
- * Uses Nebula operations (not Dexie) and EditorAgentBridge.
+ * Uses GoSQLite operations (not Dexie) and EditorAgentBridge.
  */
 
 import type { GoKittService } from '../../services/gokitt.service';
 import type { ToolName } from './tool-schemas';
 import { isValidToolName } from './tool-schemas';
 import type { EditorAgentBridge, SelectionInfo, EditResult } from './editor-agent-bridge';
-import * as nebulaOps from '../nebula/operations';
+import * as ops from '../operations';
 
 // =============================================================================
 // Types
@@ -170,7 +170,7 @@ async function executeByName(
             }
 
             // Fetch from Nebula
-            const note = await nebulaOps.getNote(noteId);
+            const note = await ops.getNote(noteId);
             if (!note) {
                 return JSON.stringify({ error: `Note not found: ${noteId}` });
             }
@@ -246,9 +246,9 @@ async function executeByName(
             const content = String(args['content'] || '');
             const folderId = String(args['folder_id'] || '');
 
-            // Create note via Nebula operations
+            // Create note via operations
             // Must provide all required Note fields
-            const noteId = await nebulaOps.createNote({
+            const noteId = await ops.createNote({
                 title,
                 content: content ? JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }] }) : '',
                 markdownContent: content,

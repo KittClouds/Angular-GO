@@ -350,7 +350,8 @@ export class EditorToolbarComponent {
 
     /**
      * Handle entity tagging from dropdown.
-     * Wraps selected text in [TYPE|Text] syntax and registers the entity.
+     * Applies entity mark to the selected text and registers the entity.
+     * NO parsing syntax - just native marks.
      */
     onEntityAction(item: DropdownItem) {
         if (!this.ctx || !this.editorState) return;
@@ -366,7 +367,7 @@ export class EditorToolbarComponent {
         try {
             const view = this.ctx.get(editorViewCtx);
             const { state } = view;
-            const { selection, doc } = state;
+            const { selection, doc, schema } = state;
             const { from, to, empty } = selection;
 
             if (empty) {
@@ -378,11 +379,24 @@ export class EditorToolbarComponent {
             const selectedText = doc.textBetween(from, to, ' ');
             if (!selectedText.trim()) return;
 
-            // Create the entity syntax: [TYPE|Label]
-            const entitySyntax = `[${entityType}|${selectedText}]`;
+            // Get the entity mark type from schema
+            const entityMarkType = schema.marks['entity'];
+            if (!entityMarkType) {
+                console.error('[EntityTag] Entity mark not found in schema');
+                return;
+            }
 
-            // Replace the selected text with the entity syntax
-            const tr = state.tr.replaceWith(from, to, state.schema.text(entitySyntax));
+            // Create the entity mark with attributes
+            const entityMark = entityMarkType.create({
+                type: 'entity',
+                kind: entityType,
+                label: selectedText.trim(),
+                id: '', // Will be assigned by registry
+                mode: 'vivid',
+            });
+
+            // Apply the mark to the selected text (don't replace text!)
+            const tr = state.tr.addMark(from, to, entityMark);
             view.dispatch(tr);
 
             // Register the entity in the registry
@@ -394,7 +408,7 @@ export class EditorToolbarComponent {
                 { source: 'user' }
             );
 
-            console.log(`[EntityTag] Created entity: ${entitySyntax}`);
+            console.log(`[EntityTag] Tagged "${selectedText}" as ${entityType}`);
 
             // Hide toolbar after action
             this.hide.emit();

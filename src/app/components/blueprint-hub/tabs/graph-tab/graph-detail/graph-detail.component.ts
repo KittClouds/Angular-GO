@@ -5,8 +5,9 @@ import { smartGraphRegistry } from '../../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../../lib/registry';
 import { ConnectionGroup, ConnectionGroupComponent } from './connection-group/connection-group.component';
 import { EntityKind } from '../../../../../lib/Scanner/types';
+import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
-// Replicating entity types and colors locally for now
+// Entity icons (colors come from entityColorStore)
 const ENTITY_ICONS: Record<string, any> = {
     'CHARACTER': User,
     'FACTION': Users,
@@ -17,18 +18,6 @@ const ENTITY_ICONS: Record<string, any> = {
     'SPECIES': Users,
     'ABILITY': Zap,
     'UNKNOWN': Tag
-};
-
-const ENTITY_COLORS: Record<string, string> = {
-    'CHARACTER': '#ef4444',
-    'FACTION': '#8b5cf6',
-    'LOCATION': '#10b981',
-    'EVENT': '#f59e0b',
-    'OBJECT': '#6366f1',
-    'LORE': '#06b6d4',
-    'SPECIES': '#ec4899',
-    'ABILITY': '#eab308',
-    'UNKNOWN': '#64748b'
 };
 
 @Component({
@@ -134,15 +123,15 @@ export class GraphDetailComponent implements OnChanges {
     }
 
     getColor(kind: string): string {
-        return ENTITY_COLORS[kind as EntityKind] || ENTITY_COLORS['UNKNOWN'];
+        return entityColorStore.getEntityColor(kind);
     }
 
     getBgColor(kind: string): string {
-        return `${this.getColor(kind)}25`; // ~15% opacity
+        return entityColorStore.getEntityBgColor(kind, 0.15);
     }
 
     getBorderColor(kind: string): string {
-        return `${this.getColor(kind)}66`; // ~40% opacity
+        return entityColorStore.getEntityBgColor(kind, 0.4);
     }
 
     getIcon(kind: string): any {

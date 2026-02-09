@@ -35,6 +35,7 @@ type GoKittWorkerMessage =
     | { type: 'SCAN'; payload: { text: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'SCAN_IMPLICIT'; payload: { text: string }; id: number }
     | { type: 'SCAN_DISCOVERY'; payload: { text: string }; id: number }
+    | { type: 'REBUILD_DICTIONARY'; payload: { entitiesJSON: string }; id: number }
     | { type: 'INDEX_NOTE'; payload: { id: string; text: string; scope?: SearchScope }; id: number }
     | { type: 'SEARCH'; payload: { query: string[]; limit?: number; vector?: number[]; scope?: SearchScope }; id: number }
     | { type: 'ADD_VECTOR'; payload: { id: string; vectorJSON: string }; id: number }
@@ -44,6 +45,7 @@ type GoKittWorkerMessage =
     | { type: 'UPSERT_NOTE'; payload: { id: string; text: string; version?: number }; id: number }
     | { type: 'REMOVE_NOTE'; payload: { id: string }; id: number }
     | { type: 'SCAN_NOTE'; payload: { noteId: string; provenance?: ProvenanceContext }; id: number }
+    | { type: 'VALIDATE_RELATIONS'; payload: { noteId: string; relationsJSON: string }; id: number }
     | { type: 'DOC_COUNT'; id: number };
 
 type GoKittWorkerResponse =
@@ -52,6 +54,7 @@ type GoKittWorkerResponse =
     | { type: 'SCAN_RESULT'; id: number; payload: any }
     | { type: 'SCAN_IMPLICIT_RESULT'; id: number; payload: any[] }
     | { type: 'SCAN_DISCOVERY_RESULT'; id: number; payload: any[] }
+    | { type: 'REBUILD_DICTIONARY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'INDEX_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'SEARCH_RESULT'; id: number; payload: any[] }
     | { type: 'ADD_VECTOR_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -62,13 +65,38 @@ type GoKittWorkerResponse =
     | { type: 'REMOVE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'SCAN_NOTE_RESULT'; id: number; payload: any }
     | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
+    | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
+    // SQLite Store responses
+    | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NOTE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_NOTES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_ENTITY_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_ENTITIES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_EDGE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_DELETE_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_EDGES_RESULT'; id: number; payload: any[] }
+    // Phase 3: Graph Merger responses
+    | { type: 'MERGER_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'MERGER_ADD_SCANNER_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_ADD_LLM_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_ADD_MANUAL_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
+    | { type: 'MERGER_GET_GRAPH_RESULT'; id: number; payload: any }
+    | { type: 'MERGER_GET_STATS_RESULT'; id: number; payload: any }
+    // Phase 4: PCST response
+    | { type: 'MERGER_RUN_PCST_RESULT'; id: number; payload: any }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
     providedIn: 'root'
 })
 export class GoKittService {
-    private worker: Worker | null = null;
+    // Worker is protected so GoKittStoreService can access it
+    protected _worker: Worker | null = null;
     private wasmLoaded = false;
     private wasmHydrated = false;
     private loadPromise: Promise<void> | null = null;
@@ -81,6 +109,11 @@ export class GoKittService {
     // Last graph data from GoKitt scan - PRIMARY source for graph visualization
     private _lastGraphData = signal<GoKittGraphData | null>(null);
     readonly lastGraphData = this._lastGraphData.asReadonly();
+
+    /** Get the worker instance for external services (like GoKittStoreService) */
+    get worker(): Worker | null {
+        return this._worker;
+    }
 
     constructor() {
         console.log('[GoKittService] Service ready (worker-based)');
@@ -134,14 +167,14 @@ export class GoKittService {
 
     private async _loadWasmInternal(): Promise<void> {
         // Create worker
-        this.worker = new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' });
+        this._worker = new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' });
 
         // Setup message handler
-        this.worker.onmessage = (e: MessageEvent<GoKittWorkerResponse>) => {
+        this._worker.onmessage = (e: MessageEvent<GoKittWorkerResponse>) => {
             this.handleWorkerMessage(e.data);
         };
 
-        this.worker.onerror = (e) => {
+        this._worker.onerror = (e) => {
             console.error('[GoKittService] Worker error:', e);
         };
 
@@ -433,6 +466,131 @@ export class GoKittService {
     }
 
     /**
+     * Phase 2: Validate LLM-extracted relations against CST
+     * Cross-references relations with document structure to filter hallucinations
+     * @param noteId The note ID (must be in DocStore)
+     * @param relations Array of LLM-extracted relations
+     * @returns Validated relations with confidence adjustments
+     */
+    async validateRelations(noteId: string, relations: any[]): Promise<{
+        noteId: string;
+        totalInput: number;
+        validCount: number;
+        relations: any[];
+        error?: string;
+    }> {
+        if (!this.wasmLoaded) {
+            return { noteId, totalInput: 0, validCount: 0, relations: [], error: 'WASM not loaded' };
+        }
+
+        try {
+            const relationsJSON = JSON.stringify(relations);
+            const result = await this.sendRequest<any>('VALIDATE_RELATIONS', { noteId, relationsJSON });
+            return result;
+        } catch (e) {
+            console.error('[GoKittService] Validation error:', e);
+            return { noteId, totalInput: relations.length, validCount: 0, relations: [], error: String(e) };
+        }
+    }
+
+    // ==========================================================================
+    // Phase 3: Graph Merger API
+    // ==========================================================================
+
+    /**
+     * Initialize a new merger instance
+     */
+    async mergerInit(): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('MERGER_INIT', {});
+    }
+
+    /**
+     * Add edges from a scanner (CST) scan result
+     */
+    async mergerAddScanner(noteId: string, graphJSON: string): Promise<{ success: boolean; added: number; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, added: 0, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('MERGER_ADD_SCANNER', { noteId, graphJSON });
+    }
+
+    /**
+     * Add edges from LLM extraction
+     * @param edges Array of { sourceId, targetId, relType, confidence, attributes, sourceNoteId }
+     */
+    async mergerAddLLM(edges: any[]): Promise<{ success: boolean; added: number; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, added: 0, error: 'WASM not loaded' };
+        }
+        const edgesJSON = JSON.stringify(edges);
+        return this.sendRequest('MERGER_ADD_LLM', { edgesJSON });
+    }
+
+    /**
+     * Add manually created edges
+     * @param edges Array of { sourceId, targetId, relType, attributes }
+     */
+    async mergerAddManual(edges: any[]): Promise<{ success: boolean; added: number; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, added: 0, error: 'WASM not loaded' };
+        }
+        const edgesJSON = JSON.stringify(edges);
+        return this.sendRequest('MERGER_ADD_MANUAL', { edgesJSON });
+    }
+
+    /**
+     * Get the current merged graph
+     */
+    async mergerGetGraph(): Promise<{ nodes: any; edges: any }> {
+        if (!this.wasmLoaded) {
+            return { nodes: {}, edges: {} };
+        }
+        return this.sendRequest('MERGER_GET_GRAPH', {});
+    }
+
+    /**
+     * Get merge statistics
+     */
+    async mergerGetStats(): Promise<{
+        totalEdges: number;
+        scannerEdges: number;
+        llmEdges: number;
+        manualEdges: number;
+        deduplicatedEdges: number;
+    }> {
+        if (!this.wasmLoaded) {
+            return { totalEdges: 0, scannerEdges: 0, llmEdges: 0, manualEdges: 0, deduplicatedEdges: 0 };
+        }
+        return this.sendRequest('MERGER_GET_STATS', {});
+    }
+
+    // ==========================================================================
+    // Phase 4: PCST Coherence Filter
+    // ==========================================================================
+
+    /**
+     * Run PCST on the merged graph to extract the optimal subgraph
+     * @param prizes Map of nodeId -> prize value (higher = more important to include)
+     * @param rootID Optional root node for the Steiner tree
+     */
+    async mergerRunPCST(prizes: Record<string, number>, rootID?: string): Promise<{
+        success: boolean;
+        graph?: { nodes: any; edges: any };
+        nodeCount?: number;
+        edgeCount?: number;
+        error?: string;
+    }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        const prizesJSON = JSON.stringify(prizes);
+        return this.sendRequest('MERGER_RUN_PCST', { prizesJSON, rootID });
+    }
+
+    /**
      * Scan for implicit entity mentions (Aho-Corasick)
      * Returns SYNCHRONOUSLY for editor performance (uses cached data)
      *
@@ -482,6 +640,29 @@ export class GoKittService {
         }
     }
 
+    /**
+     * Rebuild the Aho-Corasick dictionary with new entities from the registry.
+     * Call this when entities are added/removed to enable implicit highlighting.
+     */
+    async rebuildDictionary(entities: Array<{ id: string; label: string; kind: string; aliases?: string[] }>): Promise<void> {
+        if (!this.wasmLoaded) {
+            console.warn('[GoKittService.rebuildDictionary] WASM not loaded yet');
+            return;
+        }
+
+        try {
+            const entitiesJSON = JSON.stringify(entities);
+            const result = await this.sendRequest<{ success: boolean; error?: string }>('REBUILD_DICTIONARY', { entitiesJSON });
+            if (!result.success) {
+                console.error('[GoKittService.rebuildDictionary] Failed:', result.error);
+            } else {
+                console.log(`[GoKittService] Dictionary rebuilt with ${entities.length} entities`);
+            }
+        } catch (e) {
+            console.error('[GoKittService.rebuildDictionary] Error:', e);
+        }
+    }
+
     async addVector(id: string, vector: number[]): Promise<void> {
         if (!this.wasmLoaded) return;
         const vectorJSON = JSON.stringify(vector);
@@ -512,6 +693,7 @@ export class GoKittService {
                         case 'SCAN_RESULT':
                         case 'SCAN_IMPLICIT_RESULT':
                         case 'SCAN_DISCOVERY_RESULT':
+                        case 'REBUILD_DICTIONARY_RESULT':
                         case 'INDEX_NOTE_RESULT':
                         case 'SEARCH_RESULT':
                         case 'ADD_VECTOR_RESULT':
@@ -522,6 +704,30 @@ export class GoKittService {
                         case 'REMOVE_NOTE_RESULT':
                         case 'SCAN_NOTE_RESULT':
                         case 'DOC_COUNT_RESULT':
+                        case 'VALIDATE_RELATIONS_RESULT':
+                        // SQLite Store responses
+                        case 'STORE_INIT_RESULT':
+                        case 'STORE_UPSERT_NOTE_RESULT':
+                        case 'STORE_GET_NOTE_RESULT':
+                        case 'STORE_DELETE_NOTE_RESULT':
+                        case 'STORE_LIST_NOTES_RESULT':
+                        case 'STORE_UPSERT_ENTITY_RESULT':
+                        case 'STORE_GET_ENTITY_RESULT':
+                        case 'STORE_DELETE_ENTITY_RESULT':
+                        case 'STORE_LIST_ENTITIES_RESULT':
+                        case 'STORE_UPSERT_EDGE_RESULT':
+                        case 'STORE_GET_EDGE_RESULT':
+                        case 'STORE_DELETE_EDGE_RESULT':
+                        case 'STORE_LIST_EDGES_RESULT':
+                        // Phase 3: Graph Merger responses
+                        case 'MERGER_INIT_RESULT':
+                        case 'MERGER_ADD_SCANNER_RESULT':
+                        case 'MERGER_ADD_LLM_RESULT':
+                        case 'MERGER_ADD_MANUAL_RESULT':
+                        case 'MERGER_GET_GRAPH_RESULT':
+                        case 'MERGER_GET_STATS_RESULT':
+                        // Phase 4: PCST response
+                        case 'MERGER_RUN_PCST_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -541,7 +747,7 @@ export class GoKittService {
             const id = this.nextRequestId++;
             this.pendingRequests.set(id, { resolve, reject });
 
-            this.worker?.postMessage({ type, payload, id } as GoKittWorkerMessage);
+            this._worker?.postMessage({ type, payload, id } as GoKittWorkerMessage);
 
             // Timeout after 30 seconds
             setTimeout(() => {
@@ -560,23 +766,23 @@ export class GoKittService {
 
                 // Match response type to request type
                 if (msg.type === 'INIT' && response.type === 'INIT_COMPLETE') {
-                    this.worker?.removeEventListener('message', handler);
+                    this._worker?.removeEventListener('message', handler);
                     resolve(undefined as T);
                 } else if (msg.type === 'HYDRATE' && response.type === 'HYDRATE_COMPLETE') {
-                    this.worker?.removeEventListener('message', handler);
+                    this._worker?.removeEventListener('message', handler);
                     resolve(response.payload as T);
                 } else if (response.type === 'ERROR' && !('id' in response)) {
-                    this.worker?.removeEventListener('message', handler);
+                    this._worker?.removeEventListener('message', handler);
                     reject(new Error(response.payload.message));
                 }
             };
 
-            this.worker?.addEventListener('message', handler);
-            this.worker?.postMessage(msg);
+            this._worker?.addEventListener('message', handler);
+            this._worker?.postMessage(msg);
 
             // Timeout
             setTimeout(() => {
-                this.worker?.removeEventListener('message', handler);
+                this._worker?.removeEventListener('message', handler);
                 reject(new Error(`${msg.type} timed out`));
             }, 30000);
         });

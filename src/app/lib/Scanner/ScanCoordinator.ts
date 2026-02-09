@@ -23,6 +23,7 @@ export interface ScanCoordinatorConfig {
     graphRegistry: {
         upsertRelationship: (rel: any) => void;
         registerEntity: (label: string, kind: any, noteId: string, options?: any) => any;
+        findEntityByLabel?: (label: string) => any | null;
     };
     onNewRelations?: (relations: ExtractedRelation[]) => void;
     idleTimeoutMs?: number;
@@ -94,13 +95,20 @@ export class ScanCoordinator {
 
         // Register entity immediately for UI updates
         // Don't await - fire and forget
+        // GUARD: Skip if already registered to prevent infinite loop
+        // (dictionary-rebuilt → rescan → onEntityDecoration → registerEntity → notify → dictionary-rebuilt)
         if (span.type === 'entity' || span.type === 'entity_ref' || span.type === 'entity_implicit') {
-            this.config.graphRegistry.registerEntity(
-                span.label || '',
-                span.kind,
-                noteId,
-                { source: 'extraction' }
-            );
+            const label = span.label || '';
+            // Check if already registered (sync check, no events)
+            const alreadyKnown = this.config.graphRegistry.findEntityByLabel?.(label);
+            if (!alreadyKnown) {
+                this.config.graphRegistry.registerEntity(
+                    label,
+                    span.kind,
+                    noteId,
+                    { source: 'extraction' }
+                );
+            }
         } else if (span.type === 'relationship' || span.type === 'predicate') {
             // Handle Relationship Spans from Regex Scanner
             if (span.sourceEntity && span.targetEntity && span.label) {

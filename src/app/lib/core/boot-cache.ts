@@ -4,11 +4,12 @@
 // This ensures registry data is available synchronously when components mount
 
 import { db } from '../dexie';
-import type { Entity, Edge } from '../dexie';
+import type { Entity, Edge, Note } from '../dexie';
 
 export interface BootData {
     entities: Entity[];
     edges: Edge[];
+    notes: Note[];
     loadedAt: number;
     duration: number;
 }
@@ -35,9 +36,10 @@ async function _loadBootData(): Promise<BootData> {
 
     try {
         // Open Dexie and load in parallel
-        const [entities, edges] = await Promise.all([
+        const [entities, edges, notes] = await Promise.all([
             db.entities.toArray(),
-            db.edges.toArray()
+            db.edges.toArray(),
+            db.notes.toArray()
         ]);
 
         const duration = Math.round(performance.now() - start);
@@ -45,11 +47,12 @@ async function _loadBootData(): Promise<BootData> {
         _bootData = {
             entities,
             edges,
+            notes,
             loadedAt: Date.now(),
             duration
         };
 
-        console.log(`[BootCache] ✓ Loaded ${entities.length} entities, ${edges.length} edges in ${duration}ms`);
+        console.log(`[BootCache] ✓ Loaded ${entities.length} entities, ${edges.length} edges, ${notes.length} notes in ${duration}ms`);
         return _bootData;
 
     } catch (err) {
@@ -58,6 +61,7 @@ async function _loadBootData(): Promise<BootData> {
         _bootData = {
             entities: [],
             edges: [],
+            notes: [],
             loadedAt: Date.now(),
             duration: 0
         };

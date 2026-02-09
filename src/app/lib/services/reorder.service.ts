@@ -4,7 +4,15 @@
 import { Injectable, signal, inject, Injector, runInInjectionContext } from '@angular/core';
 import { createSwapy, Swapy, SwapEvent } from 'swapy';
 import type { FlatTreeNode } from '../arborist/types';
-import { reorderFolder, reorderNote, moveFolderToParent, moveNoteToFolder, swapItems } from '../dexie/operations';
+import {
+    reorderFolder,
+    reorderNote,
+    moveFolderToParent,
+    moveNoteToFolder,
+    swapItems,
+    getFolderChildren,
+    getNotesByFolder
+} from '../operations';
 
 export type ReorderScope = 'siblings-only' | 'cross-folder';
 
@@ -213,22 +221,16 @@ export class ReorderService {
      * Get sibling folders for a parent.
      */
     private async getFolderSiblings(parentId: string): Promise<Array<{ id: string; order: number }>> {
-        const { db } = await import('../dexie/db');
-        return db.folders
-            .where('parentId')
-            .equals(parentId)
-            .sortBy('order');
+        const folders = await getFolderChildren(parentId);
+        return folders.sort((a, b) => a.order - b.order);
     }
 
     /**
      * Get sibling notes for a folder.
      */
     private async getNoteSiblings(folderId: string): Promise<Array<{ id: string; order: number }>> {
-        const { db } = await import('../dexie/db');
-        return db.notes
-            .where('folderId')
-            .equals(folderId)
-            .sortBy('order');
+        const notes = await getNotesByFolder(folderId);
+        return notes.sort((a, b) => a.order - b.order);
     }
 
     // Storage for current nodes (set by component)

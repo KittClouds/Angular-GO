@@ -45,6 +45,10 @@
     background-color: hsl(var(--editor-bg));
     color: hsl(var(--editor-fg));
     box-sizing: border-box;
+
+    /* Performance: Hint browser to optimize for content changes */
+    will-change: contents;
+    contain: layout style;
 }
 
 :deep(.milkdown) {

@@ -6,20 +6,11 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
 import { LucideAngularModule, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Plus, X } from 'lucide-angular';
+import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
-// Entity colors and icons
+// Entity kinds and icons (colors come from entityColorStore)
 const ENTITY_KINDS = ['CHARACTER', 'LOCATION', 'NPC', 'ITEM', 'FACTION', 'EVENT', 'CONCEPT'] as const;
 type EntityKind = typeof ENTITY_KINDS[number] | string;
-
-const ENTITY_COLORS: Record<string, string> = {
-    'CHARACTER': '#a855f7',
-    'LOCATION': '#22c55e',
-    'NPC': '#f59e0b',
-    'ITEM': '#eab308',
-    'FACTION': '#ef4444',
-    'EVENT': '#3b82f6',
-    'CONCEPT': '#8b5cf6',
-};
 
 const ENTITY_ICONS: Record<string, any> = {
     'CHARACTER': User,
@@ -387,7 +378,7 @@ export class EntityCreatorDialogComponent implements OnChanges {
     }
 
     getColor(kind: string): string {
-        return ENTITY_COLORS[kind] || '#94a3b8';
+        return entityColorStore.getEntityColor(kind);
     }
 
     getBgColor(kind: string): string {

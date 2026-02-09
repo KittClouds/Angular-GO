@@ -8,15 +8,18 @@ import { smartGraphRegistry } from './lib/registry';
 import { entityColorStore } from './lib/store/entityColorStore';
 import { seedDefaultSchemas } from './lib/folders/seed';
 import { GoKittService } from './services/gokitt.service';
+import { GoKittStoreService } from './services/gokitt-store.service';
 import { setGoKittService } from './api/highlighter-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
-import { NebulaCozoBridge } from './lib/bridge';
+import { GoSqliteCozoBridge } from './lib/bridge/GoSqliteCozoBridge';
 import { cozoDb } from './lib/cozo/db';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
-import { setNebulaBridge } from './lib/nebula/operations';
+import { setGoSqliteBridge } from './lib/operations';
+import { AppStore } from './lib/ngrx';
+import * as ops from './lib/operations';
 
 @Component({
   selector: 'app-root',
@@ -29,11 +32,13 @@ export class AppComponent implements OnInit, OnDestroy {
   title = 'angular-notes';
   private spinner = inject(NgxSpinnerService);
   private goKitt = inject(GoKittService);
+  private goKittStore = inject(GoKittStoreService);
   private orchestrator = inject(AppOrchestrator);
-  private nebulaBridge = inject(NebulaCozoBridge);
+  private goSqliteBridge = inject(GoSqliteCozoBridge);
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
+  private appStore = inject(AppStore);
 
 
   // Navigation API subscriptions
@@ -71,13 +76,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
         // Initialize CozoDB (WASM + persistence)
         await cozoDb.init();
-
-        // Initialize NebulaDB-CozoDB bridge (hydrates from Cozo, primary data layer)
-        await this.nebulaBridge.init();
-
-        // Wire up bridge for non-DI contexts (operations.ts)
-        setNebulaBridge(this.nebulaBridge);
-        console.log('[AppComponent] ✓ NebulaDB bridge initialized and wired');
+        console.log('[AppComponent] ✓ CozoDB initialized');
       });
 
       // Phase 3: WASM Load - load module (parallel with registry)
@@ -104,8 +103,16 @@ export class AppComponent implements OnInit, OnDestroy {
       await this.goKitt.hydrateNotes(noteData);
       console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes`);
 
+      // Phase 4.6: GoSQLite-Cozo Bridge - initialize data layer with smart cache
+      await this.goSqliteBridge.init();
+      setGoSqliteBridge(this.goSqliteBridge);
+      console.log('[AppComponent] ✓ GoSQLite-Cozo Bridge initialized');
+
       // Phase 5: Ready
       this.orchestrator.completePhase('ready');
+
+      // Phase 6: Restore last note from NgRx AppStore
+      await this.restoreLastNote();
 
     } catch (err) {
       console.error('[AppComponent] Boot failed:', err);
@@ -145,8 +152,31 @@ export class AppComponent implements OnInit, OnDestroy {
     this.navUnsubscribe = navigationApi.onNavigate((noteId) => {
       console.log('[AppComponent] Navigation handler triggered:', noteId);
       this.noteEditorStore.openNote(noteId);
+      this.appStore.openNote(noteId); // Track in NgRx for restore
     });
 
     console.log('[AppComponent] ✓ Navigation API wired up');
+  }
+
+  /**
+   * Restore the last opened note from NgRx AppStore.
+   * Called after WASM and data layer are ready.
+   */
+  private async restoreLastNote(): Promise<void> {
+    const lastNoteId = this.appStore.restoreLastNote();
+
+    if (lastNoteId) {
+      // Verify note still exists
+      const note = await ops.getNote(lastNoteId);
+      if (note) {
+        console.log(`[AppComponent] ✓ Restoring last note: ${note.title} (${lastNoteId})`);
+        this.noteEditorStore.openNote(lastNoteId);
+        this.appStore.openNote(lastNoteId);
+      } else {
+        console.log('[AppComponent] Last note no longer exists, starting fresh');
+      }
+    } else {
+      console.log('[AppComponent] No last note to restore');
+    }
   }
 }

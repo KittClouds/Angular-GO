@@ -3,8 +3,9 @@ import { CommonModule } from '@angular/common';
 import { LucideAngularModule, ChevronRight, User, Users, MapPin, Calendar, Hash, FileText, Zap, Tag } from 'lucide-angular';
 import { EntityKind } from '../../../../../../lib/Scanner/types';
 import { RegisteredEntity } from '../../../../../../lib/registry';
+import { entityColorStore } from '../../../../../../lib/store/entityColorStore';
 
-// Replicating entity types and colors locally for now
+// Entity icons (colors come from entityColorStore)
 const ENTITY_ICONS: Record<string, any> = {
     'CHARACTER': User,
     'FACTION': Users,
@@ -15,18 +16,6 @@ const ENTITY_ICONS: Record<string, any> = {
     'SPECIES': Users,
     'ABILITY': Zap,
     'UNKNOWN': Tag
-};
-
-const ENTITY_COLORS: Record<string, string> = {
-    'CHARACTER': '#ef4444',
-    'FACTION': '#8b5cf6',
-    'LOCATION': '#10b981',
-    'EVENT': '#f59e0b',
-    'OBJECT': '#6366f1',
-    'LORE': '#06b6d4',
-    'SPECIES': '#ec4899',
-    'ABILITY': '#eab308',
-    'UNKNOWN': '#64748b'
 };
 
 export interface ConnectionGroup {
@@ -88,7 +77,7 @@ export class ConnectionGroupComponent {
     readonly ChevronRight = ChevronRight;
 
     getColor(kind: string): string {
-        return ENTITY_COLORS[kind as EntityKind] || ENTITY_COLORS['UNKNOWN'];
+        return entityColorStore.getEntityColor(kind);
     }
 
     getBgColor(kind: string): string {

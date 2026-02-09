@@ -3,8 +3,10 @@
 // Wired to ScanCoordinator for entity event emission
 
 import type { DecorationSpan, HighlighterConfig, HighlightMode } from '../lib/Scanner';
-import { scanDocument, getDecorationStyle, getDecorationClass } from '../lib/Scanner';
-import { scanForPatternsSync } from '../lib/Scanner/pattern-scanner';
+import { getDecorationStyle, getDecorationClass } from '../lib/Scanner';
+// HIGHLIGHTER C: Regex scanner disabled - using Aho-Corasick only
+// import { scanDocument } from '../lib/Scanner';
+// import { scanForPatternsSync } from '../lib/Scanner/pattern-scanner';
 import type { EntityKind } from '../lib/Scanner/types';
 import { getScanCoordinator } from '../lib/Scanner/scanCoordinatorInstance';
 import { createSelector, realignSpans } from '../lib/Scanner/anchor-utils';
@@ -49,6 +51,9 @@ const useDiscoveryStore = {
 export interface HighlighterApi {
     /** Get decoration spans for a ProseMirror document */
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[];
+
+    /** Async: Scan document and return spans directly (waits for scan to complete) */
+    scanForSpansAsync(doc: ProseMirrorDoc): Promise<DecorationSpan[]>;
 
     /** Get inline CSS style for a decoration span */
     getStyle(span: DecorationSpan): string;
@@ -96,6 +101,7 @@ class DefaultHighlighterApi implements HighlighterApi {
     private enableWikilinks = true;
     private enableEntityRefs = true;
     private implicitDecorations: DecorationSpan[] = [];
+    private implicitDecorationsDocSize = 0; // Track doc size when implicits were computed
     private lastContext: string = '';
     private lastScannedContext: string = '';
     private listeners: Set<() => void> = new Set();
@@ -137,6 +143,16 @@ class DefaultHighlighterApi implements HighlighterApi {
                     this.notifyListeners();
                 }
             }) as EventListener);
+
+            // REMOVED: dictionary-rebuilt listener was causing infinite loop
+            // The implicit scanner now picks up new entities naturally on next scan
+            // (keystroke, note open, etc.) instead of forcing an immediate rescan
+            // window.addEventListener('dictionary-rebuilt', () => {
+            //     console.log('[HighlighterApi] Dictionary rebuilt - triggering rescan');
+            //     this.pendingRescan = true;
+            //     this.lastScannedContext = '';
+            //     this.notifyListeners();
+            // });
         }
 
         // Subscribe to store changes
@@ -188,6 +204,17 @@ class DefaultHighlighterApi implements HighlighterApi {
         this.listeners.forEach(cb => cb());
     }
 
+    /** Fast equality check for span arrays (avoids redundant rebuilds) */
+    private spansEqual(a: DecorationSpan[], b: DecorationSpan[]): boolean {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i].from !== b[i].from || a[i].to !== b[i].to || a[i].label !== b[i].label) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[] {
         this.lastDoc = doc;
         const settings = highlightingStore.getSettings();
@@ -196,7 +223,8 @@ class DefaultHighlighterApi implements HighlighterApi {
             return [];
         }
 
-        const spans = scanDocument(doc);
+        // HIGHLIGHTER C: No regex scanning - only Aho-Corasick implicits
+        // const spans = scanDocument(doc);
         const text = docContent(doc);
 
         // Handle pending rescan (triggered when WASM becomes ready)
@@ -207,37 +235,48 @@ class DefaultHighlighterApi implements HighlighterApi {
         }
 
         if (text !== this.lastContext) {
+            const prevText = this.lastContext;
             this.lastContext = text;
 
             if (!this.hasScannedOnOpen) {
+                // First scan on note open - always run
                 this.hasScannedOnOpen = true;
                 this.lastScannedContext = text;
                 this.tryLoadCachedOrScan(doc, text);
             } else {
-                const currentEntityCount = this.implicitDecorations.filter(d =>
-                    d.type === 'entity_implicit'
-                ).length;
+                // WORD BOUNDARY CHECK: Only scan at word boundaries (space, punctuation)
+                // This prevents flicker while typing mid-word since no new entities can be detected
+                const lastChar = text.slice(-1);
+                const isWordBoundary = /[\s.,!?;:\-\n\r]/.test(lastChar);
+                const isDelete = text.length < prevText.length;
+                const isPaste = Math.abs(text.length - prevText.length) > 3; // Heuristic: paste = large change
 
-                const prevLength = this.lastScannedContext.length;
-                const shouldCheck = this.shouldCheckForNewEntities(text, prevLength);
-
-                if (currentEntityCount === 0 || shouldCheck) {
+                if (isWordBoundary || isDelete || isPaste) {
                     this.lastScannedContext = text;
                     this.tryLoadCachedOrScan(doc, text);
                 }
+                // If typing mid-word, skip scan - existing highlights stay in place
             }
         }
 
-        const allSpans = [...spans];
-        for (const implicit of this.implicitDecorations) {
-            const overlaps = allSpans.some(explicit =>
-                (implicit.from >= explicit.from && implicit.from < explicit.to) ||
-                (implicit.to > explicit.from && implicit.to <= explicit.to) ||
-                (implicit.from <= explicit.from && implicit.to >= explicit.to)
-            );
+        // HIGHLIGHTER C: Start empty - only Aho-Corasick implicits will be added
+        const allSpans: DecorationSpan[] = [];
 
-            if (!overlaps) {
-                allSpans.push(implicit);
+        // Only use implicit decorations if text length matches (prevents stale positions)
+        const currentTextLength = text.length;
+        const implicitsAreValid = this.implicitDecorationsDocSize === currentTextLength;
+
+        if (implicitsAreValid) {
+            for (const implicit of this.implicitDecorations) {
+                const overlaps = allSpans.some(explicit =>
+                    (implicit.from >= explicit.from && implicit.from < explicit.to) ||
+                    (implicit.to > explicit.from && implicit.to <= explicit.to) ||
+                    (implicit.from <= explicit.from && implicit.to >= explicit.to)
+                );
+
+                if (!overlaps) {
+                    allSpans.push(implicit);
+                }
             }
         }
 
@@ -273,6 +312,48 @@ class DefaultHighlighterApi implements HighlighterApi {
     private shouldCheckForNewEntities(currentText: string, prevLength: number): boolean {
         const currLength = currentText.length;
         return Math.abs(currLength - prevLength) >= 3;
+    }
+
+    /**
+     * Async scan that waits for GoKitt to return spans.
+     * Use this when you need guaranteed results (like on note open).
+     */
+    async scanForSpansAsync(doc: ProseMirrorDoc): Promise<DecorationSpan[]> {
+        if (!goKittService) {
+            console.warn('[HighlighterApi] scanForSpansAsync: GoKitt not available');
+            return [];
+        }
+
+        const batch: { id: number, text: string, pos: number }[] = [];
+        let batchIdCounter = 0;
+
+        doc.descendants((node, pos) => {
+            if (node.isText && node.text) {
+                batch.push({ id: batchIdCounter++, text: node.text, pos });
+            }
+        });
+
+        if (batch.length === 0) return [];
+
+        const allSpans: DecorationSpan[] = [];
+
+        for (const item of batch) {
+            try {
+                const spans = await goKittService.scanImplicitAsync(item.text);
+                for (const span of spans) {
+                    allSpans.push({
+                        ...span,
+                        from: span.from + item.pos,
+                        to: span.to + item.pos,
+                    });
+                }
+            } catch (e) {
+                console.error('[HighlighterApi] scanForSpansAsync error:', e);
+            }
+        }
+
+        console.log(`[HighlighterApi] scanForSpansAsync returned ${allSpans.length} spans`);
+        return allSpans;
     }
 
     getStyle(span: DecorationSpan): string {
@@ -381,6 +462,7 @@ class DefaultHighlighterApi implements HighlighterApi {
 
         if (batch.length === 0) {
             this.implicitDecorations = [];
+            this.implicitDecorationsDocSize = 0;
             this.notifyListeners();
             return;
         }
@@ -390,23 +472,12 @@ class DefaultHighlighterApi implements HighlighterApi {
 
         const scanPromises = batch.map(async (item) => {
             try {
-                // Use Aho-Corasick implicit scanner from GoKitt if available (async via worker)
-                let implicitSpans = await goKittService?.scanImplicitAsync(item.text) ?? [];
+                // HIGHLIGHTER C: Use ONLY Aho-Corasick implicit scanner from GoKitt
+                // No regex pattern scanning - plain text matching only
+                const implicitSpans = await goKittService?.scanImplicitAsync(item.text) ?? [];
 
-                // Also run regex scanner for explicit patterns
-                const explicitSpans = scanForPatternsSync(item.text);
-
-                // Merge: explicit spans take priority, no duplicates
-                const mergedSpans = [...explicitSpans];
-                for (const implicit of implicitSpans) {
-                    const overlaps = mergedSpans.some(explicit =>
-                        (implicit.from >= explicit.from && implicit.from < explicit.to) ||
-                        (implicit.to > explicit.from && implicit.to <= explicit.to)
-                    );
-                    if (!overlaps) {
-                        mergedSpans.push(implicit);
-                    }
-                }
+                // All spans come from Aho-Corasick now
+                const mergedSpans = [...implicitSpans];
 
                 // Add Resilient Anchors (Selectors) to all new spans
                 mergedSpans.forEach(span => {
@@ -444,8 +515,13 @@ class DefaultHighlighterApi implements HighlighterApi {
                 }
             }
 
+            // Only notify if spans actually changed (avoids flicker)
+            const changed = !this.spansEqual(this.implicitDecorations, mergedSpans);
             this.implicitDecorations = mergedSpans;
-            this.notifyListeners();
+            this.implicitDecorationsDocSize = fullText.length; // Track when these were computed
+            if (changed) {
+                this.notifyListeners();
+            }
 
             const entityCount = mergedSpans.filter(d => d.type === 'entity_implicit').length;
             const hadNewEntities = entityCount > this.lastKnownEntityCount;

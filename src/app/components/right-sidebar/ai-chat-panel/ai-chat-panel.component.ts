@@ -599,8 +599,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     chatService = inject(AiChatService);
     openRouter = inject(OpenRouterService);
     googleGenAI = inject(GoogleGenAIService);
-    goKittService = inject(GoKittService);
-    noteEditorStore = inject(NoteEditorStore);
+    private goKittService = inject(GoKittService);
+    private noteEditorStore = inject(NoteEditorStore);
     editorBridge = inject(EditorAgentBridge);
 
     // Icon references for template

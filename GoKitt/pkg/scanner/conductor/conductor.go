@@ -88,10 +88,55 @@ func (c *Conductor) Scan(text string) ScanResult {
 	synMatches := c.syntaxScanner.Scan(text)
 	c.registerExplicitEntities(synMatches)
 
-	// 2. Chunker Pass (Structure)
+	// 2. Implicit Matcher Pass (Registry Entities) - Phase 0 Fix
+	// This allows entities registered via LLM or manual tagging to be found in prose
+	// and create EntitySpan nodes in the CST for relationship extraction.
+	if c.implicitScanner != nil {
+		implicitHits := c.implicitScanner.ScanWithInfo(text)
+		for _, hit := range implicitHits {
+			// Skip if this span already has a syntax match (explicit takes priority)
+			isOverlapping := false
+			for _, syn := range synMatches {
+				if (hit.Start >= syn.Start && hit.Start < syn.End) ||
+					(hit.End > syn.Start && hit.End <= syn.End) {
+					isOverlapping = true
+					break
+				}
+			}
+			if isOverlapping {
+				continue
+			}
+
+			// Use best entity if multiple match same pattern
+			bestEntity := c.implicitScanner.SelectBest(func() []string {
+				ids := make([]string, 0, len(hit.Entities))
+				for _, e := range hit.Entities {
+					ids = append(ids, e.ID)
+				}
+				return ids
+			}())
+
+			if bestEntity != nil {
+				synMatches = append(synMatches, syntax.SyntaxMatch{
+					Start:      hit.Start,
+					End:        hit.End,
+					Text:       hit.MatchedText,
+					Original:   hit.MatchedText,
+					Kind:       syntax.KindEntity,
+					EntityKind: bestEntity.Kind.String(),
+					Label:      bestEntity.Label,
+				})
+
+				// Also register with resolver for pronoun resolution
+				c.resolver.ObserveMention(bestEntity.Label)
+			}
+		}
+	}
+
+	// 3. Chunker Pass (Structure)
 	chunkResult := c.chunker.Chunk(text)
 
-	// 3. Harvest Candidates (All NPs)
+	// 4. Harvest Candidates (All NPs)
 	for _, chunk := range chunkResult.Chunks {
 		if chunk.Kind == chunker.NounPhrase {
 			head := chunk.HeadText(text)
@@ -105,7 +150,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 		}
 	}
 
-	// 4. Narrative Pass (Verbs -> Events) & Discovery "Virus"
+	// 5. Narrative Pass (Verbs -> Events) & Discovery "Virus"
 	var narrativeEvents []NarrativeEvent
 
 	for i, chunk := range chunkResult.Chunks {
@@ -161,7 +206,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 		}
 	}
 
-	// 5. Resolver Pass (Pronouns) - Second pass for remaining tokens
+	// 6. Resolver Pass (Pronouns) - Second pass for remaining tokens
 	var resolvedRefs []ResolvedReference
 	for _, token := range chunkResult.Tokens {
 		if token.POS == chunker.Pronoun || token.POS == chunker.ProperNoun {

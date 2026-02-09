@@ -1,5 +1,10 @@
 import { Injectable } from '@angular/core';
-import { db, Span, Entity, Claim, Wormhole } from '../dexie/db';
+import type { Entity } from '../dexie/db';
+import type { CozoSpan } from '../cozo/schema/layer2-span-model';
+
+// Cross-world query functionality now uses CozoDB for spans, wormholes, spanMentions.
+// Schemas: src/app/lib/cozo/schema/layer2-span-model.ts
+// Operations: GoKitt/internal/store/sqlite_store.go (when implemented)
 
 /**
  * Dependency Graph Node for reactive invalidation
@@ -30,7 +35,7 @@ interface WorldProjectionState {
 
     // Entity/Claim Projection Cache (hot objects)
     entityProjectionCache: Map<string, Entity>;
-    claimProjectionCache: Map<string, Claim>;
+    claimProjectionCache: Map<string, any>; // Claim type if needed
 }
 
 @Injectable({
@@ -74,54 +79,32 @@ export class ProjectionCacheService {
 
     /**
      * CROSS-WORLD QUERY: world -> spans -> wormholes -> target spans -> target entities
-     * Optimized for performance using indices.
+     *
+     * CozoDB Implementation (when Go operations are ready):
+     * 1. Query spans by world_id and position range from CozoDB
+     * 2. Query wormholes to find cross-span links
+     * 3. Query span_mentions to resolve entity candidates
+     * 4. Query entities for final entity data
+     *
+     * See: docs/cozo-span-migration-plan.md for full query design
      */
     async crossWorldQuery(
         sourceWorldId: string,
         start: number,
         end: number
-    ): Promise<{ spans: Span[], entities: Entity[] }> {
-        // 1. Get Source Spans (using compound index [worldId+start+end])
-        // Dexie doesn't strictly support 3-field compound range efficiently in one go without 'between',
-        // but we can query by worldId and filter, or if we set up [worldId+noteId], etc.
-        // For now assuming [worldId+start+end] index exists
+    ): Promise<{ spans: CozoSpan[], entities: Entity[] }> {
+        // TODO: Implement using Go operations when ready
+        // Example CozoDB query pattern:
+        // ?[span] := *spans{world_id: sourceWorldId, start: s, end: e, id: span},
+        //           s >= start, e <= end
+        // ?[dst_span] := *wormholes{src_span_id: span, dst_span_id: dst_span}
+        // ?[entity] := *span_mentions{span_id: dst_span, candidate_entity_id: entity}
 
-        const sourceSpans = await db.spans
-            .where('[worldId+start+end]')
-            .between([sourceWorldId, start, -Infinity], [sourceWorldId, end, Infinity])
-            .toArray();
-
-        // 2. Find Wormholes (Contracts)
-        const spanIds = sourceSpans.map(s => s.id);
-        const wormholes = await db.wormholes
-            .where('srcSpanId')
-            .anyOf(spanIds)
-            .toArray();
-
-        // 3. Resolve Target Spans from Wormholes
-        const targetSpanIds = wormholes.map(w => w.dstSpanId);
-        const targetSpans = await db.spans.bulkGet(targetSpanIds);
-        // Note: Dexie bulkGet returns (Span | undefined)[]
-
-        const validTargetSpans = targetSpans.filter(s => !!s) as Span[];
-
-        // 4. Resolve Target Entities (if any claim links/mentions exist)
-        // This usually goes through SpanMention table
-        const targetSpanIdsList = validTargetSpans.map(s => s.id);
-        const mentions = await db.spanMentions
-            .where('spanId')
-            .anyOf(targetSpanIdsList)
-            .toArray();
-
-        const entityIds = mentions
-            .map(m => m.candidateEntityId)
-            .filter(id => !!id) as string[];
-
-        const entities = await db.entities.bulkGet(entityIds);
+        console.warn('[ProjectionCacheService] crossWorldQuery not yet implemented - CozoDB schemas ready, Go operations pending');
 
         return {
-            spans: validTargetSpans,
-            entities: entities.filter(e => !!e) as Entity[]
+            spans: [],
+            entities: []
         };
     }
 }

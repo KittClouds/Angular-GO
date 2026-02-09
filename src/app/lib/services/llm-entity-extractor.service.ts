@@ -1,15 +1,18 @@
 /**
  * LLM Entity Extractor Service
  * 
- * Uses LLM (Google GenAI or OpenRouter) to extract entities from notes
- * and add them directly to the registry.
+ * Extracts entities from notes using LLM and adds them to the registry.
+ * 
+ * Uses LlmBatchService which:
+ * - Has its OWN settings (separate from AI Chat)
+ * - Does NOT use streaming
+ * - Returns complete responses only
  */
 
 import { Injectable, inject, signal } from '@angular/core';
-import { db } from '../dexie/db';
+import * as ops from '../operations';
 import { smartGraphRegistry } from '../registry';
-import { GoogleGenAIService } from './google-genai.service';
-import { OpenRouterService } from './openrouter.service';
+import { LlmBatchService } from './llm-batch.service';
 import { ENTITY_KINDS, type EntityKind, isEntityKind } from '../cozo/utils';
 
 export interface ExtractedEntity {
@@ -32,34 +35,28 @@ export interface CommitResult {
     skipped: number;
 }
 
-const EXTRACTION_PROMPT = `You are an entity extraction assistant for a world-building/writing application.
-Extract named entities from the following text. Return ONLY a valid JSON array (no markdown, no explanation).
+const SYSTEM_PROMPT = `You are an entity extraction assistant. Return ONLY a valid JSON array. No markdown, no explanation. Start with [ and end with ].`;
 
-Each entity object must have:
-- "label": The canonical name of the entity
+const USER_PROMPT_TEMPLATE = `Extract named entities from this text. Return a JSON array.
+
+Each object:
+- "label": Canonical name (string)
 - "kind": One of: ${ENTITY_KINDS.join(', ')}
-- "aliases": Array of alternative names/nicknames (optional)
-- "confidence": Number 0.0-1.0 indicating extraction confidence
+- "confidence": 0.0-1.0
 
-ENTITY KIND GUIDE:
-- CHARACTER: Main/playable characters, protagonists
-- NPC: Side characters, minor characters, extras
-- LOCATION: Places, regions, buildings, geographical features
-- ITEM: Objects, artifacts, weapons, equipment, vehicles
-- FACTION: Organizations, groups, nations, guilds, families
-- EVENT: Historical events, battles, ceremonies, incidents
-- CONCEPT: Abstract ideas, magic systems, lore, rules
-- SCENE: Story scenes
-- ARC/ACT/CHAPTER/BEAT: Story structure elements
-- TIMELINE: Temporal periods
-- NARRATIVE: Story/world containers
+KIND GUIDE:
+- CHARACTER: Main characters
+- NPC: Side characters
+- LOCATION: Places, buildings
+- ITEM: Objects, artifacts
+- FACTION: Organizations, groups
+- EVENT: Historical events
+- CONCEPT: Magic systems, lore
 
 Rules:
-1. Only extract proper nouns and significant named concepts
-2. Do NOT extract generic words like "the city", "a warrior" - only specific names
-3. Prefer CHARACTER over NPC for clearly important named characters
-4. Use CONCEPT for magic systems, abilities, or abstract named things
-5. Deduplicate - if "Gandalf the Grey" appears, only extract once with aliases
+1. Only proper nouns
+2. Skip generic terms
+3. Deduplicate
 
 TEXT:
 `;
@@ -68,12 +65,29 @@ TEXT:
     providedIn: 'root'
 })
 export class LlmEntityExtractorService {
-    private googleGenAI = inject(GoogleGenAIService);
-    private openRouter = inject(OpenRouterService);
+    // Uses dedicated batch service - NOT the chat services
+    private llmBatch = inject(LlmBatchService);
 
     // Extraction state
     isExtracting = signal(false);
     extractionProgress = signal({ current: 0, total: 0 });
+
+    /**
+     * Check if the batch LLM is configured
+     */
+    isConfigured(): boolean {
+        return this.llmBatch.isConfigured();
+    }
+
+    /**
+     * Get current provider/model info for display
+     */
+    getProviderInfo(): { provider: string; model: string } {
+        return {
+            provider: this.llmBatch.provider(),
+            model: this.llmBatch.currentModel()
+        };
+    }
 
     /**
      * Extract entities from a single note's text
@@ -81,23 +95,13 @@ export class LlmEntityExtractorService {
     async extractFromNote(noteId: string, text: string): Promise<ExtractedEntity[]> {
         if (!text.trim()) return [];
 
-        const prompt = EXTRACTION_PROMPT + text.substring(0, 8000); // Limit context
+        // Limit text to avoid token limits
+        const truncatedText = text.substring(0, 6000);
+        const userPrompt = USER_PROMPT_TEMPLATE + truncatedText;
 
         try {
-            let response: string;
-
-            // Prefer Google GenAI if configured, else OpenRouter
-            if (this.googleGenAI.isConfigured()) {
-                response = await this.googleGenAI.chat([
-                    { role: 'user', parts: [{ text: prompt }] }
-                ]);
-            } else if (this.openRouter.isConfigured()) {
-                response = await this.openRouter.chat([
-                    { role: 'user', content: prompt }
-                ]);
-            } else {
-                throw new Error('No LLM provider configured');
-            }
+            // Use dedicated batch service - NO STREAMING
+            const response = await this.llmBatch.complete(userPrompt, SYSTEM_PROMPT);
 
             // Parse JSON from response
             const entities = this.parseEntityResponse(response, noteId);
@@ -125,7 +129,8 @@ export class LlmEntityExtractorService {
             const noteIds = await this.getNoteIdsInNarrative(narrativeId);
             this.extractionProgress.set({ current: 0, total: noteIds.length });
 
-            console.log(`[LlmEntityExtractor] Extracting from ${noteIds.length} notes in narrative ${narrativeId}`);
+            const info = this.getProviderInfo();
+            console.log(`[LlmEntityExtractor] Extracting from ${noteIds.length} notes using ${info.provider}/${info.model}`);
 
             const entityMap = new Map<string, ExtractedEntity>(); // Dedupe by normalized label
 
@@ -134,7 +139,7 @@ export class LlmEntityExtractorService {
                 this.extractionProgress.set({ current: i + 1, total: noteIds.length });
 
                 try {
-                    const note = await db.notes.get(noteId);
+                    const note = await ops.getNote(noteId);
                     if (!note?.content) continue;
 
                     const extracted = await this.extractFromNote(noteId, note.content);
@@ -176,7 +181,7 @@ export class LlmEntityExtractorService {
      * Commit extracted entities to the registry
      * Auto-skips already registered entities
      */
-    async commitToRegistry(entities: ExtractedEntity[], _narrativeId?: string): Promise<CommitResult> {
+    async commitToRegistry(entities: ExtractedEntity[]): Promise<CommitResult> {
         const result: CommitResult = {
             created: 0,
             updated: 0,
@@ -188,13 +193,11 @@ export class LlmEntityExtractorService {
             const existing = smartGraphRegistry.findEntityByLabel(entity.label);
 
             if (existing) {
-                // Already registered - skip
                 result.skipped++;
                 continue;
             }
 
             try {
-                // Register new entity
                 smartGraphRegistry.registerEntity(
                     entity.label,
                     entity.kind,
@@ -220,13 +223,11 @@ export class LlmEntityExtractorService {
     private async getNoteIdsInNarrative(narrativeId: string): Promise<string[]> {
         const noteIds: string[] = [];
 
-        // Get all folders in this narrative
         const folderIds = await this.getDescendantFolderIds(narrativeId);
-        folderIds.push(narrativeId); // Include root folder
+        folderIds.push(narrativeId);
 
-        // Get notes in each folder
         for (const folderId of folderIds) {
-            const notes = await db.notes.where('folderId').equals(folderId).toArray();
+            const notes = await ops.getNotesByFolder(folderId);
             noteIds.push(...notes.map(n => n.id));
         }
 
@@ -238,7 +239,7 @@ export class LlmEntityExtractorService {
      */
     private async getDescendantFolderIds(parentId: string): Promise<string[]> {
         const result: string[] = [];
-        const children = await db.folders.where('parentId').equals(parentId).toArray();
+        const children = await ops.getFolderChildren(parentId);
 
         for (const child of children) {
             result.push(child.id);
@@ -254,20 +255,26 @@ export class LlmEntityExtractorService {
      */
     private parseEntityResponse(response: string, sourceNoteId: string): ExtractedEntity[] {
         try {
-            // Try to extract JSON from the response (might have markdown wrapping)
             let jsonStr = response.trim();
 
             // Remove markdown code block if present
             if (jsonStr.startsWith('```')) {
                 const lines = jsonStr.split('\n');
-                lines.shift(); // Remove opening ```json
+                lines.shift();
                 if (lines[lines.length - 1].startsWith('```')) {
-                    lines.pop(); // Remove closing ```
+                    lines.pop();
                 }
                 jsonStr = lines.join('\n');
             }
 
-            const parsed = JSON.parse(jsonStr);
+            // Try parsing
+            let parsed: any[];
+            try {
+                parsed = JSON.parse(jsonStr);
+            } catch {
+                console.warn('[LlmEntityExtractor] JSON parse failed, attempting repair...');
+                parsed = this.repairTruncatedJson(jsonStr);
+            }
 
             if (!Array.isArray(parsed)) {
                 console.warn('[LlmEntityExtractor] Response is not an array');
@@ -279,7 +286,6 @@ export class LlmEntityExtractorService {
             for (const item of parsed) {
                 if (!item.label || !item.kind) continue;
 
-                // Normalize kind
                 const kindUpper = String(item.kind).toUpperCase();
                 if (!isEntityKind(kindUpper)) {
                     console.warn('[LlmEntityExtractor] Unknown kind:', item.kind);
@@ -295,11 +301,35 @@ export class LlmEntityExtractorService {
                 });
             }
 
+            console.log(`[LlmEntityExtractor] Parsed ${entities.length} entities`);
             return entities;
         } catch (err) {
-            console.error('[LlmEntityExtractor] Failed to parse response:', err);
+            console.error('[LlmEntityExtractor] Failed to parse:', err);
             console.log('[LlmEntityExtractor] Raw response:', response.substring(0, 500));
             return [];
         }
+    }
+
+    /**
+     * Attempt to repair truncated JSON
+     */
+    private repairTruncatedJson(jsonStr: string): any[] {
+        const results: any[] = [];
+        const pattern = /\{\s*"label"\s*:\s*"[^"]+"\s*,\s*"kind"\s*:\s*"[^"]+"\s*(?:,\s*"[^"]+"\s*:\s*(?:"[^"]*"|[\d.]+|\[[^\]]*\]|true|false|null))*\s*\}/g;
+
+        let match;
+        while ((match = pattern.exec(jsonStr)) !== null) {
+            try {
+                const obj = JSON.parse(match[0]);
+                if (obj.label && obj.kind) {
+                    results.push(obj);
+                }
+            } catch {
+                // Skip
+            }
+        }
+
+        console.log(`[LlmEntityExtractor] Recovered ${results.length} entities from malformed JSON`);
+        return results;
     }
 }
