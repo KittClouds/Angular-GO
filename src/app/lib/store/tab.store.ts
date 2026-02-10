@@ -59,6 +59,27 @@ export class TabStore {
                 this.ensureTabOpen(activeNoteId);
             }
         });
+
+        // ─────────────────────────────────────────────────────────────
+        // Reactive Title Sync
+        // When the current note's title changes in Dexie (via liveQuery),
+        // update the corresponding tab title to stay in sync.
+        // This fixes the issue where tabs show "Untitled Note" but
+        // the sidebar shows the actual note name like "girls".
+        // ─────────────────────────────────────────────────────────────
+        effect(() => {
+            const currentNote = this.noteEditorStore.currentNote();
+            if (!currentNote) return;
+
+            // Find the tab for this note and update its title if different
+            const currentTabs = untracked(() => this.tabs());
+            const existingTab = currentTabs.find(t => t.noteId === currentNote.id);
+
+            if (existingTab && existingTab.title !== currentNote.title) {
+                console.log(`[TabStore] Syncing tab title: "${existingTab.title}" → "${currentNote.title}"`);
+                this.updateTabTitle(currentNote.id, currentNote.title || 'Untitled');
+            }
+        });
     }
 
     // ─────────────────────────────────────────────────────────────

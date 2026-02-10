@@ -42,7 +42,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
             
             @if (service.isOpen()) {
                 <!-- View Selector Header -->
-                <div class="shrink-0 h-10 border-b border-teal-900/40 bg-gradient-to-r from-[#134e4a] via-[#113a35] to-[#18181b] px-2 flex items-center shadow-sm text-white">
+                <div class="shrink-0 h-10 border-b border-white/10 bg-gradient-to-b from-zinc-800 to-zinc-950 px-2 flex items-center shadow-sm text-white">
                     <div class="view-selector-wrapper h-8 relative">
                         <!-- Trigger Button -->
                         <div class="view-selector-display" (click)="toggleDropdown()">
@@ -165,7 +165,7 @@ const STORAGE_KEY = 'right-sidebar:tab';
                 </div>
 
                 <!-- Footer -->
-                <div class="h-8 flex items-center px-3 border-t border-sidebar-border shrink-0 text-xs bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1),0_-2px_4px_-1px_rgba(0,0,0,0.06)] relative z-10 transition-colors duration-300">
+                <div class="h-8 flex items-center px-3 border-t border-border shrink-0 text-xs font-medium tracking-wide bg-gradient-to-b from-white to-gray-50 dark:from-zinc-900 dark:to-zinc-950 text-slate-600 dark:text-slate-400 relative z-10 transition-colors duration-300">
                     @if (activeView() === 'entities') {
                         <span>{{ entities().length }} entities</span>
                     } @else if (activeView() === 'ai') {

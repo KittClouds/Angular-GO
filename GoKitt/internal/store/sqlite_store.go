@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"sync"
 
+	_ "github.com/asg017/sqlite-vec-go-bindings/ncruces"
 	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 // SQLiteStore is the SQLite-backed data store.
@@ -19,11 +19,13 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-// schema defines all tables for the unified data layer.
+// schema defines all tables for the unified data layer with temporal versioning.
 const schema = `
--- Notes (JSON doc store pattern)
+-- Notes (Temporal versioning pattern)
+-- Composite primary key (id, version) enables full version history
 CREATE TABLE IF NOT EXISTS notes (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
     world_id TEXT NOT NULL,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -38,11 +40,20 @@ CREATE TABLE IF NOT EXISTS notes (
     narrative_id TEXT,
     "order" REAL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    valid_from INTEGER NOT NULL,
+    valid_to INTEGER,
+    is_current INTEGER DEFAULT 1,
+    change_reason TEXT,
+    PRIMARY KEY (id, version)
 );
 
-CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id);
-CREATE INDEX IF NOT EXISTS idx_notes_narrative ON notes(narrative_id);
+-- Partial indexes for current versions (fast queries)
+CREATE INDEX IF NOT EXISTS idx_notes_current ON notes(id) WHERE is_current = 1;
+CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id) WHERE is_current = 1;
+CREATE INDEX IF NOT EXISTS idx_notes_narrative ON notes(narrative_id) WHERE is_current = 1;
+-- Index for history queries
+CREATE INDEX IF NOT EXISTS idx_notes_history ON notes(id, valid_from);
 
 -- Entities (Registry)
 CREATE TABLE IF NOT EXISTS entities (
@@ -115,57 +126,123 @@ func (s *SQLiteStore) Close() error {
 // Note CRUD
 // =============================================================================
 
-// UpsertNote inserts or updates a note.
-func (s *SQLiteStore) UpsertNote(note *Note) error {
+// CreateNote creates a new note with version 1.
+func (s *SQLiteStore) CreateNote(note *Note) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Set version defaults
+	if note.Version == 0 {
+		note.Version = 1
+	}
+	if note.ValidFrom == 0 {
+		note.ValidFrom = note.CreatedAt
+	}
+	note.IsCurrent = true
+
 	_, err := s.db.Exec(`
-		INSERT INTO notes (id, world_id, title, content, markdown_content, folder_id, 
+		INSERT INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
 			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id, 
-			narrative_id, "order", created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			world_id = excluded.world_id,
-			title = excluded.title,
-			content = excluded.content,
-			markdown_content = excluded.markdown_content,
-			folder_id = excluded.folder_id,
-			entity_kind = excluded.entity_kind,
-			entity_subtype = excluded.entity_subtype,
-			is_entity = excluded.is_entity,
-			is_pinned = excluded.is_pinned,
-			favorite = excluded.favorite,
-			owner_id = excluded.owner_id,
-			narrative_id = excluded.narrative_id,
-			"order" = excluded."order",
-			updated_at = excluded.updated_at
-	`, note.ID, note.WorldID, note.Title, note.Content, note.MarkdownContent,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, note.ID, note.Version, note.WorldID, note.Title, note.Content, note.MarkdownContent,
 		note.FolderID, note.EntityKind, note.EntitySubtype,
 		boolToInt(note.IsEntity), boolToInt(note.IsPinned), boolToInt(note.Favorite),
-		note.OwnerID, note.NarrativeID, note.Order, note.CreatedAt, note.UpdatedAt)
+		note.OwnerID, note.NarrativeID, note.Order, note.CreatedAt, note.UpdatedAt,
+		note.ValidFrom, note.ValidTo, boolToInt(note.IsCurrent), note.ChangeReason)
 
 	return err
 }
 
-// GetNote retrieves a note by ID.
+// UpdateNote creates a new version of an existing note.
+func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Get current version info
+	var currentVersion int
+	var createdAt int64
+	err := s.db.QueryRow(`
+		SELECT version, created_at FROM notes 
+		WHERE id = ? AND is_current = 1
+	`, note.ID).Scan(&currentVersion, &createdAt)
+	if err == sql.ErrNoRows {
+		// Note doesn't exist, fall back to create
+		s.mu.Unlock()
+		return s.CreateNote(note)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Close old current version
+	_, err = s.db.Exec(`
+		UPDATE notes SET valid_to = ?, is_current = 0 
+		WHERE id = ? AND is_current = 1
+	`, note.UpdatedAt, note.ID)
+	if err != nil {
+		return err
+	}
+
+	// Insert new version
+	newVersion := currentVersion + 1
+	note.Version = newVersion
+	note.CreatedAt = createdAt // Preserve original creation time
+	note.ValidFrom = note.UpdatedAt
+	note.ValidTo = nil
+	note.IsCurrent = true
+	note.ChangeReason = reason
+
+	_, err = s.db.Exec(`
+		INSERT INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id, 
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, note.ID, note.Version, note.WorldID, note.Title, note.Content, note.MarkdownContent,
+		note.FolderID, note.EntityKind, note.EntitySubtype,
+		boolToInt(note.IsEntity), boolToInt(note.IsPinned), boolToInt(note.Favorite),
+		note.OwnerID, note.NarrativeID, note.Order, note.CreatedAt, note.UpdatedAt,
+		note.ValidFrom, note.ValidTo, boolToInt(note.IsCurrent), note.ChangeReason)
+
+	return err
+}
+
+// UpsertNote is a convenience method that creates or updates.
+func (s *SQLiteStore) UpsertNote(note *Note) error {
+	s.mu.RLock()
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM notes WHERE id = ? AND is_current = 1 LIMIT 1`, note.ID).Scan(&exists)
+	s.mu.RUnlock()
+
+	if err == sql.ErrNoRows {
+		return s.CreateNote(note)
+	}
+	if err != nil {
+		return err
+	}
+	return s.UpdateNote(note, "upsert")
+}
+
+// GetNote retrieves the current version of a note by ID.
 func (s *SQLiteStore) GetNote(id string) (*Note, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var note Note
-	var isEntity, isPinned, favorite int
+	var isEntity, isPinned, favorite, isCurrent int
+	var validTo sql.NullInt64
 
 	err := s.db.QueryRow(`
-		SELECT id, world_id, title, content, markdown_content, folder_id,
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
 			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
-			narrative_id, "order", created_at, updated_at
-		FROM notes WHERE id = ?
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+		FROM notes WHERE id = ? AND is_current = 1
 	`, id).Scan(
-		&note.ID, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
+		&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
 		&note.FolderID, &note.EntityKind, &note.EntitySubtype,
 		&isEntity, &isPinned, &favorite,
 		&note.OwnerID, &note.NarrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+		&note.ValidFrom, &validTo, &isCurrent, &note.ChangeReason,
 	)
 
 	if err == sql.ErrNoRows {
@@ -178,11 +255,213 @@ func (s *SQLiteStore) GetNote(id string) (*Note, error) {
 	note.IsEntity = isEntity != 0
 	note.IsPinned = isPinned != 0
 	note.Favorite = favorite != 0
+	note.IsCurrent = isCurrent != 0
+	if validTo.Valid {
+		note.ValidTo = &validTo.Int64
+	}
 
 	return &note, nil
 }
 
-// DeleteNote removes a note by ID.
+// GetNoteVersion retrieves a specific version of a note.
+func (s *SQLiteStore) GetNoteVersion(id string, version int) (*Note, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var note Note
+	var isEntity, isPinned, favorite, isCurrent int
+	var validTo sql.NullInt64
+
+	err := s.db.QueryRow(`
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+		FROM notes WHERE id = ? AND version = ?
+	`, id, version).Scan(
+		&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
+		&note.FolderID, &note.EntityKind, &note.EntitySubtype,
+		&isEntity, &isPinned, &favorite,
+		&note.OwnerID, &note.NarrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+		&note.ValidFrom, &validTo, &isCurrent, &note.ChangeReason,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	note.IsEntity = isEntity != 0
+	note.IsPinned = isPinned != 0
+	note.Favorite = favorite != 0
+	note.IsCurrent = isCurrent != 0
+	if validTo.Valid {
+		note.ValidTo = &validTo.Int64
+	}
+
+	return &note, nil
+}
+
+// ListNoteVersions returns all versions of a note.
+func (s *SQLiteStore) ListNoteVersions(id string) ([]*Note, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+		FROM notes WHERE id = ? ORDER BY version DESC
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []*Note
+	for rows.Next() {
+		var note Note
+		var isEntity, isPinned, favorite, isCurrent int
+		var validTo sql.NullInt64
+
+		if err := rows.Scan(
+			&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
+			&note.FolderID, &note.EntityKind, &note.EntitySubtype,
+			&isEntity, &isPinned, &favorite,
+			&note.OwnerID, &note.NarrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+			&note.ValidFrom, &validTo, &isCurrent, &note.ChangeReason,
+		); err != nil {
+			return nil, err
+		}
+
+		note.IsEntity = isEntity != 0
+		note.IsPinned = isPinned != 0
+		note.Favorite = favorite != 0
+		note.IsCurrent = isCurrent != 0
+		if validTo.Valid {
+			note.ValidTo = &validTo.Int64
+		}
+		notes = append(notes, &note)
+	}
+
+	return notes, rows.Err()
+}
+
+// GetNoteAtTime retrieves the version of a note that was current at a given timestamp.
+func (s *SQLiteStore) GetNoteAtTime(id string, timestamp int64) (*Note, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var note Note
+	var isEntity, isPinned, favorite, isCurrent int
+	var validTo sql.NullInt64
+
+	err := s.db.QueryRow(`
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+		FROM notes 
+		WHERE id = ? 
+		  AND valid_from <= ? 
+		  AND (valid_to IS NULL OR valid_to > ?)
+		ORDER BY version DESC LIMIT 1
+	`, id, timestamp, timestamp).Scan(
+		&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
+		&note.FolderID, &note.EntityKind, &note.EntitySubtype,
+		&isEntity, &isPinned, &favorite,
+		&note.OwnerID, &note.NarrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+		&note.ValidFrom, &validTo, &isCurrent, &note.ChangeReason,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	note.IsEntity = isEntity != 0
+	note.IsPinned = isPinned != 0
+	note.Favorite = favorite != 0
+	note.IsCurrent = isCurrent != 0
+	if validTo.Valid {
+		note.ValidTo = &validTo.Int64
+	}
+
+	return &note, nil
+}
+
+// RestoreNoteVersion restores a previous version by creating a new version with the old content.
+func (s *SQLiteStore) RestoreNoteVersion(id string, version int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Get the version to restore
+	var oldNote Note
+	var isEntity, isPinned, favorite int
+	var validTo sql.NullInt64
+
+	err := s.db.QueryRow(`
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to
+		FROM notes WHERE id = ? AND version = ?
+	`, id, version).Scan(
+		&oldNote.ID, &oldNote.Version, &oldNote.WorldID, &oldNote.Title, &oldNote.Content, &oldNote.MarkdownContent,
+		&oldNote.FolderID, &oldNote.EntityKind, &oldNote.EntitySubtype,
+		&isEntity, &isPinned, &favorite,
+		&oldNote.OwnerID, &oldNote.NarrativeID, &oldNote.Order, &oldNote.CreatedAt, &oldNote.UpdatedAt,
+		&oldNote.ValidFrom, &validTo,
+	)
+	if err != nil {
+		return err
+	}
+
+	oldNote.IsEntity = isEntity != 0
+	oldNote.IsPinned = isPinned != 0
+	oldNote.Favorite = favorite != 0
+
+	// Get current max version
+	var maxVersion int
+	err = s.db.QueryRow(`SELECT MAX(version) FROM notes WHERE id = ?`, id).Scan(&maxVersion)
+	if err != nil {
+		return err
+	}
+
+	// Get current timestamp for valid_from
+	var now int64
+	err = s.db.QueryRow(`SELECT strftime('%s', 'now') * 1000`).Scan(&now)
+	if err != nil {
+		now = oldNote.UpdatedAt // Fallback
+	}
+
+	// Close current version
+	_, err = s.db.Exec(`
+		UPDATE notes SET valid_to = ?, is_current = 0 
+		WHERE id = ? AND is_current = 1
+	`, now, id)
+	if err != nil {
+		return err
+	}
+
+	// Insert restored version
+	newVersion := maxVersion + 1
+	_, err = s.db.Exec(`
+		INSERT INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id, 
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, oldNote.ID, newVersion, oldNote.WorldID, oldNote.Title, oldNote.Content, oldNote.MarkdownContent,
+		oldNote.FolderID, oldNote.EntityKind, oldNote.EntitySubtype,
+		boolToInt(oldNote.IsEntity), boolToInt(oldNote.IsPinned), boolToInt(oldNote.Favorite),
+		oldNote.OwnerID, oldNote.NarrativeID, oldNote.Order, oldNote.CreatedAt, now,
+		now, nil, 1, "restore")
+
+	return err
+}
+
+// DeleteNote removes all versions of a note.
 func (s *SQLiteStore) DeleteNote(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,7 +470,7 @@ func (s *SQLiteStore) DeleteNote(id string) error {
 	return err
 }
 
-// ListNotes returns all notes, optionally filtered by folder.
+// ListNotes returns current versions of all notes, optionally filtered by folder.
 func (s *SQLiteStore) ListNotes(folderID string) ([]*Note, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -201,17 +480,17 @@ func (s *SQLiteStore) ListNotes(folderID string) ([]*Note, error) {
 
 	if folderID != "" {
 		rows, err = s.db.Query(`
-			SELECT id, world_id, title, content, markdown_content, folder_id,
+			SELECT id, version, world_id, title, content, markdown_content, folder_id,
 				entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
-				narrative_id, "order", created_at, updated_at
-			FROM notes WHERE folder_id = ? ORDER BY "order"
+				narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+			FROM notes WHERE folder_id = ? AND is_current = 1 ORDER BY "order"
 		`, folderID)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, world_id, title, content, markdown_content, folder_id,
+			SELECT id, version, world_id, title, content, markdown_content, folder_id,
 				entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
-				narrative_id, "order", created_at, updated_at
-			FROM notes ORDER BY "order"
+				narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+			FROM notes WHERE is_current = 1 ORDER BY "order"
 		`)
 	}
 
@@ -223,13 +502,15 @@ func (s *SQLiteStore) ListNotes(folderID string) ([]*Note, error) {
 	var notes []*Note
 	for rows.Next() {
 		var note Note
-		var isEntity, isPinned, favorite int
+		var isEntity, isPinned, favorite, isCurrent int
+		var validTo sql.NullInt64
 
 		if err := rows.Scan(
-			&note.ID, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
+			&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &note.MarkdownContent,
 			&note.FolderID, &note.EntityKind, &note.EntitySubtype,
 			&isEntity, &isPinned, &favorite,
 			&note.OwnerID, &note.NarrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+			&note.ValidFrom, &validTo, &isCurrent, &note.ChangeReason,
 		); err != nil {
 			return nil, err
 		}
@@ -237,19 +518,23 @@ func (s *SQLiteStore) ListNotes(folderID string) ([]*Note, error) {
 		note.IsEntity = isEntity != 0
 		note.IsPinned = isPinned != 0
 		note.Favorite = favorite != 0
+		note.IsCurrent = isCurrent != 0
+		if validTo.Valid {
+			note.ValidTo = &validTo.Int64
+		}
 		notes = append(notes, &note)
 	}
 
 	return notes, rows.Err()
 }
 
-// CountNotes returns the total number of notes.
+// CountNotes returns the total number of notes (current versions only).
 func (s *SQLiteStore) CountNotes() (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM notes WHERE is_current = 1").Scan(&count)
 	return count, err
 }
 

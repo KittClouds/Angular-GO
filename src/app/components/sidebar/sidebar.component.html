@@ -5,9 +5,10 @@
          ═══════════════════════════════════════════════════════════════════════════ -->
     <div class="w-12 h-full flex flex-col border-r border-sidebar-border bg-sidebar shrink-0">
         <!-- Top Section: New Note -->
-        <div class="h-10 flex items-center justify-center border-b border-sidebar-border bg-[#18181b]">
+        <div
+            class="h-10 flex items-center justify-center border-b border-white/10 bg-gradient-to-b from-zinc-800 to-zinc-950">
             <button
-                class="w-8 h-8 flex items-center justify-center rounded-md hover:bg-white/10 text-white transition-colors"
+                class="w-9 h-9 flex items-center justify-center rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"
                 title="New Note" (click)="createNote()">
                 <lucide-icon [img]="Plus" size="18"></lucide-icon>
             </button>
@@ -16,56 +17,68 @@
         <!-- Main Navigation Icons -->
         <div class="flex-1 flex flex-col items-center py-3 gap-1.5 overflow-y-auto">
             <!-- Files -->
-            <button class="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200"
-                [class.bg-teal-500_20]="viewMode() === 'files'" [class.text-teal-300]="viewMode() === 'files'"
-                [class.text-slate-500]="viewMode() !== 'files'" [class.hover:text-slate-300]="viewMode() !== 'files'"
-                [class.hover:bg-white_5]="viewMode() !== 'files'" title="Files" (click)="setViewMode('files')">
+            <button
+                class="w-9 h-9 flex items-center justify-center rounded-md transition-all duration-200 relative group"
+                [class.bg-primary/10]="viewMode() === 'files'" [class.text-primary]="viewMode() === 'files'"
+                [class.text-muted-foreground]="viewMode() !== 'files'"
+                [class.hover:text-foreground]="viewMode() !== 'files'"
+                [class.hover:bg-muted/10]="viewMode() !== 'files'" title="Files" (click)="setViewMode('files')">
+                <div *ngIf="viewMode() === 'files'"
+                    class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>
                 <lucide-icon [img]="FileText" size="18"></lucide-icon>
             </button>
 
             <!-- Narrative -->
             <button
-                class="w-9 h-9 flex items-center justify-center rounded-lg text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 transition-all duration-200"
+                class="w-9 h-9 flex items-center justify-center rounded-md text-purple-500 hover:text-purple-400 hover:bg-purple-500/10 transition-all duration-200"
                 title="Create Narrative Vault" (click)="createNarrative()">
                 <lucide-icon [img]="BookOpen" size="18"></lucide-icon>
             </button>
 
             <!-- Calendar -->
             <button
-                class="w-9 h-9 flex items-center justify-center rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-all duration-200"
+                class="w-9 h-9 flex items-center justify-center rounded-md text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all duration-200"
                 title="Fantasy Calendar" (click)="navigateToCalendar()">
                 <lucide-icon [img]="Calendar" size="18"></lucide-icon>
             </button>
 
             <!-- 3D Graph -->
             <button
-                class="w-9 h-9 flex items-center justify-center rounded-lg text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-all duration-200"
+                class="w-9 h-9 flex items-center justify-center rounded-md text-cyan-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all duration-200"
                 title="Knowledge Graph" (click)="navigateToGraph()">
                 <lucide-icon [img]="Share2" size="18"></lucide-icon>
             </button>
 
             <!-- Search -->
-            <button class="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200"
-                [class.bg-teal-500_20]="viewMode() === 'search'" [class.text-teal-300]="viewMode() === 'search'"
-                [class.text-teal-400]="viewMode() !== 'search'" [class.hover:text-teal-300]="viewMode() !== 'search'"
-                [class.hover:bg-teal-500_10]="viewMode() !== 'search'" title="Semantic Search"
+            <button
+                class="w-9 h-9 flex items-center justify-center rounded-md transition-all duration-200 relative group"
+                [class.bg-primary/10]="viewMode() === 'search'" [class.text-primary]="viewMode() === 'search'"
+                [class.text-muted-foreground]="viewMode() !== 'search'"
+                [class.hover:text-foreground]="viewMode() !== 'search'"
+                [class.hover:bg-muted/10]="viewMode() !== 'search'" title="Semantic Search"
                 (click)="setViewMode('search')">
+                <div *ngIf="viewMode() === 'search'"
+                    class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>
                 <lucide-icon [img]="Search" size="18"></lucide-icon>
             </button>
 
             <!-- NER -->
-            <button class="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200"
-                [class.bg-teal-500_20]="viewMode() === 'ner'" [class.text-teal-300]="viewMode() === 'ner'"
-                [class.text-teal-400]="viewMode() !== 'ner'" [class.hover:text-teal-300]="viewMode() !== 'ner'"
-                [class.hover:bg-teal-500_10]="viewMode() !== 'ner'" title="Entity Detection" (click)="toggleNer()">
+            <button
+                class="w-9 h-9 flex items-center justify-center rounded-md transition-all duration-200 relative group"
+                [class.bg-primary/10]="viewMode() === 'ner'" [class.text-primary]="viewMode() === 'ner'"
+                [class.text-muted-foreground]="viewMode() !== 'ner'"
+                [class.hover:text-foreground]="viewMode() !== 'ner'" [class.hover:bg-muted/10]="viewMode() !== 'ner'"
+                title="Entity Detection" (click)="toggleNer()">
+                <div *ngIf="viewMode() === 'ner'"
+                    class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>
                 <lucide-icon [img]="Brain" size="18"></lucide-icon>
             </button>
         </div>
 
         <!-- Bottom Section: Collapse Toggle -->
-        <div class="h-8 flex items-center justify-center border-t border-sidebar-border bg-[#18181b]">
+        <div class="h-8 flex items-center justify-center border-t border-sidebar-border bg-[hsl(var(--sidebar-bg))]">
             <button
-                class="w-6 h-6 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                class="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/20 transition-colors"
                 [title]="sidebarService.isOpen() ? 'Collapse Panel' : 'Expand Panel'"
                 (click)="sidebarService.toggleCollapse()">
                 <lucide-icon [img]="sidebarService.isOpen() ? PanelLeftClose : PanelLeft" size="14"></lucide-icon>
@@ -82,7 +95,7 @@
 
         <!-- Panel Header -->
         <div
-            class="h-10 flex items-center justify-between px-3 border-b border-sidebar-border shrink-0 bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200">
+            class="h-10 flex items-center justify-between px-3 border-b border-white/10 shrink-0 bg-gradient-to-b from-zinc-800 to-zinc-950 text-slate-200">
             <span class="text-sm font-semibold text-slate-200">
                 <ng-container [ngSwitch]="viewMode()">
                     <span *ngSwitchCase="'files'">Folders</span>
@@ -181,15 +194,15 @@
 
         <!-- Panel Footer -->
         <div
-            class="h-8 flex items-center justify-between px-3 border-t border-sidebar-border shrink-0 text-xs bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f2a2e] text-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1),0_-2px_4px_-1px_rgba(0,0,0,0.06)] relative z-10">
+            class="h-8 flex items-center justify-between px-3 border-t border-border shrink-0 text-xs font-medium tracking-wide bg-gradient-to-b from-white to-gray-50 dark:from-zinc-900 dark:to-zinc-950 text-slate-600 dark:text-slate-400 relative z-10">
             <span>{{ treeData().length }} items</span>
 
             <!-- Graph Scan Button -->
             <button (click)="triggerGraphScan()" [disabled]="isScanning()"
                 class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors"
-                [class.bg-teal-500/20]="!isScanning()" [class.text-teal-300]="!isScanning()"
-                [class.hover:bg-teal-500/30]="!isScanning()" [class.bg-amber-500/20]="isScanning()"
-                [class.text-amber-300]="isScanning()" [class.cursor-wait]="isScanning()"
+                [class.bg-teal-500/10]="!isScanning()" [class.text-teal-700]="!isScanning()"
+                [class.hover:bg-teal-500/20]="!isScanning()" [class.bg-amber-500/10]="isScanning()"
+                [class.text-amber-700]="isScanning()" [class.cursor-wait]="isScanning()"
                 [title]="isScanning() ? 'Scanning...' : 'Run Graph Scan on Current Note'">
                 <lucide-icon [img]="RefreshCw" size="12" [class.animate-spin]="isScanning()">
                 </lucide-icon>

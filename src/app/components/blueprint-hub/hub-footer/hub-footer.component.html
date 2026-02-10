@@ -1,23 +1,34 @@
 <div
-    class="h-8 bg-gradient-to-r from-[#115e59] via-[#134e4a] to-[#0f172a] text-slate-200 border-t border-teal-900/40 flex items-center justify-between px-3 text-xs select-none z-50 relative shadow-[0_-1px_3px_rgba(0,0,0,0.05)]">
+    class="h-8 bg-gradient-to-b from-white to-gray-50 dark:from-zinc-900 dark:to-zinc-950 text-slate-600 dark:text-slate-400 border-t border-border flex items-center justify-between px-3 text-[11px] font-medium tracking-wide select-none z-50 relative shadow-[0_-1px_3px_rgba(0,0,0,0.05)]">
     <!-- Left: Hub Trigger -->
     <div class="flex items-center gap-4">
         <!-- Hub Toggle -->
-        <button (click)="hubService.toggle()" class="flex items-center gap-2 transition-colors focus:outline-none group"
-            [class.text-white]="hubService.isHubOpen()" [class.font-semibold]="hubService.isHubOpen()"
-            [class.text-white/80]="!hubService.isHubOpen()" [class.hover:text-white]="true">
-            <i class="pi" [class.pi-angle-up]="!hubService.isHubOpen()"
-                [class.pi-angle-down]="hubService.isHubOpen()"></i>
+        <!-- Hub Toggle -->
+        <button (click)="hubService.toggle()"
+            class="flex items-center gap-2 pl-2 pr-3 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 group focus:outline-none">
 
-            <span class="flex items-center gap-1.5">
-                <i class="pi pi-database text-[10px]"></i>
-                Hub
+            <!-- Icon Circle -->
+            <div
+                class="w-4 h-4 rounded-full bg-teal-500/10 dark:bg-teal-500/20 flex items-center justify-center group-hover:bg-teal-500/20 dark:group-hover:bg-teal-500/30 transition-colors">
+                <i class="pi pi-database text-[8px] text-teal-600 dark:text-teal-400"></i>
+            </div>
+
+            <span class="text-[10px] font-semibold text-slate-700 dark:text-slate-200 tracking-wide">Hub</span>
+
+            <!-- Separator -->
+            <div class="w-[1px] h-2.5 bg-slate-300 dark:bg-slate-700 mx-0.5"></div>
+
+            <span
+                class="text-[10px] text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">
+                {{ statsService.totalEntities() }} <span class="text-[9px] opacity-80">entities</span>
             </span>
-            <span class="ml-1 opacity-70 group-hover:opacity-100 transition-opacity">{{ statsService.totalEntities() }}
-                entities</span>
+
+            <!-- Arrow -->
+            <i class="pi text-[8px] text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300 transition-colors ml-1"
+                [class.pi-chevron-up]="!hubService.isHubOpen()" [class.pi-chevron-down]="hubService.isHubOpen()"></i>
         </button>
 
-        <div class="h-3 w-[1px] bg-white/20"></div>
+        <div class="h-3 w-[1px] bg-border"></div>
 
         <!-- TTS Settings Popup -->
         <app-tts-settings-popup></app-tts-settings-popup>
@@ -26,21 +37,23 @@
         @switch (ttsService.modelState()) {
         @case ('idle') {
         <button (click)="onLoadModelClick()"
-            class="text-white/80 hover:text-white transition-colors flex items-center gap-1"
+            class="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
             title="Load Text-to-Speech Model">
             <i class="pi pi-download text-[10px]"></i>
         </button>
         }
         @case ('loading') {
-        <button disabled class="text-teal-400 flex items-center gap-1 cursor-wait" title="Loading TTS model...">
+        <button disabled class="text-teal-600 dark:text-teal-400 flex items-center gap-1 cursor-wait"
+            title="Loading TTS model...">
             <i class="pi pi-spin pi-spinner text-[10px]"></i>
             <span class="text-[10px]">{{ ttsService.loadProgress() }}%</span>
         </button>
         }
         @case ('ready') {
         <button (click)="onSpeakClick()" class="transition-colors flex items-center gap-1"
-            [class.text-teal-400]="ttsService.isPlaying()" [class.text-white/80]="!ttsService.isPlaying()"
-            [class.hover:text-white]="!ttsService.isPlaying()"
+            [class.text-teal-600]="ttsService.isPlaying()" [class.dark:text-teal-400]="ttsService.isPlaying()"
+            [class.text-muted-foreground]="!ttsService.isPlaying()"
+            [class.hover:text-foreground]="!ttsService.isPlaying()"
             [title]="ttsService.isPlaying() ? 'Stop reading' : 'Read note aloud'">
             <i class="pi text-[10px]" [class.pi-volume-up]="!ttsService.isPlaying()"
                 [class.pi-stop]="ttsService.isPlaying()"></i>
@@ -48,7 +61,7 @@
         }
         @case ('error') {
         <button (click)="onLoadModelClick()"
-            class="text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
+            class="text-red-500 hover:text-red-600 transition-colors flex items-center gap-1"
             title="Load failed - click to retry">
             <i class="pi pi-exclamation-triangle text-[10px]"></i>
         </button>
@@ -57,9 +70,10 @@
     </div>
 
     <!-- Right: Editor Stats (LIVE DATA) -->
-    <div class="flex items-center gap-4 text-white/70">
-        <span class="hover:text-white cursor-pointer transition-colors">{{ statsService.backlinks() }} backlinks</span>
-        <span class="hover:text-white cursor-pointer transition-colors">{{ statsService.wordCount() }} words</span>
+    <div class="flex items-center gap-4 text-muted-foreground">
+        <span class="hover:text-foreground cursor-pointer transition-colors">{{ statsService.backlinks() }}
+            backlinks</span>
+        <span class="hover:text-foreground cursor-pointer transition-colors">{{ statsService.wordCount() }} words</span>
         <om-gradient-text [text]="charCountText()" [gradientStart]="charGradientStart()"
             [gradientEnd]="charGradientEnd()" styleClass="char-health-gradient">
         </om-gradient-text>
@@ -67,12 +81,12 @@
 
         <!-- Save Status -->
         <button *ngIf="statsService.isSaved()"
-            class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-900/30 border border-teal-400/30 text-teal-100 hover:bg-teal-900/50 transition-colors">
+            class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-300 hover:bg-teal-500/20 transition-colors">
             <i class="pi pi-check text-[10px]"></i>
             <span>Saved</span>
         </button>
         <button *ngIf="!statsService.isSaved()"
-            class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-100 transition-colors">
+            class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors">
             <i class="pi pi-sync text-[10px] animate-spin"></i>
             <span>Saving...</span>
         </button>

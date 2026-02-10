@@ -2,10 +2,11 @@
 // This is the unified data layer replacing Dexie/Nebula in TypeScript.
 package store
 
-// Note represents a document in the store.
-// Maps 1:1 to Dexie Note interface.
+// Note represents a versioned document in the store.
+// Uses temporal table pattern for full version history.
 type Note struct {
 	ID              string  `json:"id"`
+	Version         int     `json:"version"`
 	WorldID         string  `json:"worldId"`
 	Title           string  `json:"title"`
 	Content         string  `json:"content"`
@@ -21,6 +22,12 @@ type Note struct {
 	Order           float64 `json:"order"`
 	CreatedAt       int64   `json:"createdAt"`
 	UpdatedAt       int64   `json:"updatedAt"`
+
+	// Temporal fields for version tracking
+	ValidFrom    int64  `json:"validFrom"`
+	ValidTo      *int64 `json:"validTo,omitempty"`
+	IsCurrent    bool   `json:"isCurrent"`
+	ChangeReason string `json:"changeReason,omitempty"`
 }
 
 // Entity represents a registered entity in the store.
@@ -50,4 +57,41 @@ type Edge struct {
 	Bidirectional bool    `json:"bidirectional"`
 	SourceNote    string  `json:"sourceNote,omitempty"`
 	CreatedAt     int64   `json:"createdAt"`
+}
+
+// Storer defines the interface for data persistence.
+// SQLiteStore is the sole implementation, using in-memory SQLite for WASM.
+type Storer interface {
+	// Notes - Basic CRUD
+	UpsertNote(note *Note) error
+	GetNote(id string) (*Note, error)
+	DeleteNote(id string) error
+	ListNotes(folderID string) ([]*Note, error)
+	CountNotes() (int, error)
+
+	// Notes - Version-aware operations
+	CreateNote(note *Note) error
+	UpdateNote(note *Note, reason string) error
+	GetNoteVersion(id string, version int) (*Note, error)
+	ListNoteVersions(id string) ([]*Note, error)
+	GetNoteAtTime(id string, timestamp int64) (*Note, error)
+	RestoreNoteVersion(id string, version int) error
+
+	// Entities
+	UpsertEntity(entity *Entity) error
+	GetEntity(id string) (*Entity, error)
+	GetEntityByLabel(label string) (*Entity, error)
+	DeleteEntity(id string) error
+	ListEntities(kind string) ([]*Entity, error)
+	CountEntities() (int, error)
+
+	// Edges
+	UpsertEdge(edge *Edge) error
+	GetEdge(id string) (*Edge, error)
+	DeleteEdge(id string) error
+	ListEdgesForEntity(entityID string) ([]*Edge, error)
+	CountEdges() (int, error)
+
+	// Lifecycle
+	Close() error
 }

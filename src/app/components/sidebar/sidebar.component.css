@@ -6,7 +6,7 @@
 
 /* Sidebar background color */
 .bg-sidebar {
-    background-color: hsl(var(--muted) / 0.3);
+    background-color: hsl(var(--sidebar-bg));
 }
 
 /* Folder dropdown menu item */

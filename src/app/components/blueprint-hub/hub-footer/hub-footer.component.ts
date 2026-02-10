@@ -4,6 +4,7 @@ import { BlueprintHubService } from '../blueprint-hub.service';
 import { FooterStatsService } from '../../../services/footer-stats.service';
 import { TtsService } from '../../../services/tts.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
+import { ThemeService } from '../../../lib/services/theme.service';
 import { TtsSettingsPopupComponent } from './tts-settings-popup.component';
 import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
 
@@ -18,6 +19,7 @@ export class HubFooterComponent {
     hubService = inject(BlueprintHubService);
     statsService = inject(FooterStatsService);
     ttsService = inject(TtsService);
+    themeService = inject(ThemeService);
     private noteStore = inject(NoteEditorStore);
 
     // ========================================================================
@@ -37,37 +39,45 @@ export class HubFooterComponent {
         return Math.min(count / this.CHAR_LIMIT, 1.5); // Cap at 1.5 for extra red
     });
 
-    /** Gradient start color: Vibrant lime green */
+    /** Gradient start color */
     charGradientStart = computed(() => {
         const ratio = this.charHealthRatio();
-        // Lime -> Orange -> Red
-        if (ratio < 0.5) {
-            // Green to Yellow-Green
-            return '#32CD32'; // Lime green
-        } else if (ratio < 0.8) {
-            // Yellow-Green to Orange
-            return '#9ACD32'; // Yellow-green
+        const isDark = this.themeService.isDark();
+
+        if (isDark) {
+            // Original Neon/Bright Colors for Dark Mode
+            if (ratio < 0.5) return '#32CD32';      // Lime green
+            else if (ratio < 0.8) return '#9ACD32'; // Yellow-green
+            else return '#FFA500';                  // Orange
         } else {
-            // Orange to Red
-            return '#FFA500'; // Orange
+            // Richer/Darker Colors for Light Mode (High Contrast on White)
+            if (ratio < 0.5) return '#16a34a';      // Green 600
+            else if (ratio < 0.8) return '#ca8a04'; // Yellow 600 (Gold)
+            else return '#ea580c';                  // Orange 600
         }
     });
 
-    /** Gradient end color: shifts based on health */
+    /** Gradient end color */
     charGradientEnd = computed(() => {
         const ratio = this.charHealthRatio();
-        if (ratio < 0.3) {
-            return '#00FF7F'; // Spring green (very healthy)
-        } else if (ratio < 0.5) {
-            return '#7CFC00'; // Lawn green
-        } else if (ratio < 0.7) {
-            return '#ADFF2F'; // Green-yellow
-        } else if (ratio < 0.85) {
-            return '#FFD700'; // Gold (warning)
-        } else if (ratio < 1.0) {
-            return '#FF6347'; // Tomato (danger approaching)
+        const isDark = this.themeService.isDark();
+
+        if (isDark) {
+            // Original Neon Colors
+            if (ratio < 0.3) return '#00FF7F';      // Spring green
+            else if (ratio < 0.5) return '#7CFC00'; // Lawn green
+            else if (ratio < 0.7) return '#ADFF2F'; // Green-yellow
+            else if (ratio < 0.85) return '#FFD700';// Gold
+            else if (ratio < 1.0) return '#FF6347'; // Tomato
+            else return '#FF0000';                  // Bright red
         } else {
-            return '#FF0000'; // Bright red (at/over limit)
+            // Richer Colors for Light Mode
+            if (ratio < 0.3) return '#15803d';      // Green 700
+            else if (ratio < 0.5) return '#16a34a'; // Green 600
+            else if (ratio < 0.7) return '#65a30d'; // Lime 600
+            else if (ratio < 0.85) return '#d97706';// Amber 600
+            else if (ratio < 1.0) return '#dc2626'; // Red 600
+            else return '#b91c1c';                  // Red 700
         }
     });
 

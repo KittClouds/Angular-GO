@@ -18,13 +18,20 @@ import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
                 <p-tablist class="h-full bg-transparent border-0" style="background: transparent !important;">
                     @for (tab of tabStore.tabs(); track tab.id) {
                         <p-tab [value]="tab.id" 
-                            class="h-[38px] flex items-center gap-2 px-3 text-xs border-r border-white/10 text-white/80 hover:text-white hover:bg-white/5 transition-colors cursor-pointer select-none group min-w-[120px] max-w-[200px]"
-                            [class.bg-teal-900/30]="tab.active"
+                            class="h-[34px] mt-auto flex items-center gap-2 px-3 text-xs rounded-t-md border transition-all cursor-pointer select-none group min-w-[120px] max-w-[200px] mr-1"
+                            [class.bg-zinc-800]="tab.active"
                             [class.text-white]="tab.active"
-                            [class.border-t-2]="tab.active"
-                            [class.border-t-teal-400]="tab.active">
+                            [class.border-zinc-500]="tab.active"
+                            [class.border-b-zinc-800]="tab.active"
+                            [class.z-10]="tab.active"
+                            [class.bg-zinc-900/40]="!tab.active"
+                            [class.border-white/5]="!tab.active"
+                            [class.text-muted-foreground]="!tab.active"
+                            [class.hover:bg-zinc-800/60]="!tab.active"
+                            [class.hover:border-white/10]="!tab.active"
+                            [class.hover:text-white]="!tab.active">
                             
-                            <lucide-icon [img]="FileText" size="12" [class.text-teal-400]="!tab.active" [class.text-violet-400]="tab.active"></lucide-icon>
+                            <lucide-icon [img]="FileText" size="12" [class.text-teal-400]="false" [class.text-violet-400]="tab.active"></lucide-icon>
                             
                             <!-- Title or Rename Input -->
                             <div class="flex-1 truncate relative" (dblclick)="startRenaming(tab.id, tab.title)">

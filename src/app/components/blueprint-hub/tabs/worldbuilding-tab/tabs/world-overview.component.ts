@@ -122,8 +122,8 @@ import { map, switchMap, of } from 'rxjs';
 
                     <!-- Stakes Card (Static Mock for now) -->
                     <div class="p-6 rounded-xl border border-red-500/20 dark:border-red-500/10 bg-gradient-to-b from-red-500/5 to-transparent shadow-lg relative overflow-hidden">
-                         <!-- Background noise/pattern -->
-                        <div class="absolute inset-0 opacity-[0.03] bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+                         <!-- Background noise/pattern (using CSS pattern instead of external URL for COEP compliance) -->
+                        <div class="absolute inset-0 opacity-[0.03]" style="background-image: repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px);"></div>
                         
                         <h3 class="text-xs font-bold text-red-600 dark:text-red-500/80 uppercase tracking-widest mb-5 flex items-center gap-2">
                             <i class="pi pi-bolt"></i> Stakes & Pressure

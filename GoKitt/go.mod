@@ -3,6 +3,7 @@ module github.com/kittclouds/gokitt
 go 1.25.4
 
 require (
+	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/coregx/ahocorasick v0.1.0
 	github.com/fogfish/hnsw v0.0.5
 	github.com/hack-pad/hackpadfs v0.2.4

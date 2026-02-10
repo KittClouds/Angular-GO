@@ -70,5 +70,60 @@ preloadBootCache()
     // Expose injector globally for non-DI contexts (e.g., registry dictionary rebuild)
     (window as any).__angularInjector = appRef.injector;
     console.log('[Main] Angular bootstrapped, injector exposed');
+
+    // =============================================================================
+    // Phase 3: Dev Session Monitor (HMR Memory Leak Prevention)
+    // =============================================================================
+    // Only runs in development mode to warn about long sessions that accumulate
+    // Vite HMR module wrappers in memory (~12KB per module × hundreds = 794MB+)
+    if (!(window as any).ngDevMode?.isDevMode?.()) {
+      return;
+    }
+
+    const SESSION_START = Date.now();
+    const WARNING_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+    const CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+    const checkSessionHealth = () => {
+      const elapsed = Date.now() - SESSION_START;
+      const hours = Math.floor(elapsed / (60 * 60 * 1000));
+      const minutes = Math.floor((elapsed % (60 * 60 * 1000)) / (60 * 1000));
+
+      if (elapsed > WARNING_THRESHOLD_MS) {
+        console.warn(
+          `⚠️ [Dev Health] Long session detected (${hours}h ${minutes}m).\n` +
+          `   Vite HMR may have accumulated memory.\n` +
+          `   Consider refreshing the page or opening a new tab.\n` +
+          `   Check: DevTools → Memory → Search "__vite_injectQuery"`
+        );
+      } else {
+        console.log(
+          `[Dev Health] Session running for ${hours}h ${minutes}m. ` +
+          `Memory health OK.`
+        );
+      }
+    };
+
+    // Initial check after 30 seconds (let app settle first)
+    setTimeout(() => {
+      checkSessionHealth();
+      // Then check every 30 minutes
+      setInterval(checkSessionHealth, CHECK_INTERVAL_MS);
+    }, 30 * 1000);
+
+    // Expose utility to check memory manually
+    (window as any).__checkHmrMemory = () => {
+      checkSessionHealth();
+      console.log(
+        `[Dev Health] To check HMR memory:\n` +
+        `   1. Open DevTools → Memory\n` +
+        `   2. Take a heap snapshot\n` +
+        `   3. Search for "__vite_injectQuery"\n` +
+        `   4. If hundreds of instances → open a new tab`
+      );
+    };
+    console.log(
+      '[Main] Dev session monitor active. Call __checkHmrMemory() to check health.'
+    );
   })
   .catch((err) => console.error('[Main] Boot failed:', err));

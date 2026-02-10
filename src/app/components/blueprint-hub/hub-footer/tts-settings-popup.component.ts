@@ -10,8 +10,8 @@ import { TtsService, TTS_VOICES, TtsVoice } from '../../../services/tts.service'
     <div class="relative">
         <!-- Settings Cog Button -->
         <button (click)="togglePopup()"
-                class="text-white/80 hover:text-white transition-colors flex items-center gap-1 focus:outline-none"
-                [class.text-teal-400]="isOpen"
+                class="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 focus:outline-none"
+                [class.text-teal-600]="isOpen" [class.dark:text-teal-400]="isOpen"
                 title="TTS Settings">
             <i class="pi pi-cog text-[10px]"></i>
         </button>

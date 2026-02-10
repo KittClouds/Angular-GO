@@ -31,24 +31,26 @@
 
     <!-- Content Area -->
     <div class="flex-1 overflow-hidden bg-hub relative">
-        <ng-container [ngSwitch]="activeTab">
-            <app-graph-tab *ngSwitchCase="'graph'" class="h-full w-full block"></app-graph-tab>
-            <app-theme-tab *ngSwitchCase="'theme'" class="h-full w-full block"></app-theme-tab>
-            <app-patterns-tab *ngSwitchCase="'patterns'" class="h-full w-full block"></app-patterns-tab>
-            <app-story-beats-tab *ngSwitchCase="'story-beats'" class="h-full w-full block"></app-story-beats-tab>
-            <app-worldbuilding-tab *ngSwitchCase="'worldbuilding'" class="h-full w-full block"></app-worldbuilding-tab>
+        <!-- Using [hidden] to keep tab components alive and preserve subscriptions -->
+        <app-graph-tab class="h-full w-full block" [hidden]="activeTab !== 'graph'"></app-graph-tab>
+        <app-theme-tab class="h-full w-full block" [hidden]="activeTab !== 'theme'"></app-theme-tab>
+        <app-patterns-tab class="h-full w-full block" [hidden]="activeTab !== 'patterns'"></app-patterns-tab>
+        <app-story-beats-tab class="h-full w-full block" [hidden]="activeTab !== 'story-beats'"></app-story-beats-tab>
+        <app-worldbuilding-tab class="h-full w-full block"
+            [hidden]="activeTab !== 'worldbuilding'"></app-worldbuilding-tab>
 
-            <div *ngSwitchDefault class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
-                <div
-                    class="text-center p-8 border rounded-xl bg-background/50 backdrop-blur-sm border-dashed border-border/60">
-                    <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                        <i [class]="'text-2xl ' + activeTabIcon"></i>
-                    </div>
-                    <h3 class="font-medium text-lg text-foreground">{{ activeTabLabel }}</h3>
-                    <p class="text-sm mt-2 max-w-xs mx-auto">This module is not yet implemented in the Angular build.
-                    </p>
+        @if (!['graph', 'theme', 'patterns', 'story-beats', 'worldbuilding'].includes(activeTab)) {
+        <div class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
+            <div
+                class="text-center p-8 border rounded-xl bg-background/50 backdrop-blur-sm border-dashed border-border/60">
+                <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                    <i [class]="'text-2xl ' + activeTabIcon"></i>
                 </div>
+                <h3 class="font-medium text-lg text-foreground">{{ activeTabLabel }}</h3>
+                <p class="text-sm mt-2 max-w-xs mx-auto">This module is not yet implemented in the Angular build.
+                </p>
             </div>
-        </ng-container>
+        </div>
+        }
     </div>
 </div>
