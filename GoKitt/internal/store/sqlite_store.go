@@ -163,6 +163,36 @@ CREATE TABLE IF NOT EXISTS memory_threads (
 
 CREATE INDEX IF NOT EXISTS idx_memory_threads_thread ON memory_threads(thread_id);
 CREATE INDEX IF NOT EXISTS idx_memory_threads_message ON memory_threads(message_id);
+
+-- =============================================================================
+-- Observational Memory Tables (Phase 8) — Three-agent pipeline
+-- =============================================================================
+
+-- OMRecords: Per-thread observation state for Observer → Reflector → Actor pipeline
+CREATE TABLE IF NOT EXISTS om_records (
+    thread_id TEXT PRIMARY KEY,
+    observations TEXT NOT NULL DEFAULT '',
+    current_task TEXT NOT NULL DEFAULT '',
+    last_observed_at INTEGER NOT NULL DEFAULT 0,
+    obs_token_count INTEGER NOT NULL DEFAULT 0,
+    generation_num INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- OMGenerations: Reflection compression history
+CREATE TABLE IF NOT EXISTS om_generations (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    input_text TEXT NOT NULL,
+    output_text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_om_gen_thread ON om_generations(thread_id, generation);
 `
 
 // NewSQLiteStore creates a new in-memory SQLite store.
@@ -1709,6 +1739,230 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	return nil
+}
+
+// =============================================================================
+// Episode Log CRUD (Stub implementations — temporal action stream)
+// =============================================================================
+
+// LogEpisode records a temporal action log entry.
+// TODO: Implement full episode tracking for "what did LLM know at time T?" queries.
+func (s *SQLiteStore) LogEpisode(episode *Episode) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO episodes (scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, episode.ScopeID, episode.NoteID, episode.Timestamp, episode.ActionType,
+		episode.TargetID, episode.TargetKind, episode.Payload, episode.NarrativeID)
+
+	return err
+}
+
+// GetEpisodes retrieves recent episodes for a scope.
+func (s *SQLiteStore) GetEpisodes(scopeID string, limit int) ([]*Episode, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.Query(`
+		SELECT scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id
+		FROM episodes WHERE scope_id = ? ORDER BY ts DESC LIMIT ?
+	`, scopeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var episodes []*Episode
+	for rows.Next() {
+		var ep Episode
+		var narrativeID sql.NullString
+		if err := rows.Scan(
+			&ep.ScopeID, &ep.NoteID, &ep.Timestamp, &ep.ActionType,
+			&ep.TargetID, &ep.TargetKind, &ep.Payload, &narrativeID,
+		); err != nil {
+			return nil, err
+		}
+		if narrativeID.Valid {
+			ep.NarrativeID = narrativeID.String
+		}
+		episodes = append(episodes, &ep)
+	}
+
+	return episodes, rows.Err()
+}
+
+// =============================================================================
+// Blocks CRUD (Stub implementations — vector search not yet integrated)
+// =============================================================================
+
+// UpsertBlock inserts or updates a text block with vector embedding.
+// TODO: Implement vector storage once sqlite-vec is fully integrated.
+func (s *SQLiteStore) UpsertBlock(block *Block) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO blocks (id, note_id, ord, text, narrative_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			note_id = excluded.note_id,
+			ord = excluded.ord,
+			text = excluded.text,
+			narrative_id = excluded.narrative_id
+	`, block.ID, block.NoteID, block.Ordinal, block.Text, block.NarrativeID, block.CreatedAt)
+
+	return err
+}
+
+// GetBlocksForNote retrieves all blocks for a note.
+func (s *SQLiteStore) GetBlocksForNote(noteID string) ([]*Block, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, note_id, ord, text, narrative_id, created_at
+		FROM blocks WHERE note_id = ? ORDER BY ord
+	`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var blocks []*Block
+	for rows.Next() {
+		var block Block
+		if err := rows.Scan(
+			&block.ID, &block.NoteID, &block.Ordinal, &block.Text,
+			&block.NarrativeID, &block.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, &block)
+	}
+
+	return blocks, rows.Err()
+}
+
+// SearchBlocks performs vector similarity search.
+// TODO: Implement with sqlite-vec once integrated.
+func (s *SQLiteStore) SearchBlocks(queryVec []float32, limit int, narrativeID string) ([]*Block, error) {
+	// Stub: return empty slice until vector search is implemented
+	// This avoids compilation errors while the feature is being developed
+	return []*Block{}, nil
+}
+
+// =============================================================================
+// Observational Memory CRUD (Phase 8)
+// =============================================================================
+
+// UpsertOMRecord inserts or updates an OM record for a thread.
+func (s *SQLiteStore) UpsertOMRecord(record *OMRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO om_records (thread_id, observations, current_task, last_observed_at,
+			obs_token_count, generation_num, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(thread_id) DO UPDATE SET
+			observations = excluded.observations,
+			current_task = excluded.current_task,
+			last_observed_at = excluded.last_observed_at,
+			obs_token_count = excluded.obs_token_count,
+			generation_num = excluded.generation_num,
+			updated_at = excluded.updated_at
+	`, record.ThreadID, record.Observations, record.CurrentTask, record.LastObservedAt,
+		record.ObsTokenCount, record.GenerationNum, record.CreatedAt, record.UpdatedAt)
+
+	return err
+}
+
+// GetOMRecord retrieves the OM record for a thread.
+// Returns nil (not error) if no record exists.
+func (s *SQLiteStore) GetOMRecord(threadID string) (*OMRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var record OMRecord
+	err := s.db.QueryRow(`
+		SELECT thread_id, observations, current_task, last_observed_at,
+			obs_token_count, generation_num, created_at, updated_at
+		FROM om_records WHERE thread_id = ?
+	`, threadID).Scan(
+		&record.ThreadID, &record.Observations, &record.CurrentTask, &record.LastObservedAt,
+		&record.ObsTokenCount, &record.GenerationNum, &record.CreatedAt, &record.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &record, nil
+}
+
+// DeleteOMRecord removes the OM record for a thread.
+func (s *SQLiteStore) DeleteOMRecord(threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("DELETE FROM om_records WHERE thread_id = ?", threadID)
+	return err
+}
+
+// AddOMGeneration records a reflection compression event.
+func (s *SQLiteStore) AddOMGeneration(gen *OMGeneration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO om_generations (id, thread_id, generation, input_tokens, output_tokens,
+			input_text, output_text, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, gen.ID, gen.ThreadID, gen.Generation, gen.InputTokens, gen.OutputTokens,
+		gen.InputText, gen.OutputText, gen.CreatedAt)
+
+	return err
+}
+
+// GetOMGenerations retrieves all generations for a thread, ordered by generation.
+func (s *SQLiteStore) GetOMGenerations(threadID string) ([]*OMGeneration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, thread_id, generation, input_tokens, output_tokens,
+			input_text, output_text, created_at
+		FROM om_generations
+		WHERE thread_id = ?
+		ORDER BY generation ASC
+	`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var generations []*OMGeneration
+	for rows.Next() {
+		var gen OMGeneration
+		if err := rows.Scan(
+			&gen.ID, &gen.ThreadID, &gen.Generation, &gen.InputTokens, &gen.OutputTokens,
+			&gen.InputText, &gen.OutputText, &gen.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		generations = append(generations, &gen)
+	}
+
+	return generations, rows.Err()
 }
 
 // Compile-time interface check

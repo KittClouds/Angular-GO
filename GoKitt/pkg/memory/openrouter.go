@@ -282,3 +282,47 @@ func isValidMemoryType(mt string) bool {
 		return false
 	}
 }
+
+// Complete sends a prompt to the LLM and returns the response.
+// Implements LLMClient interface for internal/memory package.
+func (c *OpenRouterClient) Complete(userPrompt, systemPrompt string) (string, error) {
+	req := openRouterRequest{
+		Model: c.model,
+		Messages: []openRouterMsg{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature:    0.3,
+		MaxTokens:      4096,
+		Stream:         false,
+		ResponseFormat: &responseFormat{Type: "json_object"},
+	}
+
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("memory: failed to marshal request: %w", err)
+	}
+
+	raw, err := c.jsFetchWithAuth(
+		"https://openrouter.ai/api/v1/chat/completions",
+		string(reqBody),
+	)
+	if err != nil {
+		return "", fmt.Errorf("memory: OpenRouter API request failed: %w", err)
+	}
+
+	var resp openRouterResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return "", fmt.Errorf("memory: failed to parse response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return "", fmt.Errorf("memory: OpenRouter API error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("memory: empty response from OpenRouter")
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}

@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	omm "github.com/kittclouds/gokitt/internal/memory"
 	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/agent"
 	"github.com/kittclouds/gokitt/pkg/batch"
@@ -22,22 +23,22 @@ import (
 	"github.com/kittclouds/gokitt/pkg/hierarchy"
 	implicitmatcher "github.com/kittclouds/gokitt/pkg/implicit-matcher"
 	"github.com/kittclouds/gokitt/pkg/memory"
+	"github.com/kittclouds/gokitt/pkg/qgram"
 	"github.com/kittclouds/gokitt/pkg/reality/builder"
 	"github.com/kittclouds/gokitt/pkg/reality/merger"
 	"github.com/kittclouds/gokitt/pkg/reality/pcst"
 	"github.com/kittclouds/gokitt/pkg/reality/projection"
 	"github.com/kittclouds/gokitt/pkg/reality/validator"
-	"github.com/kittclouds/gokitt/pkg/resorank"
 	"github.com/kittclouds/gokitt/pkg/sab"
 	"github.com/kittclouds/gokitt/pkg/scanner/conductor"
 )
 
 // Version info
-const Version = "0.6.0" // Observational Memory + Chat Service
+const Version = "0.7.0" // Observational Memory + Q-Gram Hybrid Search
 
 // Global state
 var pipeline *conductor.Conductor
-var searcher *resorank.Scorer
+var searcher *qgram.QGramIndex        // Changed from ResoRank to Q-Gram Hybrid
 var docs *docstore.Store              // In-memory document store
 var sqlStore *store.SQLiteStore       // SQLite persistent store
 var graphMerger *merger.Merger        // Phase 3: Graph merger instance
@@ -47,6 +48,7 @@ var extractionSvc *extraction.Service // Phase 6: Unified Extraction
 var agentSvc *agent.Service           // Phase 6: Agent (tool-calling)
 var chatSvc *chat.ChatService         // Phase 7: Chat + Observational Memory
 var memorySvc *memory.Extractor       // Phase 7: Memory extraction
+var omSvc *omm.OMOrchestrator         // Phase 8: Observational Memory pipeline
 
 func main() {
 	var err error
@@ -55,8 +57,8 @@ func main() {
 		fmt.Println("[GoKitt] FATAL: Failed to initialize conductor:", err.Error())
 	}
 
-	// Initialize Searcher
-	searcher = resorank.NewScorer(resorank.DefaultConfig())
+	// Initialize Searcher (Q=3 for trigrams)
+	searcher = qgram.NewQGramIndex(3)
 
 	// Initialize DocStore
 	docs = docstore.New()
@@ -138,6 +140,12 @@ func main() {
 		"chatGetContext":     js.FuncOf(jsChatGetContext),
 		"chatClearThread":    js.FuncOf(jsChatClearThread),
 		"chatExportThread":   js.FuncOf(jsChatExportThread),
+		// Phase 8: Observational Memory
+		"omProcess":   js.FuncOf(jsOMProcess),
+		"omGetRecord": js.FuncOf(jsOMGetRecord),
+		"omObserve":   js.FuncOf(jsOMObserve),
+		"omReflect":   js.FuncOf(jsOMReflect),
+		"omClear":     js.FuncOf(jsOMClear),
 	}))
 
 	select {}
@@ -145,26 +153,9 @@ func main() {
 
 // ... existing helpers ...
 
-// indexDocument: [id string, metaJSON string, tokensJSON string]
+// indexDocument is deprecated/legacy. Use indexNote instead.
 func indexDocument(this js.Value, args []js.Value) interface{} {
-	if len(args) < 3 {
-		return errorResult("requires 3 args: id, metaJSON, tokensJSON")
-	}
-
-	id := args[0].String()
-	var meta resorank.DocumentMetadata
-	if err := json.Unmarshal([]byte(args[1].String()), &meta); err != nil {
-		return errorResult("meta json: " + err.Error())
-	}
-
-	var tokens map[string]resorank.TokenMetadata
-	if err := json.Unmarshal([]byte(args[2].String()), &tokens); err != nil {
-		return errorResult("tokens json: " + err.Error())
-	}
-
-	searcher.IndexDocument(id, meta, tokens)
-
-	return successResult("indexed " + id)
+	return errorResult("deprecated: use indexNote for q-gram indexing")
 }
 
 // indexNote: [id string, text string, scopeJSON string (optional)]
@@ -189,61 +180,12 @@ func indexNote(this js.Value, args []js.Value) interface{} {
 		}
 	}
 
-	if pipeline == nil || searcher == nil {
-		return errorResult("pipeline or searcher not initialized")
+	if searcher == nil {
+		return errorResult("searcher not initialized")
 	}
 
-	// 1. Scan (Conductor)
-	scanRes := pipeline.Scan(text)
-
-	// 2. Transform to ResoRank Metadata
-	docLen := len(scanRes.Tokens)
-	if docLen == 0 {
-		return successResult("indexed empty note " + id)
-	}
-
-	docMeta := resorank.DocumentMetadata{
-		FieldLengths:    map[string]int{"content": docLen},
-		TotalTokenCount: docLen,
-		NarrativeID:     narrativeID,
-		FolderPath:      folderPath,
-	}
-
-	tokens := make(map[string]resorank.TokenMetadata)
-
-	// Use fixed 50 tokens per segment for now (or read from config)
-	const tokensPerSeg = 50
-	maxSegs := searcher.Config.MaxSegments
-
-	for i, tok := range scanRes.Tokens {
-		// Normalized term (lowercase)
-		term := strings.ToLower(tok.Text)
-
-		meta, exists := tokens[term]
-		if !exists {
-			meta = resorank.TokenMetadata{
-				FieldOccurrences: make(map[string]resorank.FieldOccurrence),
-				SegmentMask:      0,
-			}
-		}
-
-		// Update stats for "content" field
-		occ := meta.FieldOccurrences["content"]
-		occ.TF++
-		occ.FieldLength = docLen
-		meta.FieldOccurrences["content"] = occ
-
-		// Segment Mask
-		segIdx := uint32(i / tokensPerSeg)
-		if segIdx < maxSegs {
-			meta.SegmentMask |= (1 << segIdx)
-		}
-
-		tokens[term] = meta
-	}
-
-	// 3. Index
-	searcher.IndexDocument(id, docMeta, tokens)
+	// Index raw text into Q-Gram Index with metadata
+	searcher.IndexDocumentScoped(id, map[string]string{"body": text}, narrativeID, folderPath)
 
 	return successResult("indexed " + id)
 }
@@ -254,30 +196,68 @@ func search(this js.Value, args []js.Value) interface{} {
 		return errorResult("requires 2+ args: queryJSON, limit, [vectorJSON], [scopeJSON]")
 	}
 
-	var query []string
-	if err := json.Unmarshal([]byte(args[0].String()), &query); err != nil {
+	var queryInput interface{}
+	if err := json.Unmarshal([]byte(args[0].String()), &queryInput); err != nil {
 		return errorResult("query json: " + err.Error())
+	}
+
+	var input string
+	matchAny := false
+
+	switch v := queryInput.(type) {
+	case string:
+		input = v
+	case []interface{}:
+		// Join array of strings
+		parts := make([]string, len(v))
+		for i, p := range v {
+			if s, ok := p.(string); ok {
+				parts[i] = s
+			}
+		}
+		input = strings.Join(parts, " ")
+	case map[string]interface{}:
+		// Support object with options
+		if q, ok := v["query"].(string); ok {
+			input = q
+		}
+		if anyMatch, ok := v["matchAny"].(bool); ok {
+			matchAny = anyMatch
+		}
+	default:
+		return errorResult("query must be string, array, or object {query, matchAny}")
 	}
 
 	limit := args[1].Int()
 
-	var vector []float32
-	if len(args) > 2 && args[2].String() != "" && args[2].String() != "null" {
-		if err := json.Unmarshal([]byte(args[2].String()), &vector); err != nil {
-			return errorResult("vector json: " + err.Error())
-		}
-	}
+	// Vector support TODO (Q-Gram is currently text-only)
+	// var vector []float32
+	// if len(args) > 2 && ...
 
-	// Parse optional scope filter
-	var scope *resorank.SearchScope
+	// Scope filter
+	var scope *qgram.SearchScope
 	if len(args) > 3 && args[3].String() != "" && args[3].String() != "null" {
-		scope = &resorank.SearchScope{}
+		scope = &qgram.SearchScope{}
 		if err := json.Unmarshal([]byte(args[3].String()), scope); err != nil {
 			return errorResult("scope json: " + err.Error())
 		}
 	}
 
-	results := searcher.SearchScoped(query, vector, limit, scope)
+	// Defaults: λ=3 (soft-AND), PhraseHard=true, Proximity=0.5
+	config := qgram.DefaultSearchConfig()
+	config.Scope = scope
+	config.FieldWeights["body"] = 1.0
+
+	// Apply matchAny override
+	if matchAny {
+		config.CoverageLambda = 0.0
+		// Should we disable PhraseHard? User request implies "Match Any Term".
+		// If query has quotes, usually users expect quotes to be respected even in OR mode.
+		// e.g. "big apple" OR orange.
+		// Leaving PhraseHard=true (default) means phrases are units.
+	}
+
+	results := searcher.Search(input, config, limit)
 
 	bytes, _ := json.Marshal(results)
 	return string(bytes)
@@ -406,10 +386,6 @@ func scanImplicit(this js.Value, args []js.Value) interface{} {
 
 	bytes, _ := json.Marshal(spans)
 	return string(bytes)
-}
-
-func isWordChar(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // getEntityIDs extracts IDs from EntityInfo slice
@@ -1750,7 +1726,7 @@ func jsAgentChatWithTools(this js.Value, args []js.Value) interface{} {
 // =============================================================================
 
 // jsChatInit initializes the chat service with OpenRouter config.
-// Args: configJSON (string) - JSON with apiKey and model
+// Args: configJSON (string) - JSON with apiKey, model, omEnabled, observeThreshold, reflectThreshold
 func jsChatInit(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return errorResult("missing arguments")
@@ -1761,8 +1737,11 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 	}
 
 	var config struct {
-		APIKey string `json:"apiKey"`
-		Model  string `json:"model"`
+		APIKey           string `json:"apiKey"`
+		Model            string `json:"model"`
+		OMEnabled        bool   `json:"omEnabled"`
+		ObserveThreshold int    `json:"observeThreshold"`
+		ReflectThreshold int    `json:"reflectThreshold"`
 	}
 	if err := json.Unmarshal([]byte(args[0].String()), &config); err != nil {
 		return errorResult(fmt.Sprintf("invalid config: %v", err))
@@ -1777,6 +1756,27 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 
 	// Initialize Chat Service
 	chatSvc = chat.NewChatService(sqlStore, memorySvc)
+
+	// Initialize Observational Memory pipeline
+	omConfig := store.OMConfig{
+		Enabled:          config.OMEnabled,
+		ObserveThreshold: config.ObserveThreshold,
+		ReflectThreshold: config.ReflectThreshold,
+		MaxRetries:       2,
+	}
+	if omConfig.ObserveThreshold <= 0 {
+		omConfig.ObserveThreshold = omm.DefaultObserveThreshold
+	}
+	if omConfig.ReflectThreshold <= 0 {
+		omConfig.ReflectThreshold = omm.DefaultReflectThreshold
+	}
+
+	// Create LLM client for OM
+	llmClient := memory.NewOpenRouterClient(memory.OpenRouterConfig{
+		APIKey: config.APIKey,
+		Model:  config.Model,
+	})
+	omSvc = omm.NewOMOrchestrator(sqlStore, llmClient, omConfig)
 
 	return successResult("Chat service initialized")
 }
@@ -1975,7 +1975,7 @@ func jsChatGetMemories(this js.Value, args []js.Value) interface{} {
 	return string(jsonBytes)
 }
 
-// jsChatGetContext retrieves context string (with memories) for a thread.
+// jsChatGetContext retrieves context string (with memories and observations) for a thread.
 // Args: threadID (string)
 func jsChatGetContext(this js.Value, args []js.Value) interface{} {
 	if chatSvc == nil {
@@ -1985,12 +1985,28 @@ func jsChatGetContext(this js.Value, args []js.Value) interface{} {
 		return errorResult("missing arguments")
 	}
 
-	ctxStr, err := chatSvc.GetContextWithMemories(args[0].String())
+	threadID := args[0].String()
+
+	// Get memories context
+	memoriesCtx, err := chatSvc.GetContextWithMemories(threadID)
 	if err != nil {
 		return errorResult(err.Error())
 	}
 
-	return ctxStr
+	// Get observations context from OM (if enabled)
+	var obsCtx string
+	if omSvc != nil {
+		obsCtx, _ = omSvc.GetContext(threadID)
+		// Ignore error - OM is optional
+	}
+
+	// Combine: observations first, then memories
+	if obsCtx != "" && memoriesCtx != "" {
+		return obsCtx + "\n\n" + memoriesCtx
+	} else if obsCtx != "" {
+		return obsCtx
+	}
+	return memoriesCtx
 }
 
 // jsChatClearThread clears all messages in a thread.
@@ -2026,4 +2042,102 @@ func jsChatExportThread(this js.Value, args []js.Value) interface{} {
 	}
 
 	return jsonStr
+}
+
+// =============================================================================
+// Phase 8: Observational Memory WASM Bridge
+// =============================================================================
+
+// jsOMProcess triggers the OM pipeline for a thread.
+// Args: threadID (string)
+// Returns: {observed: bool, reflected: bool}
+func jsOMProcess(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing threadID")
+	}
+
+	result, err := omSvc.Process(args[0].String())
+	if err != nil {
+		return errorResult(err.Error())
+	}
+
+	jsonBytes, _ := json.Marshal(result)
+	return string(jsonBytes)
+}
+
+// jsOMGetRecord retrieves the OM record for a thread.
+// Args: threadID (string)
+// Returns: OMRecord JSON or null
+func jsOMGetRecord(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing threadID")
+	}
+
+	record, err := omSvc.GetRecord(args[0].String())
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if record == nil {
+		return js.Null()
+	}
+
+	jsonBytes, _ := json.Marshal(record)
+	return string(jsonBytes)
+}
+
+// jsOMObserve manually triggers observation for a thread.
+// Args: threadID (string)
+func jsOMObserve(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing threadID")
+	}
+
+	if err := omSvc.Observe(args[0].String()); err != nil {
+		return errorResult(err.Error())
+	}
+
+	return successResult("observation triggered")
+}
+
+// jsOMReflect manually triggers reflection for a thread.
+// Args: threadID (string)
+func jsOMReflect(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing threadID")
+	}
+
+	if err := omSvc.Reflect(args[0].String()); err != nil {
+		return errorResult(err.Error())
+	}
+
+	return successResult("reflection triggered")
+}
+
+// jsOMClear clears the OM state for a thread.
+// Args: threadID (string)
+func jsOMClear(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing threadID")
+	}
+
+	if err := omSvc.Clear(args[0].String()); err != nil {
+		return errorResult(err.Error())
+	}
+
+	return successResult("OM cleared")
 }

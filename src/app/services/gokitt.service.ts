@@ -882,6 +882,12 @@ export class GoKittService {
                         case 'CHAT_GET_CONTEXT_RESULT':
                         case 'CHAT_CLEAR_THREAD_RESULT':
                         case 'CHAT_EXPORT_THREAD_RESULT':
+                        // Phase 8: Observational Memory responses
+                        case 'OM_PROCESS_RESULT':
+                        case 'OM_GET_RECORD_RESULT':
+                        case 'OM_OBSERVE_RESULT':
+                        case 'OM_REFLECT_RESULT':
+                        case 'OM_CLEAR_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -1270,5 +1276,64 @@ export class GoKittService {
             return '{}';
         }
         return this.sendRequest('CHAT_EXPORT_THREAD', { threadId });
+    }
+
+    // =========================================================================
+    // Phase 8: Observational Memory API
+    // =========================================================================
+
+    /**
+     * Process a thread through the OM pipeline.
+     * @param threadId Thread ID
+     */
+    async omProcess(threadId: string): Promise<{ observed: boolean; reflected: boolean }> {
+        if (!this.wasmLoaded) {
+            return { observed: false, reflected: false };
+        }
+        return this.sendRequest('OM_PROCESS', { threadId });
+    }
+
+    /**
+     * Get the OM record for a thread.
+     * @param threadId Thread ID
+     */
+    async omGetRecord(threadId: string): Promise<any | null> {
+        if (!this.wasmLoaded) {
+            return null;
+        }
+        return this.sendRequest('OM_GET_RECORD', { threadId });
+    }
+
+    /**
+     * Manually trigger observation for a thread.
+     * @param threadId Thread ID
+     */
+    async omObserve(threadId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('OM_OBSERVE', { threadId });
+    }
+
+    /**
+     * Manually trigger reflection for a thread.
+     * @param threadId Thread ID
+     */
+    async omReflect(threadId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('OM_REFLECT', { threadId });
+    }
+
+    /**
+     * Clear OM state for a thread.
+     * @param threadId Thread ID
+     */
+    async omClear(threadId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('OM_CLEAR', { threadId });
     }
 }

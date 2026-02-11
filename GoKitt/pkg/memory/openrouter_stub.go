@@ -44,3 +44,9 @@ type MessageInput struct {
 func (c *OpenRouterClient) ExtractMemories(messages []MessageInput) (*ExtractionResult, error) {
 	return nil, fmt.Errorf("memory extraction requires WASM environment")
 }
+
+// Complete is a no-op stub for non-WASM builds.
+// Implements LLMClient interface for internal/memory package.
+func (c *OpenRouterClient) Complete(userPrompt, systemPrompt string) (string, error) {
+	return "", fmt.Errorf("LLM completion requires WASM environment")
+}

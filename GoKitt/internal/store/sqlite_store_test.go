@@ -5,6 +5,168 @@ import (
 	"time"
 )
 
+// =============================================================================
+// Observational Memory Tests (Phase 8)
+// =============================================================================
+
+func TestOMRecordCRUD(t *testing.T) {
+	s, err := NewSQLiteStore()
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	threadID := "thread-om-test-1"
+	now := time.Now().Unix()
+
+	// Create: Upsert a new OMRecord
+	record := &OMRecord{
+		ThreadID:       threadID,
+		Observations:   "User is working on a Go WASM project. They prefer functional programming.",
+		CurrentTask:    "Implementing Observational Memory",
+		LastObservedAt: now,
+		ObsTokenCount:  150,
+		GenerationNum:  0,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	if err := s.UpsertOMRecord(record); err != nil {
+		t.Fatalf("UpsertOMRecord failed: %v", err)
+	}
+
+	// Read: Get the record back
+	got, err := s.GetOMRecord(threadID)
+	if err != nil {
+		t.Fatalf("GetOMRecord failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetOMRecord returned nil")
+	}
+	if got.ThreadID != record.ThreadID {
+		t.Errorf("ThreadID mismatch: got %s, want %s", got.ThreadID, record.ThreadID)
+	}
+	if got.Observations != record.Observations {
+		t.Errorf("Observations mismatch: got %s, want %s", got.Observations, record.Observations)
+	}
+	if got.CurrentTask != record.CurrentTask {
+		t.Errorf("CurrentTask mismatch: got %s, want %s", got.CurrentTask, record.CurrentTask)
+	}
+	if got.ObsTokenCount != record.ObsTokenCount {
+		t.Errorf("ObsTokenCount mismatch: got %d, want %d", got.ObsTokenCount, record.ObsTokenCount)
+	}
+
+	// Update: Upsert with new observations
+	record.Observations = "User is working on Go WASM. They like TDD. They use Angular."
+	record.CurrentTask = "Writing OM tests"
+	record.ObsTokenCount = 200
+	record.GenerationNum = 1
+	record.UpdatedAt = time.Now().Unix()
+
+	if err := s.UpsertOMRecord(record); err != nil {
+		t.Fatalf("UpsertOMRecord update failed: %v", err)
+	}
+
+	got, _ = s.GetOMRecord(threadID)
+	if got.Observations != record.Observations {
+		t.Errorf("Updated Observations mismatch: got %s, want %s", got.Observations, record.Observations)
+	}
+	if got.GenerationNum != 1 {
+		t.Errorf("GenerationNum should be 1, got %d", got.GenerationNum)
+	}
+
+	// Delete
+	if err := s.DeleteOMRecord(threadID); err != nil {
+		t.Fatalf("DeleteOMRecord failed: %v", err)
+	}
+
+	got, _ = s.GetOMRecord(threadID)
+	if got != nil {
+		t.Error("Record should be deleted")
+	}
+}
+
+func TestOMGenerationHistory(t *testing.T) {
+	s, err := NewSQLiteStore()
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	threadID := "thread-gen-test-1"
+	now := time.Now().Unix()
+
+	// Add multiple generations
+	gen1 := &OMGeneration{
+		ID:           "gen-1",
+		ThreadID:     threadID,
+		Generation:   1,
+		InputTokens:  4500,
+		OutputTokens: 1200,
+		InputText:    "Long observations text that exceeded threshold...",
+		OutputText:   "Condensed observations...",
+		CreatedAt:    now,
+	}
+
+	gen2 := &OMGeneration{
+		ID:           "gen-2",
+		ThreadID:     threadID,
+		Generation:   2,
+		InputTokens:  5200,
+		OutputTokens: 1100,
+		InputText:    "Another long observations text...",
+		OutputText:   "Further condensed...",
+		CreatedAt:    now + 1000,
+	}
+
+	if err := s.AddOMGeneration(gen1); err != nil {
+		t.Fatalf("AddOMGeneration gen1 failed: %v", err)
+	}
+	if err := s.AddOMGeneration(gen2); err != nil {
+		t.Fatalf("AddOMGeneration gen2 failed: %v", err)
+	}
+
+	// Query generations
+	generations, err := s.GetOMGenerations(threadID)
+	if err != nil {
+		t.Fatalf("GetOMGenerations failed: %v", err)
+	}
+
+	if len(generations) != 2 {
+		t.Fatalf("Expected 2 generations, got %d", len(generations))
+	}
+
+	// Should be ordered by generation
+	if generations[0].Generation != 1 {
+		t.Errorf("First generation should be 1, got %d", generations[0].Generation)
+	}
+	if generations[1].Generation != 2 {
+		t.Errorf("Second generation should be 2, got %d", generations[1].Generation)
+	}
+
+	// Verify content
+	if generations[0].InputTokens != 4500 {
+		t.Errorf("InputTokens mismatch: got %d, want 4500", generations[0].InputTokens)
+	}
+	if generations[1].OutputText != "Further condensed..." {
+		t.Errorf("OutputText mismatch: got %s", generations[1].OutputText)
+	}
+}
+
+func TestOMRecordDefault(t *testing.T) {
+	s, err := NewSQLiteStore()
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	// Get non-existent record should return nil, not error
+	got, err := s.GetOMRecord("nonexistent-thread")
+	if err != nil {
+		t.Fatalf("GetOMRecord for nonexistent should not error: %v", err)
+	}
+	if got != nil {
+		t.Error("GetOMRecord for nonexistent should return nil")
+	}
+}
+
 func TestExportImport(t *testing.T) {
 	// Initialize store (in-memory)
 	s, err := NewSQLiteStore()

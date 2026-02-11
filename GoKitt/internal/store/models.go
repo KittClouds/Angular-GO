@@ -130,6 +130,99 @@ type MemoryThread struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 
+// =============================================================================
+// Observational Memory Types (Phase 8) — Three-agent pipeline
+// =============================================================================
+
+// OMRecord holds the current observational memory state for a thread.
+// This is the core state for the Observer → Reflector → Actor pipeline.
+type OMRecord struct {
+	ThreadID       string `json:"threadId"`
+	Observations   string `json:"observations"`   // LLM-extracted observations (prose)
+	CurrentTask    string `json:"currentTask"`    // What the user is currently doing
+	LastObservedAt int64  `json:"lastObservedAt"` // Timestamp cursor — messages before this are "observed"
+	ObsTokenCount  int    `json:"obsTokenCount"`  // Cached token count of observations
+	GenerationNum  int    `json:"generationNum"`  // Reflection generation counter
+	CreatedAt      int64  `json:"createdAt"`
+	UpdatedAt      int64  `json:"updatedAt"`
+}
+
+// OMGeneration records a reflection compression event.
+// Tracks the history of observation condensation for debugging and rollback.
+type OMGeneration struct {
+	ID           string `json:"id"`
+	ThreadID     string `json:"threadId"`
+	Generation   int    `json:"generation"`
+	InputTokens  int    `json:"inputTokens"`  // Pre-compression token count
+	OutputTokens int    `json:"outputTokens"` // Post-compression token count
+	InputText    string `json:"inputText"`    // Pre-compression observations
+	OutputText   string `json:"outputText"`   // Post-compression observations
+	CreatedAt    int64  `json:"createdAt"`
+}
+
+// OMConfig holds threshold settings for the OM pipeline.
+// Configurable via Angular settings UI.
+type OMConfig struct {
+	ObserveThreshold int  // Token count trigger for observation (default: 1000)
+	ReflectThreshold int  // Token count trigger for reflection (default: 4000)
+	MaxRetries       int  // Reflection compression retries (default: 2)
+	Enabled          bool // Master on/off toggle for OM processing
+}
+
+// EpisodeActionType defines the type of action recorded in an episode.
+type EpisodeActionType string
+
+const (
+	ActionCreatedEntity       EpisodeActionType = "created_entity"
+	ActionRenamedEntity       EpisodeActionType = "renamed_entity"
+	ActionMergedEntity        EpisodeActionType = "merged_entity"
+	ActionDeletedEntity       EpisodeActionType = "deleted_entity"
+	ActionCreatedBlock        EpisodeActionType = "created_block"
+	ActionEditedBlock         EpisodeActionType = "edited_block"
+	ActionDeletedBlock        EpisodeActionType = "deleted_block"
+	ActionMovedNote           EpisodeActionType = "moved_note"
+	ActionCreatedNote         EpisodeActionType = "created_note"
+	ActionDeletedNote         EpisodeActionType = "deleted_note"
+	ActionCreatedRelationship EpisodeActionType = "created_relationship"
+	ActionDeletedRelationship EpisodeActionType = "deleted_relationship"
+)
+
+// EpisodeTargetKind defines the kind of target affected by an episode.
+type EpisodeTargetKind string
+
+const (
+	TargetEntity       EpisodeTargetKind = "entity"
+	TargetBlock        EpisodeTargetKind = "block"
+	TargetNote         EpisodeTargetKind = "note"
+	TargetFolder       EpisodeTargetKind = "folder"
+	TargetRelationship EpisodeTargetKind = "relationship"
+)
+
+// Episode represents a temporal action log entry.
+// Enables "what did the LLM know at time T?" queries.
+type Episode struct {
+	ScopeID     string            `json:"scopeId"` // Usually worldID or narrativeID
+	NoteID      string            `json:"noteId"`
+	Timestamp   int64             `json:"ts"`
+	ActionType  EpisodeActionType `json:"actionType"`
+	TargetID    string            `json:"targetId"`
+	TargetKind  EpisodeTargetKind `json:"targetKind"`
+	Payload     string            `json:"payload"` // JSON string
+	NarrativeID string            `json:"narrativeId,omitempty"`
+}
+
+// Block represents a text chunk with vector embedding.
+// Complements RAPTOR by providing fine-grained LLM memory access.
+type Block struct {
+	ID          string    `json:"id"` // block_id
+	NoteID      string    `json:"noteId"`
+	Ordinal     int       `json:"ord"`
+	Text        string    `json:"text"`
+	Vec         []float32 `json:"textVec,omitempty"` // 384d vector
+	NarrativeID string    `json:"narrativeId,omitempty"`
+	CreatedAt   int64     `json:"createdAt"`
+}
+
 // Storer defines the interface for data persistence.
 // SQLiteStore is the sole implementation, using in-memory SQLite for WASM.
 type Storer interface {
@@ -189,6 +282,22 @@ type Storer interface {
 	DeleteMemory(id string) error
 	GetMemoriesForThread(threadID string) ([]*Memory, error)
 	ListMemoriesByType(memoryType MemoryType) ([]*Memory, error)
+
+	// Observational Memory — Three-agent pipeline state (Phase 8)
+	UpsertOMRecord(record *OMRecord) error
+	GetOMRecord(threadID string) (*OMRecord, error)
+	DeleteOMRecord(threadID string) error
+	AddOMGeneration(gen *OMGeneration) error
+	GetOMGenerations(threadID string) ([]*OMGeneration, error)
+
+	// Episode Log - Temporal action stream
+	LogEpisode(episode *Episode) error
+	GetEpisodes(scopeID string, limit int) ([]*Episode, error)
+
+	// Blocks - Vector-searchable text chunks
+	UpsertBlock(block *Block) error
+	GetBlocksForNote(noteID string) ([]*Block, error)
+	SearchBlocks(queryVec []float32, limit int, narrativeID string) ([]*Block, error)
 
 	// Export/Import (Database serialization for OPFS sync)
 	Export() ([]byte, error)
