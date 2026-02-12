@@ -196,7 +196,7 @@ export class AppOrchestrator {
     }
 }
 
-// Singleton export for non-DI contexts (e.g., highlighter-api.ts)
+// Singleton export for non-DI contexts (e.g., pretty-text-api.ts)
 let _orchestratorInstance: AppOrchestrator | null = null;
 
 export function getAppOrchestrator(): AppOrchestrator {

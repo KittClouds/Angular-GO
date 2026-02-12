@@ -229,7 +229,7 @@ func TestExportImport(t *testing.T) {
 		t.Errorf("Expected title %s, got %s", note.Title, restoredNote.Title)
 	}
 
-	folders, err := s2.ListFolders("world1")
+	folders, err := s2.ListFolders("")
 	if err != nil {
 		t.Fatalf("Failed to list folders: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestFolderCRUD(t *testing.T) {
 	}
 
 	// Read
-	folders, err := s.ListFolders("w1")
+	folders, err := s.ListFolders("")
 	if err != nil {
 		t.Fatalf("ListFolders failed: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestFolderCRUD(t *testing.T) {
 	if err := s.UpsertFolder(f1); err != nil {
 		t.Fatalf("UpsertFolder update failed: %v", err)
 	}
-	folders, _ = s.ListFolders("w1")
+	folders, _ = s.ListFolders("")
 	if folders[0].Name != "Folder 1 Updated" {
 		t.Errorf("Folder update not persisted")
 	}
@@ -280,7 +280,7 @@ func TestFolderCRUD(t *testing.T) {
 	if err := s.DeleteFolder("f1"); err != nil {
 		t.Fatalf("DeleteFolder failed: %v", err)
 	}
-	folders, _ = s.ListFolders("w1")
+	folders, _ = s.ListFolders("")
 	if len(folders) != 0 {
 		t.Errorf("Folder not deleted")
 	}

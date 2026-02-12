@@ -104,7 +104,9 @@ type GoKittWorkerMessage =
     | { type: 'OM_GET_RECORD'; payload: { threadId: string }; id: number }
     | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
     | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
-    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number };
+    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number }
+    // Phase 9: RLM Engine
+    | { type: 'RLM_EXECUTE'; payload: { requestJSON: string }; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -187,6 +189,7 @@ type GoKittWorkerResponse =
     | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RLM_EXECUTE_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -331,6 +334,8 @@ declare const GoKitt: {
     omObserve: (threadId: string) => string;
     omReflect: (threadId: string) => string;
     omClear: (threadId: string) => string;
+    // Phase 9: RLM Engine
+    rlmExecute: (requestJSON: string) => string;
 };
 
 /**
@@ -386,6 +391,26 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
     try {
         switch (msg.type) {
+            case 'RLM_EXECUTE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RLM_EXECUTE_RESULT',
+                        id: msg.id,
+                        payload: JSON.stringify({ error: 'WASM not loaded' })
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.rlmExecute(msg.payload.requestJSON);
+
+                self.postMessage({
+                    type: 'RLM_EXECUTE_RESULT',
+                    id: msg.id,
+                    payload: res // Already JSON string
+                } as GoKittWorkerResponse);
+                break;
+            }
+
             case 'INIT': {
                 await loadWasm();
                 self.postMessage({ type: 'INIT_COMPLETE' } as GoKittWorkerResponse);

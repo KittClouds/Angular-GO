@@ -160,7 +160,7 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<vo
 
 // Lazy sync to GoKitt DocStore (fire-and-forget)
 function syncNoteToDocStore(id: string, content: any, version: number): void {
-    import('../api/highlighter-api').then((api) => {
+    import('../api/pretty-text-api').then((api) => {
         const goKitt = (api as any).getGoKittService?.();
         if (goKitt) {
             const text = typeof content === 'string' ? content : JSON.stringify(content);

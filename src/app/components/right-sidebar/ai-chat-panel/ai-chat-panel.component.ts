@@ -902,6 +902,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (!this.scriptLoaded) {
             const script = document.createElement('script');
             script.src = 'https://unpkg.com/quikchat';
+            script.crossOrigin = 'anonymous';
             script.onload = () => {
                 this.scriptLoaded = true;
                 this.initializeChat();

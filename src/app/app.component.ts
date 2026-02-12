@@ -9,7 +9,7 @@ import { entityColorStore } from './lib/store/entityColorStore';
 import { seedDefaultSchemas } from './lib/folders/seed';
 import { GoKittService } from './services/gokitt.service';
 import { GoKittStoreService } from './services/gokitt-store.service';
-import { setGoKittService } from './api/highlighter-api';
+import { setGoKittService } from './api/pretty-text-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
 import { GoSqliteCozoBridge } from './lib/bridge/GoSqliteCozoBridge';
 import { cozoDb } from './lib/cozo/db';

@@ -17,6 +17,12 @@ const (
 	DefaultMaxRetries       = 2
 )
 
+// WorkspaceProvider is the minimal interface for RLM workspace integration.
+// Implemented by pkg/rlm.Workspace via an adapter.
+type WorkspaceProvider interface {
+	GetPinnedPayloads(scope *store.ScopeKey) ([]store.PinnedPayload, error)
+}
+
 // ProcessResult represents the result of a Process call.
 type ProcessResult struct {
 	Observed  bool `json:"observed"`  // Whether observation occurred
@@ -30,6 +36,9 @@ type OMOrchestrator struct {
 	reflector *Reflector
 	config    store.OMConfig
 	mu        sync.Mutex // Prevent concurrent observe/reflect
+	// Optional RLM workspace for pinned artifact context augmentation.
+	// Set via SetWorkspace; nil means RLM is not wired.
+	workspace WorkspaceProvider
 }
 
 // NewOMOrchestrator creates a new OM orchestrator.
@@ -166,6 +175,7 @@ func (om *OMOrchestrator) Process(threadID string) (*ProcessResult, error) {
 }
 
 // GetContext returns formatted observations for system prompt injection.
+// If an RLM workspace is set, pinned artifacts are appended.
 func (om *OMOrchestrator) GetContext(threadID string) (string, error) {
 	if !om.config.Enabled {
 		return "", nil
@@ -186,6 +196,19 @@ func (om *OMOrchestrator) GetContext(threadID string) (string, error) {
 		context += fmt.Sprintf("\n\nCurrent task: %s", record.CurrentTask)
 	}
 	context += "\n</observations>"
+
+	// Append pinned RLM workspace artifacts if workspace is set
+	if om.workspace != nil {
+		scope := &store.ScopeKey{ThreadID: threadID}
+		pinned, err := om.workspace.GetPinnedPayloads(scope)
+		if err == nil && len(pinned) > 0 {
+			context += "\n<workspace_context>\n"
+			for _, p := range pinned {
+				context += fmt.Sprintf("[%s] %s\n", p.Key, p.Payload)
+			}
+			context += "</workspace_context>"
+		}
+	}
 
 	return context, nil
 }
@@ -304,4 +327,12 @@ func (om *OMOrchestrator) GetConfig() store.OMConfig {
 	om.mu.Lock()
 	defer om.mu.Unlock()
 	return om.config
+}
+
+// SetWorkspace injects the optional RLM workspace provider.
+// When set, GetContext will include pinned workspace artifacts.
+func (om *OMOrchestrator) SetWorkspace(wp WorkspaceProvider) {
+	om.mu.Lock()
+	defer om.mu.Unlock()
+	om.workspace = wp
 }

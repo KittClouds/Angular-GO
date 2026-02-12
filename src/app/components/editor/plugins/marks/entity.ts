@@ -2,7 +2,7 @@
 // Native Entity Mark Schema - The "Highlighter C" Strategy
 
 import { $markAttr, $markSchema } from '@milkdown/kit/utils';
-import { getHighlighterApi } from '../../../../api';
+import { getPrettyTextApi } from '../../../../api';
 
 export const entityAttr = $markAttr('entity');
 
@@ -28,7 +28,7 @@ export const entitySchema = $markSchema('entity', (ctx) => ({
         },
     ],
     toDOM: (mark) => {
-        const highlighterApi = getHighlighterApi();
+        const prettyTextApi = getPrettyTextApi();
         // Construct span dummy to get class/style from API
         const span = {
             from: 0,
@@ -49,8 +49,8 @@ export const entitySchema = $markSchema('entity', (ctx) => ({
                 'data-entity-label': mark.attrs['label'],
                 'data-entity-id': mark.attrs['id'],
                 'data-entity-mode': mark.attrs['mode'],
-                class: highlighterApi.getClass(span),
-                style: highlighterApi.getStyle(span),
+                class: prettyTextApi.getClass(span),
+                style: prettyTextApi.getStyle(span),
                 title: `${mark.attrs['label']} (${mark.attrs['kind']})`
             },
             0,

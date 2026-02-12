@@ -67,7 +67,13 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number };
+    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    // Phase 8: Observational Memory
+    | { type: 'OM_PROCESS'; payload: { threadId: string }; id: number }
+    | { type: 'OM_GET_RECORD'; payload: { threadId: string }; id: number }
+    | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
+    | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
+    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -135,6 +141,12 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    // Phase 8: Observational Memory responses
+    | { type: 'OM_PROCESS_RESULT'; id: number; payload: { observed: boolean; reflected: boolean } }
+    | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
+    | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({

@@ -223,6 +223,51 @@ type Block struct {
 	CreatedAt   int64     `json:"createdAt"`
 }
 
+// =============================================================================
+// RLM Workspace Types
+// =============================================================================
+
+// ScopeKey identifies the RLM workspace scope.
+// All RLM operations are scoped by this triple.
+type ScopeKey struct {
+	ThreadID    string `json:"thread_id"`
+	NarrativeID string `json:"narrative_id"`
+	FolderID    string `json:"folder_id"`
+}
+
+// ArtifactKind is the type descriptor for workspace artifacts.
+type ArtifactKind string
+
+const (
+	ArtifactHits        ArtifactKind = "hits"
+	ArtifactSpanSet     ArtifactKind = "span_set"
+	ArtifactSnippet     ArtifactKind = "snippet"
+	ArtifactTable       ArtifactKind = "table"
+	ArtifactSummary     ArtifactKind = "summary"
+	ArtifactDraftAnswer ArtifactKind = "draft_answer"
+)
+
+// WorkspaceArtifact is a scoped ephemeral artifact in the RLM workspace.
+type WorkspaceArtifact struct {
+	Key         string       `json:"key"`
+	ThreadID    string       `json:"thread_id"`
+	NarrativeID string       `json:"narrative_id"`
+	FolderID    string       `json:"folder_id"`
+	Kind        ArtifactKind `json:"kind"`
+	Payload     string       `json:"payload"` // JSON blob
+	Pinned      bool         `json:"pinned"`
+	ProducedBy  string       `json:"produced_by"` // op name that created it
+	CreatedAt   int64        `json:"created_at"`
+	UpdatedAt   int64        `json:"updated_at"`
+}
+
+// PinnedPayload is a lightweight view of a pinned workspace artifact.
+// Used for crossing the RLM → OM boundary.
+type PinnedPayload struct {
+	Key     string
+	Payload string
+}
+
 // Storer defines the interface for data persistence.
 // SQLiteStore is the sole implementation, using in-memory SQLite for WASM.
 type Storer interface {
@@ -302,6 +347,13 @@ type Storer interface {
 	// Export/Import (Database serialization for OPFS sync)
 	Export() ([]byte, error)
 	Import(data []byte) error
+
+	// RLM Workspace — scoped artifact store
+	PutArtifact(art *WorkspaceArtifact) error
+	GetArtifact(scope *ScopeKey, key string) (*WorkspaceArtifact, error)
+	DeleteArtifact(scope *ScopeKey, key string) error
+	ListArtifacts(scope *ScopeKey) ([]*WorkspaceArtifact, error)
+	SearchNotes(scope *ScopeKey, query string, limit int) ([]*Note, error)
 
 	// Lifecycle
 	Close() error

@@ -25,32 +25,16 @@ import {
 } from './plugins/marks';
 import { textAlignPlugin, setTextAlignCommand, indentPlugin, indentCommand, outdentCommand } from './plugins/nodes';
 
-// =============================================================================
-// ENTITY HIGHLIGHTER A/B/C TESTING
-// =============================================================================
-// Option A: Original decoration-based (has flicker on redraw)
-// Option B: Experimental overlay-based (reduced ProseMirror mutation)
-// Option C: TRUE MARK-BASED (like text color - stored in document JSON, no flicker)
-// Toggle by commenting/uncommenting the import and .use() below
-// =============================================================================
-
-// OPTION A: Original (decoration-based) - DISABLED
-// import { entityHighlighter } from './plugins/entityHighlighter';
-
-// OPTION B: Experimental (hybrid overlay + decorations) - DISABLED
-// import { entityHighlighterExperimental } from './plugins/entityHighlighterExperimental';
-
-// OPTION C: True Mark-Based (Highlighter C) - CURRENTLY ACTIVE
-// Entity marks are stored in document JSON like text color - applied once, never rebuilt
+// Unified Pretty Text System (formerly Highlighter C)
 import { entitySchema } from './plugins/marks/entity';
-import { entityHighlighterC } from './plugins/entityHighlighterC';
+import { prettyTextPlugin } from './plugins/prettyTextPlugin';
 
 import { detailsNodes, detailsInteractivePlugin } from './plugins/details';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
 import { EditorService } from '../../services/editor.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
-import { getHighlighterApi } from '../../api/highlighter-api';
+import { getPrettyTextApi } from '../../api/pretty-text-api';
 import type { Note } from '../../lib/dexie/db';
 
 @Component({
@@ -116,19 +100,10 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             .use(indentCommand)
             .use(outdentCommand)
             // ─────────────────────────────────────────────────────────────
-            // ENTITY HIGHLIGHTER - A/B/C Testing
+            // PRETTY TEXT PLUGIN (Unified Highlighting System)
             // ─────────────────────────────────────────────────────────────
-            // OPTION A: Original decoration-based - DISABLED
-            // .use(entityHighlighter)
-            // 
-            // OPTION B: Experimental hybrid - DISABLED
-            // .use(entityHighlighterExperimental)
-            //
-            // OPTION C: True Mark-Based - CURRENTLY ACTIVE
-            // entitySchema defines the mark type (like textColor schema)
-            // entityHighlighterC applies marks on note open (like clicking color picker)
             .use(entitySchema)
-            .use(entityHighlighterC)
+            .use(prettyTextPlugin)
             // ─────────────────────────────────────────────────────────────
             .use(detailsNodes)
             .use(detailsInteractivePlugin);
@@ -241,9 +216,9 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 }
             }
 
-            // Update highlighter API with current note context
-            const highlighterApi = getHighlighterApi();
-            highlighterApi.setNoteId(note.id, note.narrativeId || '');
+            // Update pretty text API with current note context
+            const prettyTextApi = getPrettyTextApi();
+            prettyTextApi.setNoteId(note.id, note.narrativeId || '');
 
         } catch (e) {
             console.error('[EditorComponent] Failed to load note content:', e);

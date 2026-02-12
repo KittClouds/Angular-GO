@@ -193,6 +193,27 @@ CREATE TABLE IF NOT EXISTS om_generations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_om_gen_thread ON om_generations(thread_id, generation);
+
+-- =============================================================================
+-- RLM Workspace Artifacts
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS workspace_artifacts (
+    key TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    narrative_id TEXT NOT NULL DEFAULT '',
+    folder_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    produced_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (key, thread_id, narrative_id, folder_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_scope
+    ON workspace_artifacts(thread_id, narrative_id, folder_id);
 `
 
 // NewSQLiteStore creates a new in-memory SQLite store.
@@ -1963,6 +1984,227 @@ func (s *SQLiteStore) GetOMGenerations(threadID string) ([]*OMGeneration, error)
 	}
 
 	return generations, rows.Err()
+}
+
+// =============================================================================
+// RLM Workspace CRUD
+// =============================================================================
+
+// PutArtifact inserts or updates a workspace artifact.
+func (s *SQLiteStore) PutArtifact(art *WorkspaceArtifact) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO workspace_artifacts (key, thread_id, narrative_id, folder_id,
+			kind, payload, pinned, produced_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(key, thread_id, narrative_id, folder_id) DO UPDATE SET
+			kind = excluded.kind,
+			payload = excluded.payload,
+			pinned = excluded.pinned,
+			produced_by = excluded.produced_by,
+			updated_at = excluded.updated_at
+	`, art.Key, art.ThreadID, art.NarrativeID, art.FolderID,
+		art.Kind, art.Payload, boolToInt(art.Pinned), art.ProducedBy,
+		art.CreatedAt, art.UpdatedAt)
+
+	return err
+}
+
+// GetArtifact retrieves a single workspace artifact by scope + key.
+func (s *SQLiteStore) GetArtifact(scope *ScopeKey, key string) (*WorkspaceArtifact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var art WorkspaceArtifact
+	var pinned int
+
+	err := s.db.QueryRow(`
+		SELECT key, thread_id, narrative_id, folder_id,
+			kind, payload, pinned, produced_by, created_at, updated_at
+		FROM workspace_artifacts
+		WHERE key = ? AND thread_id = ? AND narrative_id = ? AND folder_id = ?
+	`, key, scope.ThreadID, scope.NarrativeID, scope.FolderID).Scan(
+		&art.Key, &art.ThreadID, &art.NarrativeID, &art.FolderID,
+		&art.Kind, &art.Payload, &pinned, &art.ProducedBy,
+		&art.CreatedAt, &art.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	art.Pinned = pinned != 0
+	return &art, nil
+}
+
+// DeleteArtifact removes a workspace artifact by scope + key.
+func (s *SQLiteStore) DeleteArtifact(scope *ScopeKey, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		DELETE FROM workspace_artifacts
+		WHERE key = ? AND thread_id = ? AND narrative_id = ? AND folder_id = ?
+	`, key, scope.ThreadID, scope.NarrativeID, scope.FolderID)
+
+	return err
+}
+
+// ListArtifacts returns all workspace artifacts for the given scope.
+func (s *SQLiteStore) ListArtifacts(scope *ScopeKey) ([]*WorkspaceArtifact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT key, thread_id, narrative_id, folder_id,
+			kind, payload, pinned, produced_by, created_at, updated_at
+		FROM workspace_artifacts
+		WHERE thread_id = ? AND narrative_id = ? AND folder_id = ?
+		ORDER BY updated_at DESC
+	`, scope.ThreadID, scope.NarrativeID, scope.FolderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var arts []*WorkspaceArtifact
+	for rows.Next() {
+		var art WorkspaceArtifact
+		var pinned int
+
+		if err := rows.Scan(
+			&art.Key, &art.ThreadID, &art.NarrativeID, &art.FolderID,
+			&art.Kind, &art.Payload, &pinned, &art.ProducedBy,
+			&art.CreatedAt, &art.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		art.Pinned = pinned != 0
+		arts = append(arts, &art)
+	}
+
+	return arts, rows.Err()
+}
+
+// SearchNotes searches current notes by markdown content using LIKE,
+// scoped to a folder subtree (recursive CTE) and narrative.
+func (s *SQLiteStore) SearchNotes(scope *ScopeKey, query string, limit int) ([]*Note, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	likePattern := "%" + query + "%"
+
+	var rows *sql.Rows
+	var err error
+
+	if scope.FolderID != "" {
+		// Recursive CTE to get all folders in the subtree
+		q := `
+			WITH RECURSIVE folder_tree(id) AS (
+				SELECT id FROM folders WHERE id = ?
+				UNION ALL
+				SELECT f.id FROM folders f
+					INNER JOIN folder_tree ft ON f.parent_id = ft.id
+			)
+			SELECT n.id, n.version, n.world_id, n.title, n.content,
+				n.markdown_content, n.folder_id, n.entity_kind, n.entity_subtype,
+				n.is_entity, n.is_pinned, n.favorite, n.owner_id,
+				n.narrative_id, n."order", n.created_at, n.updated_at,
+				n.valid_from, n.valid_to, n.is_current, n.change_reason
+			FROM notes n
+			WHERE n.is_current = 1
+			  AND n.folder_id IN (SELECT id FROM folder_tree)
+			  AND (? = '' OR n.narrative_id = ?)
+			  AND (n.markdown_content LIKE ? OR n.title LIKE ?)
+			ORDER BY n.updated_at DESC
+			LIMIT ?
+		`
+		rows, err = s.db.Query(q, scope.FolderID,
+			scope.NarrativeID, scope.NarrativeID,
+			likePattern, likePattern, limit)
+	} else {
+		q := `
+			SELECT id, version, world_id, title, content,
+				markdown_content, folder_id, entity_kind, entity_subtype,
+				is_entity, is_pinned, favorite, owner_id,
+				narrative_id, "order", created_at, updated_at,
+				valid_from, valid_to, is_current, change_reason
+			FROM notes
+			WHERE is_current = 1
+			  AND (? = '' OR narrative_id = ?)
+			  AND (markdown_content LIKE ? OR title LIKE ?)
+			ORDER BY updated_at DESC
+			LIMIT ?
+		`
+		rows, err = s.db.Query(q,
+			scope.NarrativeID, scope.NarrativeID,
+			likePattern, likePattern, limit)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []*Note
+	for rows.Next() {
+		var note Note
+		var isEntity, isPinned, favorite, isCurrent int
+		var validTo sql.NullInt64
+		var markdownContent, fID, entityKind, entitySubtype, ownerID, narrativeID, changeReason sql.NullString
+
+		if err := rows.Scan(
+			&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content,
+			&markdownContent, &fID, &entityKind, &entitySubtype,
+			&isEntity, &isPinned, &favorite,
+			&ownerID, &narrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+			&note.ValidFrom, &validTo, &isCurrent, &changeReason,
+		); err != nil {
+			return nil, err
+		}
+
+		note.IsEntity = isEntity != 0
+		note.IsPinned = isPinned != 0
+		note.Favorite = favorite != 0
+		note.IsCurrent = isCurrent != 0
+		if validTo.Valid {
+			note.ValidTo = &validTo.Int64
+		}
+		if markdownContent.Valid {
+			note.MarkdownContent = markdownContent.String
+		}
+		if fID.Valid {
+			note.FolderID = fID.String
+		}
+		if entityKind.Valid {
+			note.EntityKind = entityKind.String
+		}
+		if entitySubtype.Valid {
+			note.EntitySubtype = entitySubtype.String
+		}
+		if ownerID.Valid {
+			note.OwnerID = ownerID.String
+		}
+		if narrativeID.Valid {
+			note.NarrativeID = narrativeID.String
+		}
+		if changeReason.Valid {
+			note.ChangeReason = changeReason.String
+		}
+		notes = append(notes, &note)
+	}
+
+	return notes, rows.Err()
 }
 
 // Compile-time interface check

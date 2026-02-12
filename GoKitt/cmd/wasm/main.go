@@ -29,12 +29,13 @@ import (
 	"github.com/kittclouds/gokitt/pkg/reality/pcst"
 	"github.com/kittclouds/gokitt/pkg/reality/projection"
 	"github.com/kittclouds/gokitt/pkg/reality/validator"
+	"github.com/kittclouds/gokitt/pkg/rlm"
 	"github.com/kittclouds/gokitt/pkg/sab"
 	"github.com/kittclouds/gokitt/pkg/scanner/conductor"
 )
 
 // Version info
-const Version = "0.7.0" // Observational Memory + Q-Gram Hybrid Search
+const Version = "0.8.0" // RLM Retrofit + Observational Memory
 
 // Global state
 var pipeline *conductor.Conductor
@@ -49,6 +50,7 @@ var agentSvc *agent.Service           // Phase 6: Agent (tool-calling)
 var chatSvc *chat.ChatService         // Phase 7: Chat + Observational Memory
 var memorySvc *memory.Extractor       // Phase 7: Memory extraction
 var omSvc *omm.OMOrchestrator         // Phase 8: Observational Memory pipeline
+var rlmEngine *rlm.Engine             // Phase 9: RLM Engine
 
 func main() {
 	var err error
@@ -146,6 +148,8 @@ func main() {
 		"omObserve":   js.FuncOf(jsOMObserve),
 		"omReflect":   js.FuncOf(jsOMReflect),
 		"omClear":     js.FuncOf(jsOMClear),
+		// Phase 9: RLM Engine
+		"rlmExecute": js.FuncOf(jsRLMExecute),
 	}))
 
 	select {}
@@ -1778,7 +1782,12 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 	})
 	omSvc = omm.NewOMOrchestrator(sqlStore, llmClient, omConfig)
 
-	return successResult("Chat service initialized")
+	// Initialize RLM Engine (Phase 9)
+	rlmWorkspace := rlm.NewWorkspace(sqlStore)
+	rlmEngine = rlm.NewEngine(rlmWorkspace)
+	omSvc.SetWorkspace(rlmWorkspace)
+
+	return successResult("Chat service initialized (RLM Enabled)")
 }
 
 // jsChatCreateThread creates a new chat thread.
@@ -2140,4 +2149,28 @@ func jsOMClear(this js.Value, args []js.Value) interface{} {
 	}
 
 	return successResult("OM cleared")
+}
+
+// =============================================================================
+// Phase 9: RLM Engine WASM Bridge
+// =============================================================================
+
+// jsRLMExecute processes an RLM action pipeline.
+// Args: requestJSON (string)
+// Returns: resultJSON (string)
+func jsRLMExecute(this js.Value, args []js.Value) interface{} {
+	if rlmEngine == nil {
+		return errorResult("RLM engine not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing requestJSON")
+	}
+
+	requestJSON := args[0].String()
+	responseBytes, err := rlmEngine.Execute([]byte(requestJSON))
+	if err != nil {
+		return errorResult(err.Error())
+	}
+
+	return string(responseBytes)
 }
