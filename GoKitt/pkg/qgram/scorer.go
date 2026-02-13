@@ -66,154 +66,142 @@ func (idx *QGramIndex) Search(input string, config SearchConfig, limit int) []Se
 		return nil
 	}
 
-	// 2. Candidates (union across clauses)
-	candidateSet := idx.GenerateCandidates(clauses)
-	if len(candidateSet) == 0 {
+	// 2. Candidates (union across clauses) with WAND UpperBounds
+	candidates := idx.GeneratePrunedCandidates(clauses, config, limit)
+	if len(candidates) == 0 {
 		return nil
 	}
 
-	// 2.5 Filters (Scope)
-	if config.Scope != nil {
-		for docID := range candidateSet {
-			doc, ok := idx.Documents[docID]
-			if !ok {
-				delete(candidateSet, docID)
-				continue
-			}
+	// 3. Sort, Verify, Score, Prune via helper
+	return idx.refinedSearchWithPruning(candidates, clauses, config, limit)
+}
 
-			// NarrativeID
-			if config.Scope.NarrativeID != "" && doc.NarrativeID != config.Scope.NarrativeID {
-				delete(candidateSet, docID)
-				continue
-			}
-
-			// FolderPath (Prefix match)
-			if config.Scope.FolderPath != "" && !strings.HasPrefix(doc.FolderPath, config.Scope.FolderPath) {
-				delete(candidateSet, docID)
-				continue
-			}
-		}
-		if len(candidateSet) == 0 {
-			return nil
-		}
-	}
-
-	// 3. Verify all candidates against all clauses
-	//    matches[docID][clauseIdx] = *PatternMatch or nil
+func (idx *QGramIndex) refinedSearchWithPruning(candidates []Candidate, clauses []Clause, config SearchConfig, limit int) []SearchResult {
 	type docVerification struct {
-		matches      []*PatternMatch // index-aligned with clauses, nil if no match
+		matches      []*PatternMatch
 		matchedCount int
+		score        float64
 	}
 
 	verified := make(map[string]*docVerification)
-	patternDF := make([]int, len(clauses)) // df(p) across verified docs
 
-	for docID := range candidateSet {
-		dv := &docVerification{
-			matches: make([]*PatternMatch, len(clauses)),
+	// Pre-calculate IDFs based on Candidate Counts (Stable estimate)
+	// This avoids score instability due to pruning.
+	corpusStats := idx.GetCorpusStats()
+	N := float64(corpusStats.TotalDocuments)
+	if N == 0 {
+		N = 1
+	}
+
+	idfs := make([]float64, len(clauses))
+	for i, clause := range clauses {
+		// Use candidate count as DF estimate
+		// Safe lower bound on IDF (Upper bound on DF)
+		// We re-query candidates count? No, we have it from `getCandidatesForPattern`.
+		// But passing it here is hard.
+		// Let's just re-extract? No, expensive.
+		// Let's assume idx.GramIDF(rarest) is available or just use GramIDF.
+		// Actually, clauses[i].Pattern -> we can get rarest gram IDF easily?
+		// idx.GramIDF() exists.
+		grams := ExtractGrams(clause.Pattern, idx.Q)
+		maxIDF := 0.0
+		for _, g := range grams {
+			idf := idx.GramIDF(g)
+			if idf > maxIDF {
+				maxIDF = idf
+			}
 		}
+		if maxIDF == 0 {
+			maxIDF = 1.0
+		} // fallback
+		idfs[i] = maxIDF
+	}
 
-		reject := false
-		for i, clause := range clauses {
-			m := idx.VerifyCandidate(docID, clause)
-			dv.matches[i] = m
-			if m != nil {
-				dv.matchedCount++
-			} else if config.PhraseHard && clause.Type == PhraseClause {
-				// Hard constraint: phrase miss → reject
-				reject = true
+	// Build QueryVerifier once for all candidates (Aho-Corasick one-pass verification)
+	qv := NewQueryVerifier(clauses)
+
+	// Track pattern document frequencies for potential future use
+	patternDF := make([]int, len(clauses))
+
+	var topScores []float64
+	threshold := 0.0
+	var results []SearchResult
+
+	for _, cand := range candidates {
+		if limit > 0 && len(topScores) >= limit {
+			if cand.UpperBound <= threshold {
 				break
 			}
 		}
 
-		if reject || dv.matchedCount == 0 {
+		docID := cand.DocID
+		doc, ok := idx.Documents[docID]
+		if !ok {
 			continue
 		}
 
+		// Scope Check
+		if config.Scope != nil {
+			if config.Scope.NarrativeID != "" && doc.NarrativeID != config.Scope.NarrativeID {
+				continue
+			}
+			if config.Scope.FolderPath != "" && !strings.HasPrefix(doc.FolderPath, config.Scope.FolderPath) {
+				continue
+			}
+		}
+
+		// Verify all clauses in one pass using Aho-Corasick
+		matches, matchedCount := idx.VerifyCandidateAll(docID, &qv)
+		if matchedCount == 0 {
+			continue
+		}
+
+		// PhraseHard behavior preserved
+		reject := false
+		if config.PhraseHard {
+			for i, clause := range clauses {
+				if clause.Type == PhraseClause && matches[i] == nil {
+					reject = true
+					break
+				}
+			}
+		}
+		if reject {
+			continue
+		}
+
+		// Score
+		score := idx.computeDocScore(docID, matches, matchedCount, idfs, config, corpusStats)
+		dv := &docVerification{
+			matches:      matches,
+			matchedCount: matchedCount,
+			score:        score,
+		}
 		verified[docID] = dv
-		for i, m := range dv.matches {
+
+		// Update pattern document frequencies
+		for i, m := range matches {
 			if m != nil {
 				patternDF[i]++
 			}
 		}
-	}
 
-	if len(verified) == 0 {
-		return nil
-	}
-
-	// 4. Score
-	corpusStats := idx.GetCorpusStats()
-	N := float64(corpusStats.TotalDocuments)
-
-	// Pre-calculate IDFs (per-pattern, post-verify)
-	idfs := make([]float64, len(clauses))
-	for i := range clauses {
-		idfs[i] = resorank.CalculateIDF(N, patternDF[i])
-	}
-
-	var results []SearchResult
-
-	for docID, dv := range verified {
-		// --- Base score: Σ s(p,d) for matched patterns ---
-		baseSum := 0.0
-		var patternMasks []uint32
-
-		for i, m := range dv.matches {
-			if m == nil {
-				continue
+		// Update Threshold
+		if limit > 0 {
+			topScores = insertSorted(topScores, score, limit)
+			if len(topScores) == limit {
+				threshold = topScores[0]
 			}
-
-			// Field-weighted normalized TF:
-			// tf*(p,d) = Σ_f w_f · ntf(tf_{p,d,f}, |d_f|, avg|d_f|, b)
-			tfStar := 0.0
-			for field, detail := range m.FieldMatches {
-				wf := 1.0
-				if w, ok := config.FieldWeights[field]; ok {
-					wf = w
-				}
-
-				avgLen := corpusStats.AverageFieldLengths[field]
-				if avgLen == 0 {
-					avgLen = 100.0
-				}
-
-				ntf := resorank.NormalizedTermFrequency(
-					detail.Count, detail.FieldLength, avgLen, config.B,
-				)
-				tfStar += wf * ntf
-			}
-
-			// Saturation + IDF
-			// s(p,d) = idf(p) · sat(tf*(p,d))
-			sat := resorank.Saturate(tfStar, config.K1)
-			baseSum += idfs[i] * sat
-
-			patternMasks = append(patternMasks, m.SegmentMask)
-		}
-
-		// --- Coverage multiplier: (ε + C(d))^λ ---
-		coverage := float64(dv.matchedCount) / float64(len(clauses))
-		coverageMult := math.Pow(config.CoverageEpsilon+coverage, config.CoverageLambda)
-
-		score := baseSum * coverageMult
-
-		// --- Proximity multiplier (global overlap on pattern masks) ---
-		if len(patternMasks) > 1 {
-			score *= patternProximity(
-				patternMasks, config.ProximityAlpha, config.MaxSegments,
-				idx, docID, corpusStats.AverageDocLength, config.ProximityDecay,
-			)
 		}
 
 		results = append(results, SearchResult{
 			DocID:    docID,
 			Score:    score,
-			Coverage: coverage,
+			Coverage: float64(matchedCount) / float64(len(clauses)),
 		})
 	}
 
-	// 5. Sort descending, tie-break by DocID
+	// Final Sort
 	sort.Slice(results, func(i, j int) bool {
 		if math.Abs(results[i].Score-results[j].Score) < 1e-9 {
 			return results[i].DocID < results[j].DocID
@@ -226,6 +214,85 @@ func (idx *QGramIndex) Search(input string, config SearchConfig, limit int) []Se
 	}
 
 	return results
+}
+
+func (idx *QGramIndex) computeDocScore(
+	docID string,
+	matches []*PatternMatch,
+	matchedCount int,
+	idfs []float64,
+	config SearchConfig,
+	stats CorpusStats,
+) float64 {
+	baseSum := 0.0
+	var patternMasks []uint32
+
+	for i, m := range matches {
+		if m == nil {
+			continue
+		}
+
+		// Field-weighted normalized TF
+		tfStar := 0.0
+		for field, detail := range m.FieldMatches {
+			wf := 1.0
+			if w, ok := config.FieldWeights[field]; ok {
+				wf = w
+			}
+
+			avgLen := stats.AverageFieldLengths[field]
+			if avgLen == 0 {
+				avgLen = 100.0
+			}
+
+			ntf := resorank.NormalizedTermFrequency(
+				detail.Count, detail.FieldLength, avgLen, config.B,
+			)
+			tfStar += wf * ntf
+		}
+
+		sat := resorank.Saturate(tfStar, config.K1)
+		baseSum += idfs[i] * sat
+
+		patternMasks = append(patternMasks, m.SegmentMask)
+	}
+
+	coverage := float64(matchedCount) / float64(len(matches))
+	coverageMult := math.Pow(config.CoverageEpsilon+coverage, config.CoverageLambda)
+
+	score := baseSum * coverageMult
+
+	if len(patternMasks) > 1 {
+		score *= patternProximity(
+			patternMasks, config.ProximityAlpha, config.MaxSegments,
+			idx, docID, stats.AverageDocLength, config.ProximityDecay,
+		)
+	}
+
+	return score
+}
+
+func insertSorted(slice []float64, val float64, limit int) []float64 {
+	i := sort.SearchFloat64s(slice, val)
+	// Insert at i
+	if len(slice) < limit {
+		slice = append(slice, 0)
+		copy(slice[i+1:], slice[i:])
+		slice[i] = val
+	} else if i > 0 {
+		// If val is greater than smallest (slice[0]), we drop slice[0]
+		// Actually slice is sorted ascending. slice[0] is smallest.
+		// If val > slice[0], we insert.
+		// Shift down
+		copy(slice[0:i-1], slice[1:i]) // Shift left? No.
+		// We want to remove index 0 and insert at index i (which is relative to original slice).
+		// Wait, if slice is [1, 2, 4], val is 3. i=2.
+		// Result: [2, 3, 4].
+		// Shift 1..i to 0..i-1
+		copy(slice[0:], slice[1:i])
+		slice[i-1] = val
+	}
+	return slice
 }
 
 // patternProximity computes the simplified global-overlap multiplier:

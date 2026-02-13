@@ -64,3 +64,49 @@ func TestIndexDocument(t *testing.T) {
 		t.Errorf("Expected bit 12 set for 'rld', got mask %b", metaRld.SegmentMask)
 	}
 }
+
+func TestRemoveDocument(t *testing.T) {
+	idx := NewQGramIndex(3)
+
+	// Index two documents
+	idx.IndexDocument("doc1", map[string]string{"body": "hello world"})
+	idx.IndexDocument("doc2", map[string]string{"body": "goodbye world"})
+
+	// Verify initial state
+	stats := idx.GetCorpusStats()
+	if stats.TotalDocuments != 2 {
+		t.Errorf("Expected 2 documents, got %d", stats.TotalDocuments)
+	}
+
+	// Remove doc1
+	idx.RemoveDocument("doc1")
+
+	// Verify doc1 is gone
+	if _, exists := idx.Documents["doc1"]; exists {
+		t.Error("doc1 should be removed from Documents map")
+	}
+
+	// Verify stats updated
+	stats = idx.GetCorpusStats()
+	if stats.TotalDocuments != 1 {
+		t.Errorf("Expected 1 document after removal, got %d", stats.TotalDocuments)
+	}
+
+	// Verify gram postings cleaned up
+	// "hel" should no longer have doc1
+	if _, ok := idx.GramPostings["hel"]["doc1"]; ok {
+		t.Error("'hel' should not have doc1 posting")
+	}
+
+	// "wor" should still have doc2 (both docs had "world")
+	if _, ok := idx.GramPostings["wor"]["doc2"]; !ok {
+		t.Error("'wor' should still have doc2 posting")
+	}
+
+	// Remove non-existent doc should be no-op
+	idx.RemoveDocument("nonexistent")
+	stats = idx.GetCorpusStats()
+	if stats.TotalDocuments != 1 {
+		t.Errorf("Removing non-existent doc should not change stats, got %d", stats.TotalDocuments)
+	}
+}

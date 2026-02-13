@@ -69,6 +69,7 @@ func (idx *QGramIndex) getCandidatesForPattern(pattern string) []string {
 	for docID := range postings {
 		currentDocs = append(currentDocs, docID)
 	}
+	sort.Strings(currentDocs)
 
 	// Intersect with subsequent grams
 	for i := 1; i < len(stats); i++ {
@@ -89,25 +90,6 @@ func (idx *QGramIndex) getCandidatesForPattern(pattern string) []string {
 	}
 
 	return currentDocs
-}
-
-func intersect(a, b []string) []string {
-	if len(a) > len(b) {
-		a, b = b, a // Ensure a is smaller (iterator)
-	}
-
-	set := make(map[string]bool, len(a))
-	for _, x := range a {
-		set[x] = true
-	}
-
-	var res []string
-	for _, x := range b {
-		if set[x] {
-			res = append(res, x)
-		}
-	}
-	return res
 }
 
 // GramIDF computes IDF for a specific gram

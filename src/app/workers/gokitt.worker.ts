@@ -105,6 +105,7 @@ type GoKittWorkerMessage =
     | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
     | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
     | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number }
+    | { type: 'OM_SET_CONFIG'; payload: { enabled: boolean; observeThreshold: number; reflectThreshold: number }; id: number }
     // Phase 9: RLM Engine
     | { type: 'RLM_EXECUTE'; payload: { requestJSON: string }; id: number };
 
@@ -189,6 +190,7 @@ type GoKittWorkerResponse =
     | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'OM_SET_CONFIG_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'RLM_EXECUTE_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
@@ -334,6 +336,7 @@ declare const GoKitt: {
     omObserve: (threadId: string) => string;
     omReflect: (threadId: string) => string;
     omClear: (threadId: string) => string;
+    omSetConfig: (configJSON: string) => string;
     // Phase 9: RLM Engine
     rlmExecute: (requestJSON: string) => string;
 };
@@ -2040,6 +2043,32 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
                 self.postMessage({
                     type: 'OM_CLEAR_RESULT',
+                    id: msg.id,
+                    payload: result
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'OM_SET_CONFIG': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'OM_SET_CONFIG_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const configJSON = JSON.stringify({
+                    enabled: msg.payload.enabled,
+                    observeThreshold: msg.payload.observeThreshold,
+                    reflectThreshold: msg.payload.reflectThreshold
+                });
+                const res = (GoKitt as any).omSetConfig(configJSON);
+                const result = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'OM_SET_CONFIG_RESULT',
                     id: msg.id,
                     payload: result
                 } as GoKittWorkerResponse);

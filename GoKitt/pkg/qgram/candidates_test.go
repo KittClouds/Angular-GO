@@ -1,8 +1,6 @@
 package qgram
 
 import (
-	"reflect"
-	"sort"
 	"testing"
 )
 
@@ -64,18 +62,5 @@ func TestGenerateCandidates(t *testing.T) {
 	cands = idx.GenerateCandidates(clauses)
 	if len(cands) != 3 {
 		t.Errorf("Expected all 3 docs for short pattern 'z', got %d", len(cands))
-	}
-}
-
-func TestIntersect(t *testing.T) {
-	a := []string{"1", "2", "3"}
-	b := []string{"2", "3", "4"}
-
-	res := intersect(a, b)
-	sort.Strings(res)
-
-	expected := []string{"2", "3"}
-	if !reflect.DeepEqual(res, expected) {
-		t.Errorf("Expected %v, got %v", expected, res)
 	}
 }

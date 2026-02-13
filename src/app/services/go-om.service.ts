@@ -70,9 +70,19 @@ export class GoOMService {
 
     /**
      * Update OM configuration (typically from settings UI)
+     * Also syncs to Go WASM runtime.
      */
-    updateConfig(config: Partial<OMConfig>): void {
+    async updateConfig(config: Partial<OMConfig>): Promise<void> {
         this.config.update(c => ({ ...c, ...config }));
+
+        // Sync to Go WASM
+        const { enabled, observeThreshold, reflectThreshold } = this.config();
+        try {
+            await this.goKitt.omSetConfig(enabled, observeThreshold, reflectThreshold);
+            console.log('[GoOMService] Config synced to Go WASM:', { enabled, observeThreshold, reflectThreshold });
+        } catch (err) {
+            console.error('[GoOMService] Failed to sync config to Go WASM:', err);
+        }
     }
 
     /**

@@ -21,9 +21,11 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain } from 'lucide-angular';
+import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw } from 'lucide-angular';
+import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
 import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/services/go-chat.service';
 import { GoOMService } from '../../../services/go-om.service';
+import { OrchestratorService } from '../../../services/orchestrator.service';
 import { OpenRouterService, OpenRouterMessage, ToolCallResponse } from '../../../lib/services/openrouter.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { GoKittService } from '../../../services/gokitt.service';
@@ -263,6 +265,44 @@ Keep responses concise but helpful. If you don't know something specific about t
                                         max="10000"
                                         step="500"
                                     />
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Custom Instructions (Collapsible) -->
+                    <div class="border-t border-border/30 pt-2 mt-2">
+                        <button 
+                            class="flex items-center justify-between w-full py-1 group"
+                            (click)="toggleSystemPrompt()">
+                            <div class="flex items-center gap-2">
+                                <lucide-icon [img]="SettingsIcon" class="h-4 w-4 text-muted-foreground group-hover:text-teal-400 transition-colors"></lucide-icon>
+                                <div class="text-left">
+                                    <label class="text-xs font-medium cursor-pointer group-hover:text-teal-400 transition-colors">Custom Instructions</label>
+                                    <p class="text-[10px] text-muted-foreground">Customize Kammi's persona & behavior</p>
+                                </div>
+                            </div>
+                            <div class="text-[10px] text-muted-foreground group-hover:text-teal-400 transition-colors">
+                                {{ showSystemPrompt() ? 'Hide' : 'Edit' }}
+                            </div>
+                        </button>
+                        
+                        @if (showSystemPrompt()) {
+                            <div class="mt-2 space-y-2 pl-1 animation-slide-down">
+                                <textarea
+                                    class="w-full h-32 px-3 py-2 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500 resize-none leading-relaxed"
+                                    [value]="systemPromptInput()"
+                                    (input)="systemPromptInput.set($any($event.target).value)"
+                                    placeholder="Enter system instructions..."
+                                ></textarea>
+                                <div class="flex justify-end">
+                                    <button 
+                                        class="flex items-center gap-1.5 px-2 py-1 text-[10px] text-muted-foreground hover:text-teal-400 hover:bg-teal-500/10 rounded transition-colors"
+                                        (click)="resetSystemPrompt()"
+                                        title="Reset to default Kammi persona">
+                                        <lucide-icon [img]="RotateCcwIcon" class="h-3 w-3"></lucide-icon>
+                                        Reset to Default
+                                    </button>
                                 </div>
                             </div>
                         }
@@ -660,6 +700,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     googleGenAI = inject(GoogleGenAIService);
     private goKittService = inject(GoKittService);
     private noteEditorStore = inject(NoteEditorStore);
+    private orchestrator = inject(OrchestratorService);
     editorBridge = inject(EditorAgentBridge);
     // Track Go batch init for agentic chat
     private goBatchInitialized = false;
@@ -675,10 +716,15 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     readonly ArrowLeftIcon = ArrowLeft;
     readonly DatabaseIcon = Database;
     readonly BrainIcon = Brain;
+    readonly RotateCcwIcon = RotateCcw;
 
     // Settings panel state
     showSettings = signal(false);
     activeProvider = signal<'google' | 'openrouter'>('google');  // Default to Google
+
+    // Custom Instructions
+    showSystemPrompt = signal(false);
+    systemPromptInput = signal(KAMMI_SYSTEM_PROMPT);
 
     // OpenRouter settings
     apiKeyInput = signal('');
@@ -731,6 +777,12 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
         // Initialize Go chat service
         this.initGoChatService();
+
+        // Load saved system prompt
+        const savedPrompt = getSetting<string | null>('chat:systemPrompt', null);
+        if (savedPrompt) {
+            this.systemPromptInput.set(savedPrompt);
+        }
     }
 
     /**
@@ -744,10 +796,14 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (orConfig?.apiKey) {
             await this.goChatService.init({
                 apiKey: orConfig.apiKey,
-                model: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free'
+                model: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                // Pass OM settings from UI toggles
+                omEnabled: this.omEnabled(),
+                observeThreshold: this.omObserveThreshold(),
+                reflectThreshold: this.omReflectThreshold()
             });
             this.goChatInitialized = true;
-            console.log('[AiChatPanel] Go chat service initialized');
+            console.log('[AiChatPanel] Go chat service initialized (OM:', this.omEnabled() ? 'ON' : 'OFF', ')');
         }
     }
 
@@ -771,7 +827,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 model: this.selectedModel(),
                 temperature: 0.7,
                 maxTokens: 2048,
-                systemPrompt: KAMMI_SYSTEM_PROMPT,
+                systemPrompt: this.systemPromptInput(),
             });
         }
 
@@ -782,9 +838,12 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 model: this.googleModelInput(),
                 temperature: 0.7,
                 maxOutputTokens: 2048,
-                systemPrompt: KAMMI_SYSTEM_PROMPT,
+                systemPrompt: this.systemPromptInput(),
             });
         }
+
+        // Persist system prompt setting independently
+        setSetting('chat:systemPrompt', this.systemPromptInput());
 
         // Save OM settings
         this.saveOMSettings();
@@ -809,11 +868,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     toggleOM(): void {
         this.omEnabled.update(v => !v);
+        // Sync to Go WASM (fire-and-forget)
         this.omService.updateConfig({ enabled: this.omEnabled() });
         console.log('[AiChatPanel] Observational Memory:', this.omEnabled() ? 'ON' : 'OFF');
     }
 
     saveOMSettings(): void {
+        // Sync to Go WASM (fire-and-forget)
         this.omService.updateConfig({
             enabled: this.omEnabled(),
             observeThreshold: this.omObserveThreshold(),
@@ -824,6 +885,14 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             observeThreshold: this.omObserveThreshold(),
             reflectThreshold: this.omReflectThreshold(),
         });
+    }
+
+    toggleSystemPrompt(): void {
+        this.showSystemPrompt.update(v => !v);
+    }
+
+    resetSystemPrompt(): void {
+        this.systemPromptInput.set(KAMMI_SYSTEM_PROMPT);
     }
 
     // -------------------------------------------------------------------------
@@ -974,22 +1043,45 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         const botMsgId = instance.messageAddNew('', 'Kammi', 'left');
         this.currentBotMsgId = botMsgId;
 
+        // --- ORCHESTRATOR LAYER ---
+        let contextBlock = '';
+        if (this.indexEnabled()) {
+            try {
+                // Show thinking indicator
+                instance.messageReplaceContent(botMsgId, '🧠 Thinking...');
+
+                const threadId = this.goChatService.currentThread()?.id || 'default';
+                contextBlock = await this.orchestrator.orchestrate(text, threadId);
+
+                // Clear thinking indicator
+                instance.messageReplaceContent(botMsgId, '');
+            } catch (err) {
+                console.error('[AiChatPanel] Orchestrator error:', err);
+                // Clear on error to proceed with normal chat
+                instance.messageReplaceContent(botMsgId, '');
+            }
+        }
+
         // Build conversation history for context
         const history = this.buildConversationHistory(text);
 
+        // Inject Context Block into the system prompt for THIS turn
+        const effectiveSystemPrompt = this.systemPromptInput() + (contextBlock ? `\n\n${contextBlock}` : '');
+
         // If Index mode is enabled, use agentic tool calling (OpenRouter only for now)
         if (this.indexEnabled() && openRouterConfigured) {
-            await this.handleAgenticChat(instance, botMsgId, history);
+            await this.handleAgenticChat(instance, botMsgId, history, effectiveSystemPrompt);
         } else {
             // Standard streaming - use active provider
-            await this.handleStreamingChat(instance, botMsgId, history);
+            await this.handleStreamingChat(instance, botMsgId, history, effectiveSystemPrompt);
         }
     }
 
     private async handleStreamingChat(
         instance: any,
         botMsgId: string,
-        history: OpenRouterMessage[]
+        history: OpenRouterMessage[],
+        systemPrompt: string
     ): Promise<void> {
         let fullResponse = '';
 
@@ -1019,7 +1111,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     instance.messageReplaceContent(botMsgId, `❌ Error: ${error.message}`);
                     this.currentBotMsgId = null;
                 },
-            }, KAMMI_SYSTEM_PROMPT);
+            }, systemPrompt);
         } else {
             // Use OpenRouter
             await this.openRouter.streamChat(history, {
@@ -1036,14 +1128,15 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     instance.messageReplaceContent(botMsgId, `❌ Error: ${error.message}`);
                     this.currentBotMsgId = null;
                 },
-            }, KAMMI_SYSTEM_PROMPT);
+            }, systemPrompt);
         }
     }
 
     private async handleAgenticChat(
         instance: any,
         botMsgId: string,
-        history: OpenRouterMessage[]
+        history: OpenRouterMessage[],
+        systemPrompt: string
     ): Promise<void> {
         const MAX_ITERATIONS = 5;
         let iterations = 0;
@@ -1100,7 +1193,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 const result = await this.goKittService.agentChatWithTools(
                     messages,
                     ALL_TOOLS,
-                    KAMMI_SYSTEM_PROMPT
+                    systemPrompt
                 );
 
                 // If model returned content, we're done

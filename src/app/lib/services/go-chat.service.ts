@@ -56,6 +56,10 @@ export interface Memory {
 export interface ChatConfig {
     apiKey: string;
     model: string;
+    // Observational Memory settings
+    omEnabled?: boolean;
+    observeThreshold?: number;
+    reflectThreshold?: number;
 }
 
 /** Thread creation options */
@@ -133,9 +137,13 @@ export class GoChatService {
 
         try {
             // Initialize Go chat service via WASM
+            // Include OM settings from GoOMService if available
             const configJSON = JSON.stringify({
                 apiKey: config.apiKey,
-                model: config.model || 'meta-llama/llama-3.3-70b-instruct:free'
+                model: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                omEnabled: config.omEnabled ?? true,
+                observeThreshold: config.observeThreshold ?? 1000,
+                reflectThreshold: config.reflectThreshold ?? 4000
             });
 
             const result = await this.goKittService.chatInit(configJSON);
@@ -245,6 +253,13 @@ export class GoChatService {
 
         try {
             const result = await this.goKittService.chatListThreads(worldId);
+
+            // Handle null/undefined result (empty database or WASM not ready)
+            if (!result) {
+                this.threads.set([]);
+                console.log('[GoChatService] No threads found (empty database)');
+                return;
+            }
 
             if (result.error) {
                 console.error('[GoChatService] List threads failed:', result.error);
@@ -600,11 +615,17 @@ export class GoChatService {
 
     /**
      * Restore the last active thread from settings.
+     * Clears the saved ID if the thread no longer exists.
      */
     private async restoreLastThread(): Promise<void> {
         const lastThreadId = getSetting<string | null>('chat:activeThreadId', null);
         if (lastThreadId) {
             await this.loadThread(lastThreadId);
+            // If load failed (thread not found), clear the saved ID
+            if (!this.currentThread()) {
+                console.log('[GoChatService] Clearing stale thread ID from settings');
+                setSetting('chat:activeThreadId', null);
+            }
         }
     }
 

@@ -148,6 +148,7 @@ func main() {
 		"omObserve":   js.FuncOf(jsOMObserve),
 		"omReflect":   js.FuncOf(jsOMReflect),
 		"omClear":     js.FuncOf(jsOMClear),
+		"omSetConfig": js.FuncOf(jsOMSetConfig),
 		// Phase 9: RLM Engine
 		"rlmExecute": js.FuncOf(jsRLMExecute),
 	}))
@@ -2149,6 +2150,42 @@ func jsOMClear(this js.Value, args []js.Value) interface{} {
 	}
 
 	return successResult("OM cleared")
+}
+
+// jsOMSetConfig updates the OM configuration at runtime.
+// Args: configJSON (string) - JSON with enabled, observeThreshold, reflectThreshold
+func jsOMSetConfig(this js.Value, args []js.Value) interface{} {
+	if omSvc == nil {
+		return errorResult("OM service not initialized")
+	}
+	if len(args) < 1 {
+		return errorResult("missing configJSON")
+	}
+
+	var config struct {
+		Enabled          bool `json:"enabled"`
+		ObserveThreshold int  `json:"observeThreshold"`
+		ReflectThreshold int  `json:"reflectThreshold"`
+	}
+	if err := json.Unmarshal([]byte(args[0].String()), &config); err != nil {
+		return errorResult(fmt.Sprintf("invalid config: %v", err))
+	}
+
+	omConfig := store.OMConfig{
+		Enabled:          config.Enabled,
+		ObserveThreshold: config.ObserveThreshold,
+		ReflectThreshold: config.ReflectThreshold,
+		MaxRetries:       2,
+	}
+	if omConfig.ObserveThreshold <= 0 {
+		omConfig.ObserveThreshold = omm.DefaultObserveThreshold
+	}
+	if omConfig.ReflectThreshold <= 0 {
+		omConfig.ReflectThreshold = omm.DefaultReflectThreshold
+	}
+
+	omSvc.SetConfig(omConfig)
+	return successResult(fmt.Sprintf("OM config updated (enabled: %v)", config.Enabled))
 }
 
 // =============================================================================

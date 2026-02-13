@@ -10,14 +10,17 @@ import (
 	"time"
 
 	_ "github.com/asg017/sqlite-vec-go-bindings/ncruces"
+	"github.com/kittclouds/gokitt/pkg/qgram"
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
 // SQLiteStore is the SQLite-backed data store.
 // Thread-safe for concurrent WASM callbacks.
+// Maintains an in-memory qgram index for BM25-like search.
 type SQLiteStore struct {
-	mu sync.RWMutex
-	db *sql.DB
+	mu   sync.RWMutex
+	db   *sql.DB
+	qidx *qgram.QGramIndex
 }
 
 // schema defines all tables for the unified data layer with temporal versioning.
@@ -235,7 +238,10 @@ func NewSQLiteStoreWithDSN(dsn string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{
+		db:   db,
+		qidx: qgram.NewQGramIndex(3), // Q=3 trigrams
+	}, nil
 }
 
 // Close closes the database connection.
@@ -251,6 +257,71 @@ func (s *SQLiteStore) Close() error {
 // =============================================================================
 // Note CRUD
 // =============================================================================
+
+// resolveFolderPathLocked builds the full folder path from the folder hierarchy.
+// Returns a path like "/root-folder/child-folder" for prefix matching.
+// MUST be called with lock already held.
+func (s *SQLiteStore) resolveFolderPathLocked(folderID string) string {
+	if folderID == "" {
+		return ""
+	}
+
+	// Build path by walking up the hierarchy
+	var segments []string
+	currentID := folderID
+
+	for currentID != "" {
+		var name, parentID sql.NullString
+		err := s.db.QueryRow(`SELECT name, parent_id FROM folders WHERE id = ?`, currentID).Scan(&name, &parentID)
+		if err != nil {
+			// Folder not found, just use the ID
+			segments = append([]string{currentID}, segments...)
+			break
+		}
+
+		segments = append([]string{name.String}, segments...)
+		if parentID.Valid {
+			currentID = parentID.String
+		} else {
+			break
+		}
+	}
+
+	return "/" + joinSegments(segments)
+}
+
+// ResolveFolderPath builds the full folder path from the folder hierarchy.
+// Returns a path like "/root-folder/child-folder" for prefix matching.
+func (s *SQLiteStore) ResolveFolderPath(folderID string) string {
+	// This is called from indexNote which is called with lock held
+	return s.resolveFolderPathLocked(folderID)
+}
+
+// joinSegments joins path segments with "/"
+func joinSegments(segments []string) string {
+	result := ""
+	for i, s := range segments {
+		if i > 0 {
+			result += "/"
+		}
+		result += s
+	}
+	return result
+}
+
+// indexNote adds a note to the qgram index for search.
+// Uses title and markdown_content as searchable fields.
+func (s *SQLiteStore) indexNote(note *Note) {
+	fields := map[string]string{
+		"title": note.Title,
+	}
+	if note.MarkdownContent != "" {
+		fields["body"] = note.MarkdownContent
+	}
+	// Build folder path from folder hierarchy
+	folderPath := s.resolveFolderPathLocked(note.FolderID)
+	s.qidx.IndexDocumentScoped(note.ID, fields, note.NarrativeID, folderPath)
+}
 
 // CreateNote creates a new note with version 1.
 func (s *SQLiteStore) CreateNote(note *Note) error {
@@ -277,7 +348,13 @@ func (s *SQLiteStore) CreateNote(note *Note) error {
 		note.OwnerID, note.NarrativeID, note.Order, note.CreatedAt, note.UpdatedAt,
 		note.ValidFrom, note.ValidTo, boolToInt(note.IsCurrent), note.ChangeReason)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Index in qgram
+	s.indexNote(note)
+	return nil
 }
 
 // UpdateNote creates a new version of an existing note.
@@ -330,7 +407,14 @@ func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 		note.OwnerID, note.NarrativeID, note.Order, note.CreatedAt, note.UpdatedAt,
 		note.ValidFrom, note.ValidTo, boolToInt(note.IsCurrent), note.ChangeReason)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Reindex in qgram (remove old, add new)
+	s.qidx.RemoveDocument(note.ID)
+	s.indexNote(note)
+	return nil
 }
 
 // UpsertNote is a convenience method that creates or updates.
@@ -489,7 +573,8 @@ func (s *SQLiteStore) ListNoteVersions(id string) ([]*Note, error) {
 	}
 	defer rows.Close()
 
-	var notes []*Note
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	notes := make([]*Note, 0)
 	for rows.Next() {
 		var note Note
 		var isEntity, isPinned, favorite, isCurrent int
@@ -700,7 +785,13 @@ func (s *SQLiteStore) DeleteNote(id string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec("DELETE FROM notes WHERE id = ?", id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Remove from qgram index
+	s.qidx.RemoveDocument(id)
+	return nil
 }
 
 // ListNotes returns current versions of all notes, optionally filtered by folder.
@@ -732,7 +823,8 @@ func (s *SQLiteStore) ListNotes(folderID string) ([]*Note, error) {
 	}
 	defer rows.Close()
 
-	var notes []*Note
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	notes := make([]*Note, 0)
 	for rows.Next() {
 		var note Note
 		var isEntity, isPinned, favorite, isCurrent int
@@ -936,7 +1028,8 @@ func (s *SQLiteStore) ListEntities(kind string) ([]*Entity, error) {
 	}
 	defer rows.Close()
 
-	var entities []*Entity
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	entities := make([]*Entity, 0)
 	for rows.Next() {
 		var entity Entity
 		var aliasesJSON string
@@ -1052,7 +1145,8 @@ func (s *SQLiteStore) ListEdgesForEntity(entityID string) ([]*Edge, error) {
 	}
 	defer rows.Close()
 
-	var edges []*Edge
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	edges := make([]*Edge, 0)
 	for rows.Next() {
 		var edge Edge
 		var bidirectional int
@@ -1175,7 +1269,8 @@ func (s *SQLiteStore) ListFolders(parentID string) ([]*Folder, error) {
 	}
 	defer rows.Close()
 
-	var folders []*Folder
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	folders := make([]*Folder, 0)
 	for rows.Next() {
 		var folder Folder
 		if err := rows.Scan(
@@ -1273,7 +1368,8 @@ func (s *SQLiteStore) ListThreads(worldID string) ([]*Thread, error) {
 	}
 	defer rows.Close()
 
-	var threads []*Thread
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	threads := make([]*Thread, 0)
 	for rows.Next() {
 		var t Thread
 		if err := rows.Scan(&t.ID, &t.WorldID, &t.NarrativeID, &t.Title,
@@ -1323,7 +1419,8 @@ func (s *SQLiteStore) GetThreadMessages(threadID string) ([]*ThreadMessage, erro
 	}
 	defer rows.Close()
 
-	var messages []*ThreadMessage
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	messages := make([]*ThreadMessage, 0)
 	for rows.Next() {
 		var m ThreadMessage
 		var isStreaming int
@@ -1499,7 +1596,8 @@ func (s *SQLiteStore) GetMemoriesForThread(threadID string) ([]*Memory, error) {
 	}
 	defer rows.Close()
 
-	var memories []*Memory
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	memories := make([]*Memory, 0)
 	for rows.Next() {
 		var m Memory
 		var memoryType string
@@ -1535,7 +1633,8 @@ func (s *SQLiteStore) ListMemoriesByType(memoryType MemoryType) ([]*Memory, erro
 	}
 	defer rows.Close()
 
-	var memories []*Memory
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	memories := make([]*Memory, 0)
 	for rows.Next() {
 		var m Memory
 		var mt string
@@ -1799,7 +1898,8 @@ func (s *SQLiteStore) GetEpisodes(scopeID string, limit int) ([]*Episode, error)
 	}
 	defer rows.Close()
 
-	var episodes []*Episode
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	episodes := make([]*Episode, 0)
 	for rows.Next() {
 		var ep Episode
 		var narrativeID sql.NullString
@@ -1855,7 +1955,8 @@ func (s *SQLiteStore) GetBlocksForNote(noteID string) ([]*Block, error) {
 	}
 	defer rows.Close()
 
-	var blocks []*Block
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	blocks := make([]*Block, 0)
 	for rows.Next() {
 		var block Block
 		if err := rows.Scan(
@@ -1971,7 +2072,8 @@ func (s *SQLiteStore) GetOMGenerations(threadID string) ([]*OMGeneration, error)
 	}
 	defer rows.Close()
 
-	var generations []*OMGeneration
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	generations := make([]*OMGeneration, 0)
 	for rows.Next() {
 		var gen OMGeneration
 		if err := rows.Scan(
@@ -2072,7 +2174,8 @@ func (s *SQLiteStore) ListArtifacts(scope *ScopeKey) ([]*WorkspaceArtifact, erro
 	}
 	defer rows.Close()
 
-	var arts []*WorkspaceArtifact
+	// Initialize as empty slice to ensure JSON marshaling returns [] instead of null
+	arts := make([]*WorkspaceArtifact, 0)
 	for rows.Next() {
 		var art WorkspaceArtifact
 		var pinned int
@@ -2092,8 +2195,8 @@ func (s *SQLiteStore) ListArtifacts(scope *ScopeKey) ([]*WorkspaceArtifact, erro
 	return arts, rows.Err()
 }
 
-// SearchNotes searches current notes by markdown content using LIKE,
-// scoped to a folder subtree (recursive CTE) and narrative.
+// SearchNotes searches notes using the qgram BM25-like index,
+// scoped to a folder subtree and narrative.
 func (s *SQLiteStore) SearchNotes(scope *ScopeKey, query string, limit int) ([]*Note, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2102,109 +2205,95 @@ func (s *SQLiteStore) SearchNotes(scope *ScopeKey, query string, limit int) ([]*
 		limit = 20
 	}
 
-	likePattern := "%" + query + "%"
-
-	var rows *sql.Rows
-	var err error
-
-	if scope.FolderID != "" {
-		// Recursive CTE to get all folders in the subtree
-		q := `
-			WITH RECURSIVE folder_tree(id) AS (
-				SELECT id FROM folders WHERE id = ?
-				UNION ALL
-				SELECT f.id FROM folders f
-					INNER JOIN folder_tree ft ON f.parent_id = ft.id
-			)
-			SELECT n.id, n.version, n.world_id, n.title, n.content,
-				n.markdown_content, n.folder_id, n.entity_kind, n.entity_subtype,
-				n.is_entity, n.is_pinned, n.favorite, n.owner_id,
-				n.narrative_id, n."order", n.created_at, n.updated_at,
-				n.valid_from, n.valid_to, n.is_current, n.change_reason
-			FROM notes n
-			WHERE n.is_current = 1
-			  AND n.folder_id IN (SELECT id FROM folder_tree)
-			  AND (? = '' OR n.narrative_id = ?)
-			  AND (n.markdown_content LIKE ? OR n.title LIKE ?)
-			ORDER BY n.updated_at DESC
-			LIMIT ?
-		`
-		rows, err = s.db.Query(q, scope.FolderID,
-			scope.NarrativeID, scope.NarrativeID,
-			likePattern, likePattern, limit)
-	} else {
-		q := `
-			SELECT id, version, world_id, title, content,
-				markdown_content, folder_id, entity_kind, entity_subtype,
-				is_entity, is_pinned, favorite, owner_id,
-				narrative_id, "order", created_at, updated_at,
-				valid_from, valid_to, is_current, change_reason
-			FROM notes
-			WHERE is_current = 1
-			  AND (? = '' OR narrative_id = ?)
-			  AND (markdown_content LIKE ? OR title LIKE ?)
-			ORDER BY updated_at DESC
-			LIMIT ?
-		`
-		rows, err = s.db.Query(q,
-			scope.NarrativeID, scope.NarrativeID,
-			likePattern, likePattern, limit)
+	// Build search config with scope
+	cfg := qgram.DefaultSearchConfig()
+	if scope.NarrativeID != "" || scope.FolderID != "" {
+		// Resolve folder path for prefix matching
+		folderPath := s.resolveFolderPathLocked(scope.FolderID)
+		cfg.Scope = &qgram.SearchScope{
+			NarrativeID: scope.NarrativeID,
+			FolderPath:  folderPath, // Prefix match on folder path
+		}
 	}
 
+	// Execute qgram search
+	results := s.qidx.Search(query, cfg, limit)
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	// Fetch full notes for the results
+	notes := make([]*Note, 0, len(results))
+	for _, res := range results {
+		note, err := s.getNoteByID(res.DocID)
+		if err != nil {
+			return nil, err
+		}
+		if note != nil {
+			notes = append(notes, note)
+		}
+	}
+
+	return notes, nil
+}
+
+// getNoteByID retrieves a note by ID without locking (internal helper).
+func (s *SQLiteStore) getNoteByID(id string) (*Note, error) {
+	var note Note
+	var isEntity, isPinned, favorite, isCurrent int
+	var validTo sql.NullInt64
+	var markdownContent, folderID, entityKind, entitySubtype, ownerID, narrativeID, changeReason sql.NullString
+
+	err := s.db.QueryRow(`
+		SELECT id, version, world_id, title, content, markdown_content, folder_id,
+			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id,
+			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason
+		FROM notes WHERE id = ? AND is_current = 1
+	`, id).Scan(
+		&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content, &markdownContent,
+		&folderID, &entityKind, &entitySubtype,
+		&isEntity, &isPinned, &favorite,
+		&ownerID, &narrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
+		&note.ValidFrom, &validTo, &isCurrent, &changeReason,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var notes []*Note
-	for rows.Next() {
-		var note Note
-		var isEntity, isPinned, favorite, isCurrent int
-		var validTo sql.NullInt64
-		var markdownContent, fID, entityKind, entitySubtype, ownerID, narrativeID, changeReason sql.NullString
-
-		if err := rows.Scan(
-			&note.ID, &note.Version, &note.WorldID, &note.Title, &note.Content,
-			&markdownContent, &fID, &entityKind, &entitySubtype,
-			&isEntity, &isPinned, &favorite,
-			&ownerID, &narrativeID, &note.Order, &note.CreatedAt, &note.UpdatedAt,
-			&note.ValidFrom, &validTo, &isCurrent, &changeReason,
-		); err != nil {
-			return nil, err
-		}
-
-		note.IsEntity = isEntity != 0
-		note.IsPinned = isPinned != 0
-		note.Favorite = favorite != 0
-		note.IsCurrent = isCurrent != 0
-		if validTo.Valid {
-			note.ValidTo = &validTo.Int64
-		}
-		if markdownContent.Valid {
-			note.MarkdownContent = markdownContent.String
-		}
-		if fID.Valid {
-			note.FolderID = fID.String
-		}
-		if entityKind.Valid {
-			note.EntityKind = entityKind.String
-		}
-		if entitySubtype.Valid {
-			note.EntitySubtype = entitySubtype.String
-		}
-		if ownerID.Valid {
-			note.OwnerID = ownerID.String
-		}
-		if narrativeID.Valid {
-			note.NarrativeID = narrativeID.String
-		}
-		if changeReason.Valid {
-			note.ChangeReason = changeReason.String
-		}
-		notes = append(notes, &note)
+	note.IsEntity = isEntity != 0
+	note.IsPinned = isPinned != 0
+	note.Favorite = favorite != 0
+	note.IsCurrent = isCurrent != 0
+	if validTo.Valid {
+		note.ValidTo = &validTo.Int64
+	}
+	if markdownContent.Valid {
+		note.MarkdownContent = markdownContent.String
+	}
+	if folderID.Valid {
+		note.FolderID = folderID.String
+	}
+	if entityKind.Valid {
+		note.EntityKind = entityKind.String
+	}
+	if entitySubtype.Valid {
+		note.EntitySubtype = entitySubtype.String
+	}
+	if ownerID.Valid {
+		note.OwnerID = ownerID.String
+	}
+	if narrativeID.Valid {
+		note.NarrativeID = narrativeID.String
+	}
+	if changeReason.Valid {
+		note.ChangeReason = changeReason.String
 	}
 
-	return notes, rows.Err()
+	return &note, nil
 }
 
 // Compile-time interface check

@@ -26,6 +26,7 @@ type CorpusStats struct {
 type QGramIndex struct {
 	Q            int
 	GramPostings map[string]map[string]*GramMetadata // gram -> docID -> meta
+	GramStats    map[string]*GramStat                // gram -> stats (for WAND pruning)
 	Documents    map[string]DocumentInfo
 
 	// Internal sums for calculating stats on the fly
@@ -34,10 +35,16 @@ type QGramIndex struct {
 	totalDocs      int
 }
 
+type GramStat struct {
+	MaxTF       int
+	MinFieldLen int
+}
+
 func NewQGramIndex(q int) *QGramIndex {
 	return &QGramIndex{
 		Q:              q,
 		GramPostings:   make(map[string]map[string]*GramMetadata),
+		GramStats:      make(map[string]*GramStat),
 		Documents:      make(map[string]DocumentInfo),
 		totalFieldLens: make(map[string]float64),
 	}
@@ -113,6 +120,19 @@ func (idx *QGramIndex) IndexDocumentScoped(docID string, fields map[string]strin
 				segIdx = 31
 			}
 			meta.SegmentMask |= (1 << segIdx)
+
+			// Phase 10: WAND Stats
+			stat, ok := idx.GramStats[gram]
+			if !ok {
+				stat = &GramStat{MinFieldLen: fieldLen}
+				idx.GramStats[gram] = stat
+			}
+			if occ.TF > stat.MaxTF {
+				stat.MaxTF = occ.TF
+			}
+			if fieldLen < stat.MinFieldLen {
+				stat.MinFieldLen = fieldLen
+			}
 		}
 	}
 
@@ -133,4 +153,45 @@ func (idx *QGramIndex) GetCorpusStats() CorpusStats {
 	}
 
 	return stats
+}
+
+// RemoveDocument removes a document from the index.
+// It decrements corpus stats and removes all gram postings for the docID.
+func (idx *QGramIndex) RemoveDocument(docID string) {
+	doc, exists := idx.Documents[docID]
+	if !exists {
+		return // Nothing to remove
+	}
+
+	// Calculate document length for stats adjustment
+	docLen := 0
+	for _, content := range doc.Fields {
+		docLen += len(NormalizeText(content))
+	}
+
+	// Remove from gram postings
+	for gram, postings := range idx.GramPostings {
+		delete(postings, docID)
+		// Clean up empty posting lists
+		if len(postings) == 0 {
+			delete(idx.GramPostings, gram)
+		}
+	}
+
+	// Remove from documents map
+	delete(idx.Documents, docID)
+
+	// Adjust corpus stats
+	idx.totalDocs--
+	idx.totalDocLen -= float64(docLen)
+
+	// Adjust field lengths
+	for field, content := range doc.Fields {
+		fieldLen := len(NormalizeText(content))
+		idx.totalFieldLens[field] -= float64(fieldLen)
+		// Clean up zero entries
+		if idx.totalFieldLens[field] <= 0 {
+			delete(idx.totalFieldLens, field)
+		}
+	}
 }

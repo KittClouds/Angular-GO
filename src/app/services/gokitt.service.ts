@@ -73,7 +73,10 @@ type GoKittWorkerMessage =
     | { type: 'OM_GET_RECORD'; payload: { threadId: string }; id: number }
     | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
     | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
-    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number };
+    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number }
+    | { type: 'OM_SET_CONFIG'; payload: { enabled: boolean; observeThreshold: number; reflectThreshold: number }; id: number }
+    // Phase 9: RLM Engine
+    | { type: 'RLM_EXECUTE'; payload: { requestJSON: string }; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -147,6 +150,9 @@ type GoKittWorkerResponse =
     | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'OM_SET_CONFIG_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    // Phase 9: RLM Engine responses
+    | { type: 'RLM_EXECUTE_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
@@ -900,6 +906,7 @@ export class GoKittService {
                         case 'OM_OBSERVE_RESULT':
                         case 'OM_REFLECT_RESULT':
                         case 'OM_CLEAR_RESULT':
+                        case 'OM_SET_CONFIG_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -1347,5 +1354,38 @@ export class GoKittService {
             return { success: false, error: 'WASM not loaded' };
         }
         return this.sendRequest('OM_CLEAR', { threadId });
+    }
+
+    /**
+     * Update OM configuration at runtime.
+     * @param enabled Whether OM is enabled
+     * @param observeThreshold Token threshold for observation
+     * @param reflectThreshold Token threshold for reflection
+     */
+    async omSetConfig(
+        enabled: boolean,
+        observeThreshold: number,
+        reflectThreshold: number
+    ): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('OM_SET_CONFIG', { enabled, observeThreshold, reflectThreshold });
+    }
+
+    // =============================================================================
+    // Phase 9: RLM Engine
+    // =============================================================================
+
+    /**
+     * Execute an RLM action pipeline.
+     * @param requestJSON JSON string containing the RLM request
+     * @returns JSON string containing the RLM response
+     */
+    async rlmExecute(requestJSON: string): Promise<string> {
+        if (!this.wasmLoaded) {
+            return JSON.stringify({ error: 'WASM not loaded' });
+        }
+        return this.sendRequest('RLM_EXECUTE', { requestJSON });
     }
 }

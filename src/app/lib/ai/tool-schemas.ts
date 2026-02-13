@@ -1,8 +1,8 @@
 /**
- * AI Tool Schemas - Phase 1
+ * AI Tool Schemas - Phase 1 & 2
  * 
  * OpenRouter-compatible tool definitions for Search, Read, Write.
- * Phase 2 (later): Graph tools, folder tools, scan tools.
+ * Phase 2: RLM workspace tools for agent-style operations.
  * 
  * Tools:
  * 1. read_current_note - Read the currently open note
@@ -11,6 +11,15 @@
  * 4. search_notes - BM25 keyword search via GoKitt ResoRank
  * 5. edit_note - Edit note content (replace selection, insert, append)
  * 6. create_note - Create a new note in a folder
+ * 
+ * Phase 2 - RLM Workspace Tools:
+ * 7. workspace_get_index - List all artifacts in workspace
+ * 8. workspace_put - Store an artifact in workspace
+ * 9. workspace_pin - Pin an artifact as important
+ * 10. needle_search - Search notes with snippet results
+ * 11. notes_get - Get a specific note by ID
+ * 12. notes_list - List notes in scope
+ * 13. spans_read - Read a text span from a note
  */
 
 // =============================================================================
@@ -166,27 +175,189 @@ export const CreateNoteTool: ToolDefinition = {
     }
 };
 
+// -----------------------------------------------------------------------------
+// RLM WORKSPACE Tools (Phase 2)
+// -----------------------------------------------------------------------------
+
+export const WorkspaceGetIndexTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'workspace_get_index',
+        description: 'List all artifacts in the current workspace. Returns metadata for each artifact including key, kind, pinned status, and timestamps. Use to see what data is available in the workspace.',
+        parameters: {
+            type: 'object',
+            properties: {},
+            required: []
+        }
+    }
+};
+
+export const WorkspacePutTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'workspace_put',
+        description: 'Store an artifact in the workspace. Use to save intermediate results, notes, or computed data for later retrieval. Artifacts are scoped to the current thread/narrative.',
+        parameters: {
+            type: 'object',
+            properties: {
+                key: {
+                    type: 'string',
+                    description: 'Unique key to identify this artifact'
+                },
+                kind: {
+                    type: 'string',
+                    description: 'Type of artifact (e.g., "snippet", "hits", "span_set", "table")'
+                },
+                payload: {
+                    type: 'string',
+                    description: 'JSON string containing the artifact data'
+                }
+            },
+            required: ['key', 'kind', 'payload']
+        }
+    }
+};
+
+export const WorkspacePinTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'workspace_pin',
+        description: 'Pin an artifact as important. Pinned artifacts are included in memory context for the LLM. Use to mark key findings or results that should persist.',
+        parameters: {
+            type: 'object',
+            properties: {
+                key: {
+                    type: 'string',
+                    description: 'Key of the artifact to pin'
+                }
+            },
+            required: ['key']
+        }
+    }
+};
+
+export const NeedleSearchTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'needle_search',
+        description: 'Search notes with snippet results. Returns matching notes with title, doc_id, and a text snippet. More targeted than search_notes for finding specific content.',
+        parameters: {
+            type: 'object',
+            properties: {
+                query: {
+                    type: 'string',
+                    description: 'Search query - text to find in notes'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maximum results to return (default: 10)'
+                }
+            },
+            required: ['query']
+        }
+    }
+};
+
+export const NotesGetTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'notes_get',
+        description: 'Get a specific note by its document ID. Returns the full note object including title and markdown content.',
+        parameters: {
+            type: 'object',
+            properties: {
+                doc_id: {
+                    type: 'string',
+                    description: 'The document ID of the note to retrieve'
+                }
+            },
+            required: ['doc_id']
+        }
+    }
+};
+
+export const NotesListTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'notes_list',
+        description: 'List notes in the current scope. Returns metadata for each note including ID and update timestamp.',
+        parameters: {
+            type: 'object',
+            properties: {},
+            required: []
+        }
+    }
+};
+
+export const SpansReadTool: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'spans_read',
+        description: 'Read a specific text span from a note. Use to extract a portion of a document without loading the entire content.',
+        parameters: {
+            type: 'object',
+            properties: {
+                doc_id: {
+                    type: 'string',
+                    description: 'Document ID to read from'
+                },
+                start: {
+                    type: 'number',
+                    description: 'Start character position (0-indexed)'
+                },
+                end: {
+                    type: 'number',
+                    description: 'End character position'
+                },
+                max_chars: {
+                    type: 'number',
+                    description: 'Maximum characters to return (optional limit)'
+                }
+            },
+            required: ['doc_id', 'start', 'end']
+        }
+    }
+};
+
 // =============================================================================
-// Tool Collection - Phase 1 Only
+// Tool Collection - Phase 1 & 2
 // =============================================================================
 
 export const ALL_TOOLS: ToolDefinition[] = [
+    // Phase 1: Core tools
     ReadCurrentNoteTool,
     ReadNoteByIdTool,
     GetEditorSelectionTool,
     SearchNotesTool,
     EditNoteTool,
-    CreateNoteTool
+    CreateNoteTool,
+    // Phase 2: RLM workspace tools
+    WorkspaceGetIndexTool,
+    WorkspacePutTool,
+    WorkspacePinTool,
+    NeedleSearchTool,
+    NotesGetTool,
+    NotesListTool,
+    SpansReadTool
 ];
 
 // Map for quick lookup
 export const TOOL_MAP: Record<string, ToolDefinition> = {
+    // Phase 1
     read_current_note: ReadCurrentNoteTool,
     read_note_by_id: ReadNoteByIdTool,
     get_editor_selection: GetEditorSelectionTool,
     search_notes: SearchNotesTool,
     edit_note: EditNoteTool,
-    create_note: CreateNoteTool
+    create_note: CreateNoteTool,
+    // Phase 2: RLM workspace tools
+    workspace_get_index: WorkspaceGetIndexTool,
+    workspace_put: WorkspacePutTool,
+    workspace_pin: WorkspacePinTool,
+    needle_search: NeedleSearchTool,
+    notes_get: NotesGetTool,
+    notes_list: NotesListTool,
+    spans_read: SpansReadTool
 };
 
 // =============================================================================
@@ -194,12 +365,21 @@ export const TOOL_MAP: Record<string, ToolDefinition> = {
 // =============================================================================
 
 export type ToolName =
+    // Phase 1
     | 'read_current_note'
     | 'read_note_by_id'
     | 'get_editor_selection'
     | 'search_notes'
     | 'edit_note'
-    | 'create_note';
+    | 'create_note'
+    // Phase 2: RLM workspace tools
+    | 'workspace_get_index'
+    | 'workspace_put'
+    | 'workspace_pin'
+    | 'needle_search'
+    | 'notes_get'
+    | 'notes_list'
+    | 'spans_read';
 
 export function isValidToolName(name: string): name is ToolName {
     return name in TOOL_MAP;
