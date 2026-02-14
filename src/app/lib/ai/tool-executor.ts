@@ -1,9 +1,8 @@
 /**
- * AI Tool Executor - Phase 1 & 2
+ * AI Tool Executor - Phase 1
  * 
  * Executes tool calls from LLM responses.
  * Phase 1: Read, Search, Write tools only.
- * Phase 2: RLM workspace tools for agent-style operations.
  * Uses GoSQLite operations (not Dexie) and EditorAgentBridge.
  */
 
@@ -17,21 +16,12 @@ import * as ops from '../operations';
 // Types
 // =============================================================================
 
-/** RLM Scope for workspace operations */
-export interface RLMScope {
-    threadId: string;
-    narrativeId?: string;
-    folderId?: string;
-}
-
 export interface ToolExecutionContext {
     goKittService: GoKittService;
     editorBridge: EditorAgentBridge;
     getCurrentNoteContent: () => string | null;
     getCurrentNoteId: () => string | null;
     getCurrentNoteTitle: () => string | null;
-    /** RLM scope for workspace tools - required for Phase 2 tools */
-    rlmScope?: RLMScope;
 }
 
 export interface ToolCall {
@@ -282,215 +272,16 @@ async function executeByName(
         }
 
         // ---------------------------------------------------------------------
-        // RLM WORKSPACE Tools (Phase 2)
+        // RLM WORKSPACE Tools - DISABLED (RLM removed)
         // ---------------------------------------------------------------------
-        case 'workspace_get_index': {
-            if (!ctx.rlmScope?.threadId) {
-                return JSON.stringify({ error: 'RLM scope not configured - threadId required' });
-            }
-
-            const request = {
-                scope: {
-                    thread_id: ctx.rlmScope.threadId,
-                    narrative_id: ctx.rlmScope.narrativeId || '',
-                    folder_id: ctx.rlmScope.folderId || ''
-                },
-                current_task: 'get_workspace_index',
-                workspace_plan: '',
-                actions: [{ op: 'workspace.get_index', args: {}, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            if (result.results?.[0]?.ok) {
-                return JSON.stringify({ artifacts: result.results[0].payload || [] });
-            }
-            return JSON.stringify({ error: result.results?.[0]?.error || 'Failed to get workspace index' });
-        }
-
-        case 'workspace_put': {
-            if (!ctx.rlmScope?.threadId) {
-                return JSON.stringify({ error: 'RLM scope not configured - threadId required' });
-            }
-
-            const key = String(args['key'] || '');
-            const kind = String(args['kind'] || '');
-            const payload = String(args['payload'] || '');
-
-            if (!key || !kind || !payload) {
-                return JSON.stringify({ error: 'key, kind, and payload are required' });
-            }
-
-            const request = {
-                scope: {
-                    thread_id: ctx.rlmScope.threadId,
-                    narrative_id: ctx.rlmScope.narrativeId || '',
-                    folder_id: ctx.rlmScope.folderId || ''
-                },
-                current_task: 'store_artifact',
-                workspace_plan: '',
-                actions: [{ op: 'workspace.put', args: { key, kind, payload }, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            return JSON.stringify({
-                success: result.results?.[0]?.ok || false,
-                error: result.results?.[0]?.error
-            });
-        }
-
-        case 'workspace_pin': {
-            if (!ctx.rlmScope?.threadId) {
-                return JSON.stringify({ error: 'RLM scope not configured - threadId required' });
-            }
-
-            const key = String(args['key'] || '');
-            if (!key) {
-                return JSON.stringify({ error: 'key is required' });
-            }
-
-            const request = {
-                scope: {
-                    thread_id: ctx.rlmScope.threadId,
-                    narrative_id: ctx.rlmScope.narrativeId || '',
-                    folder_id: ctx.rlmScope.folderId || ''
-                },
-                current_task: 'pin_artifact',
-                workspace_plan: '',
-                actions: [{ op: 'workspace.pin', args: { key }, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            return JSON.stringify({
-                success: result.results?.[0]?.ok || false,
-                error: result.results?.[0]?.error
-            });
-        }
-
-        case 'needle_search': {
-            if (!ctx.rlmScope?.threadId) {
-                return JSON.stringify({ error: 'RLM scope not configured - threadId required' });
-            }
-
-            const query = String(args['query'] || '');
-            const limit = Number(args['limit']) || 10;
-
-            if (!query) {
-                return JSON.stringify({ error: 'query is required' });
-            }
-
-            const request = {
-                scope: {
-                    thread_id: ctx.rlmScope.threadId,
-                    narrative_id: ctx.rlmScope.narrativeId || '',
-                    folder_id: ctx.rlmScope.folderId || ''
-                },
-                current_task: 'search_notes',
-                workspace_plan: '',
-                actions: [{ op: 'needle.search', args: { query, limit }, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            if (result.results?.[0]?.ok) {
-                return JSON.stringify({ hits: result.results[0].payload || [] });
-            }
-            return JSON.stringify({ error: result.results?.[0]?.error || 'Search failed' });
-        }
-
-        case 'notes_get': {
-            const docId = String(args['doc_id'] || '');
-            if (!docId) {
-                return JSON.stringify({ error: 'doc_id is required' });
-            }
-
-            const request = {
-                scope: { thread_id: '', narrative_id: '', folder_id: '' },
-                current_task: 'get_note',
-                workspace_plan: '',
-                actions: [{ op: 'notes.get', args: { doc_id: docId }, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            if (result.results?.[0]?.ok && result.results[0].payload) {
-                const note = result.results[0].payload;
-                return JSON.stringify({
-                    doc_id: note.id,
-                    title: note.title || 'Untitled',
-                    content: (note.markdownContent || '').slice(0, 8000),
-                    truncated: (note.markdownContent?.length || 0) > 8000
-                });
-            }
-            return JSON.stringify({ error: result.results?.[0]?.error || 'Note not found' });
-        }
-
-        case 'notes_list': {
-            if (!ctx.rlmScope?.threadId) {
-                return JSON.stringify({ error: 'RLM scope not configured - threadId required' });
-            }
-
-            const request = {
-                scope: {
-                    thread_id: ctx.rlmScope.threadId,
-                    narrative_id: ctx.rlmScope.narrativeId || '',
-                    folder_id: ctx.rlmScope.folderId || ''
-                },
-                current_task: 'list_notes',
-                workspace_plan: '',
-                actions: [{ op: 'notes.list', args: {}, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            if (result.results?.[0]?.ok) {
-                return JSON.stringify({ notes: result.results[0].payload || [] });
-            }
-            return JSON.stringify({ error: result.results?.[0]?.error || 'Failed to list notes' });
-        }
-
-        case 'spans_read': {
-            const docId = String(args['doc_id'] || '');
-            const start = Number(args['start']) || 0;
-            const end = Number(args['end']) || 0;
-            const maxChars = Number(args['max_chars']) || 0;
-
-            if (!docId) {
-                return JSON.stringify({ error: 'doc_id is required' });
-            }
-            if (end <= start) {
-                return JSON.stringify({ error: 'end must be greater than start' });
-            }
-
-            const request = {
-                scope: { thread_id: '', narrative_id: '', folder_id: '' },
-                current_task: 'read_span',
-                workspace_plan: '',
-                actions: [{ op: 'spans.read', args: { doc_id: docId, start, end, max_chars: maxChars }, save_as: '' }]
-            };
-
-            const response = await ctx.goKittService.rlmExecute(JSON.stringify(request));
-            const result = JSON.parse(response);
-
-            if (result.results?.[0]?.ok && result.results[0].payload) {
-                const span = result.results[0].payload;
-                return JSON.stringify({
-                    doc_id: span.doc_id,
-                    start: span.start,
-                    end: span.end,
-                    text: span.text
-                });
-            }
-            return JSON.stringify({ error: result.results?.[0]?.error || 'Failed to read span' });
-        }
+        case 'workspace_get_index':
+        case 'workspace_put':
+        case 'workspace_pin':
+        case 'needle_search':
+        case 'notes_get':
+        case 'notes_list':
+        case 'spans_read':
+            return JSON.stringify({ error: `Tool '${name}' is no longer available (RLM system removed)` });
 
         default:
             return JSON.stringify({ error: `Tool not implemented: ${name}` });

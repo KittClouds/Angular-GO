@@ -1,4 +1,4 @@
-// Package chat provides AI chat session management with memory integration.
+// Package chat provides AI chat session management.
 // Replaces TypeScript AiChatService with Go implementation using SQLite.
 package chat
 
@@ -9,20 +9,17 @@ import (
 	"time"
 
 	"github.com/kittclouds/gokitt/internal/store"
-	"github.com/kittclouds/gokitt/pkg/memory"
 )
 
-// ChatService manages AI chat sessions with memory integration.
+// ChatService manages AI chat sessions.
 type ChatService struct {
-	store     store.Storer
-	extractor *memory.Extractor
+	store store.Storer
 }
 
 // NewChatService creates a new chat service.
-func NewChatService(s store.Storer, e *memory.Extractor) *ChatService {
+func NewChatService(s store.Storer) *ChatService {
 	return &ChatService{
-		store:     s,
-		extractor: e,
+		store: s,
 	}
 }
 
@@ -82,16 +79,6 @@ func (s *ChatService) AddMessage(threadID, role, content, narrativeID string) (*
 
 	if err := s.store.AddMessage(msg); err != nil {
 		return nil, fmt.Errorf("failed to add message: %w", err)
-	}
-
-	// Extract memories asynchronously (don't block)
-	if s.extractor != nil && s.extractor.IsEnabled() && role == "user" {
-		go func() {
-			if _, err := s.extractor.ProcessMessage(threadID, msg); err != nil {
-				// Log error but don't fail the message
-				fmt.Printf("[ChatService] Memory extraction failed: %v\n", err)
-			}
-		}()
 	}
 
 	return msg, nil
@@ -172,16 +159,6 @@ func (s *ChatService) ClearThread(threadID string) error {
 // GetMemories returns all memories for a thread.
 func (s *ChatService) GetMemories(threadID string) ([]*store.Memory, error) {
 	return s.store.GetMemoriesForThread(threadID)
-}
-
-// GetContextWithMemories builds a context string with memories for LLM prompts.
-func (s *ChatService) GetContextWithMemories(threadID string) (string, error) {
-	memories, err := s.store.GetMemoriesForThread(threadID)
-	if err != nil {
-		return "", err
-	}
-
-	return memory.FormatContextForLLM(memories), nil
 }
 
 // =============================================================================

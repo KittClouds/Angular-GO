@@ -89,10 +89,6 @@ export class GoChatService {
     readonly messageCount = computed(() => this.messages().length);
     readonly hasThread = computed(() => this.currentThread() !== null);
 
-    // Debounce timer for memory extraction
-    private memoryExtractionTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly MEMORY_EXTRACTION_DELAY_MS = 5000; // 5 seconds after conversation idle
-
     constructor() {
         console.log('[GoChatService] Service created');
     }
@@ -361,11 +357,6 @@ export class GoChatService {
             // Update local state
             this.messages.update(msgs => [...msgs, message]);
 
-            // Trigger debounced memory extraction for user messages
-            if (role === 'user') {
-                this.scheduleMemoryExtraction(thread.id);
-            }
-
             return message;
 
         } catch (err) {
@@ -542,25 +533,6 @@ export class GoChatService {
             console.error('[GoChatService] Get context error:', err);
             return '';
         }
-    }
-
-    /**
-     * Schedule debounced memory extraction.
-     * Runs after conversation has been idle for 5 seconds.
-     */
-    private scheduleMemoryExtraction(threadId: string): void {
-        // Clear existing timer
-        if (this.memoryExtractionTimer) {
-            clearTimeout(this.memoryExtractionTimer);
-        }
-
-        // Set new timer
-        this.memoryExtractionTimer = setTimeout(() => {
-            console.log('[GoChatService] Triggering memory extraction for thread:', threadId);
-            // Memory extraction happens automatically in Go when messages are added
-            // This is just a placeholder for any additional processing
-            this.memoryExtractionTimer = null;
-        }, this.MEMORY_EXTRACTION_DELAY_MS);
     }
 
     // =========================================================================

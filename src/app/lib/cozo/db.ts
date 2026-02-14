@@ -13,6 +13,7 @@ const wasmUrl = '/assets/cozo_lib_wasm_bg.wasm';
 import { cozoPersistence } from './persistence/CozoPersistenceService';
 import { initContentRepo } from './content';
 import { createGraphSchemas, createBlocksHnswIndex } from './graph/GraphSchema';
+import { WS_SCHEMAS, WS_RELATIONS } from '../rlm';
 
 // Relations to persist (graph + content)
 export const PERSISTED_RELATIONS = [
@@ -30,7 +31,9 @@ export const PERSISTED_RELATIONS = [
     'network_instance', 'network_membership', 'network_relationship',
     'node_vectors', 'entity_clusters', 'cluster_members', 'cooccurrence_edges',
     // LLM Memory relations
-    'episode_log', 'blocks'  // NOTE: chat_messages removed - now using Go/SQLite
+    'episode_log', 'blocks',
+    // RLM Workspace relations
+    ...WS_RELATIONS
 ];
 
 export class CozoDbService {
@@ -141,10 +144,11 @@ export class CozoDbService {
                 }
             }
         }
-        console.log('[CozoDB] ✅ Schemas ready');
+        // Create Blocks HNSW Index
+        createBlocksHnswIndex();
 
-        // Note: Blocks HNSW index is created lazily on first block insert
-        // (requires data in the relation for CozoDB to create the index)
+
+        console.log('[CozoDB] ✅ Schemas ready');
     }
 
     /**

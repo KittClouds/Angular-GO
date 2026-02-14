@@ -40,15 +40,106 @@ export type EpisodeActionType =
     | 'created_note'
     | 'deleted_note'
     | 'created_relationship'
-    | 'deleted_relationship';
+    | 'deleted_relationship'
+    // RLM (Recursive Language Model) action types
+    | 'rlm_query_executed'      // Model ran a Cozo query
+    | 'rlm_workspace_mutation'  // Model modified workspace
+    | 'rlm_step'                // Reasoning step completed
+    | 'rlm_claim_extracted'     // New claim from reasoning
+    | 'rlm_contradiction_found' // Contradiction detected
+    | 'rlm_plan_created'        // New reasoning plan
+    | 'rlm_plan_completed'      // Plan finished
+    // RLM Workspace Ops action types
+    | 'rlm_create_node'         // Workspace node created
+    | 'rlm_update_node'         // Workspace node updated
+    | 'rlm_delete_node'         // Workspace node deleted
+    | 'rlm_link'                // Workspace edge created
+    | 'rlm_unlink'              // Workspace edge deleted
+    | 'rlm_snapshot_view'       // View cached
+    | 'rlm_get_view'            // View retrieved
+    | 'rlm_store_query'         // Query node stored
+    | 'rlm_store_result'        // Result node stored
+    | 'rlm_spawn_task'         // Task node spawned
+    | 'fts_search';             // FTS search executed
 
-export type EpisodeTargetKind = 'entity' | 'block' | 'note' | 'folder' | 'relationship';
+export type EpisodeTargetKind = 'entity' | 'block' | 'note' | 'folder' | 'relationship' | 'workspace' | 'node' | 'workspace_node' | 'search';
 
 export interface EpisodePayload {
     oldValue?: unknown;
     newValue?: unknown;
     context?: string;
     metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// RLM-Specific Payload Types
+// ============================================================================
+
+/**
+ * Payload for rlm_query_executed episodes
+ */
+export interface RLMQueryExecutedPayload {
+    workspace_id: string;
+    query_node_id: string;
+    script: string;
+    lat_ms: number;
+    rows: number;
+    truncated: boolean;
+    error?: string;
+}
+
+/**
+ * Payload for rlm_workspace_mutation episodes
+ */
+export interface RLMWorkspaceMutationPayload {
+    workspace_id: string;
+    ops: Array<{
+        op: string;
+        payload: Record<string, unknown>;
+    }>;
+    affected: string[];  // node_ids touched
+}
+
+/**
+ * Payload for rlm_step episodes
+ */
+export interface RLMStepPayload {
+    prompt_ref: string;       // ws_node id of prompt
+    view_id: string;          // ws_view_cache id
+    model_output_ref: string; // ws_node id of output
+    reasoning: string;        // Model's reasoning trace
+}
+
+/**
+ * Payload for rlm_claim_extracted episodes
+ */
+export interface RLMClaimExtractedPayload {
+    workspace_id: string;
+    claim_node_id: string;
+    text: string;
+    confidence: number;
+    source_ids: string[];
+}
+
+/**
+ * Payload for rlm_contradiction_found episodes
+ */
+export interface RLMContradictionFoundPayload {
+    workspace_id: string;
+    claim_a_id: string;
+    claim_b_id: string;
+    conflict_type: string;
+}
+
+/**
+ * Payload for rlm_plan_created/rlm_plan_completed episodes
+ */
+export interface RLMPlanPayload {
+    workspace_id: string;
+    plan_node_id: string;
+    steps: string[];
+    current_step?: number;
+    status: 'created' | 'in_progress' | 'completed' | 'failed';
 }
 
 export interface Block {
@@ -176,6 +267,18 @@ export const BLOCKS_HNSW_384 = `
     distance: Cosine,
     ef_construction: 200,
     filter: dimension == 384
+}
+`;
+
+/**
+ * FTS index for blocks text.
+ * Enables keyword search over memory blocks.
+ */
+export const BLOCKS_FTS_SCHEMA = `
+::fts create blocks:fts_idx {
+    extractor: text,
+    tokenizer: default,
+    filter: default
 }
 `;
 

@@ -6,6 +6,7 @@
  */
 
 import { cozoDb } from '../db';
+import { ftsService } from '../fts/FtsService';
 import { createContentSchemas } from './ContentSchema';
 import type {
     Note, NoteInput, NoteUpdate, NoteSummary,
@@ -186,16 +187,18 @@ export class NoteRepo {
     }
 
     /**
-     * Search notes by title or content
+     * Search notes by title or content using FTS
      */
     static search(query: string, worldId: string = 'default'): Note[] {
-        const lowerQuery = query.toLowerCase();
-        // Cozo doesn't have native FTS, so we load and filter
-        const all = this.listAll(worldId);
-        return all.filter(note =>
-            note.title.toLowerCase().includes(lowerQuery) ||
-            note.markdownContent.toLowerCase().includes(lowerQuery)
-        );
+        // Use FTS service (limit 100 to allow for world filtering)
+        const matches = ftsService.searchNotes({ query, limit: 100 });
+
+        if (matches.length === 0) return [];
+
+        // Fetch full notes and filter by worldId
+        return matches
+            .map(m => this.get(m.id))
+            .filter((n): n is Note => n !== null && n.worldId === worldId);
     }
 
     /**
@@ -558,6 +561,10 @@ export function initContentRepo(): void {
     });
 
     console.log(`[ContentRepo] ✅ Initialized (${created.length} schemas)`);
+
+    // Initialize FTS indexes
+    ftsService.initialize();
+
     contentInitialized = true;
 }
 

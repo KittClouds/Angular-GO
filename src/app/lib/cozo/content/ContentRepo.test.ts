@@ -138,6 +138,28 @@ vi.mock('../db', () => ({
         }),
     },
 }));
+// Mock FtsService
+vi.mock('../fts/FtsService', () => ({
+    ftsService: {
+        initialize: vi.fn(),
+        searchNotes: vi.fn(({ query }) => {
+            const lowerQuery = query.toLowerCase();
+            return mockStore.notes
+                .map(row => ({
+                    id: row[0],
+                    title: row[2],
+                    content: row[3],
+                    markdownContent: row[4],
+                }))
+                .filter(n => n.title.toLowerCase().includes(lowerQuery))
+                .map(n => ({
+                    id: n.id,
+                    title: n.title,
+                    score: 1.0
+                }));
+        }),
+    }
+}));
 
 // Import AFTER mock is set up
 import { NoteRepo, FolderRepo, TagRepo } from './ContentRepo';

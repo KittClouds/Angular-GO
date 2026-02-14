@@ -1,252 +1,174 @@
 import { Injectable, inject } from '@angular/core';
 import { GoogleGenAIService } from '../lib/services/google-genai.service';
-import { GoKittService } from './gokitt.service';
+import { OpenRouterService } from '../lib/services/openrouter.service';
+import { RlmLoopService, RlmLlmService, type RLMContext, formatRlmContext } from '../lib/rlm';
+import { NoteEditorStore } from '../lib/store/note-editor.store';
+import { RetrievalService } from '../lib/rlm/services/retrieval.service';
+import { type AppContext, type EntitySnapshot } from '../lib/rlm/services/app-context';
 
 /**
- * RLM Action definition for the Planner LLM
+ * OrchestratorService - Context gathering for chat via RLM.
+ * 
+ * Uses the graph-native Recursive Language Model (RLM) loop to:
+ * 1. Observe context from FTS/Vector/Graph
+ * 2. Plan reasoning steps
+ * 3. Execute queries and mutations
+ * 4. Evaluate results and recurse if needed
+ * 
+ * Now includes AppContext - live application state (open note, folder path, nearby entities)
+ * to ground the RLM observe step in the user's current context.
  */
-interface PlannerAction {
-    op: string;
-    args: Record<string, any>;
-    save_as: string;
-    description: string; // Why are we doing this?
-}
-
-/**
- * The Planner's output structure
- */
-interface PlannerOutput {
-    thought: string;
-    context_needed: boolean;
-    actions: PlannerAction[];
-}
-
 @Injectable({ providedIn: 'root' })
 export class OrchestratorService {
-    private googleGenAi = inject(GoogleGenAIService);
-    private goKitt = inject(GoKittService);
+    private googleGenAi: GoogleGenAIService;
+    private openRouter: OpenRouterService;
+    private rlmService: RlmLoopService;
+    private rlmLlm: RlmLlmService;
+    private noteEditorStore: NoteEditorStore;
+    private retrievalService: RetrievalService;
 
-    // Prompt for the Supervisor Agent to plan RLM actions
-    private readonly SYSTEM_PROMPT = `
-You are the **Context Supervisor** for a smart writing assistant.
-Your goal is to **proactively gather information** from the user's notes/workspace to help the main Writer Agent answer the user's request.
-
-**Process:**
-1. Analyze the USER REQUEST.
-2. Determine if you need to read notes, search for terms, or check the workspace to answer well.
-3. If yes, generate a plan using the available RLM operations.
-4. If the request is simple (e.g., "Hi", "Thanks", "Write a poem about nothing"), NO context is needed.
-
-**Available RLM Operations:**
-- \`needle.search(query: string, limit: number = 5)\`: Search note content for keywords/phrases.
-- \`notes.get(doc_id: string)\`: Read the full content of a specific note (if you know the ID).
-- \`notes.list()\`: List all notes in the current folder/narrative scope.
-- \`workspace.get_index()\`: See what artifacts are already saved in the workspace.
-
-**Output Format:**
-Return ONLY a raw JSON object (no markdown formatting) with this structure:
-{
-  "thought": "Brief reasoning...",
-  "context_needed": true/false,
-  "actions": [
-    {
-      "op": "needle.search",
-      "args": { "query": "search term", "limit": 5 },
-      "save_as": "unique_key_for_result",
-      "description": "Find notes about X"
+    constructor(
+        googleGenAi?: GoogleGenAIService,
+        openRouter?: OpenRouterService,
+        rlmService?: RlmLoopService,
+        rlmLlm?: RlmLlmService,
+        noteEditorStore?: NoteEditorStore,
+        retrievalService?: RetrievalService
+    ) {
+        this.googleGenAi = googleGenAi || inject(GoogleGenAIService);
+        this.openRouter = openRouter || inject(OpenRouterService);
+        this.rlmService = rlmService || inject(RlmLoopService);
+        this.rlmLlm = rlmLlm || inject(RlmLlmService);
+        this.noteEditorStore = noteEditorStore || inject(NoteEditorStore);
+        this.retrievalService = retrievalService || inject(RetrievalService);
     }
-  ]
-}
-`;
 
     /**
-     * Orchestrates the RLM loop: Plan -> Execute -> Synthesize
+     * Gather live application context for RLM grounding.
+     * 
+     * Snapshots:
+     * - Active note ID, title, and snippet
+     * - Folder path (ancestor chain)
+     * - World/narrative IDs
+     * - Nearby entities (from narrative scope + entity neighbors)
+     * 
+     * @param narrativeId Optional narrative scope override
+     * @returns AppContext object with live state
+     */
+    private async gatherAppContext(narrativeId?: string): Promise<AppContext | undefined> {
+        const activeNoteId = this.noteEditorStore.activeNoteId();
+        const currentNote = this.noteEditorStore.currentNote();
+
+        // No active note - return minimal context
+        if (!activeNoteId || !currentNote) {
+            return undefined;
+        }
+
+        // Extract snippet from note content (first 200 chars of markdown)
+        const snippet = currentNote.markdownContent
+            ?.slice(0, 200)
+            ?.replace(/\n/g, ' ')
+            ?.trim() ?? null;
+
+        // Determine world/narrative IDs
+        const worldId = currentNote.worldId ?? '';
+        const effectiveNarrativeId = narrativeId ?? currentNote.narrativeId ?? null;
+        const folderId = currentNote.folderId ?? null;
+
+        // Get folder path (ancestors)
+        let folderPath: string[] = [];
+        if (folderId) {
+            try {
+                folderPath = await this.retrievalService.getFolderAncestors(folderId);
+            } catch (err) {
+                console.warn('[Orchestrator] Failed to get folder ancestors:', err);
+            }
+        }
+
+        // Get nearby entities
+        let nearbyEntities: EntitySnapshot[] = [];
+        if (effectiveNarrativeId) {
+            try {
+                nearbyEntities = await this.retrievalService.getEntitiesByNarrative(effectiveNarrativeId, 10);
+            } catch (err) {
+                console.warn('[Orchestrator] Failed to get nearby entities:', err);
+            }
+        }
+
+        return {
+            activeNoteId,
+            activeNoteTitle: currentNote.title ?? null,
+            activeNoteSnippet: snippet,
+            worldId,
+            narrativeId: effectiveNarrativeId,
+            folderId,
+            folderPath,
+            nearbyEntities,
+        };
+    }
+
+    /**
+     * Orchestrates context gathering for chat responses using RLM.
+     * 
      * @param userPrompt The user's chat message
-     * @param threadId The current chat thread ID (for RLM scope)
+     * @param threadId The current chat thread ID
      * @param narrativeId (Optional) Narrative scope
-     * @returns A string block containing the gathered context (or empty string)
+     * @returns Context string containing RLM reasoning and results
      */
     async orchestrate(userPrompt: string, threadId: string, narrativeId: string = ''): Promise<string> {
         if (!userPrompt.trim()) return '';
 
-        console.log('[Orchestrator] 1. Planning...');
-        const plan = await this.plan(userPrompt);
-
-        if (!plan.context_needed || plan.actions.length === 0) {
-            console.log('[Orchestrator] No context needed.');
+        // Graceful degradation: require at least one LLM provider
+        if (!this.openRouter.getApiKey()) {
+            console.warn('[Orchestrator] No OpenRouter API key — skipping RLM loop');
             return '';
         }
 
-        console.log(`[Orchestrator] 2. Executing ${plan.actions.length} actions...`, plan.actions);
-        const results = await this.execute(plan.actions, threadId, narrativeId);
+        console.log(`[Orchestrator] Starting RLM loop for thread ${threadId}`);
+        const startTime = Date.now();
 
-        console.log('[Orchestrator] 3. Synthesizing...');
-        const contextBlock = this.synthesize(results, plan);
+        // unique workspace for this reasoning episode
+        const workspaceId = `ws_${threadId}_${Date.now()}`;
 
-        return contextBlock;
-    }
-
-    /**
-     * Step 1: Ask the Supervisor LLM to plan actions.
-     */
-    private async plan(userPrompt: string): Promise<PlannerOutput> {
-        const prompt = `USER REQUEST: "${userPrompt}"\n\nReturn JSON Plan:`;
-
+        // Gather live app context before starting RLM loop
+        let appContext: AppContext | undefined;
         try {
-            // Use the GoogleGenAIService to generate a plan
-            // We ask for a non-streaming response for the JSON
-            const responseText = await this.googleGenAi.chat([
-                { role: 'user', parts: [{ text: this.SYSTEM_PROMPT + '\n\n' + prompt }] }
-            ]);
-
-            // Clean up code blocks if present
-            const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-            const output: PlannerOutput = JSON.parse(cleanJson);
-            return output;
+            appContext = await this.gatherAppContext(narrativeId || undefined);
+            if (appContext) {
+                console.log(`[Orchestrator] AppContext gathered: note=${appContext.activeNoteTitle}, entities=${appContext.nearbyEntities.length}`);
+            }
         } catch (err) {
-            console.error('[Orchestrator] Planning failed:', err);
-            // Fallback: assume no context needed on error
-            return { thought: 'Error during planning', context_needed: false, actions: [] };
+            console.warn('[Orchestrator] Failed to gather AppContext:', err);
         }
-    }
 
-    /**
-     * Step 2: Execute the planned actions using the GoKitt RLM Engine.
-     */
-    private async execute(actions: PlannerAction[], threadId: string, narrativeId: string): Promise<any[]> {
-        // Construct the RLM Request
-        // We map the planner's simplified actions to the RLM protocol
-        const rlmActions = actions.map(a => ({
-            op: a.op,
-            args: JSON.stringify(a.args), // Args must be a JSON string in the Go struct
-            save_as: a.save_as
-        }));
-
-        const request = {
-            scope: {
-                thread_id: threadId,
-                narrative_id: narrativeId,
-                folder_id: '' // Optional, could be wired if needed
-            },
-            current_task: 'orchestrator_context_gathering',
-            workspace_plan: 'Gather context for user query',
-            actions: rlmActions
+        const ctx: Partial<RLMContext> = {
+            workspaceId,
+            threadId,
+            narrativeId,
+            initialPrompt: userPrompt,
+            maxDepth: 2, // Cost-safe default: 2 recursive calls max
+            appContext, // Live application context for grounding
         };
 
         try {
-            // Call the WASM RLM Engine
-            const responseJson = await this.goKitt.rlmExecute(JSON.stringify(request));
-            const response = JSON.parse(responseJson);
+            const result = await this.rlmService.run(ctx);
 
-            // The RLM response works, but we also want the actual data content.
-            // The RLM engine returns 'Results' which contains 'OK' and 'Error'.
-            // If 'save_as' was used, the data is in the workspace.
-            // BUT, for immediate synthesis, we might want the data returned directly.
-            // The current RLM engine implementation returns 'payload' in the dispatch loop 
-            // inside 'Execute' -> but wait, 'ActionResult' struct in Go doesn't have 'Payload' field exposed in JSON?
-            // Let's check GoKitt/pkg/rlm/types.go.
-            // Looking at the code I saw earlier, ActionResult has Op, SaveAs, OK, Error.
-            // It does NOT seem to return the payload directly in the JSON output of Execute.
-            // It stores it in the workspace via 'Put'.
+            if (!result.ok) {
+                console.warn('[Orchestrator] RLM loop failed:', result.error);
+                return '';
+            }
 
-            // To get the data back for synthesis, we need to fetch it from the workspace?
-            // OR we can rely on the fact that if we use the tools via 'agentChatWithTools' it might be different,
-            // but here we are using 'rlmExecute'.
+            const latMs = Date.now() - startTime;
+            console.log(`[Orchestrator] RLM loop completed in ${latMs}ms`, result);
 
-            // Actually, let's look at 'dispatch' in engine.go again.
-            // It returns ActionResult.
-            // type ActionResult struct { ... }
+            // Format context for the LLM
+            return formatRlmContext(result, workspaceId);
 
-            // If the Go code doesn't return the payload in ActionResult, we have to fetch it.
-            // Let's assume for V1 we need to fetch the artifacts we just saved?
-            // That's 2 round trips. 
-            // Better strategy: The Orchestrator's goal is to produce a TEXT BLOCK.
-            // Maybe we can modify the Go RLM engine to return the payload if we want it?
 
-            // Let's re-read engine.go in the previous turn (Step 128).
-            // type ActionResult struct { Op string; SaveAs string; OK bool; Error string }
-            // It does NOT contain the payload.
-
-            // So: We successfully SAVED the data to the workspace.
-            // Now we need to READ it back to generate the context string.
-            // We can do this by calling 'workspace.get_index' or just assuming we know the keys.
-            // Wait, if we saved it as 'search_results', we can read 'search_results' artifact?
-            // But we don't have a 'workspace.get_artifact' op in the list?
-            // We have 'workspace.get_index'.
-
-            // HACK for V1:
-            // Design Choice: modifying the Go Action Result to include 'Payload' (interface{}) would be best.
-            // But I cannot modify Go code easily without rebuilding WASM (which accepts a long time).
-            // Is there a way to get the data?
-
-            // The 'tools' in tool-executor.ts return the payload because they inspect the return value?
-            // No, tool-executor calls 'rlmExecute'.
-            // Wait, tool-executor.ts (Step 65) says:
-            // const result = JSON.parse(response);
-            // if (result.results?.[0]?.ok) { return JSON.stringify({ matches: ... }) }
-            // WHERE DOES IT GET THE PAYLOAD?
-            // It looks for result.results[0].payload??
-            // I must have missed that field in my reading of engine.go or types.go.
-
-            // Let's verify GoKitt/pkg/rlm/types.go or engine.go again.
-            // Step 128:
-            // func (e *Engine) Execute...
-            // resp := Response{ ... Results: ... }
-            // dispatch returns ActionResult.
-            // I didn't see the definition of ActionResult struct in the file view (it might be in types.go).
-            // But in engine.go:120 "If the action produced data and has a save_as key, store it..."
-            // It doesn't look like it assigns the payload to the result struct.
-
-            // However, tool-executor.ts (which the USER provided in Step 65) acts like it works:
-            // if (result.results?.[0]?.ok) { return JSON.stringify({ hits: result.results[0].payload || [] }); }
-
-            // This suggests ActionResult HAS a Payload field.
-            // Let me trust the TypeScript code that implies the Go code has 'Payload'.
-
-            return response.results || [];
 
         } catch (err) {
-            console.error('[Orchestrator] Execution failed:', err);
-            return [];
+            console.error('[Orchestrator] Detailed error running RLM:', err);
+            return '';
         }
-    }
-
-    /**
-     * Step 3: Synthesize the execution results into a formatted Context Block.
-     */
-    private synthesize(results: any[], plan: PlannerOutput): string {
-        if (!results || results.length === 0) return '';
-
-        let context = `\n\n--- [CONTEXT SUPPORT] ---\n`;
-        let hasData = false;
-
-        results.forEach((res, index) => {
-            const action = plan.actions[index];
-            if (res.ok && res.payload) {
-                hasData = true;
-                context += `\n>> ACTION: ${action.op} (${action.description})\n`;
-
-                // Format payload based on type
-                if (Array.isArray(res.payload)) {
-                    // Start simplified
-                    const summary = JSON.stringify(res.payload, null, 2);
-                    // Truncate if too long (simple heuristic)
-                    context += summary.length > 2000 ? summary.substring(0, 2000) + '... (truncated)' : summary;
-                } else if (typeof res.payload === 'object') {
-                    const summary = JSON.stringify(res.payload, null, 2);
-                    context += summary.length > 2000 ? summary.substring(0, 2000) + '... (truncated)' : summary;
-                } else {
-                    context += String(res.payload);
-                }
-                context += '\n';
-            } else if (!res.ok) {
-                context += `\n>> ERROR executing ${action.op}: ${res.error}\n`;
-            }
-        });
-
-        if (!hasData) return '';
-
-        context += `\n--- [END CONTEXT] ---\n\n`;
-        return context;
     }
 }

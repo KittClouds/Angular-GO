@@ -1,4 +1,4 @@
-//go:build js && wasm
+﻿//go:build js && wasm
 
 package main
 
@@ -12,7 +12,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	omm "github.com/kittclouds/gokitt/internal/memory"
 	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/agent"
 	"github.com/kittclouds/gokitt/pkg/batch"
@@ -22,20 +21,18 @@ import (
 	"github.com/kittclouds/gokitt/pkg/graph"
 	"github.com/kittclouds/gokitt/pkg/hierarchy"
 	implicitmatcher "github.com/kittclouds/gokitt/pkg/implicit-matcher"
-	"github.com/kittclouds/gokitt/pkg/memory"
 	"github.com/kittclouds/gokitt/pkg/qgram"
 	"github.com/kittclouds/gokitt/pkg/reality/builder"
 	"github.com/kittclouds/gokitt/pkg/reality/merger"
 	"github.com/kittclouds/gokitt/pkg/reality/pcst"
 	"github.com/kittclouds/gokitt/pkg/reality/projection"
 	"github.com/kittclouds/gokitt/pkg/reality/validator"
-	"github.com/kittclouds/gokitt/pkg/rlm"
 	"github.com/kittclouds/gokitt/pkg/sab"
 	"github.com/kittclouds/gokitt/pkg/scanner/conductor"
 )
 
 // Version info
-const Version = "0.8.0" // RLM Retrofit + Observational Memory
+const Version = "0.9.0" // Clean Architecture: Chat + Extraction
 
 // Global state
 var pipeline *conductor.Conductor
@@ -47,10 +44,7 @@ var sharedBuffer *sab.SharedBuffer    // Phase 5: SharedArrayBuffer for zero-cop
 var batchSvc *batch.Service           // Phase 6: LLM Batch Service
 var extractionSvc *extraction.Service // Phase 6: Unified Extraction
 var agentSvc *agent.Service           // Phase 6: Agent (tool-calling)
-var chatSvc *chat.ChatService         // Phase 7: Chat + Observational Memory
-var memorySvc *memory.Extractor       // Phase 7: Memory extraction
-var omSvc *omm.OMOrchestrator         // Phase 8: Observational Memory pipeline
-var rlmEngine *rlm.Engine             // Phase 9: RLM Engine
+var chatSvc *chat.ChatService         // Phase 7: Chat Service
 
 func main() {
 	var err error
@@ -142,15 +136,6 @@ func main() {
 		"chatGetContext":     js.FuncOf(jsChatGetContext),
 		"chatClearThread":    js.FuncOf(jsChatClearThread),
 		"chatExportThread":   js.FuncOf(jsChatExportThread),
-		// Phase 8: Observational Memory
-		"omProcess":   js.FuncOf(jsOMProcess),
-		"omGetRecord": js.FuncOf(jsOMGetRecord),
-		"omObserve":   js.FuncOf(jsOMObserve),
-		"omReflect":   js.FuncOf(jsOMReflect),
-		"omClear":     js.FuncOf(jsOMClear),
-		"omSetConfig": js.FuncOf(jsOMSetConfig),
-		// Phase 9: RLM Engine
-		"rlmExecute": js.FuncOf(jsRLMExecute),
 	}))
 
 	select {}
@@ -248,7 +233,7 @@ func search(this js.Value, args []js.Value) interface{} {
 		}
 	}
 
-	// Defaults: λ=3 (soft-AND), PhraseHard=true, Proximity=0.5
+	// Defaults: Î»=3 (soft-AND), PhraseHard=true, Proximity=0.5
 	config := qgram.DefaultSearchConfig()
 	config.Scope = scope
 	config.FieldWeights["body"] = 1.0
@@ -309,8 +294,8 @@ func initialize(this js.Value, args []js.Value) interface{} {
 			}
 			pipeline.SetDictionary(dict)
 			pipeline.SeedDiscovery(entities)
-			fmt.Println("[GoKitt] ✅ Dictionary compiled:", len(entities), "entities")
-			fmt.Println("[GoKitt] ✅ Discovery seeded:", len(entities), "entities")
+			fmt.Println("[GoKitt] âœ… Dictionary compiled:", len(entities), "entities")
+			fmt.Println("[GoKitt] âœ… Discovery seeded:", len(entities), "entities")
 		}
 	}
 
@@ -373,7 +358,7 @@ func scanImplicit(this js.Value, args []js.Value) interface{} {
 		if len(m.Entities) > 0 {
 			best := dict.SelectBest(getEntityIDs(m.Entities))
 			if best != nil {
-				// Convert byte offsets → rune offsets for JavaScript
+				// Convert byte offsets â†’ rune offsets for JavaScript
 				runeFrom := byteToRuneOffset(text, m.Start)
 				runeTo := byteToRuneOffset(text, m.End)
 
@@ -448,7 +433,7 @@ func rebuildDictionary(this js.Value, args []js.Value) interface{} {
 
 	pipeline.SetDictionary(dict)
 	pipeline.SeedDiscovery(entities)
-	fmt.Printf("[GoKitt] ✅ Dictionary rebuilt: %d entities\n", len(entities))
+	fmt.Printf("[GoKitt] âœ… Dictionary rebuilt: %d entities\n", len(entities))
 
 	return successResult(fmt.Sprintf("rebuilt with %d entities", len(entities)))
 }
@@ -617,7 +602,7 @@ func hydrateNotes(this js.Value, args []js.Value) interface{} {
 	}
 
 	count := docs.Hydrate(docsList)
-	fmt.Printf("[GoKitt] ✅ DocStore hydrated: %d notes\n", count)
+	fmt.Printf("[GoKitt] âœ… DocStore hydrated: %d notes\n", count)
 	return successResult(fmt.Sprintf("hydrated %d notes", count))
 }
 
@@ -653,7 +638,7 @@ func removeNote(this js.Value, args []js.Value) interface{} {
 }
 
 // scanNote scans a note from DocStore (not from JS).
-// This eliminates the JS→Go text transfer on each scan.
+// This eliminates the JSâ†’Go text transfer on each scan.
 // Args: [id string, provenanceJSON string (optional)]
 func scanNote(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
@@ -825,7 +810,7 @@ func storeInit(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return errorResult("failed to initialize SQLite store: " + err.Error())
 	}
-	fmt.Println("[GoKitt] ✅ SQLite Store initialized")
+	fmt.Println("[GoKitt] âœ… SQLite Store initialized")
 	return successResult("store initialized")
 }
 
@@ -1123,7 +1108,7 @@ func storeExport(this js.Value, args []js.Value) interface{} {
 	jsArray := js.Global().Get("Uint8Array").New(len(data))
 	js.CopyBytesToJS(jsArray, data)
 
-	fmt.Printf("[GoKitt] ✅ Exported %d bytes\n", len(data))
+	fmt.Printf("[GoKitt] âœ… Exported %d bytes\n", len(data))
 	return jsArray
 }
 
@@ -1146,7 +1131,7 @@ func storeImport(this js.Value, args []js.Value) interface{} {
 		return errorResult("import failed: " + err.Error())
 	}
 
-	fmt.Printf("[GoKitt] ✅ Imported %d bytes\n", length)
+	fmt.Printf("[GoKitt] âœ… Imported %d bytes\n", length)
 	return successResult(fmt.Sprintf("imported %d bytes", length))
 }
 
@@ -1730,8 +1715,8 @@ func jsAgentChatWithTools(this js.Value, args []js.Value) interface{} {
 // Phase 7: Observational Memory + Chat Service Bridge
 // =============================================================================
 
-// jsChatInit initializes the chat service with OpenRouter config.
-// Args: configJSON (string) - JSON with apiKey, model, omEnabled, observeThreshold, reflectThreshold
+// jsChatInit initializes the chat service.
+// Args: configJSON (string) - JSON with apiKey, model (optional, for future use)
 func jsChatInit(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return errorResult("missing arguments")
@@ -1741,54 +1726,10 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 		return errorResult("store not initialized")
 	}
 
-	var config struct {
-		APIKey           string `json:"apiKey"`
-		Model            string `json:"model"`
-		OMEnabled        bool   `json:"omEnabled"`
-		ObserveThreshold int    `json:"observeThreshold"`
-		ReflectThreshold int    `json:"reflectThreshold"`
-	}
-	if err := json.Unmarshal([]byte(args[0].String()), &config); err != nil {
-		return errorResult(fmt.Sprintf("invalid config: %v", err))
-	}
-
-	// Initialize Memory Extractor
-	memorySvc = memory.NewExtractor(memory.ExtractorConfig{
-		Store:         sqlStore,
-		OpenRouterKey: config.APIKey,
-		Model:         config.Model,
-	})
-
 	// Initialize Chat Service
-	chatSvc = chat.NewChatService(sqlStore, memorySvc)
+	chatSvc = chat.NewChatService(sqlStore)
 
-	// Initialize Observational Memory pipeline
-	omConfig := store.OMConfig{
-		Enabled:          config.OMEnabled,
-		ObserveThreshold: config.ObserveThreshold,
-		ReflectThreshold: config.ReflectThreshold,
-		MaxRetries:       2,
-	}
-	if omConfig.ObserveThreshold <= 0 {
-		omConfig.ObserveThreshold = omm.DefaultObserveThreshold
-	}
-	if omConfig.ReflectThreshold <= 0 {
-		omConfig.ReflectThreshold = omm.DefaultReflectThreshold
-	}
-
-	// Create LLM client for OM
-	llmClient := memory.NewOpenRouterClient(memory.OpenRouterConfig{
-		APIKey: config.APIKey,
-		Model:  config.Model,
-	})
-	omSvc = omm.NewOMOrchestrator(sqlStore, llmClient, omConfig)
-
-	// Initialize RLM Engine (Phase 9)
-	rlmWorkspace := rlm.NewWorkspace(sqlStore)
-	rlmEngine = rlm.NewEngine(rlmWorkspace)
-	omSvc.SetWorkspace(rlmWorkspace)
-
-	return successResult("Chat service initialized (RLM Enabled)")
+	return successResult("Chat service initialized")
 }
 
 // jsChatCreateThread creates a new chat thread.
@@ -1998,25 +1939,14 @@ func jsChatGetContext(this js.Value, args []js.Value) interface{} {
 	threadID := args[0].String()
 
 	// Get memories context
-	memoriesCtx, err := chatSvc.GetContextWithMemories(threadID)
+	memories, err := chatSvc.GetMemories(threadID)
 	if err != nil {
 		return errorResult(err.Error())
 	}
 
-	// Get observations context from OM (if enabled)
-	var obsCtx string
-	if omSvc != nil {
-		obsCtx, _ = omSvc.GetContext(threadID)
-		// Ignore error - OM is optional
-	}
-
-	// Combine: observations first, then memories
-	if obsCtx != "" && memoriesCtx != "" {
-		return obsCtx + "\n\n" + memoriesCtx
-	} else if obsCtx != "" {
-		return obsCtx
-	}
-	return memoriesCtx
+	// Return memories as JSON
+	jsonBytes, _ := json.Marshal(memories)
+	return string(jsonBytes)
 }
 
 // jsChatClearThread clears all messages in a thread.
@@ -2052,162 +1982,4 @@ func jsChatExportThread(this js.Value, args []js.Value) interface{} {
 	}
 
 	return jsonStr
-}
-
-// =============================================================================
-// Phase 8: Observational Memory WASM Bridge
-// =============================================================================
-
-// jsOMProcess triggers the OM pipeline for a thread.
-// Args: threadID (string)
-// Returns: {observed: bool, reflected: bool}
-func jsOMProcess(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing threadID")
-	}
-
-	result, err := omSvc.Process(args[0].String())
-	if err != nil {
-		return errorResult(err.Error())
-	}
-
-	jsonBytes, _ := json.Marshal(result)
-	return string(jsonBytes)
-}
-
-// jsOMGetRecord retrieves the OM record for a thread.
-// Args: threadID (string)
-// Returns: OMRecord JSON or null
-func jsOMGetRecord(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing threadID")
-	}
-
-	record, err := omSvc.GetRecord(args[0].String())
-	if err != nil {
-		return errorResult(err.Error())
-	}
-	if record == nil {
-		return js.Null()
-	}
-
-	jsonBytes, _ := json.Marshal(record)
-	return string(jsonBytes)
-}
-
-// jsOMObserve manually triggers observation for a thread.
-// Args: threadID (string)
-func jsOMObserve(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing threadID")
-	}
-
-	if err := omSvc.Observe(args[0].String()); err != nil {
-		return errorResult(err.Error())
-	}
-
-	return successResult("observation triggered")
-}
-
-// jsOMReflect manually triggers reflection for a thread.
-// Args: threadID (string)
-func jsOMReflect(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing threadID")
-	}
-
-	if err := omSvc.Reflect(args[0].String()); err != nil {
-		return errorResult(err.Error())
-	}
-
-	return successResult("reflection triggered")
-}
-
-// jsOMClear clears the OM state for a thread.
-// Args: threadID (string)
-func jsOMClear(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing threadID")
-	}
-
-	if err := omSvc.Clear(args[0].String()); err != nil {
-		return errorResult(err.Error())
-	}
-
-	return successResult("OM cleared")
-}
-
-// jsOMSetConfig updates the OM configuration at runtime.
-// Args: configJSON (string) - JSON with enabled, observeThreshold, reflectThreshold
-func jsOMSetConfig(this js.Value, args []js.Value) interface{} {
-	if omSvc == nil {
-		return errorResult("OM service not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing configJSON")
-	}
-
-	var config struct {
-		Enabled          bool `json:"enabled"`
-		ObserveThreshold int  `json:"observeThreshold"`
-		ReflectThreshold int  `json:"reflectThreshold"`
-	}
-	if err := json.Unmarshal([]byte(args[0].String()), &config); err != nil {
-		return errorResult(fmt.Sprintf("invalid config: %v", err))
-	}
-
-	omConfig := store.OMConfig{
-		Enabled:          config.Enabled,
-		ObserveThreshold: config.ObserveThreshold,
-		ReflectThreshold: config.ReflectThreshold,
-		MaxRetries:       2,
-	}
-	if omConfig.ObserveThreshold <= 0 {
-		omConfig.ObserveThreshold = omm.DefaultObserveThreshold
-	}
-	if omConfig.ReflectThreshold <= 0 {
-		omConfig.ReflectThreshold = omm.DefaultReflectThreshold
-	}
-
-	omSvc.SetConfig(omConfig)
-	return successResult(fmt.Sprintf("OM config updated (enabled: %v)", config.Enabled))
-}
-
-// =============================================================================
-// Phase 9: RLM Engine WASM Bridge
-// =============================================================================
-
-// jsRLMExecute processes an RLM action pipeline.
-// Args: requestJSON (string)
-// Returns: resultJSON (string)
-func jsRLMExecute(this js.Value, args []js.Value) interface{} {
-	if rlmEngine == nil {
-		return errorResult("RLM engine not initialized")
-	}
-	if len(args) < 1 {
-		return errorResult("missing requestJSON")
-	}
-
-	requestJSON := args[0].String()
-	responseBytes, err := rlmEngine.Execute([]byte(requestJSON))
-	if err != nil {
-		return errorResult(err.Error())
-	}
-
-	return string(responseBytes)
 }

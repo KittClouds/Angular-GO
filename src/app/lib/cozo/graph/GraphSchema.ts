@@ -25,7 +25,15 @@ import {
     EPISODE_LOG_SCHEMA,
     BLOCKS_SCHEMA,
     BLOCKS_HNSW_384,
+    BLOCKS_FTS_SCHEMA,
 } from '../schema/layer4-memory';
+import {
+    WS_SESSION_SCHEMA,
+    WS_NODE_SCHEMA,
+    WS_EDGE_SCHEMA,
+    WS_VIEW_CACHE_SCHEMA,
+    WS_METRIC_SCHEMA,
+} from '../../rlm/schema/workspace-schema';
 
 let graphSchemasCreated = false;
 
@@ -78,7 +86,14 @@ export function createGraphSchemas(): string[] {
         // Layer 4: LLM Memory
         { name: 'episode_log', script: EPISODE_LOG_SCHEMA.trim() },
         { name: 'blocks', script: BLOCKS_SCHEMA.trim() },
+        { name: 'blocks_fts', script: BLOCKS_FTS_SCHEMA.trim() },
         // NOTE: chat_messages removed - now using Go/SQLite via GoChatService
+        // RLM Workspace schemas (ws_* relations)
+        { name: 'ws_session', script: WS_SESSION_SCHEMA.trim() },
+        { name: 'ws_node', script: WS_NODE_SCHEMA.trim() },
+        { name: 'ws_edge', script: WS_EDGE_SCHEMA.trim() },
+        { name: 'ws_view_cache', script: WS_VIEW_CACHE_SCHEMA.trim() },
+        { name: 'ws_metric', script: WS_METRIC_SCHEMA.trim() },
     ];
 
     const created: string[] = [];

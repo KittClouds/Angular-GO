@@ -67,16 +67,7 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
-    // Phase 8: Observational Memory
-    | { type: 'OM_PROCESS'; payload: { threadId: string }; id: number }
-    | { type: 'OM_GET_RECORD'; payload: { threadId: string }; id: number }
-    | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
-    | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
-    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number }
-    | { type: 'OM_SET_CONFIG'; payload: { enabled: boolean; observeThreshold: number; reflectThreshold: number }; id: number }
-    // Phase 9: RLM Engine
-    | { type: 'RLM_EXECUTE'; payload: { requestJSON: string }; id: number };
+    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -147,12 +138,6 @@ type GoKittWorkerResponse =
     // Phase 8: Observational Memory responses
     | { type: 'OM_PROCESS_RESULT'; id: number; payload: { observed: boolean; reflected: boolean } }
     | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
-    | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_SET_CONFIG_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    // Phase 9: RLM Engine responses
-    | { type: 'RLM_EXECUTE_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
@@ -900,13 +885,6 @@ export class GoKittService {
                         case 'CHAT_GET_CONTEXT_RESULT':
                         case 'CHAT_CLEAR_THREAD_RESULT':
                         case 'CHAT_EXPORT_THREAD_RESULT':
-                        // Phase 8: Observational Memory responses
-                        case 'OM_PROCESS_RESULT':
-                        case 'OM_GET_RECORD_RESULT':
-                        case 'OM_OBSERVE_RESULT':
-                        case 'OM_REFLECT_RESULT':
-                        case 'OM_CLEAR_RESULT':
-                        case 'OM_SET_CONFIG_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -1297,95 +1275,4 @@ export class GoKittService {
         return this.sendRequest('CHAT_EXPORT_THREAD', { threadId });
     }
 
-    // =========================================================================
-    // Phase 8: Observational Memory API
-    // =========================================================================
-
-    /**
-     * Process a thread through the OM pipeline.
-     * @param threadId Thread ID
-     */
-    async omProcess(threadId: string): Promise<{ observed: boolean; reflected: boolean }> {
-        if (!this.wasmLoaded) {
-            return { observed: false, reflected: false };
-        }
-        return this.sendRequest('OM_PROCESS', { threadId });
-    }
-
-    /**
-     * Get the OM record for a thread.
-     * @param threadId Thread ID
-     */
-    async omGetRecord(threadId: string): Promise<any | null> {
-        if (!this.wasmLoaded) {
-            return null;
-        }
-        return this.sendRequest('OM_GET_RECORD', { threadId });
-    }
-
-    /**
-     * Manually trigger observation for a thread.
-     * @param threadId Thread ID
-     */
-    async omObserve(threadId: string): Promise<{ success: boolean; error?: string }> {
-        if (!this.wasmLoaded) {
-            return { success: false, error: 'WASM not loaded' };
-        }
-        return this.sendRequest('OM_OBSERVE', { threadId });
-    }
-
-    /**
-     * Manually trigger reflection for a thread.
-     * @param threadId Thread ID
-     */
-    async omReflect(threadId: string): Promise<{ success: boolean; error?: string }> {
-        if (!this.wasmLoaded) {
-            return { success: false, error: 'WASM not loaded' };
-        }
-        return this.sendRequest('OM_REFLECT', { threadId });
-    }
-
-    /**
-     * Clear OM state for a thread.
-     * @param threadId Thread ID
-     */
-    async omClear(threadId: string): Promise<{ success: boolean; error?: string }> {
-        if (!this.wasmLoaded) {
-            return { success: false, error: 'WASM not loaded' };
-        }
-        return this.sendRequest('OM_CLEAR', { threadId });
-    }
-
-    /**
-     * Update OM configuration at runtime.
-     * @param enabled Whether OM is enabled
-     * @param observeThreshold Token threshold for observation
-     * @param reflectThreshold Token threshold for reflection
-     */
-    async omSetConfig(
-        enabled: boolean,
-        observeThreshold: number,
-        reflectThreshold: number
-    ): Promise<{ success: boolean; error?: string }> {
-        if (!this.wasmLoaded) {
-            return { success: false, error: 'WASM not loaded' };
-        }
-        return this.sendRequest('OM_SET_CONFIG', { enabled, observeThreshold, reflectThreshold });
-    }
-
-    // =============================================================================
-    // Phase 9: RLM Engine
-    // =============================================================================
-
-    /**
-     * Execute an RLM action pipeline.
-     * @param requestJSON JSON string containing the RLM request
-     * @returns JSON string containing the RLM response
-     */
-    async rlmExecute(requestJSON: string): Promise<string> {
-        if (!this.wasmLoaded) {
-            return JSON.stringify({ error: 'WASM not loaded' });
-        }
-        return this.sendRequest('RLM_EXECUTE', { requestJSON });
-    }
 }

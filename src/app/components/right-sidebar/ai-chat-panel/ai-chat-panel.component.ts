@@ -24,7 +24,6 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw } from 'lucide-angular';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
 import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/services/go-chat.service';
-import { GoOMService } from '../../../services/go-om.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { OpenRouterService, OpenRouterMessage, ToolCallResponse } from '../../../lib/services/openrouter.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
@@ -216,58 +215,6 @@ Keep responses concise but helpful. If you don't know something specific about t
                                 [class.translate-x-5]="indexEnabled()"
                             ></span>
                         </button>
-                    </div>
-
-                    <!-- Observational Memory Toggle -->
-                    <div class="border-t border-border/30 pt-2 mt-2">
-                        <div class="flex items-center justify-between py-1">
-                            <div class="flex items-center gap-2">
-                                <lucide-icon [img]="BrainIcon" class="h-4 w-4 text-muted-foreground"></lucide-icon>
-                                <div>
-                                    <label class="text-xs font-medium">Observational Memory</label>
-                                    <p class="text-[10px] text-muted-foreground">AI remembers conversation context</p>
-                                </div>
-                            </div>
-                            <button
-                                class="relative w-11 h-6 rounded-full transition-colors"
-                                [class.bg-teal-600]="omEnabled()"
-                                [class.bg-muted]="!omEnabled()"
-                                (click)="toggleOM()"
-                            >
-                                <span
-                                    class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm"
-                                    [class.translate-x-5]="omEnabled()"
-                                ></span>
-                            </button>
-                        </div>
-                        @if (omEnabled()) {
-                            <div class="grid grid-cols-2 gap-2 mt-2 pl-6">
-                                <div class="space-y-1">
-                                    <label class="text-[10px] text-muted-foreground">Observe Threshold</label>
-                                    <input
-                                        type="number"
-                                        class="w-full px-2 py-1 text-xs bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                        [value]="omObserveThreshold()"
-                                        (input)="omObserveThreshold.set($any($event.target).valueAsNumber || 1000)"
-                                        min="500"
-                                        max="5000"
-                                        step="100"
-                                    />
-                                </div>
-                                <div class="space-y-1">
-                                    <label class="text-[10px] text-muted-foreground">Reflect Threshold</label>
-                                    <input
-                                        type="number"
-                                        class="w-full px-2 py-1 text-xs bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                        [value]="omReflectThreshold()"
-                                        (input)="omReflectThreshold.set($any($event.target).valueAsNumber || 4000)"
-                                        min="2000"
-                                        max="10000"
-                                        step="500"
-                                    />
-                                </div>
-                            </div>
-                        }
                     </div>
 
                     <!-- Custom Instructions (Collapsible) -->
@@ -737,12 +684,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // Index toggle - enables tool calling
     indexEnabled = signal(false);
 
-    // Observational Memory settings
-    omService = inject(GoOMService);
-    omEnabled = signal(true);
-    omObserveThreshold = signal(1000);
-    omReflectThreshold = signal(4000);
-
     // History panel state
     showHistory = signal(false);
     sessions = signal<SessionInfo[]>([]);
@@ -796,14 +737,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (orConfig?.apiKey) {
             await this.goChatService.init({
                 apiKey: orConfig.apiKey,
-                model: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free',
-                // Pass OM settings from UI toggles
-                omEnabled: this.omEnabled(),
-                observeThreshold: this.omObserveThreshold(),
-                reflectThreshold: this.omReflectThreshold()
+                model: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free'
             });
             this.goChatInitialized = true;
-            console.log('[AiChatPanel] Go chat service initialized (OM:', this.omEnabled() ? 'ON' : 'OFF', ')');
+            console.log('[AiChatPanel] Go chat service initialized');
         }
     }
 
@@ -845,9 +782,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         // Persist system prompt setting independently
         setSetting('chat:systemPrompt', this.systemPromptInput());
 
-        // Save OM settings
-        this.saveOMSettings();
-
         console.log('[AiChatPanel] Settings saved, active provider:', this.activeProvider());
         this.showSettings.set(false);
     }
@@ -864,27 +798,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     toggleIndexMode(): void {
         this.indexEnabled.update(v => !v);
         console.log('[AiChatPanel] Index mode:', this.indexEnabled() ? 'ON' : 'OFF');
-    }
-
-    toggleOM(): void {
-        this.omEnabled.update(v => !v);
-        // Sync to Go WASM (fire-and-forget)
-        this.omService.updateConfig({ enabled: this.omEnabled() });
-        console.log('[AiChatPanel] Observational Memory:', this.omEnabled() ? 'ON' : 'OFF');
-    }
-
-    saveOMSettings(): void {
-        // Sync to Go WASM (fire-and-forget)
-        this.omService.updateConfig({
-            enabled: this.omEnabled(),
-            observeThreshold: this.omObserveThreshold(),
-            reflectThreshold: this.omReflectThreshold(),
-        });
-        console.log('[AiChatPanel] OM settings saved:', {
-            enabled: this.omEnabled(),
-            observeThreshold: this.omObserveThreshold(),
-            reflectThreshold: this.omReflectThreshold(),
-        });
     }
 
     toggleSystemPrompt(): void {

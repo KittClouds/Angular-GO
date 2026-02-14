@@ -98,16 +98,7 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
-    // Phase 8: Observational Memory
-    | { type: 'OM_PROCESS'; payload: { threadId: string }; id: number }
-    | { type: 'OM_GET_RECORD'; payload: { threadId: string }; id: number }
-    | { type: 'OM_OBSERVE'; payload: { threadId: string }; id: number }
-    | { type: 'OM_REFLECT'; payload: { threadId: string }; id: number }
-    | { type: 'OM_CLEAR'; payload: { threadId: string }; id: number }
-    | { type: 'OM_SET_CONFIG'; payload: { enabled: boolean; observeThreshold: number; reflectThreshold: number }; id: number }
-    // Phase 9: RLM Engine
-    | { type: 'RLM_EXECUTE'; payload: { requestJSON: string }; id: number };
+    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -184,14 +175,6 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
-    // Phase 8: Observational Memory responses
-    | { type: 'OM_PROCESS_RESULT'; id: number; payload: { observed: boolean; reflected: boolean } }
-    | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
-    | { type: 'OM_OBSERVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_REFLECT_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'OM_SET_CONFIG_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'RLM_EXECUTE_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -330,15 +313,6 @@ declare const GoKitt: {
     chatGetContext: (threadId: string) => string;
     chatClearThread: (threadId: string) => string;
     chatExportThread: (threadId: string) => string;
-    // Phase 8: Observational Memory
-    omProcess: (threadId: string) => string;
-    omGetRecord: (threadId: string) => string;
-    omObserve: (threadId: string) => string;
-    omReflect: (threadId: string) => string;
-    omClear: (threadId: string) => string;
-    omSetConfig: (configJSON: string) => string;
-    // Phase 9: RLM Engine
-    rlmExecute: (requestJSON: string) => string;
 };
 
 /**
@@ -394,26 +368,6 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
     try {
         switch (msg.type) {
-            case 'RLM_EXECUTE': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'RLM_EXECUTE_RESULT',
-                        id: msg.id,
-                        payload: JSON.stringify({ error: 'WASM not loaded' })
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.rlmExecute(msg.payload.requestJSON);
-
-                self.postMessage({
-                    type: 'RLM_EXECUTE_RESULT',
-                    id: msg.id,
-                    payload: res // Already JSON string
-                } as GoKittWorkerResponse);
-                break;
-            }
-
             case 'INIT': {
                 await loadWasm();
                 self.postMessage({ type: 'INIT_COMPLETE' } as GoKittWorkerResponse);
@@ -1940,140 +1894,6 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 break;
             }
 
-            // =============================================================================
-            // Phase 8: Observational Memory
-            // =============================================================================
-
-            case 'OM_PROCESS': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_PROCESS_RESULT',
-                        id: msg.id,
-                        payload: { observed: false, reflected: false }
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.omProcess(msg.payload.threadId);
-                const result = JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_PROCESS_RESULT',
-                    id: msg.id,
-                    payload: result
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'OM_GET_RECORD': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_GET_RECORD_RESULT',
-                        id: msg.id,
-                        payload: null
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.omGetRecord(msg.payload.threadId);
-                const record = res === 'null' ? null : JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_GET_RECORD_RESULT',
-                    id: msg.id,
-                    payload: record
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'OM_OBSERVE': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_OBSERVE_RESULT',
-                        id: msg.id,
-                        payload: { success: false, error: 'WASM not loaded' }
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.omObserve(msg.payload.threadId);
-                const result = JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_OBSERVE_RESULT',
-                    id: msg.id,
-                    payload: result
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'OM_REFLECT': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_REFLECT_RESULT',
-                        id: msg.id,
-                        payload: { success: false, error: 'WASM not loaded' }
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.omReflect(msg.payload.threadId);
-                const result = JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_REFLECT_RESULT',
-                    id: msg.id,
-                    payload: result
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'OM_CLEAR': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_CLEAR_RESULT',
-                        id: msg.id,
-                        payload: { success: false, error: 'WASM not loaded' }
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const res = GoKitt.omClear(msg.payload.threadId);
-                const result = JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_CLEAR_RESULT',
-                    id: msg.id,
-                    payload: result
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'OM_SET_CONFIG': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'OM_SET_CONFIG_RESULT',
-                        id: msg.id,
-                        payload: { success: false, error: 'WASM not loaded' }
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const configJSON = JSON.stringify({
-                    enabled: msg.payload.enabled,
-                    observeThreshold: msg.payload.observeThreshold,
-                    reflectThreshold: msg.payload.reflectThreshold
-                });
-                const res = (GoKitt as any).omSetConfig(configJSON);
-                const result = JSON.parse(res);
-
-                self.postMessage({
-                    type: 'OM_SET_CONFIG_RESULT',
-                    id: msg.id,
-                    payload: result
-                } as GoKittWorkerResponse);
-                break;
-            }
         }
     } catch (err) {
         console.error('[GoKittWorker] Error:', err);
