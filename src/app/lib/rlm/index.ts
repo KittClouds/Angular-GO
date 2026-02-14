@@ -133,3 +133,7 @@ export {
     type AppContext,
     type EntitySnapshot,
 } from './services/app-context';
+
+export {
+    AppContextProviderService,
+} from './services/app-context-provider.service';

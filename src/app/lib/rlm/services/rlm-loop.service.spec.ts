@@ -14,9 +14,8 @@ import { QueryRunnerService } from './query-runner.service';
 import { WorkspaceOpsService, type LinkPayload } from './workspace-ops.service';
 import { RetrievalService } from './retrieval.service';
 import { RlmLlmService } from './rlm-llm.service';
-import {
-    type WsNodeKind
-} from '../schema/workspace-schema';
+import { AppContextProviderService } from './app-context-provider.service';
+import { emptyAppContext } from './app-context';
 
 // Mock dependencies
 vi.mock('../../cozo/memory/EpisodeLogService', () => ({
@@ -27,6 +26,12 @@ vi.mock('../../cozo/fts/FtsService', () => ({
     ftsService: {
         searchNotes: vi.fn(() => []),
     },
+}));
+
+vi.mock('./app-context-provider.service', () => ({
+    AppContextProviderService: class {
+        getCurrentContext = vi.fn();
+    }
 }));
 
 import { recordAction } from '../../cozo/memory/EpisodeLogService';
@@ -51,6 +56,7 @@ describe('RlmLoopService', () => {
     let workspaceOpsMock: any;
     let retrievalServiceMock: any;
     let llmMock: any;
+    let appContextProviderMock: any;
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -68,9 +74,19 @@ describe('RlmLoopService', () => {
             searchBlocksFTS: vi.fn().mockResolvedValue([]),
         } as unknown as RetrievalService;
 
+        appContextProviderMock = {
+            getCurrentContext: vi.fn().mockResolvedValue(emptyAppContext('narrative-1')),
+        };
+
         llmMock = createLlmMock();
 
-        service = new RlmLoopService(queryRunnerMock, workspaceOpsMock, retrievalServiceMock, llmMock);
+        service = new RlmLoopService(
+            queryRunnerMock,
+            workspaceOpsMock,
+            retrievalServiceMock,
+            llmMock,
+            appContextProviderMock
+        );
     });
 
     afterEach(() => {
@@ -726,6 +742,7 @@ describe('RlmLoopService — LLM-driven plan + evaluate', () => {
     let workspaceOpsMock: any;
     let retrievalServiceMock: any;
     let llmMock: any;
+    let appContextProviderMock: any;
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -748,8 +765,13 @@ describe('RlmLoopService — LLM-driven plan + evaluate', () => {
             isConfigured: vi.fn(() => true),
         });
 
+        // Initialize mock
+        appContextProviderMock = {
+            getCurrentContext: vi.fn(),
+        };
+
         service = new RlmLoopService(
-            queryRunnerMock, workspaceOpsMock, retrievalServiceMock, llmMock,
+            queryRunnerMock, workspaceOpsMock, retrievalServiceMock, llmMock, appContextProviderMock
         );
     });
 
@@ -901,6 +923,133 @@ describe('RlmLoopService — LLM-driven plan + evaluate', () => {
 
             expect(result.ok).toBe(true);
             expect(llmMock.completeJSON).not.toHaveBeenCalled();
+        });
+    });
+
+    // =========================================================================
+    // AppContext Seeding in Observe Step
+    // =========================================================================
+
+    describe('observe() — AppContext seeding', () => {
+        const baseCtx: RLMContext = {
+            workspaceId: 'ws-test',
+            maxDepth: 3,
+            currentDepth: 0,
+            initialPrompt: 'Tell me about dragons',
+        };
+
+        it('should seed entities from appContext.nearbyEntities', async () => {
+            const ctx: RLMContext = {
+                ...baseCtx,
+                appContext: {
+                    activeNoteId: 'note-1',
+                    activeNoteTitle: 'Dragon Lore',
+                    activeNoteSnippet: 'Fire-breathing creatures...',
+                    worldId: 'world-1',
+                    narrativeId: 'narr-1',
+                    folderId: 'folder-chars',
+                    folderPath: ['Root', 'Characters'],
+                    nearbyEntities: [
+                        { id: 'e1', label: 'Red Dragon', kind: 'creature', subtype: 'dragon' },
+                        { id: 'e2', label: 'Alice', kind: 'person', subtype: null },
+                    ],
+                },
+            };
+
+            const result = await service.observe(ctx);
+
+            expect(result.ok).toBe(true);
+            const obs = result.result as ObservationResult;
+            // Entities from AppContext should be included
+            expect(obs.entities.some(e => e.label === 'Red Dragon')).toBe(true);
+            expect(obs.entities.some(e => e.label === 'Alice')).toBe(true);
+        });
+
+        it('should seed active note into observation.notes', async () => {
+            const ctx: RLMContext = {
+                ...baseCtx,
+                appContext: {
+                    activeNoteId: 'note-42',
+                    activeNoteTitle: 'Mystery Chapter',
+                    activeNoteSnippet: 'The detective arrives...',
+                    worldId: 'world-1',
+                    narrativeId: null,
+                    folderId: null,
+                    folderPath: [],
+                    nearbyEntities: [],
+                },
+            };
+
+            const result = await service.observe(ctx);
+
+            expect(result.ok).toBe(true);
+            const obs = result.result as ObservationResult;
+            // The FTS search overrides observation.notes, but the AppContext note
+            // should be pushed before FTS runs — check contextSummary includes it
+            expect(obs.contextSummary).toContain('Mystery Chapter');
+        });
+
+        it('should include folder path in context summary', async () => {
+            const ctx: RLMContext = {
+                ...baseCtx,
+                initialPrompt: '', // No FTS to keep observation clean
+                appContext: {
+                    activeNoteId: 'note-1',
+                    activeNoteTitle: 'Test',
+                    activeNoteSnippet: null,
+                    worldId: 'w1',
+                    narrativeId: null,
+                    folderId: 'f1',
+                    folderPath: ['World', 'Characters', 'Protagonists'],
+                    nearbyEntities: [],
+                },
+            };
+
+            const result = await service.observe(ctx);
+
+            expect(result.ok).toBe(true);
+            const obs = result.result as ObservationResult;
+            expect(obs.contextSummary).toContain('World > Characters > Protagonists');
+        });
+
+        it('should include nearby entity labels in context summary', async () => {
+            const ctx: RLMContext = {
+                ...baseCtx,
+                initialPrompt: '',
+                appContext: {
+                    activeNoteId: 'note-1',
+                    activeNoteTitle: 'Test',
+                    activeNoteSnippet: null,
+                    worldId: 'w1',
+                    narrativeId: null,
+                    folderId: null,
+                    folderPath: [],
+                    nearbyEntities: [
+                        { id: 'e1', label: 'Gandalf', kind: 'person', subtype: null },
+                        { id: 'e2', label: 'Mordor', kind: 'place', subtype: null },
+                    ],
+                },
+            };
+
+            const result = await service.observe(ctx);
+
+            expect(result.ok).toBe(true);
+            const obs = result.result as ObservationResult;
+            expect(obs.contextSummary).toContain('Gandalf');
+            expect(obs.contextSummary).toContain('Mordor');
+        });
+
+        it('should work without appContext (undefined)', async () => {
+            const ctx: RLMContext = {
+                ...baseCtx,
+                initialPrompt: '', // No FTS
+            };
+
+            const result = await service.observe(ctx);
+
+            expect(result.ok).toBe(true);
+            const obs = result.result as ObservationResult;
+            expect(obs.contextSummary).toBe('No relevant context found.');
         });
     });
 });

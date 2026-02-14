@@ -251,23 +251,28 @@ const DEFAULT_CONTEXT: Partial<RLMContext> = {
 // Service
 // ============================================================================
 
+import { AppContextProviderService } from './app-context-provider.service';
+
 @Injectable({ providedIn: 'root' })
 export class RlmLoopService {
     private queryRunner: QueryRunnerService;
     private workspaceOps: WorkspaceOpsService;
     private retrievalHelper: RetrievalService;
     private llm: RlmLlmService;
+    private appContextProvider: AppContextProviderService;
 
     constructor(
         queryRunner?: QueryRunnerService,
         workspaceOps?: WorkspaceOpsService,
         retrievalHelper?: RetrievalService,
-        llm?: RlmLlmService
+        llm?: RlmLlmService,
+        appContextProvider?: AppContextProviderService
     ) {
         this.queryRunner = queryRunner || inject(QueryRunnerService);
         this.workspaceOps = workspaceOps || inject(WorkspaceOpsService);
         this.retrievalHelper = retrievalHelper || inject(RetrievalService);
         this.llm = llm || inject(RlmLlmService);
+        this.appContextProvider = appContextProvider || inject(AppContextProviderService);
     }
 
     // Track active loops for debugging
@@ -285,7 +290,22 @@ export class RlmLoopService {
         options: RLMLoopOptions = {}
     ): Promise<RLMLoopResult> {
         const startTime = Date.now();
-        const fullCtx: RLMContext = { ...DEFAULT_CONTEXT, ...ctx } as RLMContext;
+
+        // 0. Hydrate App Context if missing and not explicitly skipped
+        let loadedAppCtx = ctx.appContext;
+        if (!loadedAppCtx && !options.skipObserve) {
+            try {
+                loadedAppCtx = await this.appContextProvider.getCurrentContext();
+            } catch (err) {
+                console.warn('[RLM] Failed to load app context:', err);
+            }
+        }
+
+        const fullCtx: RLMContext = {
+            ...DEFAULT_CONTEXT,
+            ...ctx,
+            appContext: loadedAppCtx
+        } as RLMContext;
 
         // Validate context
         if (!fullCtx.workspaceId) {

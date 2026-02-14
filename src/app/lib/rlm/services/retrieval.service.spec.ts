@@ -481,3 +481,228 @@ describe('RetrievalService — World-Scoped + JSON', () => {
         });
     });
 });
+
+// =============================================================================
+// Entity Graph + Folder Ancestor Queries (for AppContext)
+// =============================================================================
+
+describe('RetrievalService — Entity Graph + Folders', () => {
+    let service: RetrievalService;
+    let queryRunnerMock: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+
+        queryRunnerMock = {
+            runRO: vi.fn(),
+        };
+
+        service = new RetrievalService(queryRunnerMock);
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    // =========================================================================
+    // getEntitiesByNarrative
+    // =========================================================================
+
+    describe('getEntitiesByNarrative', () => {
+        it('returns entities scoped to a narrative', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({
+                ok: true,
+                rows: [
+                    ['e1', 'Red Dragon', 'creature', 'dragon'],
+                    ['e2', 'Alice', 'person', null],
+                ],
+            });
+
+            const results = await service.getEntitiesByNarrative('narr-1');
+
+            expect(results).toHaveLength(2);
+            expect(results[0]).toEqual({
+                id: 'e1',
+                label: 'Red Dragon',
+                kind: 'creature',
+                subtype: 'dragon',
+            });
+            expect(results[1]).toEqual({
+                id: 'e2',
+                label: 'Alice',
+                kind: 'person',
+                subtype: null,
+            });
+        });
+
+        it('passes narrative_id as parameter', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntitiesByNarrative('narr-42');
+
+            const params = queryRunnerMock.runRO.mock.calls[0][1];
+            expect(params.narrative_id).toBe('narr-42');
+        });
+
+        it('queries the entities relation', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntitiesByNarrative('narr-1');
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            expect(script).toContain('*entities{');
+            expect(script).toContain('narrative_id == $narrative_id');
+        });
+
+        it('returns empty for missing narrativeId', async () => {
+            const results = await service.getEntitiesByNarrative('');
+            expect(results).toEqual([]);
+            expect(queryRunnerMock.runRO).not.toHaveBeenCalled();
+        });
+
+        it('returns empty on failure', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: false, error: 'fail' });
+
+            const results = await service.getEntitiesByNarrative('narr-1');
+            expect(results).toEqual([]);
+        });
+
+        it('caps limit at 50', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntitiesByNarrative('narr-1', 999);
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            expect(script).toContain(':limit 50');
+        });
+    });
+
+    // =========================================================================
+    // getEntityNeighbors
+    // =========================================================================
+
+    describe('getEntityNeighbors', () => {
+        it('returns 1-hop neighbors', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({
+                ok: true,
+                rows: [
+                    ['e2', 'Alice', 'person', null],
+                    ['e3', 'Sword', 'item', 'weapon'],
+                ],
+            });
+
+            const results = await service.getEntityNeighbors('e1');
+
+            expect(results).toHaveLength(2);
+            expect(results[0]).toEqual({
+                id: 'e2',
+                label: 'Alice',
+                kind: 'person',
+                subtype: null,
+            });
+        });
+
+        it('uses entity_edge for both directions', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntityNeighbors('e1');
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            // Outgoing
+            expect(script).toContain('*entity_edge{source_id, target_id: neighbor_id}');
+            // Incoming
+            expect(script).toContain('*entity_edge{target_id, source_id: neighbor_id}');
+        });
+
+        it('passes entity_id as parameter', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntityNeighbors('e42');
+
+            const params = queryRunnerMock.runRO.mock.calls[0][1];
+            expect(params.entity_id).toBe('e42');
+        });
+
+        it('returns empty for missing entityId', async () => {
+            const results = await service.getEntityNeighbors('');
+            expect(results).toEqual([]);
+            expect(queryRunnerMock.runRO).not.toHaveBeenCalled();
+        });
+
+        it('returns empty on failure', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: false, error: 'bad' });
+
+            const results = await service.getEntityNeighbors('e1');
+            expect(results).toEqual([]);
+        });
+
+        it('caps limit at 30', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getEntityNeighbors('e1', 999);
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            expect(script).toContain(':limit 30');
+        });
+    });
+
+    // =========================================================================
+    // getFolderAncestors
+    // =========================================================================
+
+    describe('getFolderAncestors', () => {
+        it('returns ancestor names in order', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({
+                ok: true,
+                rows: [
+                    ['Characters', 1],
+                    ['Root', 2],
+                ],
+            });
+
+            const results = await service.getFolderAncestors('folder-leaf');
+
+            expect(results).toEqual(['Characters', 'Root']);
+        });
+
+        it('uses recursive Datalog with folder_hierarchy', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getFolderAncestors('f1');
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            expect(script).toContain('*folder_hierarchy');
+            expect(script).toContain('ancestor');
+            expect(script).toContain(':order depth');
+        });
+
+        it('passes folder_id as parameter', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getFolderAncestors('folder-42');
+
+            const params = queryRunnerMock.runRO.mock.calls[0][1];
+            expect(params.folder_id).toBe('folder-42');
+        });
+
+        it('returns empty for missing folderId', async () => {
+            const results = await service.getFolderAncestors('');
+            expect(results).toEqual([]);
+            expect(queryRunnerMock.runRO).not.toHaveBeenCalled();
+        });
+
+        it('returns empty on failure', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: false, error: 'no hierarchy' });
+
+            const results = await service.getFolderAncestors('f1');
+            expect(results).toEqual([]);
+        });
+
+        it('caps maxDepth at 20', async () => {
+            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
+
+            await service.getFolderAncestors('f1', 100);
+
+            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
+            expect(script).toContain('depth <= 20');
+        });
+    });
+});

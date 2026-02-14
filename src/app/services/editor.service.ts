@@ -22,7 +22,7 @@ export class EditorService {
     }
 
     /**
-     * Get the Crepe editor instance (for EditorAgentBridge)
+     * Get the Crepe editor instance
      */
     getCrepe(): Crepe | undefined {
         return this.crepe;

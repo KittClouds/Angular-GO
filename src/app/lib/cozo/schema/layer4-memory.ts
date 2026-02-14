@@ -248,7 +248,7 @@ export const BLOCKS_SCHEMA = `
     ord: Int,
     text: String,
     dimension: Int default 384,
-    text_vec: [Float],
+    text_vec: <F32; 384>,
     narrative_id: String,
     created_at: Float
 }
@@ -277,8 +277,7 @@ export const BLOCKS_HNSW_384 = `
 export const BLOCKS_FTS_SCHEMA = `
 ::fts create blocks:fts_idx {
     extractor: text,
-    tokenizer: default,
-    filter: default
+    tokenizer: Simple
 }
 `;
 

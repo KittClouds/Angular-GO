@@ -25,12 +25,8 @@ import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, A
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
 import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/services/go-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
-import { OpenRouterService, OpenRouterMessage, ToolCallResponse } from '../../../lib/services/openrouter.service';
+import { OpenRouterService, OpenRouterMessage } from '../../../lib/services/openrouter.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
-import { GoKittService } from '../../../services/gokitt.service';
-import { ALL_TOOLS, type ToolExecutionContext, executeToolCalls, type ToolCall } from '../../../lib/ai';
-import { EditorAgentBridge } from '../../../lib/ai/editor-agent-bridge';
-import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 
 // Import quikchat (vanilla JS lib)
 declare const quikchat: any;
@@ -645,12 +641,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // Streaming services (TypeScript)
     openRouter = inject(OpenRouterService);
     googleGenAI = inject(GoogleGenAIService);
-    private goKittService = inject(GoKittService);
-    private noteEditorStore = inject(NoteEditorStore);
     private orchestrator = inject(OrchestratorService);
-    editorBridge = inject(EditorAgentBridge);
-    // Track Go batch init for agentic chat
-    private goBatchInitialized = false;
     // Track Go chat init
     private goChatInitialized = false;
 
@@ -981,13 +972,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         // Inject Context Block into the system prompt for THIS turn
         const effectiveSystemPrompt = this.systemPromptInput() + (contextBlock ? `\n\n${contextBlock}` : '');
 
-        // If Index mode is enabled, use agentic tool calling (OpenRouter only for now)
-        if (this.indexEnabled() && openRouterConfigured) {
-            await this.handleAgenticChat(instance, botMsgId, history, effectiveSystemPrompt);
-        } else {
-            // Standard streaming - use active provider
-            await this.handleStreamingChat(instance, botMsgId, history, effectiveSystemPrompt);
-        }
+        // Always use streaming chat - RLM context already injected into effectiveSystemPrompt
+        await this.handleStreamingChat(instance, botMsgId, history, effectiveSystemPrompt);
     }
 
     private async handleStreamingChat(
@@ -1042,125 +1028,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     this.currentBotMsgId = null;
                 },
             }, systemPrompt);
-        }
-    }
-
-    private async handleAgenticChat(
-        instance: any,
-        botMsgId: string,
-        history: OpenRouterMessage[],
-        systemPrompt: string
-    ): Promise<void> {
-        const MAX_ITERATIONS = 5;
-        let iterations = 0;
-        let messages = [...history];
-
-        // Build tool execution context
-        const toolContext: ToolExecutionContext = {
-            goKittService: this.goKittService,
-            editorBridge: this.editorBridge,
-            getCurrentNoteContent: () => {
-                const note = this.noteEditorStore.currentNote();
-                if (!note?.content) return null;
-                try {
-                    // content is JSON string, parse and extract text
-                    const json = JSON.parse(note.content);
-                    return note.markdownContent || JSON.stringify(json);
-                } catch {
-                    return note.markdownContent || null;
-                }
-            },
-            getCurrentNoteId: () => this.noteEditorStore.activeNoteId() || null,
-            getCurrentNoteTitle: () => {
-                const note = this.noteEditorStore.currentNote();
-                return note?.title || null;
-            }
-        };
-
-        instance.messageAppendContent(botMsgId, '🔍 ');
-
-        try {
-            while (iterations < MAX_ITERATIONS) {
-                iterations++;
-                console.log(`[AiChatPanel] Agentic loop iteration ${iterations}`);
-
-                // Initialize Go batch with OpenRouter config on first call
-                if (!this.goBatchInitialized) {
-                    const orConfig = this.openRouter.config();
-                    if (orConfig?.apiKey) {
-                        const initResult = await this.goKittService.batchInit({
-                            provider: 'openrouter',
-                            openRouterApiKey: orConfig.apiKey,
-                            openRouterModel: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free'
-                        });
-                        if (initResult.success) {
-                            this.goBatchInitialized = true;
-                            console.log('[AiChatPanel] Go batch initialized for agent:', initResult.provider, initResult.model);
-                        } else {
-                            throw new Error(`Go batch init failed: ${initResult.error}`);
-                        }
-                    }
-                }
-
-                // Use Go WASM for non-streaming tool-calling completion
-                const result = await this.goKittService.agentChatWithTools(
-                    messages,
-                    ALL_TOOLS,
-                    systemPrompt
-                );
-
-                // If model returned content, we're done
-                if (result.content && !result.tool_calls?.length) {
-                    instance.messageReplaceContent(botMsgId, result.content);
-                    await this.goChatService.addAssistantMessage(result.content);
-                    this.currentBotMsgId = null;
-                    return;
-                }
-
-                // If model wants to call tools
-                if (result.tool_calls && result.tool_calls.length > 0) {
-                    // Show tool usage indicator
-                    const toolNames = result.tool_calls.map(tc => tc.function.name).join(', ');
-                    instance.messageAppendContent(botMsgId, `📎 ${toolNames}... `);
-
-                    // Add assistant message with tool_calls
-                    messages.push({
-                        role: 'assistant',
-                        content: null,
-                        tool_calls: result.tool_calls
-                    });
-
-                    // Execute tools
-                    const toolCalls = result.tool_calls as ToolCall[];
-                    const toolResults = await executeToolCalls(toolCalls, toolContext);
-
-                    // Add tool results to conversation
-                    for (const toolResult of toolResults) {
-                        messages.push({
-                            role: 'tool',
-                            content: toolResult.content,
-                            tool_call_id: toolResult.tool_call_id
-                        });
-                    }
-
-                    // Continue loop
-                    continue;
-                }
-
-                // Edge case: no content and no tool calls
-                instance.messageReplaceContent(botMsgId, 'I couldn\'t generate a response. Try rephrasing your question.');
-                this.currentBotMsgId = null;
-                return;
-            }
-
-            // Max iterations reached
-            instance.messageReplaceContent(botMsgId, '⚠️ Reached maximum tool iterations. Try a simpler question.');
-            this.currentBotMsgId = null;
-
-        } catch (err) {
-            console.error('[AiChatPanel] Agentic chat error:', err);
-            instance.messageReplaceContent(botMsgId, `❌ Error: ${err instanceof Error ? err.message : String(err)}`);
-            this.currentBotMsgId = null;
         }
     }
 
