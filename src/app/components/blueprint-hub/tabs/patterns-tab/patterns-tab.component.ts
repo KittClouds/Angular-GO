@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -33,10 +33,44 @@ export class PatternsTabComponent {
     private registry = inject(PatternRegistryService);
     private confirmationService = inject(ConfirmationService);
 
+    @ViewChild('menu') menu!: Menu;
+
     // State
     view = signal<'list' | 'editor' | 'tester'>('list');
     editingPattern = signal<PatternDefinition | null>(null);
     isCreating = signal(false);
+
+    // Menu State
+    menuPattern = signal<PatternDefinition | null>(null);
+
+    menuItems = computed(() => {
+        const pattern = this.menuPattern();
+        if (!pattern) return [];
+
+        const items: MenuItem[] = [
+            {
+                label: 'Test Pattern',
+                icon: 'pi pi-code',
+                command: () => { /* TODO: Test */ }
+            },
+            {
+                label: 'Edit',
+                icon: 'pi pi-pencil',
+                command: () => this.handleEdit(pattern)
+            }
+        ];
+
+        if (!pattern.isBuiltIn) {
+            items.push({
+                label: 'Delete',
+                icon: 'pi pi-trash',
+                styleClass: 'text-red-500',
+                command: () => this.handleDelete(pattern)
+            });
+        }
+
+        return items;
+    });
 
     // Patterns list signal
     patterns = signal<PatternDefinition[]>(this.registry.getAllPatterns());
@@ -155,29 +189,8 @@ export class PatternsTabComponent {
         });
     }
 
-    getMenuItems(pattern: PatternDefinition): MenuItem[] {
-        const items: MenuItem[] = [
-            {
-                label: 'Test Pattern',
-                icon: 'pi pi-code',
-                command: () => { /* TODO: Test */ }
-            },
-            {
-                label: 'Edit',
-                icon: 'pi pi-pencil',
-                command: () => this.handleEdit(pattern)
-            }
-        ];
-
-        if (!pattern.isBuiltIn) {
-            items.push({
-                label: 'Delete',
-                icon: 'pi pi-trash',
-                styleClass: 'text-red-500',
-                command: () => this.handleDelete(pattern)
-            });
-        }
-
-        return items;
+    openMenu(event: Event, pattern: PatternDefinition) {
+        this.menuPattern.set(pattern);
+        this.menu.toggle(event);
     }
 }

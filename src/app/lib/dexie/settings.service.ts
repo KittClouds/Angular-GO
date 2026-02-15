@@ -60,6 +60,7 @@ export function getSetting<T>(key: string, defaultValue: T): T {
  * Set a setting value. Updates memory immediately, writes to Dexie async.
  */
 export function setSetting<T>(key: string, value: T): void {
+    console.log(`[Settings] setSetting: "${key}" =`, value);
     _cache.set(key, value);
     // Fire-and-forget write to Dexie
     db.settings.put({ key, value }).catch(err => {

@@ -47,6 +47,11 @@ export class NoteEditorStore {
     /** Cached editor position for restoration */
     private pendingPosition: EditorPosition | null = null;
 
+
+
+    /** Flag to prevent clearing storage during initial restoration */
+    private isRestoring = true; // Default to true to block effects until restoration is complete
+
     // ─────────────────────────────────────────────────────────────
     // Derived State (Observables from liveQuery)
     // ─────────────────────────────────────────────────────────────
@@ -74,6 +79,7 @@ export class NoteEditorStore {
 
     constructor(@Inject(PLATFORM_ID) platformId: Object) {
         this.isBrowser = isPlatformBrowser(platformId);
+        console.log('[NoteEditorStore] Constructor called');
 
         // Restore active note from storage on init
         this.restoreActiveNote();
@@ -103,6 +109,12 @@ export class NoteEditorStore {
         // Persist active note ID whenever it changes
         effect(() => {
             const noteId = this.activeNoteId();
+            // Don't wipe storage if we are in the middle of restoring
+            if (noteId === null && this.isRestoring) {
+                console.log('[NoteEditorStore] Skipping persistence wipe during restoration');
+                return;
+            }
+            console.log(`[NoteEditorStore] Persistence effect triggered. ID: ${noteId}`);
             this.persistActiveNote(noteId);
         });
     }
@@ -111,31 +123,44 @@ export class NoteEditorStore {
     // Persistence Methods
     // ─────────────────────────────────────────────────────────────
 
-    private restoreActiveNote(): void {
+    private async restoreActiveNote(): Promise<void> {
         if (!this.isBrowser) return;
 
-        const storedNoteId = getSetting<string | null>(ACTIVE_NOTE_KEY, null);
-        if (storedNoteId) {
-            console.log(`[NoteEditorStore] Restoring active note: ${storedNoteId}`);
+        console.log('[NoteEditorStore] restoreActiveNote: Checking Dexie directly...');
 
-            // Load saved position
-            const position = getSetting<EditorPosition | null>(EDITOR_POSITION_KEY, null);
-            if (position && position.noteId === storedNoteId) {
-                this.pendingPosition = position;
-                console.log(`[NoteEditorStore] Loaded editor position:`, position);
-            }
+        try {
+            // Bypass synchronous cache (which might be empty due to race condition) and read from DB
+            const setting = await db.settings.get(ACTIVE_NOTE_KEY);
+            const storedNoteId = setting?.value as string | undefined;
+            console.log(`[NoteEditorStore] restoreActiveNote: Found in Dexie: "${storedNoteId}"`);
 
-            // Verify note still exists using Dexie (loaded pre-Angular, instant)
-            // NOT GoSqlite — that waits for WASM + OPFS which takes seconds
-            db.notes.get(storedNoteId).then(note => {
+            if (storedNoteId) {
+                // Restore position too
+                const posSetting = await db.settings.get(EDITOR_POSITION_KEY);
+                const position = posSetting?.value as EditorPosition | undefined;
+
+                if (position && position.noteId === storedNoteId) {
+                    this.pendingPosition = position;
+                    console.log(`[NoteEditorStore] Loaded editor position:`, position);
+                }
+
+                // Verify note exists
+                const note = await db.notes.get(storedNoteId);
                 if (note) {
                     this.activeNoteId.set(storedNoteId);
+                    console.log(`[NoteEditorStore] Restoring active note: ${storedNoteId}`);
                 } else {
-                    console.log(`[NoteEditorStore] Stored note ${storedNoteId} no longer exists, clearing`);
+                    console.log(`[NoteEditorStore] Note ${storedNoteId} not found in DB`);
+                    // Explicitly clear here since effect won't fire if signal is null
                     removeSetting(ACTIVE_NOTE_KEY);
                     removeSetting(EDITOR_POSITION_KEY);
                 }
-            });
+            }
+        } catch (e) {
+            console.error('[NoteEditorStore] Restoration failed', e);
+        } finally {
+            this.isRestoring = false;
+            console.log('[NoteEditorStore] Restoration check complete. isRestoring = false');
         }
     }
 
@@ -143,8 +168,10 @@ export class NoteEditorStore {
         if (!this.isBrowser) return;
 
         if (noteId) {
+            console.log(`[NoteEditorStore] Persisting active note ID: ${noteId}`);
             setSetting(ACTIVE_NOTE_KEY, noteId);
         } else {
+            console.log(`[NoteEditorStore] Clearing active note ID (noteId is null)`);
             removeSetting(ACTIVE_NOTE_KEY);
             removeSetting(EDITOR_POSITION_KEY);
         }

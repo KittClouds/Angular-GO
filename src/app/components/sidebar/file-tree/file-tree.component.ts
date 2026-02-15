@@ -14,6 +14,7 @@ import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 import { ScopeService } from '../../../lib/services/scope.service';
 import { ReorderService } from '../../../lib/services/reorder.service';
+import { AppStateService } from '../../../lib/services/app-state.service';
 
 @Component({
     selector: 'app-file-tree',
@@ -158,6 +159,7 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     reorderService = inject(ReorderService);
     private injector = inject(Injector);
     private destroyRef = inject(DestroyRef);
+    private appStateService = inject(AppStateService);
 
     // ViewChild for Swapy container
     @ViewChild('treeContainer') treeContainer!: ElementRef<HTMLDivElement>;
@@ -167,9 +169,10 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this._tree.set(value);
     }
 
-    // State
+    // State - expansion now comes from AppStateService (persisted)
     private _tree = signal<TreeNode[]>([]);
-    private expansion = signal<ExpansionState>(new Set());
+    // Use computed to convert from array to Set for the flatten function
+    expansion = computed(() => new Set(this.appStateService.expandedFolderIds()));
     selectedId = signal<string | null>(null);
     editingNodeId = signal<string | null>(null);
 
@@ -249,15 +252,13 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     });
 
     onToggle(nodeId: string): void {
-        this.expansion.update(exp => toggleExpansion(exp, nodeId));
+        // Delegate to AppStateService for persistence
+        this.appStateService.toggleFolderExpansion(nodeId);
     }
 
     expandNode(nodeId: string): void {
-        this.expansion.update(exp => {
-            const newExp = new Set(exp);
-            newExp.add(nodeId);
-            return newExp;
-        });
+        // Delegate to AppStateService for persistence
+        this.appStateService.setFolderExpanded(nodeId, true);
     }
 
     onSelect(node: FlatTreeNode): void {
@@ -448,8 +449,36 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Lifecycle Hooks for Swapy Integration
+    // Lifecycle Hooks for Swapy Integration & Selection Sync
     // ─────────────────────────────────────────────────────────────
+
+    constructor() {
+        // Effect: Sync active note from store to tree selection & scope
+        effect(() => {
+            const activeNoteId = this.noteEditorStore.activeNoteId();
+            const tree = this._tree(); // Dependency on tree loading
+
+            if (activeNoteId && tree.length > 0) {
+                // Prevent loops: only update if selection mismatches
+                if (this.selectedId() !== activeNoteId) {
+                    const node = this.findNodeRecursive(tree, activeNoteId);
+                    if (node) {
+                        console.log(`[FileTree] Syncing selection to active note: ${node.name}`);
+                        this.selectedId.set(activeNoteId);
+
+                        // CRITICAL: Ensure scope matches the active note
+                        // This fixes the issue where refreshing loses the "context" even if note is open
+                        this.scopeService.setScopeFromNode(node);
+
+                        // Ensure parent folders are expanded so selection is visible
+                        if (node.parentId) {
+                            this.expandParentsRecursive(tree, node.parentId);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     ngAfterViewInit(): void {
         // Set container for reorder service
@@ -480,5 +509,30 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy(): void {
         // Clean up Swapy
         this.reorderService.disableReorderMode();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Tree Helpers
+    // ─────────────────────────────────────────────────────────────
+
+    private findNodeRecursive(nodes: TreeNode[], id: string): TreeNode | null {
+        for (const node of nodes) {
+            if (node.id === id) return node;
+            if (node.children) {
+                const found = this.findNodeRecursive(node.children, id);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
+    private expandParentsRecursive(nodes: TreeNode[], parentId: string): void {
+        const parent = this.findNodeRecursive(nodes, parentId);
+        if (parent) {
+            this.expandNode(parent.id);
+            if (parent.parentId) {
+                this.expandParentsRecursive(nodes, parent.parentId);
+            }
+        }
     }
 }

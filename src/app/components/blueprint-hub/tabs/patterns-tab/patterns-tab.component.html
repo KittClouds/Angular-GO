@@ -56,9 +56,7 @@
                                     <!-- Actions Menu -->
                                     <button pButton icon="pi pi-ellipsis-v"
                                         class="p-button-text p-button-rounded p-button-sm w-8 h-8"
-                                        (click)="menu.toggle($event)"></button>
-                                    <p-menu #menu [model]="getMenuItems(pattern)" [popup]="true"
-                                        appendTo="body"></p-menu>
+                                        (click)="openMenu($event, pattern)"></button>
                                 </div>
                             </div>
 
@@ -88,3 +86,4 @@
 </div>
 
 <p-confirmdialog></p-confirmdialog>
+<p-menu #menu [model]="menuItems()" [popup]="true" appendTo="body"></p-menu>

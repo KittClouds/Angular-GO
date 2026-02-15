@@ -28,6 +28,11 @@ import {
     BLOCKS_FTS_SCHEMA,
 } from '../schema/layer4-memory';
 import {
+    RAPTOR_NODES_SCHEMA,
+    RAPTOR_CONFIG_SCHEMA,
+    RAPTOR_HNSW_INDEX
+} from '../schema/layer3-raptor';
+import {
     WS_SESSION_SCHEMA,
     WS_NODE_SCHEMA,
     WS_EDGE_SCHEMA,
@@ -87,6 +92,14 @@ export function createGraphSchemas(): string[] {
         { name: 'episode_log', script: EPISODE_LOG_SCHEMA.trim() },
         { name: 'blocks', script: BLOCKS_SCHEMA.trim() },
         { name: 'blocks_fts', script: BLOCKS_FTS_SCHEMA.trim() },
+        // Layer 3: RAPTOR (Semantic Search)
+        { name: 'raptor_nodes', script: RAPTOR_NODES_SCHEMA.trim() },
+        { name: 'raptor_config', script: RAPTOR_CONFIG_SCHEMA.trim() },
+        { name: 'raptor_index', script: RAPTOR_HNSW_INDEX.trim() },
+        // Layer 3: RAPTOR (Semantic Search)
+        { name: 'raptor_nodes', script: RAPTOR_NODES_SCHEMA.trim() },
+        { name: 'raptor_config', script: RAPTOR_CONFIG_SCHEMA.trim() },
+        { name: 'raptor_index', script: RAPTOR_HNSW_INDEX.trim() },
         // NOTE: chat_messages removed - now using Go/SQLite via GoChatService
         // RLM Workspace schemas (ws_* relations)
         { name: 'ws_session', script: WS_SESSION_SCHEMA.trim() },
@@ -104,7 +117,37 @@ export function createGraphSchemas(): string[] {
             const result = JSON.parse(resultStr);
             if (result.ok === false) {
                 const msg = result.message || result.display || 'Unknown error';
-                if (!msg.includes('already exists')) {
+
+                // Special handling for RAPTOR HNSW index failure on existing non-vector table
+                if (name === 'raptor_index' && !msg.includes('already exists')) {
+                    console.warn(`[GraphSchema] RAPTOR index '${name}' failed: ${msg}. FORCE-RECREATING due to schema mismatch...`);
+                    try {
+                        cozoDb.run(':rm raptor_nodes');
+                        console.log('[GraphSchema] Dropped old raptor_nodes table.');
+
+                        // Re-create the table
+                        const nodesScript = allSchemas.find(s => s.name === 'raptor_nodes')?.script;
+                        if (nodesScript) {
+                            cozoDb.run(nodesScript);
+                            console.log('[GraphSchema] Re-created raptor_nodes table.');
+                        }
+
+                        // Retry index creation
+                        const retryRes = cozoDb.run(script);
+                        const retryParsed = JSON.parse(retryRes);
+                        if (retryParsed.ok === false) {
+                            console.error('[GraphSchema] RETRY FAILED:', retryParsed);
+                        } else {
+                            console.log('[GraphSchema] ✅ Created RAPTOR HNSW index after recreation.');
+                            created.push(name);
+                        }
+                        continue;
+                    } catch (retryErr) {
+                        console.error('[GraphSchema] Failed to recreate RAPTOR schema:', retryErr);
+                    }
+                }
+
+                if (!msg.includes('already exists') && !msg.includes('conflicts with an existing one')) {
                     console.error(`[GraphSchema] ${name} failed:`, msg);
                 }
             } else {
@@ -112,7 +155,24 @@ export function createGraphSchemas(): string[] {
             }
         } catch (err) {
             const errMsg = String(err);
-            if (!errMsg.includes('already exists')) {
+
+            // Catch error on retry if needed... (same logic as above but for throws)
+            if (name === 'raptor_index' && !errMsg.includes('already exists')) {
+                console.warn(`[GraphSchema] RAPTOR index throw: ${errMsg}. Recreating...`);
+                try {
+                    cozoDb.run(':rm raptor_nodes');
+                    const nodesScript = allSchemas.find(s => s.name === 'raptor_nodes')?.script;
+                    if (nodesScript) cozoDb.run(nodesScript);
+                    cozoDb.run(script);
+                    console.log('[GraphSchema] ✅ Created RAPTOR HNSW index (from throw).');
+                    created.push(name);
+                    continue;
+                } catch (retryThrow) {
+                    console.error('[GraphSchema] Failed recreate from throw:', retryThrow);
+                }
+            }
+
+            if (!errMsg.includes('already exists') && !errMsg.includes('conflicts with an existing one')) {
                 console.error(`[GraphSchema] Creation failed for ${name}:`, err);
             }
         }

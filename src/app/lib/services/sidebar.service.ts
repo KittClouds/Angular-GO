@@ -1,47 +1,47 @@
 // src/app/lib/services/sidebar.service.ts
 // Service to manage sidebar open/collapsed/closed state
+// Now persists to Dexie via AppStateService
 
-import { Injectable, signal, computed } from '@angular/core';
-
-export type SidebarMode = 'open' | 'collapsed' | 'closed';
+import { Injectable, inject, computed } from '@angular/core';
+import { AppStateService } from './app-state.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class SidebarService {
-    // State: three modes
-    private _mode = signal<SidebarMode>('open');
+    private appState = inject(AppStateService);
 
-    // Computed getters for template convenience
-    readonly mode = this._mode.asReadonly();
-    readonly isOpen = computed(() => this._mode() === 'open');
-    readonly isCollapsed = computed(() => this._mode() === 'collapsed');
-    readonly isClosed = computed(() => this._mode() === 'closed');
+    // Computed getters for template convenience (from persisted state)
+    readonly mode = this.appState.leftSidebarMode;
+    readonly isOpen = computed(() => this.mode() === 'open');
+    readonly isCollapsed = computed(() => this.mode() === 'collapsed');
+    readonly isClosed = computed(() => this.mode() === 'closed');
 
-    // Actions
-    setMode(mode: SidebarMode): void {
-        this._mode.set(mode);
+    // Actions - delegate to AppStateService for persistence
+    setMode(mode: 'open' | 'collapsed' | 'closed'): void {
+        this.appState.setLeftSidebarMode(mode);
     }
 
     open(): void {
-        this._mode.set('open');
+        this.appState.setLeftSidebarMode('open');
     }
 
     collapse(): void {
-        this._mode.set('collapsed');
+        this.appState.setLeftSidebarMode('collapsed');
     }
 
     close(): void {
-        this._mode.set('closed');
+        this.appState.setLeftSidebarMode('closed');
     }
 
     // Toggle between open and collapsed (for footer button)
     toggleCollapse(): void {
-        this._mode.update(m => m === 'open' ? 'collapsed' : 'open');
+        this.appState.toggleLeftSidebar();
     }
 
     // Toggle between open/collapsed and closed (for header button)
     toggleClose(): void {
-        this._mode.update(m => m === 'closed' ? 'open' : 'closed');
+        const current = this.mode();
+        this.setMode(current === 'closed' ? 'open' : 'closed');
     }
 }

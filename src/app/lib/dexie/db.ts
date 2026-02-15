@@ -537,6 +537,81 @@ export interface Setting {
 }
 
 // =============================================================================
+// UI STATE (persistent UI state for full state management)
+// =============================================================================
+
+export type LeftSidebarMode = 'open' | 'collapsed' | 'closed';
+export type RightSidebarMode = 'open' | 'closed';
+export type RightSidebarPanel = 'entities' | 'timeline' | 'chat';
+export type SearchMode = 'vector' | 'keyword' | 'raptor';
+export type CalendarView = 'month' | 'week' | 'timeline';
+export type ThemePreference = 'light' | 'dark' | 'system';
+export type HighlightMode = 'all' | 'focused' | 'none';
+
+/**
+ * UIState - Persistent UI state that survives page refresh.
+ * Single row with id 'app-state'. All fields have defaults.
+ */
+export interface UIState {
+    id: string;                              // Always 'app-state'
+
+    // Sidebar states
+    leftSidebarMode: LeftSidebarMode;
+    rightSidebarMode: RightSidebarMode;
+    rightSidebarActivePanel: RightSidebarPanel;
+
+    // Panel dimensions (pixels)
+    leftSidebarWidth: number;
+    rightSidebarWidth: number;
+    hubHeight: number;
+
+    // Folder expansion state
+    expandedFolderIds: string[];
+
+    // Search state
+    searchQuery: string;
+    searchMode: SearchMode;
+    searchScope: 'all' | 'narrative';
+
+    // Calendar state
+    calendarView: CalendarView;
+    calendarSelectedDate: string;            // ISO date string (YYYY-MM-DD)
+
+    // Theme preferences
+    theme: ThemePreference;
+    highlightMode: HighlightMode;
+    focusedEntityKinds: string[];
+
+    // Timestamp
+    updatedAt: number;
+}
+
+/**
+ * Default UI state values
+ */
+export function getDefaultUIState(): UIState {
+    return {
+        id: 'app-state',
+        leftSidebarMode: 'open',
+        rightSidebarMode: 'open',
+        rightSidebarActivePanel: 'entities',
+        leftSidebarWidth: 280,
+        rightSidebarWidth: 320,
+        hubHeight: 300,
+        expandedFolderIds: [],
+        searchQuery: '',
+        searchMode: 'vector',
+        searchScope: 'all',
+        calendarView: 'month',
+        calendarSelectedDate: new Date().toISOString().split('T')[0],
+        theme: 'dark',
+        highlightMode: 'all',
+        focusedEntityKinds: [],
+        updatedAt: Date.now()
+    };
+}
+
+// =============================================================================
 // DEXIE DATABASE
 // =============================================================================
 
@@ -588,6 +663,9 @@ export class CrepeDatabase extends Dexie {
 
     // Settings (replaces localStorage)
     settings!: Table<Setting>;
+
+    // UI State (v16) - persistent UI state for full state management
+    uiState!: Table<UIState>;
 
     constructor() {
         super('CrepeNotesDB');
@@ -862,6 +940,17 @@ export class CrepeDatabase extends Dexie {
         // Key-value store for all UI preferences and session state
         this.version(15).stores({
             settings: 'key'
+        });
+
+        // Version 16: UI State table for full state management
+        // Single-row table for persistent UI state (sidebars, panels, dimensions, etc.)
+        this.version(16).stores({
+            uiState: 'id'
+        }).upgrade(async (tx) => {
+            // Seed default UI state
+            const defaultState = getDefaultUIState();
+            await tx.table('uiState').put(defaultState);
+            console.log('[Dexie] Upgrade to v16: Seeded default UI state');
         });
     }
 

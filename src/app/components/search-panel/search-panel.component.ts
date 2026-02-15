@@ -500,10 +500,11 @@ export class SearchPanelComponent implements OnInit {
     const startTime = performance.now();
 
     try {
+      const isGlobal = this.indexScope() === 'global';
       const searchResults = await this.searchService.search(this.query(), {
         k: 10,
         mode: this.searchMode() === 'raptor' ? 'collapsed' : 'leaves',
-        scoped: true
+        scoped: !isGlobal
       });
 
       // Map to component's SearchResult format

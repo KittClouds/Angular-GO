@@ -4,6 +4,7 @@
 import { Injectable, signal, computed, effect, Inject, PLATFORM_ID, inject, untracked } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { NoteEditorStore } from './note-editor.store';
+import { db } from '../dexie/db';
 import { getSetting, setSetting } from '../dexie/settings.service';
 import * as ops from '../operations';
 
@@ -30,6 +31,9 @@ export class TabStore {
     // List of open tabs
     readonly tabs = signal<EditorTab[]>([]);
 
+    // Prevent persistence while restoring
+    private isRestoring = true;
+
     // ─────────────────────────────────────────────────────────────
     // Constructor
     // ─────────────────────────────────────────────────────────────
@@ -43,6 +47,10 @@ export class TabStore {
         // Persist tabs whenever they change
         effect(() => {
             const currentTabs = this.tabs();
+
+            // CRITICAL: Don't persist empty list while restoring!
+            if (this.isRestoring) return;
+
             this.persistTabs(currentTabs);
         });
 
@@ -55,6 +63,10 @@ export class TabStore {
             const activeNoteId = this.noteEditorStore.activeNoteId();
 
             if (activeNoteId) {
+                // If we are still restoring, maybe we shouldn't act yet?
+                // actually ensureTabOpen handles checking existing tabs.
+                // But if restoreTabs is async, tabs() might be empty.
+                // However, restoreTabs calls set() which triggers effects.
                 this.ensureTabOpen(activeNoteId);
             }
         });
@@ -100,14 +112,20 @@ export class TabStore {
             // The actual activation logic happens via updating NoteEditorStore
             this.setActiveTabVisuals(noteId);
         } else {
-            // Fetch note title to create new tab (using GoSQLite)
-            const note = await ops.getNote(noteId);
-            if (!note) return;
+            // Fetch note title to create new tab (using GoSQLite via operations)
+            // Fallback to db.notes if ops is slow/not ready
+            let title = 'Untitled Note';
+            try {
+                const note = await ops.getNote(noteId);
+                if (note) title = note.title || 'Untitled';
+            } catch (e) {
+                console.warn('[TabStore] Failed to fetch note title for tab:', e);
+            }
 
             const newTab: EditorTab = {
                 id: noteId,
                 noteId: noteId,
-                title: note.title || 'Untitled',
+                title: title,
                 active: true
             };
 
@@ -176,15 +194,25 @@ export class TabStore {
         );
     }
 
-    private restoreTabs() {
+    private async restoreTabs() {
         if (!this.isBrowser) return;
         try {
-            const tabs = getSetting<EditorTab[] | null>(TABS_STORAGE_KEY, null);
-            if (tabs) {
+            // Bypass sync cache and read from DB directly to avoid race conditions
+            // getSetting returns value or default, but we want direct DB access here
+            // because settings cache might not be hydrated yet.
+            const s = await db.settings.get(TABS_STORAGE_KEY);
+            const tabs = s?.value as EditorTab[] | null;
+
+            if (tabs && Array.isArray(tabs) && tabs.length > 0) {
+                console.log(`[TabStore] Restoring ${tabs.length} tabs from DB`);
                 this.tabs.set(tabs);
+            } else {
+                console.log('[TabStore] No tabs found in DB to restore');
             }
         } catch (e) {
             console.warn('[TabStore] Failed to restore tabs', e);
+        } finally {
+            this.isRestoring = false;
         }
     }
 

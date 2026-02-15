@@ -18,7 +18,6 @@ import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
 import { setGoSqliteBridge } from './lib/operations';
-import { getSetting } from './lib/dexie/settings.service';
 import * as ops from './lib/operations';
 
 @Component({
@@ -98,8 +97,8 @@ export class AppComponent implements OnInit, OnDestroy {
       // 🚀 APP IS INTERACTIVE — user can see + edit notes
       this.orchestrator.completePhase('ready');
 
-      // Phase 6: Restore last note (first paint!)
-      await this.restoreLastNote();
+      // Note restoration is handled by NoteEditorStore.restoreActiveNote() in constructor
+      // No need to duplicate here - the store already loads from 'kittclouds-active-note'
 
       // ======================================================================
       // Background tasks (non-blocking, after first paint)
@@ -166,27 +165,5 @@ export class AppComponent implements OnInit, OnDestroy {
     });
 
     console.log('[AppComponent] ✓ Navigation API wired up');
-  }
-
-  /**
-   * Restore the last opened note from Dexie settings.
-   * Uses Dexie (already loaded) for verification — not GoSqlite.
-   */
-  private async restoreLastNote(): Promise<void> {
-    const lastNoteId = getSetting<string | null>('kittclouds-last-note-id', null);
-
-    if (lastNoteId) {
-      // Verify note exists in Dexie (instant — already in IDB)
-      const { db } = await import('./lib/dexie/db');
-      const note = await db.notes.get(lastNoteId);
-      if (note) {
-        console.log(`[AppComponent] ✓ Restoring last note: ${note.title} (${lastNoteId})`);
-        this.noteEditorStore.openNote(lastNoteId);
-      } else {
-        console.log('[AppComponent] Last note no longer exists, starting fresh');
-      }
-    } else {
-      console.log('[AppComponent] No last note to restore');
-    }
   }
 }

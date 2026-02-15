@@ -140,7 +140,12 @@ export class SemanticSearchService {
         console.log(`[SemanticSearch] Executing Cozo query (scoped: ${!!narrativeId})`);
 
         try {
+            console.log(`[SemanticSearch] Query: ${cozoQuery}`);
+            console.log(`[SemanticSearch] Params:`, JSON.stringify(params));
+
             const response = await this.cozo.run(cozoQuery, params);
+            console.log('[SemanticSearch] Raw Cozo Response:', JSON.stringify(response));
+
             if (!response || !response.headers || !response.rows) {
                 return [];
             }

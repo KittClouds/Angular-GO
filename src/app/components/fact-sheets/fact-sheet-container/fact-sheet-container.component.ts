@@ -12,7 +12,8 @@ import { FactSheetService, CardWithFields } from '../fact-sheet.service';
 import { FactSheetFieldSchema } from '../../../lib/dexie';
 import { SliderManagerComponent } from '../fields/slider-manager.component';
 import { graphRegistry } from '../../../lib/cozo/graph/GraphRegistry';
-
+import { UMBRA_PRESETS, getUmbraColor } from '../types/umbra-presets';
+import { calculateScaledStat } from '../../../lib/math/progression.math';
 export interface ParsedEntity {
   id: string;
   kind: string;
@@ -173,14 +174,14 @@ export interface ParsedEntity {
                                 {{ fieldNameTitle(field.currentField!) }}
                             </span>
                             <span class="text-sm font-medium" [style.color]="getProgressColor(field)">
-                              {{ getValue(field.currentField!) ?? 0 }} / {{ getValue(field.maxField!) ?? 100 }}
+                              {{ getValue(field.currentField!) ?? 0 }} / {{ getCalculatedMax(field) }}
                             </span>
                           </div>
                           <p-slider
                             [(ngModel)]="progressModels()[field.fieldName]"
                             (ngModelChange)="onProgressChange(field, $event)"
                             [min]="0"
-                            [max]="getValue(field.maxField!) ?? 100"
+                            [max]="getCalculatedMax(field)"
                             [style]="{ width: '100%', '--progress-color': getProgressColor(field) }"
                           />
                         </div>
@@ -509,15 +510,41 @@ export class FactSheetContainerComponent implements OnInit {
 
   getProgressColor(field: FactSheetFieldSchema): string {
     const current = this.getValue(field.currentField!) ?? 0;
-    const max = this.getValue(field.maxField!) ?? 100;
+    const max = this.getCalculatedMax(field);
 
     if (max === 0) return 'hsl(0, 80%, 60%)';
 
-    const percentage = Math.min(100, Math.max(0, (current / max) * 100));
-    // Gradient: Red (0) -> Yellow (60) -> Green (120)
-    const hue = (percentage / 100) * 120;
+    // Map field names to Umbra Presets for custom themes
+    let presetId = '';
+    const name = field.fieldName.toLowerCase();
 
+    if (name === 'health') presetId = 'vitals';
+    else if (name === 'mana') presetId = 'magic';
+    else if (name === 'stamina') presetId = 'nature';
+    else if (name === 'xp') presetId = 'gold';
+
+    const preset = UMBRA_PRESETS.find(p => p.id === presetId);
+    if (preset) {
+      return getUmbraColor(current, max, preset.colorLow, preset.colorMid, preset.colorHigh);
+    }
+
+    // Default fallback (Red-Yellow-Green HSL)
+    const percentage = Math.min(100, Math.max(0, (current / max) * 100));
+    const hue = (percentage / 100) * 120;
     return `hsl(${hue}, 80%, 50%)`;
+  }
+
+  getCalculatedMax(field: FactSheetFieldSchema): number {
+    const baseMax = this.getValue(field.maxField!) ?? 100;
+    const name = field.fieldName.toLowerCase();
+
+    // Only scale core vitals. XP is now included as requested.
+    if (['health', 'mana', 'stamina', 'xp'].includes(name)) {
+      const level = this.getValue('level') ?? 1;
+      return calculateScaledStat(baseMax, level);
+    }
+
+    return baseMax;
   }
 
   fieldNameTitle(fieldName: string): string {

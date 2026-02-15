@@ -240,4 +240,5 @@ export class SliderManagerComponent implements OnInit {
         this.newSliderName = '';
         this.selectedUmbra = 'vitals';
     }
+
 }

@@ -30,6 +30,7 @@ const VIEW_OPTIONS: ViewOption[] = [
 ];
 
 const STORAGE_KEY = 'right-sidebar:tab';
+const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 
 @Component({
     selector: 'app-right-sidebar',
@@ -265,7 +266,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
     entities = signal<ParsedEntity[]>([]);
 
     /** Currently selected entity ID */
-    selectedEntityId = signal<string>('');
+    selectedEntityId = signal<string>(getSetting<string>(ENTITY_STORAGE_KEY, ''));
 
     /** Computed selected entity */
     selectedEntity = computed(() => {
@@ -352,7 +353,9 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
             // Auto-select first if current selection is no longer in scope
             const currentId = this.selectedEntityId();
             if (parsed.length > 0 && !parsed.find(e => e.id === currentId)) {
-                this.selectedEntityId.set(parsed[0].id);
+                const newId = parsed[0].id;
+                this.selectedEntityId.set(newId);
+                setSetting(ENTITY_STORAGE_KEY, newId);
             }
         } catch (err) {
             console.error('[RightSidebar] Error loading scoped entities:', err);
@@ -387,6 +390,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     onEntitySelect(entityId: string) {
         this.selectedEntityId.set(entityId);
+        setSetting(ENTITY_STORAGE_KEY, entityId);
     }
 
     onChapterSelect(chapterId: string) {

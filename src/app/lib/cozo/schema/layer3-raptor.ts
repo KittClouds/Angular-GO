@@ -55,7 +55,7 @@ export const RAPTOR_NODES_SCHEMA = `
     node_id: String =>
     narrative_id: String,
     level: Int,
-    embedding: [Float],
+    embedding: <F32; 256>,
     payload: Json,
     children: [String],
     created_at: Float

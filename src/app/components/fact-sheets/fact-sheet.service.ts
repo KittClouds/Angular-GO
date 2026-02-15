@@ -38,7 +38,16 @@ const DEFAULT_CHARACTER_FIELDS: FactSheetFieldSchema[] = [
     { id: 'CHARACTER::identity::gender', entityKind: 'CHARACTER', cardId: 'identity', fieldName: 'gender', fieldType: 'text', label: 'Gender', placeholder: 'Click to add gender...', displayOrder: 7, isSystem: true, createdAt: 0, updatedAt: 0 },
     // Progression & Vitals - Now uses dynamic sliders
     { id: 'CHARACTER::progression::level', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'level', fieldType: 'number', label: 'Level', min: 1, defaultValue: '1', displayOrder: 0, isSystem: true, createdAt: 0, updatedAt: 0 },
-    { id: 'CHARACTER::progression::dynamicSliders', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'dynamicSliders', fieldType: 'dynamic-sliders', label: 'Vitals & Stats', displayOrder: 1, isSystem: true, createdAt: 0, updatedAt: 0 },
+
+    // Default Vitals (Restored)
+    { id: 'CHARACTER::progression::xp', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'xp', fieldType: 'progress', label: 'Experience', currentField: 'xpCurrent', maxField: 'xpRequired', color: '#eab308', displayOrder: 1, isSystem: true, createdAt: 0, updatedAt: 0 },
+    { id: 'CHARACTER::progression::health', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'health', fieldType: 'progress', label: 'Health', currentField: 'healthCurrent', maxField: 'healthMax', color: '#ef4444', displayOrder: 2, isSystem: true, createdAt: 0, updatedAt: 0 },
+    { id: 'CHARACTER::progression::mana', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'mana', fieldType: 'progress', label: 'Mana', currentField: 'manaCurrent', maxField: 'manaMax', color: '#3b82f6', displayOrder: 3, isSystem: true, createdAt: 0, updatedAt: 0 },
+    { id: 'CHARACTER::progression::stamina', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'stamina', fieldType: 'progress', label: 'Stamina', currentField: 'staminaCurrent', maxField: 'staminaMax', color: '#22c55e', displayOrder: 4, isSystem: true, createdAt: 0, updatedAt: 0 },
+    { id: 'CHARACTER::progression::statusConditions', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'statusConditions', fieldType: 'array', label: 'Status Conditions', displayOrder: 5, isSystem: true, createdAt: 0, updatedAt: 0 },
+
+    // Custom Stats (Dynamic)
+    { id: 'CHARACTER::progression::dynamicSliders', entityKind: 'CHARACTER', cardId: 'progression', fieldName: 'dynamicSliders', fieldType: 'dynamic-sliders', label: 'Custom Stats', displayOrder: 6, isSystem: true, createdAt: 0, updatedAt: 0 },
     // Attributes
     {
         id: 'CHARACTER::attributes::stats', entityKind: 'CHARACTER', cardId: 'attributes', fieldName: 'stats', fieldType: 'stat-grid', label: 'Core Stats', stats: JSON.stringify([
