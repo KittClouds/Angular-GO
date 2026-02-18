@@ -37,7 +37,11 @@ async function writeBinaryFile(handle: FileSystemFileHandle, data: Uint8Array): 
     let writable: FileSystemWritableFileStream | null = null;
     try {
         writable = await (handle as any).createWritable({ mode: "exclusive" });
-        await writable.write(data);
+        if (!writable) throw new Error("Failed to create writable stream");
+
+        // Convert to ArrayBuffer for compatibility
+        const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+        await writable.write(buffer);
     } catch (e: any) {
         if (e?.name === "NoModificationAllowedError") {
             throw new Error("File locked by another writer");
@@ -48,6 +52,7 @@ async function writeBinaryFile(handle: FileSystemFileHandle, data: Uint8Array): 
     }
 }
 
+
 /**
  * Append text line to file
  */
@@ -55,9 +60,12 @@ async function appendTextFile(handle: FileSystemFileHandle, text: string): Promi
     let writable: FileSystemWritableFileStream | null = null;
     try {
         writable = await (handle as any).createWritable({ keepExistingData: true });
+        if (!writable) throw new Error("Failed to create writable stream");
+
         const file = await handle.getFile();
         await writable.seek(file.size);
         await writable.write(text);
+
     } catch (e: any) {
         throw new Error("Failed to append WAL: " + e.message);
     } finally {
@@ -192,10 +200,11 @@ export class SqliteOpfsAdapter {
         // Commit tmp -> current
         try {
             await (tmp as any).move(dir, this.snapshotName);
-        } catch (e) {
+        } catch (e: any) {
             try { await dir.removeEntry(tmpName); } catch { }
-            throw new Error("Failed to commit snapshot: " + e.message);
+            throw new Error("Failed to commit snapshot: " + (e.message || String(e)));
         }
+
     }
 
     /**
@@ -220,7 +229,8 @@ export class SqliteOpfsAdapter {
         try {
             const handle = await dir.getFileHandle(this.walName, { create: true });
             writable = await (handle as any).createWritable();
-            await writable.truncate(0);
+            if (writable) await writable.truncate(0);
+
         } catch (e) {
             console.warn("[SqliteOpfs] WAL truncate failed", e);
         } finally {
