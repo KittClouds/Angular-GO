@@ -301,6 +301,163 @@ CREATE TABLE IF NOT EXISTS raptor_edges (
 CREATE INDEX IF NOT EXISTS idx_raptor_edges_parent ON raptor_edges(parent_id);
 CREATE INDEX IF NOT EXISTS idx_raptor_edges_child ON raptor_edges(child_id);
 CREATE INDEX IF NOT EXISTS idx_raptor_edges_doc ON raptor_edges(doc_id);
+
+-- =============================================================================
+-- CozoDB Parity: Missing Graph Tables
+-- =============================================================================
+
+-- Episodes: Temporal action log
+CREATE TABLE IF NOT EXISTS episodes (
+    scope_id TEXT NOT NULL,
+    note_id TEXT,
+    timestamp INTEGER NOT NULL,
+    action_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    payload TEXT,
+    narrative_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_episodes_scope ON episodes(scope_id, timestamp);
+
+-- Spans & Links
+CREATE TABLE IF NOT EXISTS spans (
+    id TEXT PRIMARY KEY,
+    world_id TEXT,
+    note_id TEXT,
+    narrative_id TEXT,
+    start INTEGER,
+    end INTEGER,
+    text TEXT,
+    content_hash TEXT,
+    span_kind TEXT,
+    status TEXT,
+    created_by TEXT,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_spans_note ON spans(note_id);
+
+CREATE TABLE IF NOT EXISTS wormholes (
+    id TEXT PRIMARY KEY,
+    src_span_id TEXT,
+    dst_span_id TEXT,
+    mode TEXT,
+    confidence REAL,
+    rationale TEXT,
+    wormhole_type TEXT,
+    bidirectional INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_wormholes_src ON wormholes(src_span_id);
+CREATE INDEX IF NOT EXISTS idx_wormholes_dst ON wormholes(dst_span_id);
+
+CREATE TABLE IF NOT EXISTS span_mentions (
+    id TEXT PRIMARY KEY,
+    span_id TEXT,
+    candidate_entity_id TEXT,
+    match_type TEXT,
+    confidence REAL,
+    ev_frequency REAL,
+    ev_capital_ratio REAL,
+    ev_context_score REAL,
+    ev_cooccurrence REAL,
+    status TEXT,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_span_mentions_span ON span_mentions(span_id);
+
+-- Network View
+CREATE TABLE IF NOT EXISTS network_instance (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    schema_id TEXT,
+    network_kind TEXT,
+    network_subtype TEXT,
+    root_folder_id TEXT,
+    root_entity_id TEXT,
+    namespace TEXT,
+    description TEXT,
+    tags TEXT,
+    member_count INTEGER,
+    relationship_count INTEGER,
+    max_depth INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER,
+    group_id TEXT,
+    scope_type TEXT,
+    narrative_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS network_membership (
+    network_id TEXT,
+    entity_id TEXT,
+    x REAL,
+    y REAL,
+    fixed INTEGER,
+    PRIMARY KEY (network_id, entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS network_relationship (
+    network_id TEXT,
+    source_entity_id TEXT,
+    target_entity_id TEXT,
+    relationship_id TEXT,
+    PRIMARY KEY (network_id, relationship_id)
+);
+
+-- Discovery & Fact Sheets
+CREATE TABLE IF NOT EXISTS discovery_candidates (
+    token TEXT PRIMARY KEY,
+    kind INTEGER,
+    score REAL,
+    status INTEGER,
+    last_seen INTEGER,
+    first_seen INTEGER,
+    count INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS entity_cards (
+    entity_id TEXT,
+    card_id TEXT,
+    name TEXT,
+    color TEXT,
+    icon TEXT,
+    display_order INTEGER,
+    is_collapsed INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER,
+    PRIMARY KEY (entity_id, card_id)
+);
+
+CREATE TABLE IF NOT EXISTS folder_schemas (
+    id TEXT PRIMARY KEY,
+    entity_kind TEXT,
+    subtype TEXT,
+    name TEXT,
+    description TEXT,
+    allowed_subfolders TEXT,
+    allowed_note_types TEXT,
+    is_vault_root INTEGER,
+    container_only INTEGER,
+    propagate_kind_to_children INTEGER,
+    icon TEXT,
+    is_system INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+
+-- Blocks: Fine-grained memory access (Legacy/Complementary to Chunks)
+CREATE TABLE IF NOT EXISTS blocks (
+    id TEXT PRIMARY KEY,
+    note_id TEXT,
+    ord INTEGER,
+    text TEXT,
+    narrative_id TEXT,
+    created_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_note ON blocks(note_id);
 `
 
 // NewSQLiteStore creates a new in-memory SQLite store.
@@ -325,12 +482,6 @@ func NewSQLiteStoreWithDSN(dsn string) (*SQLiteStore, error) {
 	s := &SQLiteStore{
 		db:   db,
 		qidx: qgram.NewQGramIndex(3), // Q=3 trigrams
-	}
-
-	// Initialize Knowledge Schema (Knowledge Graph)
-	if err := s.EnsureKnowledgeSchema(); err != nil {
-		s.Close()
-		return nil, fmt.Errorf("failed to create knowledge schema: %w", err)
 	}
 
 	return s, nil
@@ -3071,6 +3222,622 @@ func (s *SQLiteStore) GetUnobservedMessages(threadID string, since int64) ([]*Th
 		msgs = append(msgs, &m)
 	}
 	return msgs, nil
+}
+
+// =============================================================================
+// CozoDB Parity: Missing Graph Types
+// =============================================================================
+
+// Spans & Links
+
+// UpsertSpan inserts or updates a span.
+func (s *SQLiteStore) UpsertSpan(span *Span) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO spans (
+			id, world_id, note_id, narrative_id, start, end, text,
+			content_hash, span_kind, status, created_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			note_id = excluded.note_id,
+			start = excluded.start,
+			end = excluded.end,
+			text = excluded.text,
+			content_hash = excluded.content_hash,
+			status = excluded.status,
+			updated_at = excluded.updated_at
+	`, span.ID, span.WorldID, span.NoteID, span.NarrativeID, span.Start, span.End, span.Text,
+		span.ContentHash, span.SpanKind, span.Status, span.CreatedBy, span.CreatedAt, span.UpdatedAt)
+	return err
+}
+
+// GetSpan retrieves a span by ID.
+func (s *SQLiteStore) GetSpan(id string) (*Span, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var span Span
+	err := s.db.QueryRow(`
+		SELECT id, world_id, note_id, narrative_id, start, end, text,
+			   content_hash, span_kind, status, created_by, created_at, updated_at
+		FROM spans WHERE id = ?
+	`, id).Scan(
+		&span.ID, &span.WorldID, &span.NoteID, &span.NarrativeID, &span.Start, &span.End, &span.Text,
+		&span.ContentHash, &span.SpanKind, &span.Status, &span.CreatedBy, &span.CreatedAt, &span.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &span, nil
+}
+
+// ListSpansForNote retrieves all spans for a note.
+func (s *SQLiteStore) ListSpansForNote(noteID string) ([]*Span, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, world_id, note_id, narrative_id, start, end, text,
+			   content_hash, span_kind, status, created_by, created_at, updated_at
+		FROM spans WHERE note_id = ? ORDER BY start
+	`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []*Span
+	for rows.Next() {
+		var span Span
+		if err := rows.Scan(
+			&span.ID, &span.WorldID, &span.NoteID, &span.NarrativeID, &span.Start, &span.End, &span.Text,
+			&span.ContentHash, &span.SpanKind, &span.Status, &span.CreatedBy, &span.CreatedAt, &span.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		spans = append(spans, &span)
+	}
+	return spans, nil
+}
+
+// DeleteSpan removes a span by ID.
+func (s *SQLiteStore) DeleteSpan(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM spans WHERE id = ?", id)
+	return err
+}
+
+// Wormholes
+
+// UpsertWormhole inserts or updates a wormhole.
+func (s *SQLiteStore) UpsertWormhole(wormhole *Wormhole) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO wormholes (
+			id, src_span_id, dst_span_id, mode, confidence, rationale,
+			wormhole_type, bidirectional, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			mode = excluded.mode,
+			confidence = excluded.confidence,
+			rationale = excluded.rationale,
+			updated_at = excluded.updated_at
+	`, wormhole.ID, wormhole.SrcSpanID, wormhole.DstSpanID, wormhole.Mode, wormhole.Confidence,
+		wormhole.Rationale, wormhole.WormholeType, wormhole.Bidirectional, wormhole.CreatedAt, wormhole.UpdatedAt)
+	return err
+}
+
+// GetWormhole retrieves a wormhole by ID.
+func (s *SQLiteStore) GetWormhole(id string) (*Wormhole, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var w Wormhole
+	err := s.db.QueryRow(`
+		SELECT id, src_span_id, dst_span_id, mode, confidence, rationale,
+			   wormhole_type, bidirectional, created_at, updated_at
+		FROM wormholes WHERE id = ?
+	`, id).Scan(
+		&w.ID, &w.SrcSpanID, &w.DstSpanID, &w.Mode, &w.Confidence, &w.Rationale,
+		&w.WormholeType, &w.Bidirectional, &w.CreatedAt, &w.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// ListWormholesForSpan retrieves wormholes connected to a span.
+func (s *SQLiteStore) ListWormholesForSpan(spanID string) ([]*Wormhole, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+        SELECT id, src_span_id, dst_span_id, mode, confidence, rationale,
+               wormhole_type, bidirectional, created_at, updated_at
+        FROM wormholes WHERE src_span_id = ? OR dst_span_id = ?
+    `, spanID, spanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wormholes []*Wormhole
+	for rows.Next() {
+		var w Wormhole
+		if err := rows.Scan(
+			&w.ID, &w.SrcSpanID, &w.DstSpanID, &w.Mode, &w.Confidence, &w.Rationale,
+			&w.WormholeType, &w.Bidirectional, &w.CreatedAt, &w.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		wormholes = append(wormholes, &w)
+	}
+	return wormholes, nil
+}
+
+// DeleteWormhole removes a wormhole by ID.
+func (s *SQLiteStore) DeleteWormhole(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM wormholes WHERE id = ?", id)
+	return err
+}
+
+// SpanMentions
+
+// UpsertSpanMention inserts or updates a span mention.
+func (s *SQLiteStore) UpsertSpanMention(mention *SpanMention) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+        INSERT INTO span_mentions (
+            id, span_id, candidate_entity_id, match_type, confidence,
+            ev_frequency, ev_capital_ratio, ev_context_score, ev_cooccurrence,
+            status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            candidate_entity_id = excluded.candidate_entity_id,
+            match_type = excluded.match_type,
+            confidence = excluded.confidence,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+    `, mention.ID, mention.SpanID, mention.CandidateEntityID, mention.MatchType, mention.Confidence,
+		mention.EvFrequency, mention.EvCapitalRatio, mention.EvContextScore, mention.EvCooccurrence,
+		mention.Status, mention.CreatedAt, mention.UpdatedAt)
+	return err
+}
+
+// GetSpanMention retrieves a span mention by ID.
+func (s *SQLiteStore) GetSpanMention(id string) (*SpanMention, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var m SpanMention
+	err := s.db.QueryRow(`
+        SELECT id, span_id, candidate_entity_id, match_type, confidence,
+               ev_frequency, ev_capital_ratio, ev_context_score, ev_cooccurrence,
+               status, created_at, updated_at
+        FROM span_mentions WHERE id = ?
+    `, id).Scan(
+		&m.ID, &m.SpanID, &m.CandidateEntityID, &m.MatchType, &m.Confidence,
+		&m.EvFrequency, &m.EvCapitalRatio, &m.EvContextScore, &m.EvCooccurrence,
+		&m.Status, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// ListSpanMentions retrieves all mentions for a span.
+func (s *SQLiteStore) ListSpanMentions(spanID string) ([]*SpanMention, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+        SELECT id, span_id, candidate_entity_id, match_type, confidence,
+               ev_frequency, ev_capital_ratio, ev_context_score, ev_cooccurrence,
+               status, created_at, updated_at
+        FROM span_mentions WHERE span_id = ?
+    `, spanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mentions []*SpanMention
+	for rows.Next() {
+		var m SpanMention
+		if err := rows.Scan(
+			&m.ID, &m.SpanID, &m.CandidateEntityID, &m.MatchType, &m.Confidence,
+			&m.EvFrequency, &m.EvCapitalRatio, &m.EvContextScore, &m.EvCooccurrence,
+			&m.Status, &m.CreatedAt, &m.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		mentions = append(mentions, &m)
+	}
+	return mentions, nil
+}
+
+// DeleteSpanMention removes a span mention by ID.
+func (s *SQLiteStore) DeleteSpanMention(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM span_mentions WHERE id = ?", id)
+	return err
+}
+
+// Network View
+
+// UpsertNetworkInstance inserts or updates a network view.
+func (s *SQLiteStore) UpsertNetworkInstance(net *NetworkInstance) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tagsJSON, _ := json.Marshal(net.Tags)
+
+	_, err := s.db.Exec(`
+		INSERT INTO network_instance (
+			id, name, schema_id, network_kind, network_subtype,
+			root_folder_id, root_entity_id, namespace, description, tags,
+			member_count, relationship_count, max_depth, created_at, updated_at,
+			group_id, scope_type, narrative_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			network_kind = excluded.network_kind,
+			network_subtype = excluded.network_subtype,
+			description = excluded.description,
+			tags = excluded.tags,
+			member_count = excluded.member_count,
+			relationship_count = excluded.relationship_count,
+			max_depth = excluded.max_depth,
+			updated_at = excluded.updated_at
+	`, net.ID, net.Name, net.SchemaID, net.NetworkKind, net.NetworkSubtype,
+		net.RootFolderID, net.RootEntityID, net.Namespace, net.Description, string(tagsJSON),
+		net.MemberCount, net.RelationshipCount, net.MaxDepth, net.CreatedAt, net.UpdatedAt,
+		net.GroupID, net.ScopeType, net.NarrativeID)
+	return err
+}
+
+// GetNetworkInstance retrieves a network view by ID.
+func (s *SQLiteStore) GetNetworkInstance(id string) (*NetworkInstance, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var net NetworkInstance
+	var tagsJSON string
+	err := s.db.QueryRow(`
+		SELECT id, name, schema_id, network_kind, network_subtype,
+			   root_folder_id, root_entity_id, namespace, description, tags,
+			   member_count, relationship_count, max_depth, created_at, updated_at,
+			   group_id, scope_type, narrative_id
+		FROM network_instance WHERE id = ?
+	`, id).Scan(
+		&net.ID, &net.Name, &net.SchemaID, &net.NetworkKind, &net.NetworkSubtype,
+		&net.RootFolderID, &net.RootEntityID, &net.Namespace, &net.Description, &tagsJSON,
+		&net.MemberCount, &net.RelationshipCount, &net.MaxDepth, &net.CreatedAt, &net.UpdatedAt,
+		&net.GroupID, &net.ScopeType, &net.NarrativeID,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(tagsJSON), &net.Tags)
+	return &net, nil
+}
+
+// ListNetworkInstances retrieves all network views.
+func (s *SQLiteStore) ListNetworkInstances() ([]*NetworkInstance, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, name, schema_id, network_kind, network_subtype,
+			   root_folder_id, root_entity_id, namespace, description, tags,
+			   member_count, relationship_count, max_depth, created_at, updated_at,
+			   group_id, scope_type, narrative_id
+		FROM network_instance ORDER BY updated_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var networks []*NetworkInstance
+	for rows.Next() {
+		var net NetworkInstance
+		var tagsJSON string
+		if err := rows.Scan(
+			&net.ID, &net.Name, &net.SchemaID, &net.NetworkKind, &net.NetworkSubtype,
+			&net.RootFolderID, &net.RootEntityID, &net.Namespace, &net.Description, &tagsJSON,
+			&net.MemberCount, &net.RelationshipCount, &net.MaxDepth, &net.CreatedAt, &net.UpdatedAt,
+			&net.GroupID, &net.ScopeType, &net.NarrativeID,
+		); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(tagsJSON), &net.Tags)
+		networks = append(networks, &net)
+	}
+	return networks, nil
+}
+
+// DeleteNetworkInstance removes a network view.
+func (s *SQLiteStore) DeleteNetworkInstance(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM network_instance WHERE id = ?", id)
+	return err
+}
+
+// UpsertNetworkMembership update's an entity's position in a network.
+func (s *SQLiteStore) UpsertNetworkMembership(member *NetworkMembership) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO network_membership (network_id, entity_id, x, y, fixed)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(network_id, entity_id) DO UPDATE SET
+			x = excluded.x,
+			y = excluded.y,
+			fixed = excluded.fixed
+	`, member.NetworkID, member.EntityID, member.X, member.Y, member.Fixed)
+	return err
+}
+
+// GetNetworkMembers retrieves all members of a network.
+func (s *SQLiteStore) GetNetworkMembers(networkID string) ([]*NetworkMembership, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT network_id, entity_id, x, y, fixed
+		FROM network_membership WHERE network_id = ?
+	`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []*NetworkMembership
+	for rows.Next() {
+		var m NetworkMembership
+		if err := rows.Scan(&m.NetworkID, &m.EntityID, &m.X, &m.Y, &m.Fixed); err != nil {
+			return nil, err
+		}
+		members = append(members, &m)
+	}
+	return members, nil
+}
+
+// DeleteNetworkMembership removes an entity from a network.
+func (s *SQLiteStore) DeleteNetworkMembership(networkID string, entityID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM network_membership WHERE network_id = ? AND entity_id = ?", networkID, entityID)
+	return err
+}
+
+// UpsertNetworkRelationship stores a visible edge in a network.
+func (s *SQLiteStore) UpsertNetworkRelationship(rel *NetworkRelationship) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO network_relationship (network_id, source_entity_id, target_entity_id, relationship_id)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(network_id, relationship_id) DO NOTHING
+	`, rel.NetworkID, rel.SourceEntityID, rel.TargetEntityID, rel.RelationshipID)
+	return err
+}
+
+// GetNetworkRelationships retrieves all relationships in a network.
+func (s *SQLiteStore) GetNetworkRelationships(networkID string) ([]*NetworkRelationship, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT network_id, source_entity_id, target_entity_id, relationship_id
+		FROM network_relationship WHERE network_id = ?
+	`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rels []*NetworkRelationship
+	for rows.Next() {
+		var r NetworkRelationship
+		if err := rows.Scan(&r.NetworkID, &r.SourceEntityID, &r.TargetEntityID, &r.RelationshipID); err != nil {
+			return nil, err
+		}
+		rels = append(rels, &r)
+	}
+	return rels, nil
+}
+
+// DeleteNetworkRelationship removes a relationship from a network view.
+func (s *SQLiteStore) DeleteNetworkRelationship(networkID string, relationshipID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM network_relationship WHERE network_id = ? AND relationship_id = ?", networkID, relationshipID)
+	return err
+}
+
+// Discovery & Fact Sheets
+
+// UpsertDiscoveryCandidate inserts or updates a discovery candidate.
+func (s *SQLiteStore) UpsertDiscoveryCandidate(candidate *DiscoveryCandidate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO discovery_candidates (
+			token, kind, score, status, last_seen, first_seen, count
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(token) DO UPDATE SET
+			kind = excluded.kind,
+			score = excluded.score,
+			status = excluded.status,
+			last_seen = excluded.last_seen,
+			count = excluded.count
+	`, candidate.Token, candidate.Kind, candidate.Score, candidate.Status,
+		candidate.LastSeen, candidate.FirstSeen, candidate.Count)
+	return err
+}
+
+// ListDiscoveryCandidates retrieves all discovery candidates.
+func (s *SQLiteStore) ListDiscoveryCandidates() ([]*DiscoveryCandidate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT token, kind, score, status, last_seen, first_seen, count
+		FROM discovery_candidates ORDER BY score DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var candidates []*DiscoveryCandidate
+	for rows.Next() {
+		var c DiscoveryCandidate
+		if err := rows.Scan(
+			&c.Token, &c.Kind, &c.Score, &c.Status,
+			&c.LastSeen, &c.FirstSeen, &c.Count,
+		); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, &c)
+	}
+	return candidates, nil
+}
+
+// UpsertEntityCard inserts or updates an entity card.
+func (s *SQLiteStore) UpsertEntityCard(card *EntityCard) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO entity_cards (
+			entity_id, card_id, name, color, icon, display_order, is_collapsed, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(entity_id, card_id) DO UPDATE SET
+			name = excluded.name,
+			color = excluded.color,
+			icon = excluded.icon,
+			display_order = excluded.display_order,
+			is_collapsed = excluded.is_collapsed,
+			updated_at = excluded.updated_at
+	`, card.EntityID, card.CardID, card.Name, card.Color, card.Icon,
+		card.DisplayOrder, card.IsCollapsed, card.CreatedAt, card.UpdatedAt)
+	return err
+}
+
+// GetEntityCards retrieves cards for an entity.
+func (s *SQLiteStore) GetEntityCards(entityID string) ([]*EntityCard, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT entity_id, card_id, name, color, icon, display_order, is_collapsed, created_at, updated_at
+		FROM entity_cards WHERE entity_id = ? ORDER BY display_order
+	`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cards []*EntityCard
+	for rows.Next() {
+		var c EntityCard
+		if err := rows.Scan(
+			&c.EntityID, &c.CardID, &c.Name, &c.Color, &c.Icon,
+			&c.DisplayOrder, &c.IsCollapsed, &c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		cards = append(cards, &c)
+	}
+	return cards, nil
+}
+
+// UpsertFolderSchema inserts or updates a folder schema.
+func (s *SQLiteStore) UpsertFolderSchema(schema *FolderSchema) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO folder_schemas (
+			id, entity_kind, subtype, name, description, allowed_subfolders,
+			allowed_note_types, is_vault_root, container_only, propagate_kind_to_children,
+			icon, is_system, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			entity_kind = excluded.entity_kind,
+			subtype = excluded.subtype,
+			name = excluded.name,
+			description = excluded.description,
+			allowed_subfolders = excluded.allowed_subfolders,
+			allowed_note_types = excluded.allowed_note_types,
+			is_vault_root = excluded.is_vault_root,
+			container_only = excluded.container_only,
+			propagate_kind_to_children = excluded.propagate_kind_to_children,
+			icon = excluded.icon,
+			is_system = excluded.is_system,
+			updated_at = excluded.updated_at
+	`, schema.ID, schema.EntityKind, schema.Subtype, schema.Name, schema.Description,
+		schema.AllowedSubfolders, schema.AllowedNoteTypes, schema.IsVaultRoot,
+		schema.ContainerOnly, schema.PropagateKindToChildren, schema.Icon,
+		schema.IsSystem, schema.CreatedAt, schema.UpdatedAt)
+	return err
+}
+
+// GetFolderSchema retrieves a folder schema by ID.
+func (s *SQLiteStore) GetFolderSchema(id string) (*FolderSchema, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var fs FolderSchema
+	err := s.db.QueryRow(`
+		SELECT id, entity_kind, subtype, name, description, allowed_subfolders,
+			   allowed_note_types, is_vault_root, container_only, propagate_kind_to_children,
+			   icon, is_system, created_at, updated_at
+		FROM folder_schemas WHERE id = ?
+	`, id).Scan(
+		&fs.ID, &fs.EntityKind, &fs.Subtype, &fs.Name, &fs.Description,
+		&fs.AllowedSubfolders, &fs.AllowedNoteTypes, &fs.IsVaultRoot,
+		&fs.ContainerOnly, &fs.PropagateKindToChildren, &fs.Icon,
+		&fs.IsSystem, &fs.CreatedAt, &fs.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &fs, nil
 }
 
 // GetVersion returns the SQLite library version.

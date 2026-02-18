@@ -347,7 +347,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
             console.log('[Sidebar] ✅ Graph scan complete:', result);
 
-            // Persist to CozoDB
+            // Persist to GoKitt/SQLite
             if (result && !result.error) {
                 const stats = await this.goKittService.persistGraph(
                     result,

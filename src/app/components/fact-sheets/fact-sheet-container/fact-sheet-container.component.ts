@@ -11,7 +11,7 @@ import { FactSheetCardComponent } from '../fact-sheet-card/fact-sheet-card.compo
 import { FactSheetService, CardWithFields } from '../fact-sheet.service';
 import { FactSheetFieldSchema } from '../../../lib/dexie';
 import { SliderManagerComponent } from '../fields/slider-manager.component';
-import { graphRegistry } from '../../../lib/cozo/graph/GraphRegistry';
+import { smartGraphRegistry } from '../../../lib/registry';
 import { UMBRA_PRESETS, getUmbraColor } from '../types/umbra-presets';
 import { calculateScaledStat } from '../../../lib/math/progression.math';
 export interface ParsedEntity {
@@ -654,8 +654,8 @@ export class FactSheetContainerComponent implements OnInit {
     }
     allAliases.push(...aliases.filter(a => a.trim()));
 
-    // Update registry (Cozo-backed, persists to OPFS)
-    graphRegistry.updateEntity(entityId, { aliases: allAliases });
+    // Update registry (persists to Dexie)
+    smartGraphRegistry.updateEntity(entityId, { aliases: allAliases });
     console.log(`[FactSheet] Synced aliases to registry: ${allAliases.join(', ')}`);
   }
 

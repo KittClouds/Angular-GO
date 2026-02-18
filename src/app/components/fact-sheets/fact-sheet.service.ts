@@ -11,6 +11,7 @@ import {
 import { ChapterService } from '../../lib/services/chapter.service';
 import { inject } from '@angular/core';
 import { DEFAULT_ENTITY_SCHEMAS } from '../../lib/schemas/entity-fact-sheet-schemas';
+import { GoKittService } from '../../services/gokitt.service';
 
 // ============================================================================
 // DEFAULT SCHEMAS - Loaded synchronously, no async delay
@@ -145,6 +146,7 @@ export class FactSheetService {
     // We also need the ChapterService for inheritance, but circular dependency risk if not careful.
     // We'll inject it.
     private chapterService = inject(ChapterService);
+    private goKitt = inject(GoKittService);
     private initialized = false;
 
     constructor() {
@@ -300,8 +302,68 @@ export class FactSheetService {
                 console.log('[FactSheetService] Synced CHARACTER schema to Dexie');
             }
 
+            // GoKitt Sync (Persistence)
+            // Wait for GoKitt to be ready before syncing
+            await this.syncCardsToGoKitt();
+
         } catch (err) {
             console.error('[FactSheetService] Error syncing to Dexie:', err);
         }
+    }
+
+    /**
+     * Sync all default cards to GoKitt backend.
+     * Waits for GoKitt WASM to be ready before attempting sync.
+     */
+    private async syncCardsToGoKitt(): Promise<void> {
+        // Wait for GoKitt to be ready (with timeout)
+        const maxWait = 10000; // 10 seconds max
+        const startTime = Date.now();
+
+        while (!this.goKitt.isReady && (Date.now() - startTime) < maxWait) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        if (!this.goKitt.isReady) {
+            console.warn('[FactSheetService] GoKitt not ready after 10s, skipping card sync');
+            return;
+        }
+
+        // Collect all default cards
+        const allCards: FactSheetCardSchema[] = [];
+        for (const [kind, data] of Object.entries(DEFAULT_SCHEMAS)) {
+            allCards.push(...data.cards);
+        }
+
+        // Sync cards sequentially to avoid overwhelming the worker
+        let synced = 0;
+        let failed = 0;
+
+        for (const card of allCards) {
+            const goCard = {
+                entityId: card.entityKind,
+                cardId: card.cardId,
+                name: card.title,
+                color: card.gradient,
+                icon: card.icon,
+                displayOrder: card.displayOrder,
+                isCollapsed: false,
+                createdAt: card.createdAt || Date.now(),
+                updatedAt: card.updatedAt || Date.now()
+            };
+
+            try {
+                await this.goKitt.storeUpsertEntityCard(goCard);
+                synced++;
+            } catch (e) {
+                failed++;
+                // Only log first few failures to avoid console spam
+                if (failed <= 3) {
+                    console.warn(`[FactSheetService] Failed to sync card ${card.id} to Go:`, e);
+                }
+            }
+        }
+
+        console.log(`[FactSheetService] Synced ${synced} cards to GoKitt (${failed} failed)`);
     }
 }

@@ -9,8 +9,9 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { cozoDb } from '../../cozo/db';
-import { recordAction } from '../../cozo/memory/EpisodeLogService';
+// CozoDB removed - stubs for future reimplementation
+// import { cozoDb } from '../../cozo/db';
+// import { recordAction } from '../../cozo/memory/EpisodeLogService';
 import {
     validateRO,
     validateWS,
@@ -20,6 +21,25 @@ import {
     DEFAULT_RO_CAPS,
     DEFAULT_WS_CAPS,
 } from '../validators/query-validator';
+
+// Stub for cozoDb - to be reimplemented
+const cozoDb = {
+    isReady: () => false,
+    run: (_script: string, _params: Record<string, unknown>) => JSON.stringify({ ok: false, message: 'CozoDB removed' })
+};
+
+// Stub for recordAction - to be reimplemented
+function recordAction(
+    _workspaceId: string,
+    _narrativeId: string,
+    _actionType: string,
+    _targetId: string,
+    _targetType: string,
+    _payload: unknown,
+    _parentId: string
+): void {
+    // No-op stub
+}
 
 // ============================================================================
 // Types

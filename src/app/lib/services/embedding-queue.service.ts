@@ -1,8 +1,31 @@
 import { Injectable, signal, inject, OnDestroy } from '@angular/core';
 import { Subject, Subscription, debounceTime } from 'rxjs';
 import { RagWorkerService } from './rag-worker.service';
-import { CozoService } from '../cozo/cozo.service';
-import { RAPTOR_QUERIES, RaptorPayload } from '../cozo/schema/layer3-raptor';
+
+// ============================================================================
+// CozoDB Stubs - To be reimplemented
+// ============================================================================
+
+interface RaptorPayload {
+    text: string;
+    sourceId: string;
+    startIndex: number;
+    endIndex: number;
+    metadata: { title: string };
+}
+
+const RAPTOR_QUERIES = {
+    upsertNodes: 'STUB: upsertNodes - CozoDB removed'
+};
+
+// Stub CozoService for future reimplementation
+@Injectable({ providedIn: 'root' })
+class CozoService {
+    async run(_query: string, _params: Record<string, unknown>): Promise<{ ok: boolean }> {
+        console.warn('[CozoService] Stub called - CozoDB removed');
+        return { ok: false };
+    }
+}
 
 export interface EmbeddingJob {
     noteId: string;

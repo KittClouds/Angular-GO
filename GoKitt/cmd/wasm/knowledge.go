@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"syscall/js"
 
+	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/knowledge"
 )
 
@@ -23,32 +24,74 @@ func knowledgeInit(this js.Value, args []js.Value) interface{} {
 }
 
 // knowledgeLoad loads the graph from the persistent SQLite store.
-// Args: []
+// Loads entities as nodes and edges from the unified SQLite store into the in-memory graph.
 func knowledgeLoad(this js.Value, args []js.Value) interface{} {
+	if knowledgeGraph == nil {
+		return ErrorResult("knowledge graph not initialized")
+	}
 	if sqlStore == nil {
 		return ErrorResult("store not initialized")
 	}
 
-	fmt.Println("[GoKitt] 📚 Loading Knowledge Graph from SQLite...")
-	g, err := sqlStore.LoadKnowledgeGraph()
+	fmt.Println("[GoKitt] 📚 Loading knowledge graph from SQLite...")
+
+	// Load entities as nodes
+	entities, err := sqlStore.ListEntities("")
 	if err != nil {
-		return ErrorResult("failed to load graph: " + err.Error())
+		return ErrorResult("failed to list entities: " + err.Error())
 	}
-	knowledgeGraph = g
 
-	nodeCount := len(g.Nodes)
+	nodeCount := 0
+	for _, e := range entities {
+		node := &knowledge.KnowledgeNode{
+			ID:    e.ID,
+			Kind:  e.Kind,
+			Label: e.Label,
+			Props: make(map[string]interface{}),
+		}
+		// Aliases is already []string in Entity struct
+		if len(e.Aliases) > 0 {
+			node.Props["aliases"] = e.Aliases
+		}
+		knowledgeGraph.AddNode(node)
+		nodeCount++
+	}
+
+	// Load all edges by iterating through entities
+	// Note: ListEdgesForEntity returns edges for a specific entity
+	// We need to collect all unique edges
+	edgeSet := make(map[string]*knowledge.KnowledgeEdge)
+	for _, e := range entities {
+		edges, err := sqlStore.ListEdgesForEntity(e.ID)
+		if err != nil {
+			continue
+		}
+		for _, edge := range edges {
+			key := fmt.Sprintf("%s-%s-%s", edge.SourceID, edge.RelType, edge.TargetID)
+			if _, exists := edgeSet[key]; !exists {
+				edgeSet[key] = &knowledge.KnowledgeEdge{
+					SourceID: edge.SourceID,
+					TargetID: edge.TargetID,
+					Relation: edge.RelType,
+					Weight:   edge.Confidence,
+					Props:    make(map[string]interface{}),
+				}
+			}
+		}
+	}
+
 	edgeCount := 0
-	for _, edges := range g.OutboundEdges {
-		edgeCount += len(edges)
+	for _, edge := range edgeSet {
+		knowledgeGraph.AddEdge(edge)
+		edgeCount++
 	}
 
-	fmt.Printf("[GoKitt] 📚 Knowledge Graph loaded: %d nodes, %d edges\n", nodeCount, edgeCount)
-
+	fmt.Printf("[GoKitt] 📚 Loaded %d nodes and %d edges from SQLite\n", nodeCount, edgeCount)
 	return SuccessResult(fmt.Sprintf("loaded %d nodes, %d edges", nodeCount, edgeCount))
 }
 
 // knowledgeSave saves the current in-memory graph to SQLite.
-// Args: []
+// Persists the in-memory graph to the unified SQLite store.
 func knowledgeSave(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
@@ -57,15 +100,51 @@ func knowledgeSave(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	nodeCount := len(knowledgeGraph.Nodes)
-	fmt.Printf("[GoKitt] 💾 Saving Knowledge Graph (%d nodes)...\n", nodeCount)
+	fmt.Println("[GoKitt] 💾 Saving knowledge graph to SQLite...")
 
-	if err := sqlStore.SaveKnowledgeGraph(knowledgeGraph); err != nil {
-		return ErrorResult("failed to save graph: " + err.Error())
-	}
+	nodeCount := 0
+	edgeCount := 0
 
-	fmt.Println("[GoKitt] 💾 Knowledge Graph saved to SQLite")
-	return SuccessResult("graph saved")
+	// Save nodes as entities
+	knowledgeGraph.VisitNodes(func(n *knowledge.KnowledgeNode) {
+		var aliases []string
+		if a, ok := n.Props["aliases"]; ok {
+			if arr, ok := a.([]string); ok {
+				aliases = arr
+			}
+		}
+
+		entity := &store.Entity{
+			ID:        n.ID,
+			Label:     n.Label,
+			Kind:      n.Kind,
+			Aliases:   aliases,
+			CreatedAt: 0,
+			UpdatedAt: 0,
+		}
+
+		if err := sqlStore.UpsertEntity(entity); err == nil {
+			nodeCount++
+		}
+	})
+
+	// Save edges
+	knowledgeGraph.VisitEdges(func(e *knowledge.KnowledgeEdge) {
+		edge := &store.Edge{
+			ID:         fmt.Sprintf("%s-%s-%s", e.SourceID, e.Relation, e.TargetID),
+			SourceID:   e.SourceID,
+			TargetID:   e.TargetID,
+			RelType:    e.Relation,
+			Confidence: e.Weight,
+		}
+
+		if err := sqlStore.UpsertEdge(edge); err == nil {
+			edgeCount++
+		}
+	})
+
+	fmt.Printf("[GoKitt] 💾 Saved %d nodes and %d edges to SQLite\n", nodeCount, edgeCount)
+	return SuccessResult(fmt.Sprintf("saved %d nodes, %d edges", nodeCount, edgeCount))
 }
 
 // knowledgeAddNode adds or updates a node.

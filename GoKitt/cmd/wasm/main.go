@@ -109,6 +109,30 @@ func main() {
 		"storeGetFolder":    js.FuncOf(storeGetFolder),
 		"storeDeleteFolder": js.FuncOf(storeDeleteFolder),
 		"storeListFolders":  js.FuncOf(storeListFolders),
+		// Store Spans & Links
+		"storeUpsertSpan":       js.FuncOf(storeUpsertSpan),
+		"storeGetSpan":          js.FuncOf(storeGetSpan),
+		"storeListSpansForNote": js.FuncOf(storeListSpansForNote),
+		"storeDeleteSpan":       js.FuncOf(storeDeleteSpan),
+		// Store Network View
+		"storeUpsertNetworkInstance":     js.FuncOf(storeUpsertNetworkInstance),
+		"storeGetNetworkInstance":        js.FuncOf(storeGetNetworkInstance),
+		"storeListNetworkInstances":      js.FuncOf(storeListNetworkInstances),
+		"storeDeleteNetworkInstance":     js.FuncOf(storeDeleteNetworkInstance),
+		"storeUpsertNetworkMembership":   js.FuncOf(storeUpsertNetworkMembership),
+		"storeGetNetworkMembers":         js.FuncOf(storeGetNetworkMembers),
+		"storeDeleteNetworkMembership":   js.FuncOf(storeDeleteNetworkMembership),
+		"storeUpsertNetworkRelationship": js.FuncOf(storeUpsertNetworkRelationship),
+		"storeGetNetworkRelationships":   js.FuncOf(storeGetNetworkRelationships),
+		"storeDeleteNetworkRelationship": js.FuncOf(storeDeleteNetworkRelationship),
+		// Store Discovery
+		"storeUpsertDiscoveryCandidate": js.FuncOf(storeUpsertDiscoveryCandidate),
+		"storeListDiscoveryCandidates":  js.FuncOf(storeListDiscoveryCandidates),
+		// Store Fact Sheets
+		"storeUpsertEntityCard":   js.FuncOf(storeUpsertEntityCard),
+		"storeGetEntityCards":     js.FuncOf(storeGetEntityCards),
+		"storeUpsertFolderSchema": js.FuncOf(storeUpsertFolderSchema),
+		"storeGetFolderSchema":    js.FuncOf(storeGetFolderSchema),
 		// Phase 3: Graph Merger API
 		"mergerInit":       js.FuncOf(mergerInit),
 		"mergerAddScanner": js.FuncOf(mergerAddScanner),
@@ -1176,6 +1200,424 @@ func storeListEdges(this js.Value, args []js.Value) interface{} {
 	}
 
 	bytes, _ := json.Marshal(edges)
+	return string(bytes)
+}
+
+// =============================================================================
+// CozoDB Parity: Spans & Links
+// =============================================================================
+
+// storeUpsertSpan inserts or updates a span.
+// Args: [spanJSON string]
+func storeUpsertSpan(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertSpan requires 1 arg: spanJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var span store.Span
+	if err := json.Unmarshal([]byte(args[0].String()), &span); err != nil {
+		return ErrorResult("invalid span json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertSpan(&span); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	emitWal("upsertSpan", span)
+	return SuccessResult("upserted " + span.ID)
+}
+
+// storeGetSpan retrieves a span by ID.
+// Args: [id string]
+func storeGetSpan(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetSpan requires 1 arg: id")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	span, err := sqlStore.GetSpan(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if span == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(span)
+	return string(bytes)
+}
+
+// storeListSpansForNote retrieves all spans for a note.
+// Args: [noteID string]
+func storeListSpansForNote(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeListSpansForNote requires 1 arg: noteID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	spans, err := sqlStore.ListSpansForNote(args[0].String())
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(spans)
+	return string(bytes)
+}
+
+// storeDeleteSpan deletes a span by ID.
+// Args: [id string]
+func storeDeleteSpan(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeDeleteSpan requires 1 arg: id")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	id := args[0].String()
+	if err := sqlStore.DeleteSpan(id); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+
+	emitWal("deleteSpan", map[string]string{"id": id})
+	return SuccessResult("deleted")
+}
+
+// =============================================================================
+// CozoDB Parity: Network View
+// =============================================================================
+
+// storeUpsertNetworkInstance inserts or updates a network view.
+// Args: [networkJSON string]
+func storeUpsertNetworkInstance(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertNetworkInstance requires 1 arg: networkJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var net store.NetworkInstance
+	if err := json.Unmarshal([]byte(args[0].String()), &net); err != nil {
+		return ErrorResult("invalid network json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertNetworkInstance(&net); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	emitWal("upsertNetworkInstance", net)
+	return SuccessResult("upserted " + net.ID)
+}
+
+// storeGetNetworkInstance retrieves a network view by ID.
+// Args: [id string]
+func storeGetNetworkInstance(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetNetworkInstance requires 1 arg: id")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	net, err := sqlStore.GetNetworkInstance(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if net == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(net)
+	return string(bytes)
+}
+
+// storeListNetworkInstances retrieves all network views.
+// Args: []
+func storeListNetworkInstances(this js.Value, args []js.Value) interface{} {
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	nets, err := sqlStore.ListNetworkInstances()
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(nets)
+	return string(bytes)
+}
+
+// storeDeleteNetworkInstance deletes a network view by ID.
+// Args: [id string]
+func storeDeleteNetworkInstance(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeDeleteNetworkInstance requires 1 arg: id")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	id := args[0].String()
+	if err := sqlStore.DeleteNetworkInstance(id); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+
+	emitWal("deleteNetworkInstance", map[string]string{"id": id})
+	return SuccessResult("deleted")
+}
+
+// storeUpsertNetworkMembership inserts or updates a network membership.
+// Args: [memberJSON string]
+func storeUpsertNetworkMembership(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertNetworkMembership requires 1 arg: memberJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var member store.NetworkMembership
+	if err := json.Unmarshal([]byte(args[0].String()), &member); err != nil {
+		return ErrorResult("invalid member json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertNetworkMembership(&member); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted membership")
+}
+
+// storeGetNetworkMembers retrieves members for a network.
+// Args: [networkID string]
+func storeGetNetworkMembers(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetNetworkMembers requires 1 arg: networkID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	members, err := sqlStore.GetNetworkMembers(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(members)
+	return string(bytes)
+}
+
+// storeUpsertNetworkRelationship inserts or updates a network relationship visibility.
+// Args: [relJSON string]
+func storeUpsertNetworkRelationship(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertNetworkRelationship requires 1 arg: relJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var rel store.NetworkRelationship
+	if err := json.Unmarshal([]byte(args[0].String()), &rel); err != nil {
+		return ErrorResult("invalid rel json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertNetworkRelationship(&rel); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted relationship")
+}
+
+// storeGetNetworkRelationships retrieves relationships for a network.
+// Args: [networkID string]
+func storeGetNetworkRelationships(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetNetworkRelationships requires 1 arg: networkID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	rels, err := sqlStore.GetNetworkRelationships(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(rels)
+	return string(bytes)
+}
+
+// storeDeleteNetworkMembership removes an entity from a network.
+// Args: [networkID string, entityID string]
+func storeDeleteNetworkMembership(this js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return ErrorResult("storeDeleteNetworkMembership requires 2 args: networkID, entityID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	if err := sqlStore.DeleteNetworkMembership(args[0].String(), args[1].String()); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+
+	return SuccessResult("deleted membership")
+}
+
+// storeDeleteNetworkRelationship removes a relationship from a network view.
+// Args: [networkID string, relationshipID string]
+func storeDeleteNetworkRelationship(this js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return ErrorResult("storeDeleteNetworkRelationship requires 2 args: networkID, relationshipID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	if err := sqlStore.DeleteNetworkRelationship(args[0].String(), args[1].String()); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+
+	return SuccessResult("deleted relationship")
+}
+
+// =============================================================================
+// CozoDB Parity: Discovery (Inbox)
+// =============================================================================
+
+// storeUpsertDiscoveryCandidate inserts or updates a discovery candidate.
+// Args: [candidateJSON string]
+func storeUpsertDiscoveryCandidate(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertDiscoveryCandidate requires 1 arg: candidateJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var candidate store.DiscoveryCandidate
+	if err := json.Unmarshal([]byte(args[0].String()), &candidate); err != nil {
+		return ErrorResult("invalid candidate json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertDiscoveryCandidate(&candidate); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted " + candidate.Token)
+}
+
+// storeListDiscoveryCandidates retrieves all discovery candidates.
+// Args: []
+func storeListDiscoveryCandidates(this js.Value, args []js.Value) interface{} {
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	candidates, err := sqlStore.ListDiscoveryCandidates()
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(candidates)
+	return string(bytes)
+}
+
+// =============================================================================
+// CozoDB Parity: Fact Sheets & Folders
+// =============================================================================
+
+// storeUpsertEntityCard inserts or updates an entity card.
+// Args: [cardJSON string]
+func storeUpsertEntityCard(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertEntityCard requires 1 arg: cardJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var card store.EntityCard
+	if err := json.Unmarshal([]byte(args[0].String()), &card); err != nil {
+		return ErrorResult("invalid card json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertEntityCard(&card); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted card")
+}
+
+// storeGetEntityCards retrieves cards for an entity.
+// Args: [entityID string]
+func storeGetEntityCards(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetEntityCards requires 1 arg: entityID")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	cards, err := sqlStore.GetEntityCards(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(cards)
+	return string(bytes)
+}
+
+// storeUpsertFolderSchema inserts or updates a folder schema.
+// Args: [schemaJSON string]
+func storeUpsertFolderSchema(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertFolderSchema requires 1 arg: schemaJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var schema store.FolderSchema
+	if err := json.Unmarshal([]byte(args[0].String()), &schema); err != nil {
+		return ErrorResult("invalid schema json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertFolderSchema(&schema); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted " + schema.ID)
+}
+
+// storeGetFolderSchema retrieves a folder schema by ID.
+// Args: [id string]
+func storeGetFolderSchema(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeGetFolderSchema requires 1 arg: id")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	schema, err := sqlStore.GetFolderSchema(args[0].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if schema == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(schema)
 	return string(bytes)
 }
 

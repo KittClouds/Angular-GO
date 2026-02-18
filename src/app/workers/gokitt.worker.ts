@@ -44,7 +44,9 @@ type GoKittWorkerMessage =
     | { type: 'DOC_COUNT'; id: number }
     // SQLite Store API
     | { type: 'STORE_INIT'; id: number }
+    | { type: 'STORE_GET_VERSION'; id: number }
     | { type: 'STORE_UPSERT_NOTE'; payload: { noteJSON: string }; id: number }
+
     | { type: 'STORE_GET_NOTE'; payload: { id: string }; id: number }
     | { type: 'STORE_DELETE_NOTE'; payload: { id: string }; id: number }
     | { type: 'STORE_LIST_NOTES'; payload: { folderId?: string }; id: number }
@@ -99,6 +101,30 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    // Store: Spans & Links
+    | { type: 'STORE_UPSERT_SPAN'; payload: { spanJSON: string }; id: number }
+    | { type: 'STORE_GET_SPAN'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_SPANS_FOR_NOTE'; payload: { noteId: string }; id: number }
+    | { type: 'STORE_DELETE_SPAN'; payload: { id: string }; id: number }
+    // Store: Network View
+    | { type: 'STORE_UPSERT_NETWORK_INSTANCE'; payload: { networkJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_INSTANCE'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_NETWORK_INSTANCES'; id: number }
+    | { type: 'STORE_DELETE_NETWORK_INSTANCE'; payload: { id: string }; id: number }
+    | { type: 'STORE_UPSERT_NETWORK_MEMBERSHIP'; payload: { memberJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_MEMBERS'; payload: { networkId: string }; id: number }
+    | { type: 'STORE_DELETE_NETWORK_MEMBERSHIP'; payload: { networkId: string; entityId: string }; id: number }
+    | { type: 'STORE_UPSERT_NETWORK_RELATIONSHIP'; payload: { relJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_RELATIONSHIPS'; payload: { networkId: string }; id: number }
+    | { type: 'STORE_DELETE_NETWORK_RELATIONSHIP'; payload: { networkId: string; relationshipId: string }; id: number }
+    // Store: Discovery
+    | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE'; payload: { candidateJSON: string }; id: number }
+    | { type: 'STORE_LIST_DISCOVERY_CANDIDATES'; id: number }
+    // Store: Fact Sheets
+    | { type: 'STORE_UPSERT_ENTITY_CARD'; payload: { cardJSON: string }; id: number }
+    | { type: 'STORE_GET_ENTITY_CARDS'; payload: { entityId: string }; id: number }
+    | { type: 'STORE_UPSERT_FOLDER_SCHEMA'; payload: { schemaJSON: string }; id: number }
+    | { type: 'STORE_GET_FOLDER_SCHEMA'; payload: { id: string }; id: number }
     // RAPTOR API
     | { type: 'RAPTOR_INIT'; payload: { configJSON?: string }; id: number }
     | { type: 'RAPTOR_CHUNK'; payload: { docID: string; text: string }; id: number }
@@ -204,6 +230,27 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    // Store Results
+    | { type: 'STORE_UPSERT_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SPAN_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SPANS_FOR_NOTE_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NETWORK_INSTANCE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_INSTANCE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_NETWORK_INSTANCES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_NETWORK_INSTANCE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NETWORK_MEMBERSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_MEMBERS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_NETWORK_MEMBERSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NETWORK_RELATIONSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_RELATIONSHIPS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_NETWORK_RELATIONSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_ENTITY_CARD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
     // RAPTOR responses
     | { type: 'RAPTOR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'RAPTOR_CHUNK_RESULT'; id: number; payload: { success: boolean; chunks?: Array<{ text: string; start: number; end: number }>; count?: number; error?: string } }
@@ -335,6 +382,27 @@ declare const GoKitt: {
     storeListFolders: (parentId?: string) => string;
     // WAL Handler Registration
     setWalHandler: (callback: (op: string, dataJSON: string) => void) => string;
+    // Store API
+    storeUpsertSpan: (spanJSON: string) => string;
+    storeGetSpan: (id: string) => string;
+    storeListSpansForNote: (noteId: string) => string;
+    storeDeleteSpan: (id: string) => string;
+    storeUpsertNetworkInstance: (networkJSON: string) => string;
+    storeGetNetworkInstance: (id: string) => string;
+    storeListNetworkInstances: () => string;
+    storeDeleteNetworkInstance: (id: string) => string;
+    storeUpsertNetworkMembership: (memberJSON: string) => string;
+    storeGetNetworkMembers: (networkId: string) => string;
+    storeDeleteNetworkMembership: (networkId: string, entityId: string) => string;
+    storeUpsertNetworkRelationship: (relJSON: string) => string;
+    storeGetNetworkRelationships: (networkId: string) => string;
+    storeDeleteNetworkRelationship: (networkId: string, relationshipId: string) => string;
+    storeUpsertDiscoveryCandidate: (candidateJSON: string) => string;
+    storeListDiscoveryCandidates: () => string;
+    storeUpsertEntityCard: (cardJSON: string) => string;
+    storeGetEntityCards: (entityId: string) => string;
+    storeUpsertFolderSchema: (schemaJSON: string) => string;
+    storeGetFolderSchema: (id: string) => string;
     // Phase 3: Graph Merger API
 
     mergerInit: () => string;
@@ -1343,6 +1411,260 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: Array.isArray(parsed) ? parsed : []
                 } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // Store: Spans & Links
+            // =================================================================
+
+            case 'STORE_UPSERT_SPAN': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_SPAN_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertSpan(msg.payload.spanJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_SPAN_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_SPAN': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_SPAN_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetSpan(msg.payload.id);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_SPAN_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_SPAN_RESULT', id: msg.id, payload: null });
+                }
+                break;
+            }
+
+            case 'STORE_LIST_SPANS_FOR_NOTE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_SPANS_FOR_NOTE_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListSpansForNote(msg.payload.noteId);
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_SPANS_FOR_NOTE_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_SPAN': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_SPAN_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteSpan(msg.payload.id);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_SPAN_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            // =================================================================
+            // Store: Network View
+            // =================================================================
+
+            case 'STORE_UPSERT_NETWORK_INSTANCE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_NETWORK_INSTANCE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertNetworkInstance(msg.payload.networkJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_NETWORK_INSTANCE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_NETWORK_INSTANCE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_NETWORK_INSTANCE_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetNetworkInstance(msg.payload.id);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_NETWORK_INSTANCE_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_NETWORK_INSTANCE_RESULT', id: msg.id, payload: null });
+                }
+                break;
+            }
+
+            case 'STORE_LIST_NETWORK_INSTANCES': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_NETWORK_INSTANCES_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListNetworkInstances();
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_NETWORK_INSTANCES_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_NETWORK_INSTANCE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_NETWORK_INSTANCE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteNetworkInstance(msg.payload.id);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_NETWORK_INSTANCE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_UPSERT_NETWORK_MEMBERSHIP': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_NETWORK_MEMBERSHIP_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertNetworkMembership(msg.payload.memberJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_NETWORK_MEMBERSHIP_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_NETWORK_MEMBERS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_NETWORK_MEMBERS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeGetNetworkMembers(msg.payload.networkId);
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_GET_NETWORK_MEMBERS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_UPSERT_NETWORK_RELATIONSHIP': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_NETWORK_RELATIONSHIP_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertNetworkRelationship(msg.payload.relJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_NETWORK_RELATIONSHIP_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_NETWORK_RELATIONSHIPS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_NETWORK_RELATIONSHIPS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeGetNetworkRelationships(msg.payload.networkId);
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_GET_NETWORK_RELATIONSHIPS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_NETWORK_MEMBERSHIP': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_NETWORK_MEMBERSHIP_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteNetworkMembership(msg.payload.networkId, msg.payload.entityId);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_NETWORK_MEMBERSHIP_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_DELETE_NETWORK_RELATIONSHIP': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_NETWORK_RELATIONSHIP_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteNetworkRelationship(msg.payload.networkId, msg.payload.relationshipId);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_NETWORK_RELATIONSHIP_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            // =================================================================
+            // Store: Discovery
+            // =================================================================
+
+            case 'STORE_UPSERT_DISCOVERY_CANDIDATE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertDiscoveryCandidate(msg.payload.candidateJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_LIST_DISCOVERY_CANDIDATES': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListDiscoveryCandidates();
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            // =================================================================
+            // Store: Fact Sheets
+            // =================================================================
+
+            case 'STORE_UPSERT_ENTITY_CARD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_ENTITY_CARD_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertEntityCard(msg.payload.cardJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_ENTITY_CARD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_ENTITY_CARDS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_ENTITY_CARDS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeGetEntityCards(msg.payload.entityId);
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_GET_ENTITY_CARDS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_UPSERT_FOLDER_SCHEMA': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertFolderSchema(msg.payload.schemaJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_FOLDER_SCHEMA': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_FOLDER_SCHEMA_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetFolderSchema(msg.payload.id);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_FOLDER_SCHEMA_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_FOLDER_SCHEMA_RESULT', id: msg.id, payload: null });
+                }
                 break;
             }
 

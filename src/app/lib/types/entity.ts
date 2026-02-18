@@ -1,9 +1,12 @@
 /**
- * Cozo-local type definitions
- * These mirror the main app types but are isolated to avoid circular deps
+ * Shared entity types - extracted from CozoDB for use across the application.
+ * These types are used by GoKitt services, extractors, and UI components.
  */
 
-// Entity kinds used throughout the cozo graph
+/**
+ * Entity kinds used throughout the knowledge graph.
+ * These represent the categorization of entities in the system.
+ */
 export type EntityKind =
     | 'CHARACTER'
     | 'LOCATION'
@@ -20,6 +23,9 @@ export type EntityKind =
     | 'TIMELINE'
     | 'NARRATIVE';
 
+/**
+ * All valid entity kinds as a readonly array for runtime validation.
+ */
 export const ENTITY_KINDS: readonly EntityKind[] = [
     'CHARACTER',
     'LOCATION',
@@ -37,18 +43,31 @@ export const ENTITY_KINDS: readonly EntityKind[] = [
     'NARRATIVE',
 ] as const;
 
-// Graph scope types
+/**
+ * Graph scope types for querying.
+ */
 export type GraphScope = 'note' | 'folder' | 'vault' | 'narrative';
 
-// Extraction method types
+/**
+ * Extraction method types for entity/relationship provenance.
+ */
 export type ExtractionMethod = 'regex' | 'llm' | 'manual';
 
-// Confidence levels
+/**
+ * Confidence levels for extracted data.
+ */
 export type ConfidenceLevel = 'low' | 'medium' | 'high';
 
 /**
- * Helper to check if a string is a valid EntityKind
+ * Helper to check if a string is a valid EntityKind.
  */
 export function isEntityKind(value: string): value is EntityKind {
     return ENTITY_KINDS.includes(value as EntityKind);
+}
+
+/**
+ * Get display label for an entity kind.
+ */
+export function getEntityKindLabel(kind: EntityKind): string {
+    return kind.charAt(0) + kind.slice(1).toLowerCase();
 }

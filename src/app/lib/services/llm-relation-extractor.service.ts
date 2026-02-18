@@ -13,7 +13,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import * as ops from '../operations';
 import { smartGraphRegistry } from '../registry';
 import { LlmBatchService } from './llm-batch.service';
-import { type EntityKind, isEntityKind } from '../cozo/utils';
+import { type EntityKind, isEntityKind } from '../types';
 import { GoKittService } from '../../services/gokitt.service';
 
 // ============================================================================

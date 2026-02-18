@@ -12,7 +12,7 @@ import * as ops from '../operations';
 import { smartGraphRegistry } from '../registry';
 import { LlmBatchService } from './llm-batch.service';
 import { GoKittService } from '../../services/gokitt.service';
-import { type EntityKind, isEntityKind } from '../cozo/utils';
+import { type EntityKind, isEntityKind } from '../types';
 
 export interface ExtractedEntity {
     label: string;

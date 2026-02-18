@@ -11,7 +11,6 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { LucideAngularModule, ArrowLeft, RefreshCw, Settings, Maximize2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-angular';
 import { GraphVizService, type ForceGraphData, type GraphQueryOptions } from '../../services/graph-viz.service';
-import { graphRegistry } from '../../lib/cozo/graph';
 import { GoKittService } from '../../services/gokitt.service';
 import { KnowledgeService } from '../../services/knowledge.service';
 
@@ -351,12 +350,11 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
             console.log('[GraphPage] KG Data:', kgData);
 
             if (kgData && Object.keys(kgData.nodes).length > 0) {
-                console.log('[GraphPage] Using GoKitt Knowledge Graph (primary source)');
+                console.log('[GraphPage] Using GoKitt Knowledge Graph');
                 this.graphData = this.graphViz.fromGoKittData(kgData);
             } else {
-                // FALLBACK: Use CozoDB persisted data
-                console.log('[GraphPage] Knowledge Graph empty, falling back to CozoDB');
-                this.graphData = this.graphViz.getFullGraph();
+                console.log('[GraphPage] Knowledge Graph empty - no data to display');
+                this.graphData = { nodes: [], links: [], stats: { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} } };
             }
 
             this.stats.set(this.graphData.stats || { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} });

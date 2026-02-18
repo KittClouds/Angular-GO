@@ -357,4 +357,178 @@ type Storer interface {
 
 	// Lifecycle
 	Close() error
+
+	// =============================================================================
+	// CozoDB Parity: Missing Graph Types
+	// =============================================================================
+
+	// Spans & Links
+	UpsertSpan(span *Span) error
+	GetSpan(id string) (*Span, error)
+	ListSpansForNote(noteID string) ([]*Span, error)
+	DeleteSpan(id string) error
+
+	UpsertWormhole(wormhole *Wormhole) error
+	GetWormhole(id string) (*Wormhole, error)
+	ListWormholesForSpan(spanID string) ([]*Wormhole, error)
+	DeleteWormhole(id string) error
+
+	UpsertSpanMention(mention *SpanMention) error
+	GetSpanMention(id string) (*SpanMention, error)
+	ListSpanMentions(spanID string) ([]*SpanMention, error)
+	DeleteSpanMention(id string) error
+
+	// Network View
+	UpsertNetworkInstance(net *NetworkInstance) error
+	GetNetworkInstance(id string) (*NetworkInstance, error)
+	ListNetworkInstances() ([]*NetworkInstance, error)
+	DeleteNetworkInstance(id string) error
+	UpsertNetworkMembership(member *NetworkMembership) error
+	GetNetworkMembers(networkID string) ([]*NetworkMembership, error)
+	DeleteNetworkMembership(networkID string, entityID string) error
+	UpsertNetworkRelationship(rel *NetworkRelationship) error
+	GetNetworkRelationships(networkID string) ([]*NetworkRelationship, error)
+	DeleteNetworkRelationship(networkID string, relationshipID string) error
+
+	// Discovery & Fact Sheets
+	UpsertDiscoveryCandidate(candidate *DiscoveryCandidate) error
+	ListDiscoveryCandidates() ([]*DiscoveryCandidate, error)
+	UpsertEntityCard(card *EntityCard) error
+	GetEntityCards(entityID string) ([]*EntityCard, error)
+	UpsertFolderSchema(schema *FolderSchema) error
+	GetFolderSchema(id string) (*FolderSchema, error)
+}
+
+// =============================================================================
+// CozoDB Parity: Missing Graph Models
+// =============================================================================
+
+// Span represents a text span annotation (e.g., entity mention, quote).
+type Span struct {
+	ID          string `json:"id"`
+	WorldID     string `json:"worldId"`
+	NoteID      string `json:"noteId"`
+	NarrativeID string `json:"narrativeId,omitempty"`
+	Start       int    `json:"start"`
+	End         int    `json:"end"`
+	Text        string `json:"text"`
+	ContentHash string `json:"contentHash"`
+	SpanKind    string `json:"spanKind"`
+	Status      string `json:"status"`
+	CreatedBy   string `json:"createdBy"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
+}
+
+// Wormhole represents a link between two spans (hyperlink/relationship).
+type Wormhole struct {
+	ID            string  `json:"id"`
+	SrcSpanID     string  `json:"srcSpanId"`
+	DstSpanID     string  `json:"dstSpanId"`
+	Mode          string  `json:"mode"` // "link", "transclusion", etc.
+	Confidence    float64 `json:"confidence"`
+	Rationale     string  `json:"rationale,omitempty"`
+	WormholeType  string  `json:"wormholeType,omitempty"`
+	Bidirectional bool    `json:"bidirectional"`
+	CreatedAt     int64   `json:"createdAt"`
+	UpdatedAt     int64   `json:"updatedAt"`
+}
+
+// SpanMention links a span to a resolved entity.
+type SpanMention struct {
+	ID                string  `json:"id"`
+	SpanID            string  `json:"spanId"`
+	CandidateEntityID string  `json:"candidateEntityId,omitempty"`
+	MatchType         string  `json:"matchType"` // "exact", "fuzzy", "neural"
+	Confidence        float64 `json:"confidence"`
+	EvFrequency       float64 `json:"evFrequency,omitempty"`
+	EvCapitalRatio    float64 `json:"evCapitalRatio,omitempty"`
+	EvContextScore    float64 `json:"evContextScore,omitempty"`
+	EvCooccurrence    float64 `json:"evCooccurrence,omitempty"`
+	Status            string  `json:"status"`
+	CreatedAt         int64   `json:"createdAt"`
+	UpdatedAt         int64   `json:"updatedAt"`
+}
+
+// NetworkInstance represents a saved graph view ("mind map").
+type NetworkInstance struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	SchemaID          string   `json:"schemaId"`
+	NetworkKind       string   `json:"networkKind"`
+	NetworkSubtype    string   `json:"networkSubtype,omitempty"`
+	RootFolderID      string   `json:"rootFolderId"`
+	RootEntityID      string   `json:"rootEntityId,omitempty"`
+	Namespace         string   `json:"namespace"`
+	Description       string   `json:"description,omitempty"`
+	Tags              []string `json:"tags"`
+	MemberCount       int      `json:"memberCount"`
+	RelationshipCount int      `json:"relationshipCount"`
+	MaxDepth          int      `json:"maxDepth"`
+	CreatedAt         int64    `json:"createdAt"`
+	UpdatedAt         int64    `json:"updatedAt"`
+	GroupID           string   `json:"groupId,omitempty"`
+	ScopeType         string   `json:"scopeType"`
+	NarrativeID       string   `json:"narrativeId,omitempty"`
+}
+
+// NetworkMembership positions an entity within a network view.
+// Composite Key: (NetworkID, EntityID)
+type NetworkMembership struct {
+	NetworkID string  `json:"networkId"`
+	EntityID  string  `json:"entityId"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Fixed     bool    `json:"fixed"`
+}
+
+// NetworkRelationship represents an edge visibility in a network view.
+// Composite Key: (NetworkID, RelationshipID)
+type NetworkRelationship struct {
+	NetworkID      string `json:"networkId"`
+	SourceEntityID string `json:"sourceEntityId"`
+	TargetEntityID string `json:"targetEntityId"`
+	RelationshipID string `json:"relationshipId"`
+}
+
+// DiscoveryCandidate represents a potential entity found by unsupervised scanning.
+type DiscoveryCandidate struct {
+	Token     string  `json:"token"`
+	Kind      int     `json:"kind"`
+	Score     float64 `json:"score"`
+	Status    int     `json:"status"` // 0=new, 1=approved, 2=rejected
+	LastSeen  int64   `json:"lastSeen"`
+	FirstSeen int64   `json:"firstSeen"`
+	Count     int     `json:"count"`
+}
+
+// EntityCard represents a UI card configuration for an entity fact sheet.
+type EntityCard struct {
+	EntityID     string `json:"entityId"`
+	CardID       string `json:"cardId"`
+	Name         string `json:"name"`
+	Color        string `json:"color"`
+	Icon         string `json:"icon"`
+	DisplayOrder int    `json:"displayOrder"`
+	IsCollapsed  bool   `json:"isCollapsed"`
+	CreatedAt    int64  `json:"createdAt"`
+	UpdatedAt    int64  `json:"updatedAt"`
+}
+
+// FolderSchema defines the allowed structure for a folder type.
+type FolderSchema struct {
+	ID                      string `json:"id"`
+	EntityKind              string `json:"entityKind"`
+	Subtype                 string `json:"subtype,omitempty"`
+	Name                    string `json:"name"`
+	Description             string `json:"description,omitempty"`
+	AllowedSubfolders       string `json:"allowedSubfolders"` // JSON array
+	AllowedNoteTypes        string `json:"allowedNoteTypes"`  // JSON array
+	IsVaultRoot             bool   `json:"isVaultRoot"`
+	ContainerOnly           bool   `json:"containerOnly"`
+	PropagateKindToChildren bool   `json:"propagateKindToChildren"`
+	Icon                    string `json:"icon,omitempty"`
+	IsSystem                bool   `json:"isSystem"`
+	CreatedAt               int64  `json:"createdAt"`
+	UpdatedAt               int64  `json:"updatedAt"`
 }

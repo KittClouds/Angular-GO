@@ -34,9 +34,35 @@ import {
     type WsEdgeRel,
     WS_QUERIES,
 } from '../schema/workspace-schema';
-import { recordAction } from '../../cozo/memory/EpisodeLogService';
-import { ftsService } from '../../cozo/fts/FtsService';
 import { type AppContext } from './app-context';
+
+// ============================================================================
+// CozoDB Stubs - To be reimplemented
+// ============================================================================
+
+// Stub for recordAction - to be reimplemented
+function recordAction(
+    _workspaceId: string,
+    _narrativeId: string,
+    _actionType: string,
+    _targetId: string,
+    _targetType: string,
+    _payload: unknown,
+    _parentId: string
+): void {
+    // No-op stub
+}
+
+// Stub for ftsService - to be reimplemented
+interface FtsSearchResult {
+    id: string;
+    title?: string;
+    content?: string;
+    score?: number;
+}
+const ftsService = {
+    searchNotes: (_params: { query: string; limit?: number; minScore?: number }): FtsSearchResult[] => []
+};
 
 // ============================================================================
 // Zod Schemas — structured LLM response validation
@@ -477,7 +503,7 @@ export class RlmLoopService {
                     minScore: 0.3,
                 });
 
-                observation.notes = noteResults.map(r => ({
+                observation.notes = noteResults.map((r: FtsSearchResult) => ({
                     note_id: r.id,
                     title: r.title || '',
                     snippet: r.content?.slice(0, 200) || '',

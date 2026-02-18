@@ -1,7 +1,7 @@
 /**
  * GraphVizService - Transforms graph data for 3d-force-graph visualization
  * 
- * Converts GoKitt/CozoDB graph structures into the { nodes, links } format
+ * Converts GoKitt graph structures into the { nodes, links } format
  * expected by 3d-force-graph library.
  * 
  * Uses EntityColorStore for consistent entity coloring across the app.
@@ -9,7 +9,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import type { GoKittGraphData } from './gokitt.service';
-import { graphRegistry } from '../lib/cozo/graph';
+import { smartGraphRegistry } from '../lib/registry';
 import { entityColorStore, DEFAULT_ENTITY_COLORS } from '../lib/store/entityColorStore';
 import type { EntityKind } from '../lib/Scanner/types';
 
@@ -326,12 +326,13 @@ export class GraphVizService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Transform CozoDB → ForceGraphData (FALLBACK)
+    // Transform GraphRegistry → ForceGraphData (LEGACY FALLBACK)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Get full graph from CozoDB
+     * Get full graph from GraphRegistry
      * @param options - Query options for filtering
+     * @deprecated Use fromGoKitt() instead. This method will be removed when CozoDB is fully deprecated.
      */
     fromCozoDB(options?: GraphQueryOptions): ForceGraphData {
         const nodes: GraphNode[] = [];
@@ -339,17 +340,14 @@ export class GraphVizService {
         const kindCounts: Record<string, number> = {};
         const typeCounts: Record<string, number> = {};
 
-        // Get all entities from CozoDB
-        const allEntities = graphRegistry.getAllEntities();
+        // Get all entities from smartGraphRegistry
+        const allEntities = smartGraphRegistry.getAllEntities();
         const entityIds = new Set<string>();
 
-        console.log(`[GraphVizService.fromCozoDB] Total entities from CozoDB: ${allEntities.length}`);
+        console.log(`[GraphVizService.fromCozoDB] Total entities from smartGraphRegistry: ${allEntities.length}`);
 
         for (const entity of allEntities) {
-            // Apply filters
-            if (options?.narrativeId && entity.narrativeId !== options.narrativeId) {
-                continue;
-            }
+            // Apply filters (narrativeId not available in RegisteredEntity, skip for now)
             if (options?.kindFilter && !options.kindFilter.includes(entity.kind)) {
                 continue;
             }
@@ -368,20 +366,29 @@ export class GraphVizService {
                 val: Math.max(1, Math.log((entity.totalMentions || 1) + 1) * 3),
                 color: this.getNodeColor(kind),
                 group: KIND_TO_GROUP[kind] ?? 0,
-                narrativeId: entity.narrativeId,
             });
         }
 
-        // Get all relationships
-        const allRelationships = graphRegistry.getAllRelationshipsSync();
-        console.log(`[GraphVizService.fromCozoDB] Total relationships from CozoDB: ${allRelationships.length}`);
-
-        for (const rel of allRelationships) {
-            // Apply filters
-            if (options?.narrativeId && rel.narrativeId !== options.narrativeId) {
-                continue;
+        // Get all edges from smartGraphRegistry
+        // Collect edges from all entities
+        const allEdges: { sourceId: string; targetId: string; type: string; confidence: number }[] = [];
+        for (const entity of allEntities) {
+            const edges = smartGraphRegistry.getEdgesForEntity(entity.id);
+            for (const edge of edges) {
+                // Avoid duplicates (each edge is stored once)
+                if (edge.sourceId === entity.id) {
+                    allEdges.push({
+                        sourceId: edge.sourceId,
+                        targetId: edge.targetId,
+                        type: edge.type,
+                        confidence: edge.confidence
+                    });
+                }
             }
+        }
+        console.log(`[GraphVizService.fromCozoDB] Total edges from smartGraphRegistry: ${allEdges.length}`);
 
+        for (const rel of allEdges) {
             // Only include edges where both nodes are in the graph
             const hasSource = entityIds.has(rel.sourceId);
             const hasTarget = entityIds.has(rel.targetId);
@@ -416,6 +423,7 @@ export class GraphVizService {
 
     /**
      * Convenience method: Get full graph
+     * @deprecated Use fromGoKitt() instead. This method will be removed when CozoDB is fully deprecated.
      */
     getFullGraph(): ForceGraphData {
         return this.fromCozoDB();
@@ -423,6 +431,7 @@ export class GraphVizService {
 
     /**
      * Convenience method: Get graph scoped to a narrative
+     * @deprecated Use fromGoKitt() with narrativeId option instead. This method will be removed when CozoDB is fully deprecated.
      */
     getScopedGraph(narrativeId: string): ForceGraphData {
         return this.fromCozoDB({ narrativeId });

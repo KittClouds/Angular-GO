@@ -25,7 +25,26 @@ import {
 } from '../lib/dexie/decorations';
 
 import { smartGraphRegistry } from '../lib/registry';
-import { discoveryStore } from '../lib/store/discoveryStore';
+// This tool call is to find instantiation.
+// I will not replace yet. I need to find where to inject DiscoveryStore.
+// But first, let's fix `pretty-text-api.ts` to accept DiscoveryStore.
+
+import { DiscoveryStore } from '../lib/store/discoveryStore';
+
+let discoveryStore: DiscoveryStore | null = null;
+
+export function setDiscoveryStore(store: DiscoveryStore) {
+    discoveryStore = store;
+}
+
+// Update imports to remove the direct import of the instance which no longer exists
+// import { discoveryStore } from '../lib/store/discoveryStore'; -> remove this line
+
+// Update usages:
+// discoveryStore.addCandidates(...) -> discoveryStore?.addCandidates(...)
+
+// Doing this in `pretty-text-api.ts`.
+
 import { isFstEnabled } from '../services/ner.service';
 
 let goKittService: GoKittService | null = null;
@@ -673,7 +692,7 @@ class PrettyTextAPI implements PrettyTextApi {
                         console.log(`[Discovery:GoKitt] Found ${unknownCandidates.length} truly unknown candidates`);
 
                         // Emit to DiscoveryStore
-                        discoveryStore.addCandidates(unknownCandidates);
+                        discoveryStore?.addCandidates(unknownCandidates);
 
                         // Create highlight spans for discovered tokens
                         const candidateSpans = this.createCandidateSpans(text, unknownCandidates);

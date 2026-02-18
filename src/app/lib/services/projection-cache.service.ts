@@ -1,6 +1,18 @@
 import { Injectable } from '@angular/core';
 import type { Entity } from '../dexie/db';
-import type { CozoSpan } from '../cozo/schema/layer2-span-model';
+
+// ============================================================================
+// CozoDB Stubs - To be reimplemented
+// ============================================================================
+
+// Stub for CozoSpan - to be reimplemented
+interface CozoSpan {
+    id: string;
+    worldId: string;
+    start: number;
+    end: number;
+    content?: string;
+}
 
 // Cross-world query functionality now uses CozoDB for spans, wormholes, spanMentions.
 // Schemas: src/app/lib/cozo/schema/layer2-span-model.ts

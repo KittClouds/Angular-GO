@@ -1,7 +1,8 @@
 // src/app/lib/services/network.service.ts
 // Angular service for network CRUD with liveQuery
+// DUAL-WRITE: Live UI via Dexie, Persistence via GoKitt
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import {
@@ -11,11 +12,14 @@ import {
     NetworkRelationship,
     NetworkRelationshipDef
 } from '../dexie/db';
+import { GoKittService } from '../../services/gokitt.service'; // Adjust path if needed
 
 @Injectable({
     providedIn: 'root'
 })
 export class NetworkService {
+    private goKitt = inject(GoKittService);
+
     // ==========================================================================
     // SCHEMA QUERIES
     // ==========================================================================
@@ -114,8 +118,7 @@ export class NetworkService {
     ): Promise<string> {
         const id = crypto.randomUUID();
         const now = Date.now();
-
-        await db.networkInstances.add({
+        const instance: NetworkInstance = {
             id,
             schemaId,
             name,
@@ -124,6 +127,14 @@ export class NetworkService {
             narrativeId,
             createdAt: now,
             updatedAt: now,
+        };
+
+        // Dexie (UI)
+        await db.networkInstances.add(instance);
+
+        // GoKitt (Backend)
+        this.goKitt.storeUpsertNetworkInstance(instance).catch(e => {
+            console.error('[NetworkService] GoKitt sync failed:', e);
         });
 
         return id;
@@ -133,20 +144,33 @@ export class NetworkService {
      * Update a network instance
      */
     async updateInstance(id: string, updates: Partial<NetworkInstance>): Promise<void> {
+        // Dexie (UI)
         await db.networkInstances.update(id, {
             ...updates,
             updatedAt: Date.now(),
         });
+
+        // Backend Sync
+        const current = await db.networkInstances.get(id);
+        if (current) {
+            this.goKitt.storeUpsertNetworkInstance(current).catch(e => {
+                console.error('[NetworkService] GoKitt sync failed:', e);
+            });
+        }
     }
 
     /**
      * Delete a network instance
      */
     async deleteInstance(id: string): Promise<void> {
-        // Delete all relationships in this network
+        // Dexie (UI)
         await db.networkRelationships.where('networkId').equals(id).delete();
-        // Delete the instance
         await db.networkInstances.delete(id);
+
+        // Backend Sync
+        this.goKitt.storeDeleteNetworkInstance(id).catch(e => {
+            console.error('[NetworkService] GoKitt delete failed:', e);
+        });
     }
 
     /**
@@ -157,11 +181,25 @@ export class NetworkService {
         if (!instance) return;
 
         if (!instance.entityIds.includes(entityId)) {
+            // Update entity list in instance (Legacy way, but we keep it for now)
             instance.entityIds.push(entityId);
+            const now = Date.now();
             await db.networkInstances.update(networkId, {
                 entityIds: instance.entityIds,
-                updatedAt: Date.now(),
+                updatedAt: now,
             });
+
+            // Sync Instance Update
+            this.goKitt.storeUpsertNetworkInstance(instance).catch(e => console.error('[NetworkService] Sync instance failed', e));
+
+            // Sync Membership (New explicit table in Go)
+            this.goKitt.storeUpsertNetworkMembership({
+                networkId,
+                entityId,
+                x: 0,
+                y: 0,
+                fixed: false
+            }).catch(e => console.error('[NetworkService] GoKitt membership sync failed', e));
         }
     }
 
@@ -178,13 +216,30 @@ export class NetworkService {
             updatedAt: Date.now(),
         });
 
+        // Sync instance update
+        this.goKitt.storeUpsertNetworkInstance(instance).catch(e => console.error(e));
+
+        // Delete membership from GoKitt
+        this.goKitt.storeDeleteNetworkMembership(networkId, entityId).catch(e =>
+            console.error('[NetworkService] GoKitt membership delete failed:', e)
+        );
+
         // Remove relationships involving this entity
-        await db.networkRelationships
+        const relsToDelete = await db.networkRelationships
             .filter(r =>
                 r.networkId === networkId &&
                 (r.sourceEntityId === entityId || r.targetEntityId === entityId)
             )
-            .delete();
+            .toArray();
+
+        await db.networkRelationships.bulkDelete(relsToDelete.map(r => r.id));
+
+        // Sync relationship deletes to GoKitt
+        for (const rel of relsToDelete) {
+            this.goKitt.storeDeleteNetworkRelationship(networkId, rel.id).catch(e =>
+                console.error('[NetworkService] GoKitt relationship delete failed:', e)
+            );
+        }
     }
 
     // ==========================================================================
@@ -204,7 +259,7 @@ export class NetworkService {
         const id = crypto.randomUUID();
         const now = Date.now();
 
-        await db.networkRelationships.add({
+        const rel: NetworkRelationship = {
             id,
             networkId,
             sourceEntityId,
@@ -214,7 +269,12 @@ export class NetworkService {
             notes: options?.notes,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.networkRelationships.add(rel);
+
+        // GoKitt Sync
+        this.goKitt.storeUpsertNetworkRelationship(rel).catch(e => console.error(e));
 
         // Check if we should auto-create inverse
         const instance = await db.networkInstances.get(networkId);
@@ -224,7 +284,7 @@ export class NetworkService {
                 const relDef = schema.relationships.find(r => r.code === relationshipCode);
                 if (relDef?.inverseCode) {
                     // Create inverse relationship
-                    await db.networkRelationships.add({
+                    const inverseRel: NetworkRelationship = {
                         id: crypto.randomUUID(),
                         networkId,
                         sourceEntityId: targetEntityId,
@@ -233,7 +293,9 @@ export class NetworkService {
                         strength: options?.strength,
                         createdAt: now,
                         updatedAt: now,
-                    });
+                    };
+                    await db.networkRelationships.add(inverseRel);
+                    this.goKitt.storeUpsertNetworkRelationship(inverseRel).catch(e => console.error(e));
                 }
             }
         }
@@ -249,13 +311,27 @@ export class NetworkService {
             ...updates,
             updatedAt: Date.now(),
         });
+
+        const current = await db.networkRelationships.get(id);
+        if (current) {
+            this.goKitt.storeUpsertNetworkRelationship(current).catch(e => console.error(e));
+        }
     }
 
     /**
      * Delete a relationship
      */
     async deleteRelationship(id: string): Promise<void> {
+        // Get the relationship before deleting to get networkId
+        const rel = await db.networkRelationships.get(id);
         await db.networkRelationships.delete(id);
+
+        // Sync to GoKitt
+        if (rel) {
+            this.goKitt.storeDeleteNetworkRelationship(rel.networkId, id).catch(e =>
+                console.error('[NetworkService] GoKitt relationship delete failed:', e)
+            );
+        }
     }
 
     // ==========================================================================

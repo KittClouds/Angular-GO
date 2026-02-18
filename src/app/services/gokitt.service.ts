@@ -2,8 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { smartGraphRegistry } from '../lib/registry';
 import type { DecorationSpan } from '../lib/Scanner';
 import { db } from '../lib/dexie/db';
-import { graphRegistry, type RelationshipProvenance } from '../lib/cozo/graph';
-import type { EntityKind } from '../lib/cozo/utils';
+import type { EntityKind } from '../lib/types';
 
 // =============================================================================
 // Types for Worker Communication
@@ -58,6 +57,28 @@ type GoKittWorkerMessage =
     | { type: 'EXTRACT_ENTITIES'; payload: { text: string }; id: number }
     | { type: 'EXTRACT_RELATIONS'; payload: { text: string; knownEntitiesJSON?: string }; id: number }
     | { type: 'AGENT_CHAT_WITH_TOOLS'; payload: { messagesJSON: string; toolsJSON: string; systemPrompt?: string }; id: number }
+    // Store: Spans & Links
+    | { type: 'STORE_UPSERT_SPAN'; payload: { spanJSON: string }; id: number }
+    | { type: 'STORE_GET_SPAN'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_SPANS_FOR_NOTE'; payload: { noteId: string }; id: number }
+    | { type: 'STORE_DELETE_SPAN'; payload: { id: string }; id: number }
+    // Store: Network View
+    | { type: 'STORE_UPSERT_NETWORK_INSTANCE'; payload: { networkJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_INSTANCE'; payload: { id: string }; id: number }
+    | { type: 'STORE_LIST_NETWORK_INSTANCES'; id: number }
+    | { type: 'STORE_DELETE_NETWORK_INSTANCE'; payload: { id: string }; id: number }
+    | { type: 'STORE_UPSERT_NETWORK_MEMBERSHIP'; payload: { memberJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_MEMBERS'; payload: { networkId: string }; id: number }
+    | { type: 'STORE_UPSERT_NETWORK_RELATIONSHIP'; payload: { relJSON: string }; id: number }
+    | { type: 'STORE_GET_NETWORK_RELATIONSHIPS'; payload: { networkId: string }; id: number }
+    // Store: Discovery
+    | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE'; payload: { candidateJSON: string }; id: number }
+    | { type: 'STORE_LIST_DISCOVERY_CANDIDATES'; id: number }
+    // Store: Fact Sheets
+    | { type: 'STORE_UPSERT_ENTITY_CARD'; payload: { cardJSON: string }; id: number }
+    | { type: 'STORE_GET_ENTITY_CARDS'; payload: { entityId: string }; id: number }
+    | { type: 'STORE_UPSERT_FOLDER_SCHEMA'; payload: { schemaJSON: string }; id: number }
+    | { type: 'STORE_GET_FOLDER_SCHEMA'; payload: { id: string }; id: number }
     // Phase 7: Observational Memory + Chat Service
     | { type: 'CHAT_INIT'; payload: { configJSON: string }; id: number }
     | { type: 'CHAT_CREATE_THREAD'; payload: { worldId: string; narrativeId: string }; id: number }
@@ -129,6 +150,25 @@ type GoKittWorkerResponse =
     | { type: 'STORE_GET_EDGE_RESULT'; id: number; payload: any | null }
     | { type: 'STORE_DELETE_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_LIST_EDGES_RESULT'; id: number; payload: any[] }
+    // Store Results
+    | { type: 'STORE_UPSERT_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SPAN_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SPANS_FOR_NOTE_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NETWORK_INSTANCE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_INSTANCE_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_NETWORK_INSTANCES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_NETWORK_INSTANCE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_NETWORK_MEMBERSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_MEMBERS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_NETWORK_RELATIONSHIP_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_NETWORK_RELATIONSHIPS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_ENTITY_CARD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
     // Phase 3: Graph Merger responses
     | { type: 'MERGER_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'MERGER_ADD_SCANNER_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
@@ -444,7 +484,7 @@ export class GoKittService {
     }
 
     /**
-     * Persist graph scan results to CozoDB
+     * Persist graph scan results to SQLite via GoKitt
      * Maps GoKitt nodes → entities, edges → entity_edge
      * 
      * @param scanResult - Result from scan() containing graph.Nodes and graph.Edges
@@ -474,10 +514,10 @@ export class GoKittService {
         const knowledgePromises: Promise<any>[] = [];
 
         // ─────────────────────────────────────────────────────────────
-        // Persist Nodes → entities table (CozoDB) AND Knowledge Graph (GoKitt)
+        // Persist Nodes → entities table AND Knowledge Graph (GoKitt)
         // ─────────────────────────────────────────────────────────────
         if (nodes && typeof nodes === 'object') {
-            const nodeIdMap = new Map<string, string>(); // GoKitt ID → CozoDB ID
+            const nodeIdMap = new Map<string, string>(); // GoKitt ID → Entity ID
 
             for (const [goKittId, node] of Object.entries(nodes) as [string, any][]) {
                 const label = node.Label || node.label || goKittId;
@@ -491,28 +531,27 @@ export class GoKittService {
                     props: { narrativeId }
                 }));
 
-                // Check if entity already exists (Legacy CozoDB Logic)
-                const existing = graphRegistry.findEntityByLabel(label);
+                // Check if entity already exists (via smartGraphRegistry)
+                const existing = smartGraphRegistry.findEntityByLabel(label);
 
                 if (existing) {
                     // Entity exists - increment mention count
                     const currentCount = existing.mentionsByNote?.get(noteId) ?? 0;
-                    graphRegistry.updateNoteMentions(existing.id, noteId, currentCount + 1);
+                    existing.mentionsByNote?.set(noteId, currentCount + 1);
                     nodeIdMap.set(goKittId, existing.id);
                     stats.nodesUpdated++;
                 } else {
                     // Create new entity
-                    const entity = graphRegistry.registerEntity(label, kind, noteId, {
-                        narrativeId,
+                    const result = smartGraphRegistry.registerEntity(label, kind, noteId, {
                         aliases: node.Aliases || node.aliases || []
                     });
-                    nodeIdMap.set(goKittId, entity.id);
+                    nodeIdMap.set(goKittId, result.entity.id);
                     stats.nodesCreated++;
                 }
             }
 
             // ─────────────────────────────────────────────────────────────
-            // Persist Edges → relationships table (CozoDB) AND Knowledge Graph (GoKitt)
+            // Persist Edges → relationships table AND Knowledge Graph (GoKitt)
             // ─────────────────────────────────────────────────────────────
             if (edges && Array.isArray(edges)) {
                 for (const edge of edges) {
@@ -530,26 +569,23 @@ export class GoKittService {
                         props: { noteId }
                     }));
 
-                    // Legacy CozoDB Logic requires resolved IDs
+                    // Legacy GraphRegistry Logic requires resolved IDs
                     const sourceId = nodeIdMap.get(sourceIdx);
                     const targetId = nodeIdMap.get(targetIdx);
 
                     if (sourceId && targetId) {
-                        const existingRel = graphRegistry.findRelationship(sourceId, targetId, relation);
+                        const existingRel = smartGraphRegistry.findEdge(sourceId, targetId, relation);
 
-                        // We register/update via graphRegistry
-                        const rel = graphRegistry.addRelationship(
+                        // We register/update via smartGraphRegistry
+                        const rel = smartGraphRegistry.createEdge(
                             sourceId,
                             targetId,
                             relation,
                             {
-                                source: 'gokitt_scan',
-                                originId: noteId,
-                                confidence,
-                                timestamp: new Date(),
-                                context: 'Extracted from note via Reality Layer scan'
-                            },
-                            { narrativeId }
+                                sourceNote: noteId,
+                                weight: confidence,
+                                provenance: 'scanner'
+                            }
                         );
 
                         if (existingRel) {
@@ -915,6 +951,25 @@ export class GoKittService {
                         case 'STORE_GET_EDGE_RESULT':
                         case 'STORE_DELETE_EDGE_RESULT':
                         case 'STORE_LIST_EDGES_RESULT':
+                        // Store Results
+                        case 'STORE_UPSERT_SPAN_RESULT':
+                        case 'STORE_GET_SPAN_RESULT':
+                        case 'STORE_LIST_SPANS_FOR_NOTE_RESULT':
+                        case 'STORE_DELETE_SPAN_RESULT':
+                        case 'STORE_UPSERT_NETWORK_INSTANCE_RESULT':
+                        case 'STORE_GET_NETWORK_INSTANCE_RESULT':
+                        case 'STORE_LIST_NETWORK_INSTANCES_RESULT':
+                        case 'STORE_DELETE_NETWORK_INSTANCE_RESULT':
+                        case 'STORE_UPSERT_NETWORK_MEMBERSHIP_RESULT':
+                        case 'STORE_GET_NETWORK_MEMBERS_RESULT':
+                        case 'STORE_UPSERT_NETWORK_RELATIONSHIP_RESULT':
+                        case 'STORE_GET_NETWORK_RELATIONSHIPS_RESULT':
+                        case 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT':
+                        case 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT':
+                        case 'STORE_UPSERT_ENTITY_CARD_RESULT':
+                        case 'STORE_GET_ENTITY_CARDS_RESULT':
+                        case 'STORE_UPSERT_FOLDER_SCHEMA_RESULT':
+                        case 'STORE_GET_FOLDER_SCHEMA_RESULT':
                         // Phase 3: Graph Merger responses
                         case 'MERGER_INIT_RESULT':
                         case 'MERGER_ADD_SCANNER_RESULT':
@@ -1367,6 +1422,97 @@ export class GoKittService {
             return '{}';
         }
         return this.sendRequest('CHAT_EXPORT_THREAD', { threadId });
+    }
+
+    // =========================================================================
+    // Store API
+    // =========================================================================
+
+    async storeUpsertSpan(span: any): Promise<{ success: boolean; error?: string }> {
+        const spanJSON = JSON.stringify(span);
+        return this.sendRequest('STORE_UPSERT_SPAN', { spanJSON });
+    }
+
+    async storeGetSpan(id: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_SPAN', { id });
+    }
+
+    async storeListSpansForNote(noteId: string): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_SPANS_FOR_NOTE', { noteId });
+    }
+
+    async storeDeleteSpan(id: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_SPAN', { id });
+    }
+
+    async storeUpsertNetworkInstance(network: any): Promise<{ success: boolean; error?: string }> {
+        const networkJSON = JSON.stringify(network);
+        return this.sendRequest('STORE_UPSERT_NETWORK_INSTANCE', { networkJSON });
+    }
+
+    async storeGetNetworkInstance(id: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_NETWORK_INSTANCE', { id });
+    }
+
+    async storeListNetworkInstances(): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_NETWORK_INSTANCES', {});
+    }
+
+    async storeDeleteNetworkInstance(id: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_NETWORK_INSTANCE', { id });
+    }
+
+    async storeUpsertNetworkMembership(member: any): Promise<{ success: boolean; error?: string }> {
+        const memberJSON = JSON.stringify(member);
+        return this.sendRequest('STORE_UPSERT_NETWORK_MEMBERSHIP', { memberJSON });
+    }
+
+    async storeGetNetworkMembers(networkId: string): Promise<any[]> {
+        return this.sendRequest('STORE_GET_NETWORK_MEMBERS', { networkId });
+    }
+
+    async storeDeleteNetworkMembership(networkId: string, entityId: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_NETWORK_MEMBERSHIP', { networkId, entityId });
+    }
+
+    async storeUpsertNetworkRelationship(rel: any): Promise<{ success: boolean; error?: string }> {
+        const relJSON = JSON.stringify(rel);
+        return this.sendRequest('STORE_UPSERT_NETWORK_RELATIONSHIP', { relJSON });
+    }
+
+    async storeGetNetworkRelationships(networkId: string): Promise<any[]> {
+        return this.sendRequest('STORE_GET_NETWORK_RELATIONSHIPS', { networkId });
+    }
+
+    async storeDeleteNetworkRelationship(networkId: string, relationshipId: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_NETWORK_RELATIONSHIP', { networkId, relationshipId });
+    }
+
+    async storeUpsertDiscoveryCandidate(candidate: any): Promise<{ success: boolean; error?: string }> {
+        const candidateJSON = JSON.stringify(candidate);
+        return this.sendRequest('STORE_UPSERT_DISCOVERY_CANDIDATE', { candidateJSON });
+    }
+
+    async storeListDiscoveryCandidates(): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_DISCOVERY_CANDIDATES', {});
+    }
+
+    async storeUpsertEntityCard(card: any): Promise<{ success: boolean; error?: string }> {
+        const cardJSON = JSON.stringify(card);
+        return this.sendRequest('STORE_UPSERT_ENTITY_CARD', { cardJSON });
+    }
+
+    async storeGetEntityCards(entityId: string): Promise<any[]> {
+        return this.sendRequest('STORE_GET_ENTITY_CARDS', { entityId });
+    }
+
+    async storeUpsertFolderSchema(schema: any): Promise<{ success: boolean; error?: string }> {
+        const schemaJSON = JSON.stringify(schema);
+        return this.sendRequest('STORE_UPSERT_FOLDER_SCHEMA', { schemaJSON });
+    }
+
+    async storeGetFolderSchema(id: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_FOLDER_SCHEMA', { id });
     }
 
     // =========================================================================

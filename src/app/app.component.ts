@@ -9,15 +9,15 @@ import { entityColorStore } from './lib/store/entityColorStore';
 import { seedDefaultSchemas } from './lib/folders/seed';
 import { GoKittService } from './services/gokitt.service';
 import { GoKittStoreService } from './services/gokitt-store.service';
-import { setGoKittService } from './api/pretty-text-api';
+import { setGoKittService, setDiscoveryStore } from './api/pretty-text-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
 import { GoSqliteCozoBridge } from './lib/bridge/GoSqliteCozoBridge';
-import { cozoDb } from './lib/cozo/db';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { KnowledgeService } from './services/knowledge.service';
 import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
+import { DiscoveryStore } from './lib/store/discoveryStore';
 import { setGoSqliteBridge } from './lib/operations';
 import * as ops from './lib/operations';
 
@@ -39,6 +39,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
   private knowledgeService = inject(KnowledgeService);
+  private discoveryStore = inject(DiscoveryStore);
 
 
   // Navigation API subscriptions
@@ -54,6 +55,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
     // Wire up GoKitt to Highlighter API (doesn't start WASM yet)
     setGoKittService(this.goKitt);
+    setDiscoveryStore(this.discoveryStore);
 
     // Initialize entity color CSS variables (sync, no deps)
     entityColorStore.initialize();
@@ -73,14 +75,7 @@ export class AppComponent implements OnInit, OnDestroy {
       console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
       this.orchestrator.completePhase('registry');
 
-      // Phase 3: WASM Load (parallel with CozoDB background init)
-      // Start CozoDB in background — NOT on critical path
-      const cozoPromise = cozoDb.init().then(() => {
-        console.log('[AppComponent] ✓ CozoDB initialized (background)');
-      }).catch(err => {
-        console.error('[AppComponent] CozoDB background init failed:', err);
-      });
-
+      // Phase 3: WASM Load
       // WASM load is the critical gate
       await this.goKitt.loadWasm();
       console.log('[AppComponent] ✓ WASM module loaded');
@@ -156,8 +151,8 @@ export class AppComponent implements OnInit, OnDestroy {
         }
       })();
 
-      // Wait for all background tasks
-      await Promise.all([cozoPromise, docStorePromise]);
+      // Wait for background tasks
+      await docStorePromise;
       this.orchestrator.completePhase('background');
 
     } catch (err) {

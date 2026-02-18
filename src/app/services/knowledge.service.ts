@@ -5,7 +5,7 @@ import { GoKittService } from './gokitt.service';
  * KnowledgeService
  * 
  * High-level service for interacting with the GoKitt Knowledge Graph.
- * Replaces direct CozoDB graph queries with high-performance Go-native memory graph.
+ * Go-native in-memory graph with SQLite persistence.
  * 
  * Capabilities:
  * - Persistent Graph Storage (SQLite backed)

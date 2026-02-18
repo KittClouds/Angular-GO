@@ -1,11 +1,9 @@
 // src/app/lib/operations.ts
 // CRUD operations using GoSQLite as primary store
-// Syncs to CozoDB via GoSqliteCozoBridge
-// NO NEBULA. NO DEXIE (except model cache).
+// NO COZODB. NO DEXIE (except model cache).
 
-import { recordAction } from './cozo/memory/EpisodeLogService';
 import type { GoSqliteCozoBridge } from './bridge/GoSqliteCozoBridge';
-import type { GoKittStoreService, StoreNote, StoreEntity } from '../services/gokitt-store.service';
+import type { GoKittStoreService, StoreNote, StoreEntity, StoreFolder } from '../services/gokitt-store.service';
 
 // Re-export types for consumers
 export interface Note {
@@ -76,7 +74,7 @@ const _bridgeReady = new Promise<void>(resolve => { _bridgeResolve = resolve; })
 
 export function setGoSqliteBridge(bridge: GoSqliteCozoBridge): void {
     _bridge = bridge;
-    console.log('[Operations] ✅ GoSqlite Bridge connected');
+    console.log('[Operations] GoSqlite Bridge connected');
     _bridgeResolve?.();
 }
 
@@ -117,19 +115,8 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         updatedAt: now,
     } as Note;
 
-    // Write to GoSQLite + queue to CozoDB
+    // Write to GoSQLite
     await bridge.syncNote(fullNote as any);
-
-    // Log episode for LLM memory
-    recordAction(
-        note.folderId,
-        id,
-        'created_note',
-        id,
-        'note',
-        { newValue: { title: note.title, folderId: note.folderId } },
-        note.narrativeId || ''
-    );
 
     return id;
 }
@@ -175,24 +162,7 @@ function syncNoteToDocStore(id: string, content: any, version: number): void {
 
 export async function deleteNote(id: string): Promise<void> {
     const bridge = requireBridge();
-
-    // Get note info before deletion for episode logging
-    const note = await bridge.getNote(id);
-
     await bridge.deleteNote(id);
-
-    // Log episode for LLM memory
-    if (note) {
-        recordAction(
-            note.folderId,
-            id,
-            'deleted_note',
-            id,
-            'note',
-            { oldValue: { title: note.title, folderId: note.folderId } },
-            note.narrativeId || ''
-        );
-    }
 }
 
 export async function getNote(id: string): Promise<Note | undefined> {
@@ -253,7 +223,7 @@ function storeNoteToNote(sn: StoreNote): Note {
 }
 
 // =============================================================================
-// FOLDER OPERATIONS (folders only in CozoDB, not GoSQLite)
+// FOLDER OPERATIONS (folders now in GoSQLite, not CozoDB)
 // =============================================================================
 
 export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
@@ -278,24 +248,13 @@ export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'up
 export async function updateFolder(id: string, updates: Partial<Folder>): Promise<void> {
     const bridge = requireBridge();
 
-    // Query folder from Cozo directly (folders not in GoSQLite)
-    const rows = bridge.queryGraph<unknown[]>(`
-        ?[id, world_id, name, parent_id, entity_kind, entity_subtype, entity_label, 
-          color, is_typed_root, is_subtype_root, collapsed, owner_id, created_at, updated_at, 
-          narrative_id, is_narrative_root, network_id, metadata, order] := 
-            *folders{id, world_id, name, parent_id, entity_kind, entity_subtype, 
-                     entity_label, color, is_typed_root, is_subtype_root, collapsed, 
-                     owner_id, created_at, updated_at, narrative_id, is_narrative_root, 
-                     network_id, metadata, order},
-            id = $id
-    `, { id });
-
-    if (rows.length === 0) {
+    // Get folder from GoSQLite
+    const existing = await bridge.getFolder(id);
+    if (!existing) {
         console.warn(`[Operations] Folder ${id} not found`);
         return;
     }
 
-    const existing = cozoRowToFolder(rows[0]);
     const updatedFolder = {
         ...existing,
         ...updates,
@@ -314,81 +273,49 @@ export async function getFolder(id: string): Promise<Folder | undefined> {
     const bridge = getBridge();
     if (!bridge) return undefined;
 
-    const rows = bridge.queryGraph<unknown[]>(`
-        ?[id, world_id, name, parent_id, entity_kind, entity_subtype, entity_label, 
-          color, is_typed_root, is_subtype_root, collapsed, owner_id, created_at, updated_at, 
-          narrative_id, is_narrative_root, network_id, metadata, order] := 
-            *folders{id, world_id, name, parent_id, entity_kind, entity_subtype, 
-                     entity_label, color, is_typed_root, is_subtype_root, collapsed, 
-                     owner_id, created_at, updated_at, narrative_id, is_narrative_root, 
-                     network_id, metadata, order},
-            id = $id
-    `, { id });
-
-    return rows.length > 0 ? cozoRowToFolder(rows[0]) : undefined;
+    const folder = await bridge.getFolder(id);
+    return folder ? storeFolderToFolder(folder) : undefined;
 }
 
 export async function getAllFolders(): Promise<Folder[]> {
     const bridge = getBridge();
     if (!bridge) return [];
 
-    const rows = bridge.queryGraph<unknown[]>(`
-        ?[id, world_id, name, parent_id, entity_kind, entity_subtype, entity_label, 
-          color, is_typed_root, is_subtype_root, collapsed, owner_id, created_at, updated_at, 
-          narrative_id, is_narrative_root, network_id, metadata, order] := 
-            *folders{id, world_id, name, parent_id, entity_kind, entity_subtype, 
-                     entity_label, color, is_typed_root, is_subtype_root, collapsed, 
-                     owner_id, created_at, updated_at, narrative_id, is_narrative_root, 
-                     network_id, metadata, order}
-    `);
-
-    return rows.map(cozoRowToFolder);
+    const folders = await bridge.getAllFolders();
+    return folders.map(storeFolderToFolder);
 }
 
 export async function getFolderChildren(parentId: string): Promise<Folder[]> {
     const bridge = getBridge();
     if (!bridge) return [];
 
-    const rows = bridge.queryGraph<unknown[]>(`
-        ?[id, world_id, name, parent_id, entity_kind, entity_subtype, entity_label, 
-          color, is_typed_root, is_subtype_root, collapsed, owner_id, created_at, updated_at, 
-          narrative_id, is_narrative_root, network_id, metadata, order] := 
-            *folders{id, world_id, name, parent_id, entity_kind, entity_subtype, 
-                     entity_label, color, is_typed_root, is_subtype_root, collapsed, 
-                     owner_id, created_at, updated_at, narrative_id, is_narrative_root, 
-                     network_id, metadata, order},
-            parent_id = $parentId
-    `, { parentId });
-
-    return rows.map(cozoRowToFolder);
+    const allFolders = await bridge.getAllFolders();
+    return allFolders
+        .filter(f => f.parentId === parentId)
+        .map(storeFolderToFolder);
 }
 
-function cozoRowToFolder(row: unknown[]): Folder {
-    // Row order matches query:
-    // [0]=id, [1]=world_id, [2]=name, [3]=parent_id, [4]=entity_kind, [5]=entity_subtype, 
-    // [6]=entity_label, [7]=color, [8]=is_typed_root, [9]=is_subtype_root, [10]=collapsed, 
-    // [11]=owner_id, [12]=created_at, [13]=updated_at, [14]=narrative_id, [15]=is_narrative_root, 
-    // [16]=network_id, [17]=metadata, [18]=order
+function storeFolderToFolder(sf: StoreFolder): Folder {
     return {
-        id: row[0] as string,
-        worldId: row[1] as string,
-        name: row[2] as string,
-        parentId: row[3] as string,
-        entityKind: row[4] as string,
-        entitySubtype: row[5] as string,
-        entityLabel: row[6] as string,
-        color: row[7] as string,
-        isTypedRoot: row[8] as boolean,
-        isSubtypeRoot: row[9] as boolean,
-        collapsed: row[10] as boolean,
-        ownerId: row[11] as string,
-        createdAt: row[12] as number,
-        updatedAt: row[13] as number,
-        narrativeId: row[14] as string,
-        isNarrativeRoot: row[15] as boolean,
-        networkId: row[16] as string || undefined,
-        metadata: row[17] as Record<string, any> || undefined,
-        order: row[18] as number,
+        id: sf.id,
+        worldId: sf.worldId,
+        name: sf.name,
+        parentId: sf.parentId || '',
+        entityKind: '',      // Not in StoreFolder - use default
+        entitySubtype: '',   // Not in StoreFolder - use default
+        entityLabel: '',     // Not in StoreFolder - use default
+        color: '',           // Not in StoreFolder - use default
+        isTypedRoot: false,  // Not in StoreFolder - use default
+        isSubtypeRoot: false, // Not in StoreFolder - use default
+        collapsed: false,    // Not in StoreFolder - use default
+        ownerId: '',         // Not in StoreFolder - use default
+        createdAt: sf.createdAt,
+        updatedAt: sf.updatedAt,
+        narrativeId: sf.narrativeId || '',
+        isNarrativeRoot: false, // Not in StoreFolder - use default
+        networkId: undefined,   // Not in StoreFolder
+        metadata: undefined,    // Not in StoreFolder
+        order: sf.folderOrder,
     };
 }
 
@@ -403,47 +330,14 @@ export async function upsertEntity(entity: Entity): Promise<void> {
         return;
     }
 
-    // Check if existing for episode log
-    const existing = await bridge.getEntity(entity.id);
-    const isNew = !existing;
-
     await bridge.syncEntity(entity as any);
-
-    // Log episode for LLM memory
-    recordAction(
-        entity.narrativeId || '',
-        entity.firstNote || '',
-        isNew ? 'created_entity' : 'renamed_entity',
-        entity.id,
-        'entity',
-        isNew
-            ? { newValue: { label: entity.label, kind: entity.kind } }
-            : { oldValue: { label: existing?.label }, newValue: { label: entity.label } },
-        entity.narrativeId || ''
-    );
 }
 
 export async function deleteEntity(id: string): Promise<void> {
     const bridge = getBridge();
     if (!bridge) return;
 
-    // Get entity info before deletion for episode logging
-    const entity = await bridge.getEntity(id);
-
     await bridge.deleteEntity(id);
-
-    // Log episode for LLM memory
-    if (entity) {
-        recordAction(
-            entity.narrativeId || '',
-            entity.firstNote || '',
-            'deleted_entity',
-            id,
-            'entity',
-            { oldValue: { label: entity.label, kind: entity.kind } },
-            entity.narrativeId || ''
-        );
-    }
 }
 
 export async function getEntity(id: string): Promise<Entity | undefined> {
@@ -712,5 +606,5 @@ export async function swapItems(sourceId: string, targetId: string, type: 'folde
         await bridge.syncNote({ ...target, order: source.order, updatedAt: Date.now() } as any);
     }
 
-    console.log(`[Operations] Swapped ${type}s: ${sourceId} ↔ ${targetId}`);
+    console.log(`[Operations] Swapped ${type}s: ${sourceId} <-> ${targetId}`);
 }

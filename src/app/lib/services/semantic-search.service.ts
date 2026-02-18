@@ -2,8 +2,26 @@ import { Injectable, signal, inject } from '@angular/core';
 import { ScopeService } from './scope.service';
 import { EmbeddingQueueService } from './embedding-queue.service';
 import { RagWorkerService } from './rag-worker.service';
-import { CozoService } from '../cozo/cozo.service';
-import { RAPTOR_QUERIES } from '../cozo/schema/layer3-raptor';
+
+// ============================================================================
+// CozoDB Stubs - To be reimplemented
+// ============================================================================
+
+const RAPTOR_QUERIES = {
+    searchLeaves: 'STUB: searchLeaves - CozoDB removed',
+    searchLeavesScoped: 'STUB: searchLeavesScoped - CozoDB removed',
+    searchCollapsed: 'STUB: searchCollapsed - CozoDB removed',
+    searchCollapsedScoped: 'STUB: searchCollapsedScoped - CozoDB removed'
+};
+
+// Stub CozoService for future reimplementation
+@Injectable({ providedIn: 'root' })
+class CozoService {
+    async run(_query: string, _params?: Record<string, unknown>): Promise<{ ok: boolean; headers?: string[]; rows?: unknown[][] }> {
+        console.warn('[CozoService] Stub called - CozoDB removed');
+        return { ok: false };
+    }
+}
 
 /**
  * Semantic Search Service
