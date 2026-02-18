@@ -9,7 +9,9 @@
  */
 
 import { Injectable } from '@angular/core';
+import { Subject } from 'rxjs';
 import type { WalEntry } from './sqlite-opfs-core';
+
 
 type PendingRequest = {
     resolve: (val?: any) => void;
@@ -34,6 +36,12 @@ export class SqlitePersistenceService {
     private walBuffer: WalEntry[] = [];
     private flushTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly FLUSH_DELAY_MS = 500;
+
+    // Compaction State
+    private opCount = 0;
+    private readonly COMPACT_THRESHOLD = 500; // Trigger compact after 500 ops
+    public readonly compactNeeded$ = new Subject<void>();
+
 
     constructor() { }
 
@@ -86,8 +94,11 @@ export class SqlitePersistenceService {
      */
     async load(): Promise<LoadResult> {
         await this.init();
-        return await this.sendToWorker<LoadResult>('LOAD');
+        const result = await this.sendToWorker<LoadResult>('LOAD');
+        this.opCount = result.wal.length; // Resuming count from loaded WAL
+        return result;
     }
+
 
     /**
      * Append a mutation to the WAL
@@ -102,6 +113,15 @@ export class SqlitePersistenceService {
         };
 
         this.walBuffer.push(entry);
+        this.opCount++;
+
+        // Trigger compaction check
+        if (this.opCount >= this.COMPACT_THRESHOLD) {
+            console.log(`[SqlitePersistence] WAL threshold reached (${this.opCount}), requesting compaction...`);
+            this.compactNeeded$.next();
+            // Reset count immediately to prevent spamming while compaction runs
+            this.opCount = 0;
+        }
 
         // meaningful buffer size check
         if (this.walBuffer.length >= 50) {
@@ -110,6 +130,7 @@ export class SqlitePersistenceService {
         }
         this.scheduleFlush();
     }
+
 
     private scheduleFlush(): void {
         if (this.flushTimer) return;
@@ -156,8 +177,10 @@ export class SqlitePersistenceService {
 
         // Truncate WAL
         await this.sendToWorker('TRUNCATE_WAL');
+        this.opCount = 0; // Double ensure count is reset
         console.log('[SqlitePersistence] Compaction complete');
     }
+
 
     /**
      * Clear all persistence (Factory Reset)

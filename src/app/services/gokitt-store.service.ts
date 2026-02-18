@@ -186,8 +186,22 @@ export class GoKittStoreService {
         await this._restoreState();
 
         // [PERSISTENCE] Register WAL Handler
+        // [PERSISTENCE] Register WAL Handler
         this._registerWalHandler();
+
+        // [PERSISTENCE] Setup Auto-Compaction
+        this.persistence.compactNeeded$.subscribe(async () => {
+            console.log('[GoKittStoreService] Auto-compacting database...');
+            try {
+                const data = await this.exportDatabase();
+                await this.persistence.compact(data);
+                console.log('[GoKittStoreService] Auto-compaction successful');
+            } catch (e) {
+                console.error('[GoKittStoreService] Auto-compaction failed:', e);
+            }
+        });
     }
+
 
     private async _restoreState(): Promise<void> {
         console.log('[GoKittStoreService] Restoring state from persistence...');

@@ -40,7 +40,7 @@ async function writeBinaryFile(handle: FileSystemFileHandle, data: Uint8Array): 
         if (!writable) throw new Error("Failed to create writable stream");
 
         // Convert to ArrayBuffer for compatibility
-        const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+        const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
         await writable.write(buffer);
     } catch (e: any) {
         if (e?.name === "NoModificationAllowedError") {
