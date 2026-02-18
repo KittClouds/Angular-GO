@@ -4,17 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type RuleEngine[T any] struct {
-	store *SQLiteStore[T]
+	store    *SQLiteStore[T]
+	hasRules atomic.Bool
 }
 
 func NewRuleEngine[T any](store *SQLiteStore[T]) *RuleEngine[T] {
-	return &RuleEngine[T]{store: store}
+	re := &RuleEngine[T]{store: store}
+
+	// Pre-check if rules exist to avoid update roundtrips
+	var count int
+	// We handle error by assuming 0 (safe default, worst case is missed invalidation but if list failed likely DB issue)
+	// Actually if DB fail, we can't do much.
+	store.db.QueryRow("SELECT COUNT(*) FROM graph_named_rules").Scan(&count)
+	if count > 0 {
+		re.hasRules.Store(true)
+	}
+
+	return re
 }
 
 // Define registers a named rule.
@@ -23,6 +36,9 @@ func (r *RuleEngine[T]) Define(name string, q Query, materialize bool) error {
 	if err != nil {
 		return fmt.Errorf("marshal query: %w", err)
 	}
+
+	// Flag that we have rules
+	r.hasRules.Store(true)
 
 	// Insert or Replace rule definition
 	query := `INSERT INTO graph_named_rules (name, query_json, materialized, invalidated) 
@@ -137,11 +153,9 @@ func (r *RuleEngine[T]) Invalidate(name string) error {
 // CheckInvalidation checks if any rules need invalidation based on labels modified.
 // This is a naive implementation; optimized version would map labels -> rules.
 func (r *RuleEngine[T]) InvalidateByLabel(label string) error {
-	// For now, invalidate ALL rules? Or try to parse query to find label dependency?
-	// Parsing is hard. Simplest: Invalidate all.
-	// User prompt: "wired into your AddVertex/AddEdge write path."
-	// Let's assume user wants broad invalidation or we assume rules depend on labels.
-	// Let's just invalidate all for safety in this scope.
+	if !r.hasRules.Load() {
+		return nil
+	}
 	_, err := r.store.db.Exec("UPDATE graph_named_rules SET invalidated = 1")
 	return err
 }

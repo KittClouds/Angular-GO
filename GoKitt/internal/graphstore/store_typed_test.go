@@ -30,19 +30,19 @@ func TestTypedProperties(t *testing.T) {
 
 	// Verify direct DB values
 	var valType string
-	err = db.QueryRow("SELECT value_type FROM properties WHERE owner_id = ? AND key = 'age'", id.String()).Scan(&valType)
+	err = db.QueryRow("SELECT value_type FROM graph_properties WHERE owner_id = ? AND key = 'age'", id.String()).Scan(&valType)
 	assert.NoError(t, err)
 	assert.Equal(t, "int", valType)
 
-	err = db.QueryRow("SELECT value_type FROM properties WHERE owner_id = ? AND key = 'score'", id.String()).Scan(&valType)
+	err = db.QueryRow("SELECT value_type FROM graph_properties WHERE owner_id = ? AND key = 'score'", id.String()).Scan(&valType)
 	assert.NoError(t, err)
 	assert.Equal(t, "float", valType)
 
-	err = db.QueryRow("SELECT value_type FROM properties WHERE owner_id = ? AND key = 'active'", id.String()).Scan(&valType)
+	err = db.QueryRow("SELECT value_type FROM graph_properties WHERE owner_id = ? AND key = 'active'", id.String()).Scan(&valType)
 	assert.NoError(t, err)
 	assert.Equal(t, "bool", valType)
 
-	err = db.QueryRow("SELECT value_type FROM properties WHERE owner_id = ? AND key = 'name'", id.String()).Scan(&valType)
+	err = db.QueryRow("SELECT value_type FROM graph_properties WHERE owner_id = ? AND key = 'name'", id.String()).Scan(&valType)
 	assert.NoError(t, err)
 	assert.Equal(t, "string", valType)
 

@@ -1,0 +1,4 @@
+=== RUN   TestTypedProperties
+--- PASS: TestTypedProperties (1.08s)
+PASS
+ok  	github.com/kittclouds/gokitt/internal/graphstore	1.915s

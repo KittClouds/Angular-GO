@@ -3,7 +3,6 @@ package graphstore
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/dominikbraun/graph"
@@ -173,9 +172,6 @@ func (s *SQLiteStore[T]) ListVertices() ([]uuid.UUID, error) {
 	for id := range s.cache.vertices {
 		ids = append(ids, id)
 	}
-	// Sort for deterministic output
-	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
-
 	return ids, nil
 }
 

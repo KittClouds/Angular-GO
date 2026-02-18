@@ -58,6 +58,29 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 			return
 		}
 
+		// Pre-compute Label Filter Bitmap if needed
+		var labelFilter *roaring.Bitmap
+		if opts.NodeFilter != nil && len(opts.NodeFilter.LabelFilter) > 0 {
+			// Start with first label's bitmap or empty
+			first := true
+			for _, lbl := range opts.NodeFilter.LabelFilter {
+				if lBmp, ok := s.cache.labels[lbl]; ok {
+					if first {
+						labelFilter = lBmp.Clone()
+						first = false
+					} else {
+						labelFilter.Or(lBmp) // Union of allowed labels? Or Intersection? usually OR for "has label X or Y"
+						// Actually usually LabelFilter list means "has ANY of these labels".
+						// Let's assume OR.
+					}
+				}
+			}
+			// If no labels matched, filter is empty -> block everything?
+			if first {
+				labelFilter = roaring.New() // Empty, blocks all
+			}
+		}
+
 		// Visited set (Bitmap)
 		visited := roaring.New()
 		visited.Add(rootIdx)
@@ -67,8 +90,6 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 		frontier.Add(rootIdx)
 
 		// Parent map for path reconstruction: childIdx -> parentIdx
-		// Note: BFS finds shortest path in unweighted graph, we only store one parent.
-		// For weighted BFS (Dijkstra), we'd need priority queue. This is unweighted BFS.
 		parents := make(map[uint32]uint32)
 
 		// Initial path for root
@@ -101,21 +122,15 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 				var neighbors *roaring.Bitmap
 
 				switch opts.Direction {
-				case DirectionOutbound:
+				case DirectionOutbound, DirectionBoth:
+					// Optimization: Since graph is stored undirected (bidirectional edges),
+					// outEdges contains all neighbors.
 					if adj, ok := s.cache.outEdges[uIdx]; ok {
 						neighbors = adj.neighbors
 					}
 				case DirectionInbound:
 					if adj, ok := s.cache.inEdges[uIdx]; ok {
 						neighbors = adj.neighbors
-					}
-				case DirectionBoth:
-					neighbors = roaring.New()
-					if adj, ok := s.cache.outEdges[uIdx]; ok {
-						neighbors.Or(adj.neighbors)
-					}
-					if adj, ok := s.cache.inEdges[uIdx]; ok {
-						neighbors.Or(adj.neighbors)
 					}
 				}
 
@@ -124,51 +139,38 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 				}
 
 				// Incremental expansion: New = Neighbors - Visited
-				// Note: roaring.AndNot() returns a NEW bitmap, correct.
 				newNeighbors := roaring.AndNot(neighbors, visited)
 
-				// Important: If multiple nodes in frontier reach same new neighbor, first one wins parent.
-				// But since we iterate sequentially here (it.Next()), we process uIdx one by one.
-				// Visited is updated at END of depth loop usually in standard BFS levels.
-				// However, if we don't mark as visited immediately within this inner loop,
-				// duplicates in nextFrontier are handled by bitmap (set), but parent mapping is overwritten.
-				// BFS level-by-level: parent can be any from previous level. We just take the current uIdx.
+				// Apply Label Filter immediately
+				if labelFilter != nil {
+					newNeighbors.And(labelFilter)
+				}
 
-				// Apply Filters?
-				// NodeFilter is processed here (filtering candidates).
-				// EdgeFilter is trickier since 'neighbors' is just a bitmap.
-				// If specific edge properties are needed, we must check s.cache.outEdges[uIdx].edges[vIdx].
+				if newNeighbors.IsEmpty() {
+					continue
+				}
 
 				nIt := newNeighbors.Iterator()
 				for nIt.HasNext() {
 					vIdx := nIt.Next()
 
-					// Apply Edge Filter
+					// Apply Edge Filter (if any)
 					if opts.EdgeFilter != nil {
 						// Retrieve edge (u -> v)
-						// We need to know direction to look it up efficiently or just rely on Edge() helper
-						// Simplified: Check checks in cache directly for speed
-						var edgePass bool
-						// ... logic to check edge properties ...
-						// For now, assume pass if no filter complex logic implemented inline,
-						// or basic check if EdgeFilter has properties.
-						edgePass = true // Placeholder
-						if !edgePass {
-							continue
+						// For speed, check s.cache.outEdges[uIdx].edges[vIdx]
+						// This exists because we got vIdx from neighbors of uIdx
+						if adj, ok := s.cache.outEdges[uIdx]; ok {
+							if edge, ok := adj.edges[vIdx]; ok {
+								// Placeholder for actual filter logic
+								// if !opts.EdgeFilter.Match(edge) { continue }
+								_ = edge // use it
+							}
 						}
 					}
 
-					// Apply Node Filter
-					if opts.NodeFilter != nil {
-						// e.g. Label check.
-						// We can intersect newNeighbors with LabelBitmap beforehand for speed!
-						// Optimally: nextFrontier = (neighbors - visited) & LabelFilterBitmap
-						// This loop just updates parents then.
-					}
-
-					// Update parent if not already set for this wave (nextFrontier)
-					// We check if vIdx is already in nextFrontier?
-					// Bitmaps handle deduplication, but parent map needs care.
+					// Update parent if not already set for this wave
+					// nextFrontier does not contain duplicates due to bitmap property
+					// parents map logic: first parent wins
 					if !nextFrontier.Contains(vIdx) {
 						parents[vIdx] = uIdx
 						nextFrontier.Add(vIdx)
@@ -181,7 +183,6 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 			}
 
 			// Emit Results
-			// We reconstruct path for each node in nextFrontier
 			fit := nextFrontier.Iterator()
 			for fit.HasNext() {
 				vIdx := fit.Next()
@@ -197,12 +198,8 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 					if p, ok := parents[curr]; ok {
 						curr = p
 					} else {
-						// Should reach rootIdx eventually if logic holds
-						// Or if curr == rootIdx (initial)
 						if curr == rootIdx {
-							// Root already added
-							// But here we are descending, so path starts at root?
-							// Yes, loop trace matches.
+							// root already processed
 						}
 						break
 					}

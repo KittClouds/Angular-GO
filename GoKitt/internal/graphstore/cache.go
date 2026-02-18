@@ -2,6 +2,7 @@ package graphstore
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/dominikbraun/graph"
@@ -36,7 +37,8 @@ type adjacencyCache[T any] struct {
 
 	labels map[string]*roaring.Bitmap
 
-	dirty bool
+	edgeCount atomic.Int64
+	dirty     bool
 }
 
 func newAdjacencyCache[T any]() *adjacencyCache[T] {

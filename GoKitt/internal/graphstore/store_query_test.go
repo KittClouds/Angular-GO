@@ -139,7 +139,7 @@ func TestEdgeType(t *testing.T) {
 		uStr, vStr = vStr, uStr
 	}
 
-	err = db.QueryRow("SELECT edge_type FROM edges WHERE source_id=? AND target_id=?", uStr, vStr).Scan(&edgeType)
+	err = db.QueryRow("SELECT edge_type FROM graph_edges WHERE source_id=? AND target_id=?", uStr, vStr).Scan(&edgeType)
 	assert.NoError(t, err)
 	assert.Equal(t, "follows", edgeType)
 
@@ -153,7 +153,7 @@ func TestEdgeType(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	err = db.QueryRow("SELECT edge_type FROM edges WHERE source_id=? AND target_id=?", uStr, vStr).Scan(&edgeType)
+	err = db.QueryRow("SELECT edge_type FROM graph_edges WHERE source_id=? AND target_id=?", uStr, vStr).Scan(&edgeType)
 	assert.NoError(t, err)
 	assert.Equal(t, "blocks", edgeType)
 }

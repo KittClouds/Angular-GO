@@ -122,6 +122,9 @@ func (s *SQLiteStore[T]) AddEdge(sourceHash, targetHash uuid.UUID, edge graph.Ed
 	addToCache(s.cache.outEdges, vIdx, uIdx, rev)
 	addToCache(s.cache.inEdges, uIdx, vIdx, rev)
 
+	// Update edge count (new edge)
+	s.cache.edgeCount.Add(1)
+
 	return nil
 }
 
@@ -298,6 +301,9 @@ func (s *SQLiteStore[T]) RemoveEdge(sourceHash, targetHash uuid.UUID) error {
 	removeFromCache(s.cache.outEdges, vIdx, uIdx)
 	removeFromCache(s.cache.inEdges, uIdx, vIdx)
 
+	// Update edge count (removed edge)
+	s.cache.edgeCount.Add(-1)
+
 	return nil
 }
 
@@ -353,6 +359,10 @@ func (s *SQLiteStore[T]) ListEdges() ([]graph.Edge[uuid.UUID], error) {
 		it := adj.neighbors.Iterator()
 		for it.HasNext() {
 			vIdx := it.Next()
+			// Undirected store: only return canonical direction (e.g. u <= v) to avoid duplicates
+			if uIdx > vIdx {
+				continue
+			}
 			if e, ok := adj.edges[vIdx]; ok {
 				edges = append(edges, e)
 			}
@@ -370,9 +380,5 @@ func (s *SQLiteStore[T]) EdgeCount() (int, error) {
 	s.cache.mu.RLock()
 	defer s.cache.mu.RUnlock()
 
-	count := 0
-	for _, adj := range s.cache.outEdges {
-		count += int(adj.neighbors.GetCardinality())
-	}
-	return count, nil
+	return int(s.cache.edgeCount.Load()), nil
 }

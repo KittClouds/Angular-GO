@@ -1,0 +1,28 @@
+=== RUN   TestIndexPersistence
+--- PASS: TestIndexPersistence (1.26s)
+=== RUN   TestLabelOperations
+--- PASS: TestLabelOperations (0.00s)
+=== RUN   TestPatternMatching
+--- PASS: TestPatternMatching (0.00s)
+=== RUN   TestQueryPruning
+--- PASS: TestQueryPruning (0.00s)
+=== RUN   TestEdgeType
+--- PASS: TestEdgeType (0.01s)
+=== RUN   TestTemporalProperties
+--- PASS: TestTemporalProperties (0.02s)
+=== RUN   TestRulesEngine
+--- PASS: TestRulesEngine (0.00s)
+=== RUN   TestVertexOperations
+--- PASS: TestVertexOperations (0.00s)
+=== RUN   TestEdgeOperations
+--- PASS: TestEdgeOperations (0.00s)
+=== RUN   TestPersistence
+--- PASS: TestPersistence (0.02s)
+=== RUN   TestTraversalBFS
+--- PASS: TestTraversalBFS (0.00s)
+=== RUN   TestTraversalMaxDepth
+--- PASS: TestTraversalMaxDepth (0.00s)
+=== RUN   TestTypedProperties
+--- PASS: TestTypedProperties (0.00s)
+PASS
+ok  	github.com/kittclouds/gokitt/internal/graphstore	2.200s

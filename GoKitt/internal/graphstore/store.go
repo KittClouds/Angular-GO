@@ -1,7 +1,6 @@
 package graphstore
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -56,10 +55,15 @@ func NewJSON[T any](db *sql.DB) *SQLiteStore[T] {
 
 // canonical returns the two UUIDs in a deterministic order.
 func canonical(a, b uuid.UUID) (uuid.UUID, uuid.UUID) {
-	if a.String() < b.String() {
-		return a, b
+	for i := 0; i < 16; i++ {
+		if a[i] < b[i] {
+			return a, b
+		}
+		if a[i] > b[i] {
+			return b, a
+		}
 	}
-	return b, a
+	return a, b
 }
 
 // ensureInit ensures the registry is loaded.
@@ -84,10 +88,16 @@ func (s *SQLiteStore[T]) warmCache() error {
 		return nil
 	}
 
+	// Optimization: Pre-count for map sizing
+	var vCount, eCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM graph_vertices").Scan(&vCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM graph_edges").Scan(&eCount)
+
 	// Reset cache maps
-	s.cache.vertices = make(map[uuid.UUID]cachedVertex[T])
-	s.cache.outEdges = make(map[uint32]*bitmapAdjacency)
-	s.cache.inEdges = make(map[uint32]*bitmapAdjacency)
+	s.cache.vertices = make(map[uuid.UUID]cachedVertex[T], vCount)
+	s.cache.outEdges = make(map[uint32]*bitmapAdjacency, vCount)
+	s.cache.inEdges = make(map[uint32]*bitmapAdjacency, vCount)
+	s.cache.edgeCount.Store(int64(eCount))
 
 	// Load vertices
 	rows, err := s.db.Query("SELECT id, value, weight, attributes FROM graph_vertices")
@@ -137,8 +147,6 @@ func (s *SQLiteStore[T]) warmCache() error {
 	}
 	defer eRows.Close()
 
-	ctx := context.Background()
-
 	for eRows.Next() {
 		var srcStr, tgtStr string
 		var weight int
@@ -158,14 +166,11 @@ func (s *SQLiteStore[T]) warmCache() error {
 			return fmt.Errorf("parse target id: %w", err)
 		}
 
-		// Map to indices
-		uIdx, err := s.registry.GetOrAssign(ctx, src)
-		if err != nil {
-			return fmt.Errorf("assign src index: %w", err)
-		}
-		vIdx, err := s.registry.GetOrAssign(ctx, tgt)
-		if err != nil {
-			return fmt.Errorf("assign tgt index: %w", err)
+		// Map to indices using Get (no write lock/insert)
+		uIdx, ok1 := s.registry.Get(src)
+		vIdx, ok2 := s.registry.Get(tgt)
+		if !ok1 || !ok2 {
+			continue // Skip orphaned edges
 		}
 
 		var attrs map[string]string
