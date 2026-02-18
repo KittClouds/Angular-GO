@@ -46,6 +46,9 @@ var extractionSvc *extraction.Service // Phase 6: Unified Extraction
 var agentSvc *agent.Service           // Phase 6: Agent (tool-calling)
 var chatSvc *chat.ChatService         // Phase 7: Chat Service
 
+// WAL Handler (JS Callback)
+var walHandler js.Value
+
 func main() {
 	var err error
 	pipeline, err = conductor.New()
@@ -95,10 +98,12 @@ func main() {
 		"storeDeleteEdge":       js.FuncOf(storeDeleteEdge),
 		"storeListEdges":        js.FuncOf(storeListEdges),
 		// Store Export/Import (OPFS sync)
-		"storeExport": js.FuncOf(storeExport),
-		"storeImport": js.FuncOf(storeImport),
+		"storeExport":   js.FuncOf(storeExport),
+		"storeImport":   js.FuncOf(storeImport),
+		"setWalHandler": js.FuncOf(setWalHandler), // [NEW] WAL Handler Registration
 		// Store Folder CRUD
 		"storeUpsertFolder": js.FuncOf(storeUpsertFolder),
+
 		"storeGetFolder":    js.FuncOf(storeGetFolder),
 		"storeDeleteFolder": js.FuncOf(storeDeleteFolder),
 		"storeListFolders":  js.FuncOf(storeListFolders),
@@ -881,6 +886,9 @@ func storeUpsertNote(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
 
+	// [WAL] Emit Upsert Event
+	emitWal("upsertNote", note)
+
 	return SuccessResult("upserted " + note.ID)
 }
 
@@ -917,9 +925,13 @@ func storeDeleteNote(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	if err := sqlStore.DeleteNote(args[0].String()); err != nil {
+	id := args[0].String()
+	if err := sqlStore.DeleteNote(id); err != nil {
 		return ErrorResult("delete failed: " + err.Error())
 	}
+
+	// [WAL] Emit Delete Event
+	emitWal("deleteNote", map[string]string{"id": id})
 
 	return SuccessResult("deleted")
 }
@@ -964,6 +976,9 @@ func storeUpsertEntity(this js.Value, args []js.Value) interface{} {
 	if err := sqlStore.UpsertEntity(&entity); err != nil {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
+
+	// [WAL] Emit Upsert Event
+	emitWal("upsertEntity", entity)
 
 	return SuccessResult("upserted " + entity.ID)
 }
@@ -1024,9 +1039,13 @@ func storeDeleteEntity(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	if err := sqlStore.DeleteEntity(args[0].String()); err != nil {
+	id := args[0].String()
+	if err := sqlStore.DeleteEntity(id); err != nil {
 		return ErrorResult("delete failed: " + err.Error())
 	}
+
+	// [WAL] Emit Delete Event
+	emitWal("deleteEntity", map[string]string{"id": id})
 
 	return SuccessResult("deleted")
 }
@@ -1072,6 +1091,9 @@ func storeUpsertEdge(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
 
+	// [WAL] Emit Upsert Event
+	emitWal("upsertEdge", edge)
+
 	return SuccessResult("upserted " + edge.ID)
 }
 
@@ -1108,9 +1130,13 @@ func storeDeleteEdge(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	if err := sqlStore.DeleteEdge(args[0].String()); err != nil {
+	id := args[0].String()
+	if err := sqlStore.DeleteEdge(id); err != nil {
 		return ErrorResult("delete failed: " + err.Error())
 	}
+
+	// [WAL] Emit Delete Event
+	emitWal("deleteEdge", map[string]string{"id": id})
 
 	return SuccessResult("deleted")
 }
@@ -1184,6 +1210,45 @@ func storeImport(this js.Value, args []js.Value) interface{} {
 }
 
 // =============================================================================
+// WAL Event Emission
+// =============================================================================
+
+// setWalHandler registers a JS callback to receive WAL events
+// Args: [callback function]
+func setWalHandler(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("setWalHandler requires 1 arg: callback")
+	}
+	walHandler = args[0]
+	fmt.Println("[GoKitt] WAL handler registered")
+	return SuccessResult("handler registered")
+}
+
+// emitWal sends a WAL event to JS
+func emitWal(op string, data interface{}) {
+	if walHandler.IsUndefined() || walHandler.IsNull() {
+		return
+	}
+
+	// serialize data to JSON
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		fmt.Println("[GoKitt] WAL serialization failed:", err)
+		return
+	}
+
+	// Call JS handler in a goroutine to avoid blocking
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Recovered from WAL emit panic:", r)
+			}
+		}()
+		walHandler.Invoke(op, string(bytes))
+	}()
+}
+
+// =============================================================================
 // Store Folder CRUD
 // =============================================================================
 
@@ -1205,6 +1270,9 @@ func storeUpsertFolder(this js.Value, args []js.Value) interface{} {
 	if err := sqlStore.UpsertFolder(&folder); err != nil {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
+
+	// [WAL] Emit Upsert Event
+	emitWal("upsertFolder", folder)
 
 	return SuccessResult("upserted " + folder.ID)
 }
@@ -1242,9 +1310,13 @@ func storeDeleteFolder(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	if err := sqlStore.DeleteFolder(args[0].String()); err != nil {
+	id := args[0].String()
+	if err := sqlStore.DeleteFolder(id); err != nil {
 		return ErrorResult("delete failed: " + err.Error())
 	}
+
+	// [WAL] Emit Delete Event
+	emitWal("deleteFolder", map[string]string{"id": id})
 
 	return SuccessResult("deleted")
 }

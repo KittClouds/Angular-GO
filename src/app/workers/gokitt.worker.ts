@@ -164,7 +164,10 @@ type GoKittWorkerResponse =
     | { type: 'STORE_GET_FOLDER_RESULT'; id: number; payload: any | null }
     | { type: 'STORE_DELETE_FOLDER_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_LIST_FOLDERS_RESULT'; id: number; payload: any[] }
+    // WAL Event (Push)
+    | { type: 'WAL_EVENT'; op: string; data: any }
     // Phase 3: Graph Merger responses
+
     | { type: 'MERGER_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'MERGER_ADD_SCANNER_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
     | { type: 'MERGER_ADD_LLM_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
@@ -325,7 +328,10 @@ declare const GoKitt: {
     storeGetFolder: (id: string) => string;
     storeDeleteFolder: (id: string) => string;
     storeListFolders: (parentId?: string) => string;
+    // WAL Handler Registration
+    setWalHandler: (callback: (op: string, dataJSON: string) => void) => string;
     // Phase 3: Graph Merger API
+
     mergerInit: () => string;
     mergerAddScanner: (noteId: string, graphJSON: string) => string;
     mergerAddLLM: (edgesJSON: string) => string;
@@ -815,8 +821,32 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     return;
                 }
 
+                // Register WAL Handler during init
+                // Define the callback that Go will call
+                const walCallback = (op: string, dataJSON: string) => {
+                    try {
+                        const data = JSON.parse(dataJSON);
+                        self.postMessage({
+                            type: 'WAL_EVENT',
+                            op,
+                            data
+                        });
+                    } catch (e) {
+                        console.error('[GoKittWorker] Failed to parse WAL event:', e);
+                    }
+                };
+
+                // Register it
+                try {
+                    GoKitt.setWalHandler(walCallback);
+                    console.log('[GoKittWorker] WAL handler registered with WASM');
+                } catch (e) {
+                    console.warn('[GoKittWorker] Failed to register WAL handler (old WASM?):', e);
+                }
+
                 const res = GoKitt.storeInit();
                 const parsed = JSON.parse(res);
+
 
                 self.postMessage({
                     type: 'STORE_INIT_RESULT',

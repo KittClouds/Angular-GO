@@ -12,6 +12,8 @@
 
 import { Injectable, inject } from '@angular/core';
 import { GoKittService } from './gokitt.service';
+import { SqlitePersistenceService } from '../lib/sqlite/persistence/SqlitePersistenceService';
+
 
 // =============================================================================
 // Type Definitions - Mirroring Go store/models.go
@@ -126,8 +128,10 @@ type StoreWorkerMessage =
 })
 export class GoKittStoreService {
     private goKitt = inject(GoKittService);
+    private persistence = inject(SqlitePersistenceService);
 
     private worker: Worker | null = null;
+
     private pendingRequests = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
     private nextRequestId = 1;
 
@@ -177,11 +181,98 @@ export class GoKittStoreService {
 
         this.initialized = true;
         console.log('[GoKittStoreService] ✅ SQLite Store initialized');
+
+        // [PERSISTENCE] Restore State (Snapshot + WAL)
+        await this._restoreState();
+
+        // [PERSISTENCE] Register WAL Handler
+        this._registerWalHandler();
     }
 
+    private async _restoreState(): Promise<void> {
+        console.log('[GoKittStoreService] Restoring state from persistence...');
+        const { snapshot, wal, recoveryMode } = await this.persistence.load();
+
+        // 1. Load Snapshot (Binary)
+        if (snapshot) {
+            console.log(`[GoKittStoreService] Importing snapshot (${snapshot.byteLength} bytes)...`);
+            // We need to send this Uint8Array to the worker -> Go
+            // Since we can't easily pass it via the generic sendRequest (yet), 
+            // we rely on the implementationdetails of GoOpfsSyncService being replaced
+            // For now, we reuse the existing infrastructure or add a specialized call
+
+            // To properly send ArrayBuffer transferables, we need direct worker access or updated GoKittService
+            // Assuming we can send it as payload for now (copy overhead, but works for V1)
+
+            // @todo: Optimize with Transferable when GoKittService supports it
+            await this.importDatabase(snapshot);
+        }
+
+        // 2. Replay WAL (JSONL)
+        if (wal.length > 0) {
+            console.log(`[GoKittStoreService] Replaying ${wal.length} WAL entries...`);
+            for (const entry of wal) {
+                try {
+                    await this._replayWalEntry(entry);
+                } catch (e) {
+                    console.warn(`[GoKittStoreService] Failed to replay WAL entry ${entry.op}:`, e);
+                }
+            }
+        }
+
+        if (recoveryMode) {
+            console.warn('[GoKittStoreService] ⚠️ System recovered from backup');
+        }
+    }
+
+    private async _replayWalEntry(entry: { op: string; data: any }): Promise<void> {
+        // Map WAL op to Store method
+        switch (entry.op) {
+            case 'upsertNote':
+                await this.upsertNote(entry.data);
+                break;
+            case 'deleteNote':
+                await this.deleteNote(entry.data.id);
+                break;
+            case 'upsertEntity':
+                await this.upsertEntity(entry.data);
+                break;
+            case 'deleteEntity':
+                await this.deleteEntity(entry.data.id);
+                break;
+            case 'upsertEdge':
+                await this.upsertEdge(entry.data);
+                break;
+            case 'deleteEdge':
+                await this.deleteEdge(entry.data.id);
+                break;
+            case 'upsertFolder':
+                await this.upsertFolder(entry.data);
+                break;
+            case 'deleteFolder':
+                await this.deleteFolder(entry.data.id);
+                break;
+        }
+    }
+
+    private _registerWalHandler(): void {
+        // The handler is registered in the worker during init and events are sent as WAL_EVENT messages.
+        // We listen for them in handleMessage().
+        console.log('[GoKittStoreService] Listening for WAL events from worker');
+    }
+
+
     private handleMessage(msg: any): void {
+        // [WAL] Handle incoming WAL events
+        if (msg.type === 'WAL_EVENT') {
+            const { op, data } = msg;
+            this.persistence.appendWal(op, data);
+            return;
+        }
+
         // Only handle store-related responses
         if (!msg.type?.startsWith('STORE_')) return;
+
 
         if ('id' in msg && msg.id !== undefined) {
             const pending = this.pendingRequests.get(msg.id);
@@ -197,7 +288,7 @@ export class GoKittStoreService {
         }
     }
 
-    private sendRequest<T>(type: string, payload: any): Promise<T> {
+    private sendRequest<T>(type: string, payload: any, transfer: Transferable[] = []): Promise<T> {
         return new Promise((resolve, reject) => {
             if (!this.worker) {
                 reject(new Error('Worker not initialized'));
@@ -207,7 +298,8 @@ export class GoKittStoreService {
             const id = this.nextRequestId++;
             this.pendingRequests.set(id, { resolve, reject });
 
-            this.worker.postMessage({ type, payload, id } as StoreWorkerMessage);
+            this.worker.postMessage({ type, payload, id } as StoreWorkerMessage, transfer);
+
 
             // Timeout after 30 seconds
             setTimeout(() => {
@@ -439,7 +531,8 @@ export class GoKittStoreService {
         await this.ensureInitialized();
         // Transfer the buffer for zero-copy
         const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_IMPORT', { data: buffer });
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_IMPORT', { data: buffer }, [buffer]);
+
         if (!result.success) {
             throw new Error(`Import failed: ${result.error}`);
         }

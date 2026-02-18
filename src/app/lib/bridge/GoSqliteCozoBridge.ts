@@ -104,12 +104,19 @@ export class GoSqliteCozoBridge {
 
             // Boot from fastest available source
             const startTime = Date.now();
-            const bootSource = await this.opfsSync.boot();
 
-            // If we had BootCache data (pre-loaded from Dexie), use it on fresh boot
-            if (bootSource === 'fresh') {
+            // [New Architecture] Persistence is handled by GoKittStoreService internally.
+            // We just need to report status.
+            let bootSource: 'idb' | 'opfs' | 'fresh' = 'opfs';
+
+            // Check if store has data (loaded by GoKittStoreService)
+            const count = await this.goKittStore.countNotes();
+            if (count === 0) {
+                bootSource = 'fresh';
+                // If empty, try BootCache (Dexie warmup data)
                 await this.tryBootCache();
             }
+
 
             // Build report
             const notes = await this.goKittStore.listNotes();
@@ -166,7 +173,8 @@ export class GoSqliteCozoBridge {
                 this.seedCozoFolders(bootData.folders);
 
                 // First data loaded — sync to OPFS
-                this.opfsSync.markDirty();
+                // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
+
             }
         } catch (err) {
             console.warn('[GoSqliteBridge] BootCache not available:', err);
@@ -211,9 +219,10 @@ export class GoSqliteCozoBridge {
      */
     async syncNote(note: Note): Promise<void> {
         await this.goKittStore.upsertNote(GoKittStoreService.fromDexieNote(note));
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         this.warmDexie(db.notes, note);
     }
+
 
     /**
      * Sync a folder to GoSQLite + CozoDB (folders are read from CozoDB).
@@ -222,7 +231,8 @@ export class GoSqliteCozoBridge {
     async syncFolder(folder: Folder): Promise<void> {
         const storeFolder = GoKittStoreService.fromDexieFolder(folder);
         await this.goKittStore.upsertFolder(storeFolder);
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
+
 
         // CozoDB is the read path for folders — sync there too
         try {
@@ -241,8 +251,9 @@ export class GoSqliteCozoBridge {
      */
     async syncEntity(entity: Entity): Promise<void> {
         await this.goKittStore.upsertEntity(GoKittStoreService.fromDexieEntity(entity));
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         this.cozoHydrator.invalidate();
+
         this.warmDexie(db.entities, entity);
     }
 
@@ -251,8 +262,9 @@ export class GoSqliteCozoBridge {
      */
     async syncEdge(edge: Edge): Promise<void> {
         await this.goKittStore.upsertEdge(GoKittStoreService.fromDexieEdge(edge));
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         this.cozoHydrator.invalidate();
+
         this.warmDexie(db.edges, edge);
     }
 
@@ -262,15 +274,17 @@ export class GoSqliteCozoBridge {
 
     async deleteNote(noteId: string): Promise<void> {
         await this.goKittStore.deleteNote(noteId);
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         // Fire-and-forget Dexie cleanup
+
         db.notes.delete(noteId).catch(() => { });
     }
 
     async deleteFolder(folderId: string): Promise<void> {
         await this.goKittStore.deleteFolder(folderId);
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         // CozoDB folder cleanup
+
         try {
             cozoDb.runMutation(CozoQueries.deleteFolder(folderId));
         } catch {
@@ -282,16 +296,18 @@ export class GoSqliteCozoBridge {
 
     async deleteEntity(entityId: string): Promise<void> {
         await this.goKittStore.deleteEntity(entityId);
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         this.cozoHydrator.invalidate();
+
         // Fire-and-forget Dexie cleanup
         db.entities.delete(entityId).catch(() => { });
     }
 
     async deleteEdge(edgeId: string): Promise<void> {
         await this.goKittStore.deleteEdge(edgeId);
-        this.opfsSync.markDirty();
+        // this.opfsSync.markDirty(); // [DISABLED] Handled by WAL
         this.cozoHydrator.invalidate();
+
         // Fire-and-forget Dexie cleanup
         db.edges.delete(edgeId).catch(() => { });
     }
@@ -373,15 +389,16 @@ export class GoSqliteCozoBridge {
     // Utility Methods
     // -------------------------------------------------------------------------
 
-    /** Force sync to OPFS immediately */
     async flushQueue(): Promise<void> {
-        await this.opfsSync.syncNow();
+        // await this.opfsSync.syncNow();
     }
 
-    /** Check if there are pending sync operations */
+
     hasPendingSync(): boolean {
-        return this.opfsSync.isDirty();
+        // return this.opfsSync.isDirty();
+        return false;
     }
+
 
     /** Get OPFS sync status */
     getSyncStatus() {
