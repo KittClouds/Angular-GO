@@ -34,9 +34,8 @@ export class FooterStatsService {
     /** Current JSON content from editor (for analytics) */
     private currentContent = signal<string>('');
 
-    /** Save state tracking */
-    readonly isSaved = signal(true);
-    private saveTimeout: any = null;
+    /** Save state tracking (derived from store) */
+    readonly isSaved = computed(() => !this.noteEditorStore.isSaving());
 
     // ─────────────────────────────────────────────────────────────
     // Live Queries from Dexie
@@ -109,22 +108,10 @@ export class FooterStatsService {
     // ─────────────────────────────────────────────────────────────
 
     constructor() {
-        // Listen to editor content changes
+        // Listen to editor content changes ONLY for analytics
         this.editorService.content$.subscribe(({ json, markdown }) => {
             // Use JSON content for analytics (same as Analytics Panel)
             this.currentContent.set(JSON.stringify(json));
-
-            // Mark as unsaved, then saved after debounce
-            this.isSaved.set(false);
-
-            if (this.saveTimeout) {
-                clearTimeout(this.saveTimeout);
-            }
-
-            // Match the save debounce timing from NoteEditorStore (300ms + buffer)
-            this.saveTimeout = setTimeout(() => {
-                this.isSaved.set(true);
-            }, 500);
         });
 
         // Also load initial content when note changes
@@ -134,10 +121,8 @@ export class FooterStatsService {
             if (note) {
                 // Use JSON content (note.content) for consistency with analytics
                 this.currentContent.set(note.content || '');
-                this.isSaved.set(true);
             } else {
                 this.currentContent.set('');
-                this.isSaved.set(true);
             }
         });
     }

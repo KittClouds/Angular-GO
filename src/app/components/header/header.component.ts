@@ -7,7 +7,8 @@ import {
     PanelLeft,
     PanelRight,
     Sun,
-    Moon
+    Moon,
+    Save
 } from 'lucide-angular';
 import { EditorService } from '../../services/editor.service';
 import { SidebarService } from '../../lib/services/sidebar.service';
@@ -30,6 +31,7 @@ export class HeaderComponent {
     readonly PanelRight = PanelRight;
     readonly Sun = Sun;
     readonly Moon = Moon;
+    readonly Save = Save;
 
     sidebarService = inject(SidebarService);
     rightSidebarService = inject(RightSidebarService);
@@ -47,5 +49,9 @@ export class HeaderComponent {
 
     redo() {
         this.editorService.redo();
+    }
+
+    save() {
+        this.editorService.save();
     }
 }

@@ -17,7 +17,7 @@ export class RagWorkerService {
 
     // State
     readonly isModelLoaded = signal(false);
-    readonly modelDimension = signal(256); // MDBR Leaf default
+    readonly modelDimension = signal(256); // Gemini Embedding reduced to 256d
 
     constructor() {
         console.log('[RagWorkerService] Initialized');
@@ -51,7 +51,7 @@ export class RagWorkerService {
             });
 
             this.isModelLoaded.set(true);
-            console.log('[RagWorker] Worker initialized with 256d');
+            console.log('[RagWorker] Worker initialized with 256d (Gemini Embedding reduced)');
         } catch (err) {
             console.error('[RagWorker] Failed to initialize worker:', err);
             throw err;

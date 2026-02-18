@@ -349,7 +349,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
             // Persist to CozoDB
             if (result && !result.error) {
-                const stats = this.goKittService.persistGraph(
+                const stats = await this.goKittService.persistGraph(
                     result,
                     note.id,
                     note.narrativeId || undefined

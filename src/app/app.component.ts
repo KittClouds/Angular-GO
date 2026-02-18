@@ -14,6 +14,7 @@ import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator
 import { GoSqliteCozoBridge } from './lib/bridge/GoSqliteCozoBridge';
 import { cozoDb } from './lib/cozo/db';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
+import { KnowledgeService } from './services/knowledge.service';
 import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
@@ -37,6 +38,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
+  private knowledgeService = inject(KnowledgeService);
 
 
   // Navigation API subscriptions
@@ -89,13 +91,24 @@ export class AppComponent implements OnInit, OnDestroy {
       console.log('[AppComponent] ✓ WASM hydrated with entities');
       this.orchestrator.completePhase('wasm_hydrate');
 
+      // Phase 4.1: Helper Services (must precede Knowledge Graph)
+      // Initialize GoKittStore (SQLite) explicitly
+      await this.goKittStore.initialize();
+      console.log('[AppComponent] ✓ GoKitt Store initialized');
+
       // Phase 5: GoSQLite Bridge (OPFS restore — needed for note reads)
-      await this.goSqliteBridge.init();
-      setGoSqliteBridge(this.goSqliteBridge);
+      await this.goSqliteBridge.init(); // Imports data into Store
+      // setGoSqliteBridge(this.goSqliteBridge); // Removed as it's likely handled inside init or redundant
       console.log('[AppComponent] ✓ GoSQLite-Cozo Bridge initialized');
+
+      // Phase 4.2: Knowledge Graph (SQLite restore)
+      // Now safe to call because Store is populated with data
+      await this.knowledgeService.init();
+      console.log('[AppComponent] ✓ Knowledge Graph hydrated');
 
       // 🚀 APP IS INTERACTIVE — user can see + edit notes
       this.orchestrator.completePhase('ready');
+
 
       // Note restoration is handled by NoteEditorStore.restoreActiveNote() in constructor
       // No need to duplicate here - the store already loads from 'kittclouds-active-note'
@@ -108,11 +121,34 @@ export class AppComponent implements OnInit, OnDestroy {
       const docStorePromise = (async () => {
         try {
           const allNotes = await firstValueFrom(this.notesService.getAllNotes$()) || [];
-          const noteData = allNotes.map((n: any) => ({
-            id: n.id,
-            text: typeof n.content === 'string' ? n.content : JSON.stringify(n.content),
-            version: n.updatedAt ?? 0
-          }));
+          const noteData = allNotes.map((n: any) => {
+            // Extract plain text from Prosemirror JSON for search indexing
+            let text = '';
+            if (typeof n.content === 'string') {
+              // If it's already a string, check if it's JSON stringified
+              if (n.content.trim().startsWith('{')) {
+                try {
+                  const json = JSON.parse(n.content);
+                  text = extractTextFromContent(json);
+                } catch (e) {
+                  text = n.content; // Fallback to raw string
+                }
+              } else {
+                text = n.content;
+              }
+            } else {
+              // It's an object (Prosemirror JSON)
+              text = extractTextFromContent(n.content);
+            }
+
+            return {
+              id: n.id,
+              text: text,
+              version: n.updatedAt ?? 0,
+              narrativeId: n.narrativeId || '',
+              folderPath: n.folderId || ''
+            };
+          });
           await this.goKitt.hydrateNotes(noteData);
           console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes (background)`);
         } catch (err) {
@@ -166,4 +202,32 @@ export class AppComponent implements OnInit, OnDestroy {
 
     console.log('[AppComponent] ✓ Navigation API wired up');
   }
+}
+
+/**
+ * Helper to recursively extract plain text from Prosemirror JSON
+ */
+function extractTextFromContent(content: any): string {
+  if (!content) return '';
+  if (typeof content === 'string') return content;
+
+  let text = '';
+
+  // If it's a text node, return its text
+  if (content.type === 'text' && content.text) {
+    return content.text;
+  }
+
+  // If it has content (array), recurse
+  if (content.content && Array.isArray(content.content)) {
+    for (const child of content.content) {
+      text += extractTextFromContent(child);
+      // Add newline for block nodes to avoid smashing text together
+      if (child.type === 'paragraph' || child.type === 'heading' || child.type === 'listItem') {
+        text += '\n';
+      }
+    }
+  }
+
+  return text;
 }

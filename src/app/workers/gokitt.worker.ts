@@ -98,7 +98,30 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number };
+    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    // RAPTOR API
+    | { type: 'RAPTOR_INIT'; payload: { configJSON?: string }; id: number }
+    | { type: 'RAPTOR_CHUNK'; payload: { docID: string; text: string }; id: number }
+    | { type: 'RAPTOR_INGEST_SAB'; payload: { docID: string; count: number; dim: number; embeddings: Float32Array }; id: number }
+    | { type: 'RAPTOR_BUILD_TREE'; payload: { embeddingsJSON?: string }; id: number }
+    | { type: 'RAPTOR_SEARCH'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_SEARCH_AGGREGATED'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_SEARCH_LEAF_ONLY'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_GET_STATS'; id: number }
+    | { type: 'RAPTOR_CLEAR'; id: number }
+    // Knowledge Graph API
+    | { type: 'KNOWLEDGE_INIT'; id: number }
+    | { type: 'KNOWLEDGE_LOAD'; id: number }
+    | { type: 'KNOWLEDGE_SAVE'; id: number }
+    | { type: 'KNOWLEDGE_ADD_NODE'; payload: { nodeJSON: string }; id: number }
+    | { type: 'KNOWLEDGE_ADD_EDGE'; payload: { edgeJSON: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_NODE'; payload: { id: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_CHILDREN'; payload: { id: string; relation?: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_PARENTS'; payload: { id: string; relation?: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_ANCESTORS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
+    | { type: 'KNOWLEDGE_GET_DESCENDANTS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
+    | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD'; payload: { id: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -175,6 +198,29 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    // RAPTOR responses
+    | { type: 'RAPTOR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RAPTOR_CHUNK_RESULT'; id: number; payload: { success: boolean; chunks?: Array<{ text: string; start: number; end: number }>; count?: number; error?: string } }
+    | { type: 'RAPTOR_INGEST_SAB_RESULT'; id: number; payload: { success: boolean; error?: string; ingestedCount: number; dim?: number } }
+    | { type: 'RAPTOR_BUILD_TREE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RAPTOR_SEARCH_RESULT'; id: number; payload: any[] }
+    | { type: 'RAPTOR_SEARCH_AGGREGATED_RESULT'; id: number; payload: any[] }
+    | { type: 'RAPTOR_SEARCH_LEAF_ONLY_RESULT'; id: number; payload: any[] }
+    | { type: 'RAPTOR_GET_STATS_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_CLEAR_RESULT'; id: number; payload: { success: boolean } }
+    | { type: 'RAPTOR_CLEAR_RESULT'; id: number; payload: { success: boolean } }
+    // Knowledge Graph Responses
+    | { type: 'KNOWLEDGE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_LOAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_SAVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_ADD_NODE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_ADD_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_GET_NODE_RESULT'; id: number; payload: any }
+    | { type: 'KNOWLEDGE_GET_CHILDREN_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_PARENTS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_ANCESTORS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_DESCENDANTS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT'; id: number; payload: any[] }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -313,6 +359,30 @@ declare const GoKitt: {
     chatGetContext: (threadId: string) => string;
     chatClearThread: (threadId: string) => string;
     chatExportThread: (threadId: string) => string;
+    // RAPTOR API
+    raptorInit: (configJSON?: string) => string;
+    raptorBuildTree: (embeddingsJSON?: string) => string;
+    raptorSearch: (query: string, queryEmbeddingJSON: string, k: number) => string;
+    raptorSearchAggregated: (query: string, queryEmbeddingJSON: string, k: number) => string;
+    raptorSearchLeafOnly: (query: string, queryEmbeddingJSON: string, k: number) => string;
+    raptorGetStats: () => string;
+    raptorClear: () => string;
+    // RAPTOR SAB Zero-Copy
+    raptorChunk: (docID: string, text: string) => string;
+    raptorIngestSAB: (docID: string, count: number, dim: number) => string;
+    // Knowledge Graph API
+    knowledgeInit: () => string;
+    knowledgeLoad: () => string;
+    knowledgeSave: () => string;
+    knowledgeAddNode: (nodeJSON: string) => string;
+    knowledgeAddEdge: (edgeJSON: string) => string;
+    knowledgeGetNode: (id: string) => string;
+    knowledgeGetChildren: (id: string, relation?: string) => string;
+    knowledgeGetParents: (id: string, relation?: string) => string;
+    knowledgeGetAncestors: (id: string, relation?: string, maxDepth?: number) => string;
+    knowledgeGetDescendants: (id: string, relation?: string, maxDepth?: number) => string;
+    knowledgeGetNeighborhood: (id: string) => string;
+    knowledgeGetGraph: () => string;
 };
 
 /**
@@ -1891,6 +1961,422 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: res
                 } as GoKittWorkerResponse);
+                break;
+            }
+
+            // ===== RAPTOR API =====
+
+            case 'RAPTOR_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_INIT_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const configJSON = msg.payload?.configJSON;
+                const res = GoKitt.raptorInit(configJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'RAPTOR_INIT_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+
+            case 'RAPTOR_CHUNK': {
+                // Phase 1 of SAB ping-pong: chunk text in Go, return chunk texts for JS embedding
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_CHUNK_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded', count: 0 }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const chunkRes = GoKitt.raptorChunk(msg.payload.docID, msg.payload.text);
+                const chunkParsed = JSON.parse(chunkRes);
+
+                if (chunkParsed.error) {
+                    self.postMessage({
+                        type: 'RAPTOR_CHUNK_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: chunkParsed.error, count: 0 }
+                    } as GoKittWorkerResponse);
+                } else {
+                    // chunkParsed is an array of {text, start, end}
+                    self.postMessage({
+                        type: 'RAPTOR_CHUNK_RESULT',
+                        id: msg.id,
+                        payload: { success: true, chunks: chunkParsed, count: chunkParsed.length }
+                    } as GoKittWorkerResponse);
+                }
+                break;
+            }
+
+            case 'RAPTOR_INGEST_SAB': {
+                // Phase 2 of SAB ping-pong: write embeddings to SAB, then tell Go to read them
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_INGEST_SAB_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded', ingestedCount: 0 }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const { docID: sabDocID, count: sabCount, dim: sabDim, embeddings: sabEmbeddings } = msg.payload;
+
+                // Calculate required SAB size: header(16) + embHeader(8) + floats(count*dim*4)
+                const requiredSize = 16 + 8 + (sabCount * sabDim * 4);
+
+                // Lazy-init SAB: create the buffer if needed, or resize if too small
+                if (!(self as any).__sabBuffer || (self as any).__sabBuffer.byteLength < requiredSize) {
+                    // Allocate with 2x headroom for future batches
+                    const allocSize = Math.max(requiredSize * 2, 65536);
+                    try {
+                        (self as any).__sabBuffer = new SharedArrayBuffer(allocSize);
+                        // Initialize with Go
+                        const initRes = GoKitt.sabInit((self as any).__sabBuffer);
+                        const initParsed = JSON.parse(initRes);
+                        if (!initParsed.success) {
+                            self.postMessage({
+                                type: 'RAPTOR_INGEST_SAB_RESULT',
+                                id: msg.id,
+                                payload: { success: false, error: 'sabInit failed: ' + initParsed.error, ingestedCount: 0 }
+                            } as GoKittWorkerResponse);
+                            return;
+                        }
+                        console.log(`[GoKittWorker] SAB initialized: ${allocSize} bytes`);
+                    } catch (e) {
+                        // SharedArrayBuffer not available (COOP/COEP headers missing?)
+                        // Fallback to JSON path
+                        console.warn('[GoKittWorker] SharedArrayBuffer not available, falling back to JSON');
+                        const fallbackEmbs: number[][] = [];
+                        for (let i = 0; i < sabCount; i++) {
+                            fallbackEmbs.push(Array.from(sabEmbeddings.subarray(i * sabDim, (i + 1) * sabDim)));
+                        }
+                        // SAB not available — error out cleanly.
+                        self.postMessage({
+                            type: 'RAPTOR_INGEST_SAB_RESULT',
+                            id: msg.id,
+                            payload: { success: false, error: 'SharedArrayBuffer not available (check COOP/COEP headers)', ingestedCount: 0 }
+                        } as GoKittWorkerResponse);
+                        return;
+                    }
+                }
+
+                // Write embeddings to SAB in the expected binary layout:
+                // At OffsetPayload (16): [count:u32][dim:u32][...flat float32s...]
+                const sab = (self as any).__sabBuffer as SharedArrayBuffer;
+                const headerView = new DataView(sab);
+                const payloadOffset = 16; // OffsetPayload
+
+                // Write embedding header
+                headerView.setUint32(payloadOffset, sabCount, true);     // count (LE)
+                headerView.setUint32(payloadOffset + 4, sabDim, true);   // dim (LE)
+
+                // Write flat float32s directly into SAB
+                const float32View = new Float32Array(sab, payloadOffset + 8, sabCount * sabDim);
+                float32View.set(sabEmbeddings);
+
+                // Tell Go to read from SAB
+                const sabRes = GoKitt.raptorIngestSAB(sabDocID, sabCount, sabDim);
+                const sabParsed = JSON.parse(sabRes);
+
+                self.postMessage({
+                    type: 'RAPTOR_INGEST_SAB_RESULT',
+                    id: msg.id,
+                    payload: {
+                        success: !sabParsed.error,
+                        error: sabParsed.error,
+                        ingestedCount: sabParsed.ingestedCount || 0,
+                        dim: sabParsed.dim
+                    }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_BUILD_TREE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_BUILD_TREE_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const embeddingsJSON = msg.payload?.embeddingsJSON;
+                const res = GoKitt.raptorBuildTree(embeddingsJSON);
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'RAPTOR_BUILD_TREE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_SEARCH': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_SEARCH_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.raptorSearch(
+                    msg.payload.query,
+                    msg.payload.queryEmbeddingJSON,
+                    msg.payload.k
+                );
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'RAPTOR_SEARCH_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_SEARCH_AGGREGATED': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_SEARCH_AGGREGATED_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.raptorSearchAggregated(
+                    msg.payload.query,
+                    msg.payload.queryEmbeddingJSON,
+                    msg.payload.k
+                );
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'RAPTOR_SEARCH_AGGREGATED_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_SEARCH_LEAF_ONLY': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_SEARCH_LEAF_ONLY_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.raptorSearchLeafOnly(
+                    msg.payload.query,
+                    msg.payload.queryEmbeddingJSON,
+                    msg.payload.k
+                );
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'RAPTOR_SEARCH_LEAF_ONLY_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_GET_STATS': {
+                if (!wasmLoaded) {
+                    console.log('[GoKittWorker] RAPTOR_GET_STATS: WASM not loaded');
+                    self.postMessage({
+                        type: 'RAPTOR_GET_STATS_RESULT',
+                        id: msg.id,
+                        payload: { docCount: 0, leafCount: 0, treeCount: 0 }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.raptorGetStats();
+                console.log('[GoKittWorker] RAPTOR_GET_STATS raw result:', res);
+                const parsed = JSON.parse(res);
+                console.log('[GoKittWorker] RAPTOR_GET_STATS parsed:', parsed);
+
+                self.postMessage({
+                    type: 'RAPTOR_GET_STATS_RESULT',
+                    id: msg.id,
+                    payload: parsed
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'RAPTOR_CLEAR': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'RAPTOR_CLEAR_RESULT',
+                        id: msg.id,
+                        payload: { success: true }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                GoKitt.raptorClear();
+
+                self.postMessage({
+                    type: 'RAPTOR_CLEAR_RESULT',
+                    id: msg.id,
+                    payload: { success: true }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            // =================================================================
+            // Knowledge Graph API Handlers
+            // =================================================================
+
+            case 'KNOWLEDGE_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_INIT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeInit();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_INIT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_LOAD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_LOAD_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeLoad();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_LOAD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_SAVE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_SAVE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeSave();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_SAVE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_ADD_NODE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_ADD_NODE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeAddNode(msg.payload.nodeJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_ADD_NODE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_ADD_EDGE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_ADD_EDGE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeAddEdge(msg.payload.edgeJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_ADD_EDGE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_NODE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_NODE_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetNode(msg.payload.id);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_NODE_RESULT', id: msg.id, payload: parsed.error ? null : parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_CHILDREN': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_CHILDREN_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetChildren(msg.payload.id, msg.payload.relation);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_CHILDREN_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_PARENTS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_PARENTS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetParents(msg.payload.id, msg.payload.relation);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_PARENTS_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_ANCESTORS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_ANCESTORS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetAncestors(msg.payload.id, msg.payload.relation, msg.payload.maxDepth);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_ANCESTORS_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_DESCENDANTS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_DESCENDANTS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetDescendants(msg.payload.id, msg.payload.relation, msg.payload.maxDepth);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_DESCENDANTS_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_NEIGHBORHOOD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetNeighborhood(msg.payload.id);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'KNOWLEDGE_GET_GRAPH': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_GET_GRAPH_RESULT', id: msg.id, payload: { nodes: {}, edges: [] } });
+                    return;
+                }
+                const res = GoKitt.knowledgeGetGraph();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_GET_GRAPH_RESULT', id: msg.id, payload: parsed });
                 break;
             }
 

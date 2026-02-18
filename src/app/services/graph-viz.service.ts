@@ -293,8 +293,8 @@ export class GraphVizService {
         for (const edge of graphData.edges) {
             const sourceId = edge.Source || edge.source || '';
             const targetId = edge.Target || edge.target || '';
-            const edgeType = (edge.Type || edge.type || 'RELATED_TO').toUpperCase();
-            const confidence = edge.Confidence ?? edge.confidence ?? 1;
+            const edgeType = (edge.Type || edge.type || edge.relation || 'RELATED_TO').toUpperCase();
+            const confidence = edge.Confidence ?? edge.confidence ?? edge.weight ?? 1;
 
             // Track type counts
             typeCounts[edgeType] = (typeCounts[edgeType] || 0) + 1;

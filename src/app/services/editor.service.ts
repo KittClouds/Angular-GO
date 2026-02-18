@@ -15,6 +15,9 @@ export class EditorService {
     undo$ = this.undoTrigger.asObservable();
     redo$ = this.redoTrigger.asObservable();
 
+    private saveRequestSubject = new Subject<void>();
+    saveRequest$ = this.saveRequestSubject.asObservable();
+
     constructor() { }
 
     registerEditor(crepe: Crepe) {
@@ -53,6 +56,10 @@ export class EditorService {
                 console.error('Redo failed', e);
             }
         }
+    }
+
+    save() {
+        this.saveRequestSubject.next();
     }
 
     private contentSubject = new Subject<{ json: object; markdown: string }>();

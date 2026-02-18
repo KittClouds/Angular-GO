@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TestBed } from '@angular/core/testing';
+
 import { WorkspaceOpsService } from './workspace-ops.service';
 import { QueryRunnerService, type QueryResult } from './query-runner.service';
 
@@ -60,19 +60,19 @@ class MockQueryRunnerService {
     ): Promise<QueryResult<T>> {
         this.callLog.push({ script, params, lane: 'ro' });
 
-        if (script.includes('*ws_node') && params.node_id) {
+        if (script.includes('*ws_node') && params['node_id']) {
             const mockResult = this.mockResults.get('getNode');
             if (mockResult) return mockResult as QueryResult<T>;
         }
-        if (script.includes('*ws_node') && params.kind) {
+        if (script.includes('*ws_node') && params['kind']) {
             const mockResult = this.mockResults.get('getNodesByKind');
             if (mockResult) return mockResult as QueryResult<T>;
         }
-        if (script.includes('*ws_edge') && params.from_id) {
+        if (script.includes('*ws_edge') && params['from_id']) {
             const mockResult = this.mockResults.get('getEdgesFrom');
             if (mockResult) return mockResult as QueryResult<T>;
         }
-        if (script.includes('*ws_edge') && params.to_id) {
+        if (script.includes('*ws_edge') && params['to_id']) {
             const mockResult = this.mockResults.get('getEdgesTo');
             if (mockResult) return mockResult as QueryResult<T>;
         }
@@ -145,15 +145,7 @@ describe('WorkspaceOpsService', () => {
 
     beforeEach(() => {
         mockQueryRunner = new MockQueryRunnerService();
-
-        TestBed.configureTestingModule({
-            providers: [
-                WorkspaceOpsService,
-                { provide: QueryRunnerService, useValue: mockQueryRunner },
-            ],
-        });
-
-        service = TestBed.inject(WorkspaceOpsService);
+        service = new WorkspaceOpsService(mockQueryRunner as unknown as QueryRunnerService);
     });
 
     // ========================================================================
@@ -518,10 +510,10 @@ describe('WorkspaceOpsService', () => {
 
             expect(result.ok).toBe(true);
             expect(result.data?.kind).toBe('query');
-            expect(result.data?.json.script).toBe('?[id, label] := *entities{id, label} :limit 10');
-            expect(result.data?.json.bindings).toEqual({ kind: 'person' });
-            expect(result.data?.json.intent).toBe('entity-discovery');
-            expect(result.data?.json.costBudget).toBe(500);
+            expect(result.data?.json['script']).toBe('?[id, label] := *entities{id, label} :limit 10');
+            expect(result.data?.json['bindings']).toEqual({ kind: 'person' });
+            expect(result.data?.json['intent']).toBe('entity-discovery');
+            expect(result.data?.json['costBudget']).toBe(500);
         });
 
         it('should auto-generate query id if not provided', async () => {
@@ -563,8 +555,8 @@ describe('WorkspaceOpsService', () => {
 
             expect(result.ok).toBe(true);
             expect(result.data?.kind).toBe('result');
-            expect(result.data?.json.rows).toEqual([[1, 'John'], [2, 'Mary']]);
-            expect(result.data?.json.queryId).toBe('query-1');
+            expect(result.data?.json['rows']).toEqual([[1, 'John'], [2, 'Mary']]);
+            expect(result.data?.json['queryId']).toBe('query-1');
         });
 
         it('should create produced edge from query to result', async () => {
@@ -582,8 +574,8 @@ describe('WorkspaceOpsService', () => {
 
             const edgeCall = wsCalls[1];
             expect(edgeCall.script).toContain(':put ws_edge');
-            expect(edgeCall.params.from_id).toBe('query-1');
-            expect(edgeCall.params.rel).toBe('produced');
+            expect(edgeCall.params['from_id']).toBe('query-1');
+            expect(edgeCall.params['rel']).toBe('produced');
         });
 
         it('should auto-generate result id if not provided', async () => {
@@ -611,9 +603,9 @@ describe('WorkspaceOpsService', () => {
 
             expect(result.ok).toBe(true);
             expect(result.data?.kind).toBe('task');
-            expect(result.data?.json.plan).toBe('1. Find entities\n2. Extract claims\n3. Build graph');
-            expect(result.data?.json.context).toEqual({ focus: 'relationships' });
-            expect(result.data?.json.status).toBe('pending');
+            expect(result.data?.json['plan']).toBe('1. Find entities\n2. Extract claims\n3. Build graph');
+            expect(result.data?.json['context']).toEqual({ focus: 'relationships' });
+            expect(result.data?.json['status']).toBe('pending');
         });
 
         it('should link to parent task if provided', async () => {
@@ -631,8 +623,8 @@ describe('WorkspaceOpsService', () => {
             const callLog = mockQueryRunner.getCallLog();
             const edgeCall = callLog.find((c) => c.script.includes(':put ws_edge'));
             expect(edgeCall).toBeDefined();
-            expect(edgeCall?.params.from_id).toBe('task-parent');
-            expect(edgeCall?.params.rel).toBe('spawned');
+            expect(edgeCall?.params['from_id']).toBe('task-parent');
+            expect(edgeCall?.params['rel']).toBe('spawned');
         });
 
         it('should auto-generate task id if not provided', async () => {

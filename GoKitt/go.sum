@@ -6,6 +6,8 @@ github.com/bits-and-blooms/bitset v1.24.2 h1:M7/NzVbsytmtfHbumG+K2bremQPMJuqv1JD
 github.com/bits-and-blooms/bitset v1.24.2/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
 github.com/coregx/ahocorasick v0.1.0 h1:CiCQwQ/Gu6pahlO3u4jrPo8q0Tb8pLknU7tzqiLRZcw=
 github.com/coregx/ahocorasick v0.1.0/go.mod h1:SDcS9KTiwLP8FHNpYSO3Q3mRqrK8SYJAYpygrhcIils=
+github.com/coregx/coregex v0.12.1 h1:XEPdr4DSWXCHucaYwhFMkayZIKOOe8zJvvrUM58VMJA=
+github.com/coregx/coregex v0.12.1/go.mod h1:K+BrFVuOaFseP4gc4/d/GveYFe4JB95FHW3kNNJaTXg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/derekparker/trie/v3 v3.0.0-20240916174412-4095f8e392f7 h1:gsEwGHr/KBuoslhPtj+T2grgoV6puovmeTm1eupzDXg=

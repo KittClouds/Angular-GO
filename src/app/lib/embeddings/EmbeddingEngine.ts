@@ -8,7 +8,7 @@ import { EmbeddingModelRegistry } from './models/ModelRegistry';
 /**
  * Unified Embedding Engine
  * 
- * Provides embeddings from local models (Transformers.js) or Rust/WASM models.
+ * Provides embeddings from local models (Transformers.js), Rust/WASM models, or cloud APIs.
  */
 export class EmbeddingEngine {
     private static providers: Map<string, IEmbeddingProvider> = new Map();
@@ -18,6 +18,7 @@ export class EmbeddingEngine {
      * Initialize embedding engine with configured model
      */
     static async initialize(modelId?: string): Promise<void> {
+        // Default to local model with batch processing for memory efficiency
         const targetModelId = modelId || 'mongodb-leaf';
 
         // Check if already initialized with this model
@@ -43,6 +44,12 @@ export class EmbeddingEngine {
                     // Lazy import to avoid loading WASM unless needed
                     const { RustEmbeddingProvider } = await import('./providers/RustEmbeddingProvider');
                     provider = new RustEmbeddingProvider(targetModelId);
+                    break;
+                }
+                case 'openrouter': {
+                    // Lazy import to avoid loading unless needed
+                    const { OpenRouterEmbeddingProvider } = await import('./providers/OpenRouterEmbeddingProvider');
+                    provider = new OpenRouterEmbeddingProvider(targetModelId, model.dimensions);
                     break;
                 }
                 default:
@@ -119,7 +126,7 @@ export class EmbeddingEngine {
             return 'rust';
         } else if (modelInfo.provider === 'local') {
             return 'local';
-        } else if (modelInfo.provider === 'gemini') {
+        } else if (modelInfo.provider === 'gemini' || modelInfo.provider === 'openrouter') {
             return 'cloud';
         }
 

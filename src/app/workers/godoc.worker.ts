@@ -8,7 +8,11 @@
  * SEPARATE from RAG worker which uses heavier models for semantic search.
  */
 
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
+import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
+
+// Configure Transformers.js for web worker environment
+env.allowLocalModels = false;
+env.useBrowserCache = true;
 
 // ============================================================================
 // Types
@@ -144,11 +148,12 @@ self.onmessage = async (e: MessageEvent<CrossDocMessage>) => {
                     console.log(`[GoDocWorker] Loading model: ${MODEL_CONFIG.modelId}`);
                     const startTime = performance.now();
 
-                    embeddingPipeline = await pipeline(
+                    // Cast through any to avoid complex union type error from @huggingface/transformers
+                    // Note: quantized option removed in v3.x - models auto-select optimal format
+                    embeddingPipeline = await (pipeline as any)(
                         'feature-extraction',
-                        MODEL_CONFIG.modelId,
-                        { quantized: MODEL_CONFIG.quantized }
-                    ) as FeatureExtractionPipeline;
+                        MODEL_CONFIG.modelId
+                    );
 
                     initialized = true;
                     const elapsed = performance.now() - startTime;

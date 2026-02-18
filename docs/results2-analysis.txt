@@ -1,0 +1,44 @@
+RAPTOR Evaluation Analysis (Top-3 Check)
+========================================
+
+--- Overall Metrics (Top-3 Comparison) ---
+
+Method: leaf-only
+  Top-3 Precision: 100.00%
+  Top-3 Recall:    12.02%
+  Latency (Avg):   28.39 ms
+  Latency (P95):   46.60 ms
+  Latency (P99):   95.00 ms
+
+Method: collapsed-tree
+  Top-3 Precision: 100.00%
+  Top-3 Recall:    12.02%
+  Latency (Avg):   31.03 ms
+  Latency (P95):   54.80 ms
+  Latency (P99):   134.00 ms
+
+--- Latency & Recall Anomalies ---
+[para-025] "What is the significance of the number 2020?"
+  Latency: Collapsed=134.00ms vs Leaf=53.20ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+
+[theme-028] "What is the role of drugs in New Rome?"
+  Latency: Collapsed=115.40ms vs Leaf=29.00ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+
+[cross-006] "Find all mentions of time loops"
+  Latency: Collapsed=63.70ms vs Leaf=33.20ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+
+[para-024] "How does bribery work in New Rome?"
+  Latency: Collapsed=55.60ms vs Leaf=42.30ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+
+[exact-006] "Renesco Jolie Wrangler"
+  Latency: Collapsed=54.80ms vs Leaf=22.00ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+
+[theme-016] "What is the role of tourism in New Rome?"
+  Latency: Collapsed=54.30ms vs Leaf=49.10ms
+  Matched (Top-3): Collapsed=0 vs Leaf=0
+

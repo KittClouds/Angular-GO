@@ -3,6 +3,10 @@ package conductor
 import (
 	"strings"
 	"testing"
+
+	implicitmatcher "github.com/kittclouds/gokitt/pkg/implicit-matcher"
+	"github.com/kittclouds/gokitt/pkg/scanner/discovery"
+	"github.com/kittclouds/gokitt/pkg/scanner/syntax"
 )
 
 func TestConductorFullPipeline(t *testing.T) {
@@ -58,5 +62,53 @@ func TestConductorFullPipeline(t *testing.T) {
 	}
 	if !foundRef {
 		t.Error("Did not resolve 'He' to 'Gandalf'")
+	}
+	if !foundRef {
+		t.Error("Did not resolve 'He' to 'Gandalf'")
+	}
+}
+
+func TestConductorDiscovery(t *testing.T) {
+	c, err := New()
+	if err != nil {
+		t.Fatalf("Failed to create conductor: %v", err)
+	}
+	defer c.Close()
+
+	// 1. Seed Conductor with "Luffy" (Known Character)
+	// We need to access the Discovery Engine directly to seed it
+	// Or use SeedDiscovery if we had a proper public API for it (we have SetDictionary/SeedDiscovery from main)
+	// Let's manually inject into registry for this test
+	c.discoveryEngine.Registry.AddToken("Luffy")
+	stats := c.discoveryEngine.Registry.GetStats("Luffy")
+	stats.Status = discovery.StatusPromoted // Make it a valid source
+	kind := implicitmatcher.KindCharacter
+	stats.InferredKind = &kind
+
+	// 2. Scan text with a relation: "Luffy fought Kaido."
+	// "Kaido" is NOT in the dictionary and NOT explicitly tagged.
+	// It should be picked up by Discovery (Capitalized + Relation)
+	text := "Luffy fought Kaido."
+	result := c.Scan(text)
+
+	// 3. Verify "Kaido" is in result.Syntax
+	foundKaido := false
+	for _, m := range result.Syntax {
+		if m.Label == "Kaido" {
+			foundKaido = true
+			if m.Kind != syntax.KindEntity {
+				t.Errorf("Expected Kaido to be KindEntity, got %v", m.Kind)
+			}
+			// In the new pipeline, we set EntityKind to InferredKind (Character)
+			if m.EntityKind != "CHARACTER" {
+				// Note: ScanText returns DiscoveryCandidate with Kind.
+				// Conductor uses cand.Kind.String().
+				t.Errorf("Expected Kaido EntityKind to be CHARACTER, got %s", m.EntityKind)
+			}
+		}
+	}
+
+	if !foundKaido {
+		t.Error("Discovery did not add 'Kaido' to Syntax matches")
 	}
 }

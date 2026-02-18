@@ -38,8 +38,8 @@ describe('GraphObjectStore', () => {
         // Verify script contains intent
         expect(script).toContain('obj-1');
         expect(script).toContain('note');
-        expect(script).toContain(':create object');
-        expect(script).toContain(':create attachment');
+        expect(script).toContain(':put object');
+        expect(script).toContain(':put attachment');
         // Verify CID was passed (implied from blob put)
         // We assume blob store works (tested separately)
     });

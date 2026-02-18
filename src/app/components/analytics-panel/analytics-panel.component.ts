@@ -1,13 +1,16 @@
 // src/app/components/analytics-panel/analytics-panel.component.ts
 import { Component, inject, computed, signal, importProvidersFrom } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles } from 'lucide-angular';
+import { Router } from '@angular/router';
+import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles, Target } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
 
 import { FlowScoreComponent } from './flow-score/flow-score.component';
 import { analyzeText, parseContentToPlainText, getEmptyAnalytics, TextAnalytics } from '../../lib/analytics';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { EditorService } from '../../services/editor.service';
+import { GoKittService } from '../../services/gokitt.service';
+import { NotesService } from '../../lib/dexie/notes.service';
 
 @Component({
     selector: 'app-analytics-panel',
@@ -21,6 +24,52 @@ import { EditorService } from '../../services/editor.service';
     ],
     template: `
         <div class="analytics-content">
+            <!-- Search Section -->
+            <section class="analytics-section">
+                <div class="section-header">
+                    <div class="flex items-center gap-2">
+                        <lucide-icon [img]="Sparkles" class="h-4 w-4 text-primary"></lucide-icon>
+                        <span>Semantic Search</span>
+                    </div>
+                    <button 
+                        class="ml-auto p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-primary transition-colors"
+                        (click)="openEval()"
+                        title="Open RAPTOR Evaluation Harness"
+                    >
+                        <lucide-icon [img]="Target" class="h-3 w-3"></lucide-icon>
+                    </button>
+                </div>
+                <div class="search-box">
+                    <input 
+                        #searchInput
+                        type="text" 
+                        class="search-input" 
+                        placeholder="Search notes..."
+                        (keyup.enter)="performSearch(searchInput.value)"
+                    />
+                    <button class="search-btn" (click)="performSearch(searchInput.value)">
+                        <lucide-icon [img]="Sparkles" class="h-3 w-3"></lucide-icon>
+                    </button>
+                </div>
+                
+                @if (isSearching()) {
+                    <div class="text-xs text-muted-foreground animate-pulse px-2">Searching...</div>
+                }
+
+                @if (searchResults().length > 0) {
+                    <div class="search-results">
+                        @for (res of searchResults(); track res.id) {
+                            <div class="search-result-item" (click)="openNoteResult(res.id)">
+                                <span class="result-title">{{ res.title }}</span>
+                                <span class="result-score">{{ res.score | number:'1.2-2' }}</span>
+                            </div>
+                        }
+                    </div>
+                } @else if (searchQuery() && !isSearching()) {
+                     <div class="text-xs text-muted-foreground px-2">No results found.</div>
+                }
+            </section>
+
             @if (!hasContent()) {
                 <!-- Empty State -->
                 <div class="empty-state">
@@ -206,6 +255,82 @@ import { EditorService } from '../../services/editor.service';
             color: hsl(var(--foreground));
         }
 
+        .search-box {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .search-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            color: hsl(var(--foreground));
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: hsl(var(--primary));
+        }
+
+        .search-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 2rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 0.25rem;
+            color: hsl(var(--muted-foreground));
+            cursor: pointer;
+        }
+
+        .search-btn:hover {
+            color: hsl(var(--primary));
+            border-color: hsl(var(--primary));
+        }
+
+        .search-results {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .search-result-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.375rem 0.5rem;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 0.25rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .search-result-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .result-title {
+            font-size: 0.8rem;
+            color: hsl(var(--foreground));
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
+        }
+
+        .result-score {
+            font-size: 0.7rem;
+            color: hsl(var(--muted-foreground));
+            font-family: monospace;
+        }
+
         .stats-grid {
             padding-left: 1.5rem;
             display: flex;
@@ -327,16 +452,29 @@ import { EditorService } from '../../services/editor.service';
     `]
 })
 export class AnalyticsPanelComponent {
+    // Dependencies
+    private goKitt = inject(GoKittService);
+    private notesService = inject(NotesService);
     private noteStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
+    private router = inject(Router);
 
+    // Search State
+    searchQuery = signal('');
+    isSearching = signal(false);
+    searchResults = signal<any[]>([]);
+
+    // Note Lookup Map (ID -> Title)
+    private noteTitleMap = new Map<string, string>();
+
+    // existing state
     minCount = signal(1);
     isKeywordsExpanded = signal(false);
 
     // Real-time content from editor (immediate updates on typing/paste)
     private liveContent = signal<string>('');
 
-    // Icons
+    // ... Icons ...
     readonly FileText = FileText;
     readonly Clock = Clock;
     readonly MessageSquare = MessageSquare;
@@ -346,12 +484,19 @@ export class AnalyticsPanelComponent {
     readonly ChevronDown = ChevronDown;
     readonly ChevronUp = ChevronUp;
     readonly Sparkles = Sparkles;
+    readonly Target = Target;
 
     constructor() {
         // Subscribe to real-time editor content changes
+        // Use liveContent signal
         this.editorService.content$.subscribe(({ json }) => {
-            // Convert JSON to string for analysis
             this.liveContent.set(JSON.stringify(json));
+        });
+
+        // Build note title map
+        this.notesService.getAllNotes$().subscribe(notes => {
+            this.noteTitleMap.clear();
+            notes.forEach(n => this.noteTitleMap.set(n.id, n.title || 'Untitled'));
         });
     }
 
@@ -386,6 +531,46 @@ export class AnalyticsPanelComponent {
         return this.isKeywordsExpanded() ? keywords : keywords.slice(0, 5);
     });
 
+    async performSearch(query: string) {
+        this.searchQuery.set(query);
+        if (!query.trim()) {
+            this.searchResults.set([]);
+            return;
+        }
+
+        this.isSearching.set(true);
+        try {
+            // Search via WASM
+            const rawResults = await this.goKitt.search(query, 10);
+            if (!rawResults) {
+                this.searchResults.set([]);
+                return;
+            }
+
+            // Map results to display format
+            const mapped = rawResults.map(r => ({
+                id: r.DocID || r.docID || r.id, // Handle Go capitalization variance
+                score: r.Score || r.score || 0,
+                title: this.noteTitleMap.get(r.DocID || r.docID || r.id) || 'Unknown Note'
+            }));
+
+            this.searchResults.set(mapped);
+        } catch (err) {
+            console.error('[AnalyticsPanel] Search failed:', err);
+        } finally {
+            this.isSearching.set(false);
+        }
+    }
+
+    openNoteResult(noteId: string) {
+        this.noteStore.openNote(noteId);
+    }
+
+    openEval() {
+        this.router.navigate(['/raptor-eval']);
+    }
+
+    // ... formatTime ...
     formatTime(minutes: number, seconds: number): string {
         if (minutes === 0 && seconds === 0) return '< 1 sec';
         if (minutes === 0) return `${seconds} sec`;

@@ -7,5 +7,6 @@ export const routes: Routes = [
     { path: '', component: EditorComponent },
     { path: 'calendar', component: FantasyCalendarPageComponent },
     { path: 'graph', component: GraphPageComponent },
-    { path: 'test/graph', loadComponent: () => import('./test/gokitt-graph-test.component').then(m => m.GokittGraphTestComponent) }
+    { path: 'test/graph', loadComponent: () => import('./test/gokitt-graph-test.component').then(m => m.GokittGraphTestComponent) },
+    { path: 'raptor-eval', loadComponent: () => import('./components/raptor-eval').then(m => m.RaptorEvalComponent) }
 ];

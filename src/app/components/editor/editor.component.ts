@@ -1,4 +1,4 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LucideAngularModule, FileText, Plus } from 'lucide-angular';
 import { Subscription, skip, filter } from 'rxjs';
@@ -115,6 +115,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         // Subscribe to active note changes from NoteEditorStore
         // ─────────────────────────────────────────────────────────────
         this.noteSubscription = this.noteEditorStore.activeNote$.subscribe(note => {
+            // If we're switching away from a valid note to another note (or null), save the old one first
+            if (this.currentNoteId && (!note || note.id !== this.currentNoteId)) {
+                console.log(`[EditorComponent] Switching from ${this.currentNoteId} -> ${note?.id ?? 'null'}. Saving previous.`);
+                this.saveCurrentContent();
+            }
+
             if (note) {
                 this.loadNoteContent(note);
             } else {
@@ -123,21 +129,24 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         });
 
         // ─────────────────────────────────────────────────────────────
-        // On editor content change, save via NoteEditorStore (debounced)
+        // On editor content change:
+        // 1. Broadcast to other components (EditorService)
+        // 2. Save position
+        // 3. DO NOT AUTOSAVE to DB (Manual save only)
         // ─────────────────────────────────────────────────────────────
         this.crepe.on((listener) => {
             listener.updated((ctx, doc, prevDoc) => {
-                // Skip save if we're currently loading content
+                // Skip processing if we're currently loading content
                 if (this.isLoadingContent) return;
 
                 if (prevDoc && !doc.eq(prevDoc)) {
                     const json = doc.toJSON();
                     const markdown = this.crepe?.getMarkdown() ?? '';
 
-                    // Save to Dexie via store (300ms debounced)
-                    this.noteEditorStore.saveContent(json, markdown);
+                    // REMOVED: Automatic DB Save
+                    // this.noteEditorStore.saveContent(json, markdown);
 
-                    // Also broadcast for other listeners (e.g., hub panels)
+                    // Still broadcast for other listeners (e.g., hub panels, preview)
                     this.editorService.updateContent({ json, markdown });
 
                     // Save editor position on content change
@@ -150,10 +159,49 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         // Save position before page unload (refresh/close)
         // ─────────────────────────────────────────────────────────────
         window.addEventListener('beforeunload', () => {
+            this.saveCurrentContent();
             this.saveEditorPosition();
         });
 
+        // ─────────────────────────────────────────────────────────────
+        // Listen for Manual Save Requests (Header Button)
+        // ─────────────────────────────────────────────────────────────
+        this.editorService.saveRequest$.subscribe(() => {
+            this.saveCurrentContent();
+        });
+
         console.log('[EditorComponent] Initialized - waiting for note selection');
+    }
+
+    /**
+     * Manual Save Trigger (Ctrl+S / Cmd+S)
+     */
+    @HostListener('window:keydown.control.s', ['$event'])
+    @HostListener('window:keydown.meta.s', ['$event']) // Mac Cmd+S
+    onCtrlS(event: Event) {
+        event.preventDefault();
+        this.saveCurrentContent();
+    }
+
+    /**
+     * Captures current editor state and forces a save to NoteEditorStore
+     */
+    private saveCurrentContent(): void {
+        if (!this.crepe || !this.currentNoteId || this.isLoadingContent) return;
+
+        console.log(`[EditorComponent] saving content for ${this.currentNoteId}`);
+
+        try {
+            const editorView = this.crepe.editor.ctx.get(editorViewCtx);
+            const json = editorView.state.doc.toJSON();
+            const markdown = this.crepe.getMarkdown();
+
+            // Force immediate save (skipping debounce)
+            // MUST pass currentNoteId because the store's activeNoteId might have already changed (if switching notes)
+            this.noteEditorStore.saveContentNow(json, markdown, this.currentNoteId);
+        } catch (e) {
+            console.error('[EditorComponent] Failed to extract content for save:', e);
+        }
     }
 
     /**

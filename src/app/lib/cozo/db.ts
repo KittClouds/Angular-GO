@@ -13,7 +13,7 @@ const wasmUrl = '/assets/cozo_lib_wasm_bg.wasm';
 import { cozoPersistence } from './persistence/CozoPersistenceService';
 import { initContentRepo } from './content';
 import { createGraphSchemas, createBlocksHnswIndex } from './graph/GraphSchema';
-import { WS_SCHEMAS, WS_RELATIONS } from '../rlm';
+import { WS_SCHEMAS, WS_RELATIONS } from '../rlm/schema/workspace-schema';
 
 // Relations to persist (graph + content)
 export const PERSISTED_RELATIONS = [

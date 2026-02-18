@@ -65,6 +65,31 @@ func (m *DocIDMapper) Count() int {
 	return len(m.toUint32)
 }
 
+// GetAll returns all mappings as id -> docID.
+// Used for persistence.
+func (m *DocIDMapper) GetAll() map[uint32]string {
+	result := make(map[uint32]string, len(m.toString))
+	for id, docID := range m.toString {
+		result[id] = docID
+	}
+	return result
+}
+
+// Restore restores a specific id -> docID mapping.
+// Used for loading persisted state. The nextID is updated if needed.
+func (m *DocIDMapper) Restore(id uint32, docID string) {
+	m.toUint32[docID] = id
+	m.toString[id] = docID
+	if id >= m.nextID {
+		m.nextID = id + 1
+	}
+}
+
+// NextID returns the next ID that will be assigned.
+func (m *DocIDMapper) NextID() uint32 {
+	return m.nextID
+}
+
 // CompressedGramPostings stores posting list data with RoaringBitmap for docID sets.
 // This provides O(1) intersection via bitmap AND operations with SIMD optimization.
 // Payload data (TF, segment masks) is NOT stored here - scoring uses PatternMatch

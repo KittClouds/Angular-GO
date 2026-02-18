@@ -1,7 +1,7 @@
 // src/app/lib/embeddings/models/ModelRegistry.ts
 // Model registry for embedding models - cleaned from legacy_v1
 
-export type EmbeddingProvider = 'local' | 'gemini' | 'rust';
+export type EmbeddingProvider = 'local' | 'gemini' | 'rust' | 'openrouter';
 
 export interface EmbeddingModelDefinition {
     id: string;
@@ -22,6 +22,12 @@ export interface EmbeddingModelDefinition {
         modelId: string; // HuggingFace model ID
         quantization?: 'q8' | 'q4' | 'fp16';
         memoryMB: number; // Estimated memory usage
+    };
+
+    // OpenRouter model info (if provider === 'openrouter')
+    openRouterModel?: {
+        modelId: string; // OpenRouter model ID
+        nativeDimensions: number; // Original model dimensions before reduction
     };
 
     description: string;
@@ -68,6 +74,44 @@ export class EmbeddingModelRegistry {
                 description: 'all-MiniLM-L6-v2 via Transformers.js.',
             },
         ],
+        [
+            'gte-modernbert-base',
+            {
+                id: 'gte-modernbert-base',
+                name: 'GTE ModernBERT Base (768d)',
+                provider: 'local',
+                dimensions: 768,
+                maxTokens: 8192,
+                speed: 'medium',
+                quality: 'high',
+                costPer1kTokens: 0,
+                localModel: {
+                    modelId: 'Snowflake/snowflake-arctic-embed-m-v2.0',
+                    quantization: 'fp16',
+                    memoryMB: 400,
+                },
+                description: 'GTE ModernBERT - High quality 768d embeddings. Best for semantic search.',
+            },
+        ],
+        [
+            'bge-small-en',
+            {
+                id: 'bge-small-en',
+                name: 'BGE Small EN v1.5 (384d)',
+                provider: 'local',
+                dimensions: 384,
+                maxTokens: 512,
+                speed: 'fast',
+                quality: 'high',
+                costPer1kTokens: 0,
+                localModel: {
+                    modelId: 'BAAI/bge-small-en-v1.5',
+                    quantization: 'fp16',
+                    memoryMB: 130,
+                },
+                description: 'BGE Small EN v1.5 - Fast 384d embeddings. Great balance of speed and quality.',
+            },
+        ],
 
         // ===== RUST/WASM MODELS (kittcore EmbedCortex) =====
         [
@@ -102,6 +146,26 @@ export class EmbeddingModelRegistry {
                 quality: 'high',
                 costPer1kTokens: 0.00001,
                 description: 'Google Gemini embeddings. High quality, cloud-based.',
+            },
+        ],
+
+        // ===== OPENROUTER MODELS =====
+        [
+            'gemini-embedding-or',
+            {
+                id: 'gemini-embedding-or',
+                name: 'Gemini Embedding (OpenRouter)',
+                provider: 'openrouter',
+                dimensions: 256, // Reduced from 3072 for efficiency
+                maxTokens: 8192,
+                speed: 'fast',
+                quality: 'high',
+                costPer1kTokens: 0.00001,
+                openRouterModel: {
+                    modelId: 'google/gemini-embedding-001',
+                    nativeDimensions: 3072,
+                },
+                description: 'Gemini Embedding via OpenRouter. 3072d reduced to 256d. Best for large documents.',
             },
         ],
     ]);

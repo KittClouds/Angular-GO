@@ -5,7 +5,7 @@ import {
     type NoteSearchResult,
     type WsNodeJsonResult,
     type EpisodePayloadResult,
-    type FolderMetadataResult,
+
 } from './retrieval.service';
 import { QueryRunnerService } from './query-runner.service';
 
@@ -95,7 +95,7 @@ describe('RetrievalService', () => {
             await service.searchNotesRegex('\\bdragon\\b');
 
             const params: Record<string, unknown> = queryRunnerMock.runRO.mock.calls[0][1];
-            expect(params.pattern).toBe('\\bdragon\\b');
+            expect(params['pattern']).toBe('\\bdragon\\b');
         });
 
         it('returns empty array for empty pattern', async () => {
@@ -422,64 +422,9 @@ describe('RetrievalService — World-Scoped + JSON', () => {
     });
 
     // =========================================================================
-    // searchFoldersMetadata
+    // searchFoldersMetadata - REMOVED
     // =========================================================================
 
-    describe('searchFoldersMetadata', () => {
-        it('extracts metadata key from folders', async () => {
-            queryRunnerMock.runRO.mockResolvedValue({
-                ok: true,
-                rows: [
-                    ['f1', 'Characters', 'value-1'],
-                ],
-            });
-
-            const results = await service.searchFoldersMetadata('world-1', 'customProp');
-
-            expect(results).toHaveLength(1);
-            expect(results[0]).toEqual({
-                folderId: 'f1',
-                name: 'Characters',
-                metaValue: 'value-1',
-            });
-        });
-
-        it('uses maybe_get in the Datalog script', async () => {
-            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
-
-            await service.searchFoldersMetadata('w1', 'icon');
-
-            const script: string = queryRunnerMock.runRO.mock.calls[0][0];
-            expect(script).toContain('maybe_get(metadata, $key)');
-        });
-
-        it('filters by world_id', async () => {
-            queryRunnerMock.runRO.mockResolvedValue({ ok: true, rows: [] });
-
-            await service.searchFoldersMetadata('world-42', 'theme');
-
-            const params = queryRunnerMock.runRO.mock.calls[0][1];
-            expect(params.world_id).toBe('world-42');
-        });
-
-        it('returns empty for missing worldId', async () => {
-            const results = await service.searchFoldersMetadata('', 'key');
-            expect(results).toEqual([]);
-            expect(queryRunnerMock.runRO).not.toHaveBeenCalled();
-        });
-
-        it('returns empty for missing metaKey', async () => {
-            const results = await service.searchFoldersMetadata('w1', '');
-            expect(results).toEqual([]);
-        });
-
-        it('returns empty on failure', async () => {
-            queryRunnerMock.runRO.mockResolvedValue({ ok: false, error: 'no relation' });
-
-            const results = await service.searchFoldersMetadata('w1', 'key');
-            expect(results).toEqual([]);
-        });
-    });
 });
 
 // =============================================================================

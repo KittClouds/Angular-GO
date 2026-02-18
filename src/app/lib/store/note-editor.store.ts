@@ -38,6 +38,9 @@ export class NoteEditorStore {
     /** Loading state for UI feedback */
     readonly isLoading = signal(false);
 
+    /** Saving state for UI feedback */
+    readonly isSaving = signal(false);
+
     /** Computed: whether a note is currently open */
     readonly isNoteOpen = computed(() => this.activeNoteId() !== null);
 
@@ -250,15 +253,20 @@ export class NoteEditorStore {
      * Force an immediate save (bypass debounce).
      * Useful for explicit "Save" button or before navigation.
      */
-    async saveContentNow(json: object, markdown: string): Promise<void> {
-        const noteId = this.activeNoteId();
+    async saveContentNow(json: object, markdown: string, targetNoteId?: string): Promise<void> {
+        const noteId = targetNoteId || this.activeNoteId();
         if (!noteId) return;
 
-        await ops.updateNote(noteId, {
-            content: JSON.stringify(json),
-            markdownContent: markdown,
-        });
-        console.log(`[NoteEditorStore] Force-saved note ${noteId}`);
+        this.isSaving.set(true);
+        try {
+            await ops.updateNote(noteId, {
+                content: JSON.stringify(json),
+                markdownContent: markdown,
+            });
+            console.log(`[NoteEditorStore] Force-saved note ${noteId}`);
+        } finally {
+            this.isSaving.set(false);
+        }
     }
 
     /**

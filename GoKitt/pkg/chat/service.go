@@ -3,23 +3,31 @@
 package chat
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/kittclouds/gokitt/internal/store"
+	"github.com/kittclouds/gokitt/pkg/agent"
+	"github.com/kittclouds/gokitt/pkg/memory"
 )
 
 // ChatService manages AI chat sessions.
 type ChatService struct {
-	store store.Storer
+	store    *store.SQLiteStore
+	observer *memory.Observer
 }
 
 // NewChatService creates a new chat service.
-func NewChatService(s store.Storer) *ChatService {
+func NewChatService(s *store.SQLiteStore, a *agent.Service) *ChatService {
+	// Initialize Observational Memory
+	obs := memory.NewObserver(s, a, memory.DefaultConfig())
+
 	return &ChatService{
-		store: s,
+		store:    s,
+		observer: obs,
 	}
 }
 
@@ -80,6 +88,15 @@ func (s *ChatService) AddMessage(threadID, role, content, narrativeID string) (*
 	if err := s.store.AddMessage(msg); err != nil {
 		return nil, fmt.Errorf("failed to add message: %w", err)
 	}
+
+	// Trigger Observational Memory Loop (Async)
+	go func() {
+		// Create a background context for the async op
+		ctx := context.Background()
+		if err := s.observer.ProcessLoop(ctx, threadID); err != nil {
+			fmt.Printf("[OM] Error processing loop for thread %s: %v\n", threadID, err)
+		}
+	}()
 
 	return msg, nil
 }
@@ -159,6 +176,11 @@ func (s *ChatService) ClearThread(threadID string) error {
 // GetMemories returns all memories for a thread.
 func (s *ChatService) GetMemories(threadID string) ([]*store.Memory, error) {
 	return s.store.GetMemoriesForThread(threadID)
+}
+
+// GetOMRecord returns the observational memory record for a thread.
+func (s *ChatService) GetOMRecord(threadID string) (*store.OMRecord, error) {
+	return s.store.GetOMRecord(threadID)
 }
 
 // =============================================================================

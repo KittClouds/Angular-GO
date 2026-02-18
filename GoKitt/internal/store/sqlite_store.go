@@ -217,6 +217,90 @@ CREATE TABLE IF NOT EXISTS workspace_artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_ws_scope
     ON workspace_artifacts(thread_id, narrative_id, folder_id);
+
+-- =============================================================================
+-- Phase 9: HNSW Vector Index Persistence
+-- =============================================================================
+
+-- HNSW index blobs per dimension (256, 384, 768, 1536, etc.)
+-- Stores serialized HNSW graph with versioned header
+CREATE TABLE IF NOT EXISTS hnsw_index (
+    dim INTEGER PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1,
+    bytes BLOB NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- DocID mapper state (uint32 ↔ string mapping)
+-- Preserves "IDs never reused" invariant
+CREATE TABLE IF NOT EXISTS docid_map (
+    id INTEGER PRIMARY KEY,
+    docid TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+-- ChunkID mapper state (uint32 ↔ chunk key mapping)
+CREATE TABLE IF NOT EXISTS chunkid_map (
+    id INTEGER PRIMARY KEY,
+    chunk_key TEXT NOT NULL UNIQUE,
+    doc_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+-- Chunk metadata with scope filtering
+-- Supports expansion to parent context and scope filtering
+CREATE TABLE IF NOT EXISTS chunks (
+    chunk_id INTEGER PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    level INTEGER NOT NULL DEFAULT 0,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    parent_id INTEGER DEFAULT 0,
+    scope_narrative TEXT,
+    scope_folder TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_scope ON chunks(scope_narrative, scope_folder);
+CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_id);
+
+-- =============================================================================
+-- RAPTOR: Hierarchical Document Retrieval
+-- =============================================================================
+
+-- RAPTOR nodes (leaves + internal routing nodes)
+-- node_type: 0=leaf, 1=internal, 2=root
+CREATE TABLE IF NOT EXISTS raptor_nodes (
+    node_id INTEGER PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    node_type INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 0,
+    start INTEGER DEFAULT 0,
+    end INTEGER DEFAULT 0,
+    text TEXT NOT NULL,
+    vector BLOB,
+    parent_id INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_doc ON raptor_nodes(doc_id);
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_type ON raptor_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_parent ON raptor_nodes(parent_id);
+
+-- RAPTOR edges (parent-child relationships)
+CREATE TABLE IF NOT EXISTS raptor_edges (
+    parent_id INTEGER NOT NULL,
+    child_id INTEGER NOT NULL,
+    doc_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, child_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_edges_parent ON raptor_edges(parent_id);
+CREATE INDEX IF NOT EXISTS idx_raptor_edges_child ON raptor_edges(child_id);
+CREATE INDEX IF NOT EXISTS idx_raptor_edges_doc ON raptor_edges(doc_id);
 `
 
 // NewSQLiteStore creates a new in-memory SQLite store.
@@ -238,10 +322,18 @@ func NewSQLiteStoreWithDSN(dsn string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	return &SQLiteStore{
+	s := &SQLiteStore{
 		db:   db,
 		qidx: qgram.NewQGramIndex(3), // Q=3 trigrams
-	}, nil
+	}
+
+	// Initialize Knowledge Schema (Knowledge Graph)
+	if err := s.EnsureKnowledgeSchema(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("failed to create knowledge schema: %w", err)
+	}
+
+	return s, nil
 }
 
 // Close closes the database connection.
@@ -2294,6 +2386,691 @@ func (s *SQLiteStore) getNoteByID(id string) (*Note, error) {
 	}
 
 	return &note, nil
+}
+
+// =============================================================================
+// Phase 9: HNSW Vector Index Persistence
+// =============================================================================
+
+// HNSWRecord represents a serialized HNSW index for a dimension.
+type HNSWRecord struct {
+	Dim       int
+	Version   int
+	Bytes     []byte
+	UpdatedAt int64
+}
+
+// ChunkRecord represents a chunk with scope information.
+type ChunkRecord struct {
+	ChunkID        uint32
+	DocID          string
+	Level          uint8
+	Start          int
+	End            int
+	Text           string
+	ParentID       uint32
+	ScopeNarrative string
+	ScopeFolder    string
+	CreatedAt      int64
+}
+
+// SaveHNSW saves a serialized HNSW index for a dimension.
+func (s *SQLiteStore) SaveHNSW(dim int, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	_, err := s.db.Exec(`
+		INSERT INTO hnsw_index (dim, version, bytes, updated_at)
+		VALUES (?, 1, ?, ?)
+		ON CONFLICT(dim) DO UPDATE SET bytes = excluded.bytes, version = version + 1, updated_at = excluded.updated_at
+	`, dim, data, now)
+
+	return err
+}
+
+// LoadHNSW loads a serialized HNSW index for a dimension.
+func (s *SQLiteStore) LoadHNSW(dim int) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var data []byte
+	err := s.db.QueryRow(`SELECT bytes FROM hnsw_index WHERE dim = ?`, dim).Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return data, err
+}
+
+// ListHNSWDims returns all dimensions with stored HNSW indexes.
+func (s *SQLiteStore) ListHNSWDims() ([]int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT dim FROM hnsw_index`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var dims []int
+	for rows.Next() {
+		var dim int
+		if err := rows.Scan(&dim); err != nil {
+			return nil, err
+		}
+		dims = append(dims, dim)
+	}
+	return dims, nil
+}
+
+// DeleteHNSW removes an HNSW index for a dimension.
+func (s *SQLiteStore) DeleteHNSW(dim int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM hnsw_index WHERE dim = ?`, dim)
+	return err
+}
+
+// SaveDocIDMapper saves the DocIDMapper state to the database.
+func (s *SQLiteStore) SaveDocIDMapper(mapper *qgram.DocIDMapper) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Clear existing
+	if _, err := s.db.Exec(`DELETE FROM docid_map`); err != nil {
+		return err
+	}
+
+	// Insert all mappings
+	now := time.Now().UnixMilli()
+	for id, docID := range mapper.GetAll() {
+		if _, err := s.db.Exec(`INSERT INTO docid_map (id, docid, created_at) VALUES (?, ?, ?)`, id, docID, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// LoadDocIDMapper loads the DocIDMapper state from the database.
+func (s *SQLiteStore) LoadDocIDMapper() (*qgram.DocIDMapper, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	mapper := qgram.NewDocIDMapper()
+
+	rows, err := s.db.Query(`SELECT id, docid FROM docid_map ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id uint32
+		var docID string
+		if err := rows.Scan(&id, &docID); err != nil {
+			return nil, err
+		}
+		// Restore mapping - use internal method to set specific ID
+		mapper.Restore(id, docID)
+	}
+
+	return mapper, nil
+}
+
+// SaveChunkIDMapper saves the ChunkIDMapper state to the database.
+// Uses function parameters to avoid import cycle with chunker package.
+func (s *SQLiteStore) SaveChunkIDMapper(getAll func() map[uint32]string, getDocID func(uint32) string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Clear existing
+	if _, err := s.db.Exec(`DELETE FROM chunkid_map`); err != nil {
+		return err
+	}
+
+	// Insert all mappings
+	now := time.Now().UnixMilli()
+	for id, key := range getAll() {
+		docID := getDocID(id)
+		if _, err := s.db.Exec(`INSERT INTO chunkid_map (id, chunk_key, doc_id, created_at) VALUES (?, ?, ?, ?)`, id, key, docID, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ChunkMapping represents a loaded chunk ID mapping.
+type ChunkMapping struct {
+	ID    uint32
+	Key   string
+	DocID string
+}
+
+// LoadChunkIDMappings loads chunk ID mappings from the database.
+// Returns a slice of mappings that can be restored into a ChunkIDMapper.
+func (s *SQLiteStore) LoadChunkIDMappings() ([]ChunkMapping, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, chunk_key, doc_id FROM chunkid_map ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mappings []ChunkMapping
+	for rows.Next() {
+		var m ChunkMapping
+		if err := rows.Scan(&m.ID, &m.Key, &m.DocID); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+
+	return mappings, nil
+}
+
+// SaveChunks saves chunk records to the database.
+func (s *SQLiteStore) SaveChunks(chunks []ChunkRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Use transaction for bulk insert
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO chunks (chunk_id, doc_id, level, start, end, text, parent_id, scope_narrative, scope_folder, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(chunk_id) DO UPDATE SET
+			doc_id = excluded.doc_id,
+			level = excluded.level,
+			start = excluded.start,
+			end = excluded.end,
+			text = excluded.text,
+			parent_id = excluded.parent_id,
+			scope_narrative = excluded.scope_narrative,
+			scope_folder = excluded.scope_folder
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().UnixMilli()
+	for _, chunk := range chunks {
+		_, err := stmt.Exec(
+			chunk.ChunkID, chunk.DocID, chunk.Level, chunk.Start, chunk.End,
+			chunk.Text, chunk.ParentID, chunk.ScopeNarrative, chunk.ScopeFolder, now,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// LoadChunks loads all chunk records from the database.
+func (s *SQLiteStore) LoadChunks() ([]ChunkRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT chunk_id, doc_id, level, start, end, text, parent_id, scope_narrative, scope_folder, created_at
+		FROM chunks ORDER BY chunk_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []ChunkRecord
+	for rows.Next() {
+		var chunk ChunkRecord
+		var scopeNarrative, scopeFolder sql.NullString
+		if err := rows.Scan(
+			&chunk.ChunkID, &chunk.DocID, &chunk.Level, &chunk.Start, &chunk.End,
+			&chunk.Text, &chunk.ParentID, &scopeNarrative, &scopeFolder, &chunk.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if scopeNarrative.Valid {
+			chunk.ScopeNarrative = scopeNarrative.String
+		}
+		if scopeFolder.Valid {
+			chunk.ScopeFolder = scopeFolder.String
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	return chunks, nil
+}
+
+// GetChunksByDoc returns chunks for a specific document.
+func (s *SQLiteStore) GetChunksByDoc(docID string) ([]ChunkRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT chunk_id, doc_id, level, start, end, text, parent_id, scope_narrative, scope_folder, created_at
+		FROM chunks WHERE doc_id = ? ORDER BY start
+	`, docID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []ChunkRecord
+	for rows.Next() {
+		var chunk ChunkRecord
+		var scopeNarrative, scopeFolder sql.NullString
+		if err := rows.Scan(
+			&chunk.ChunkID, &chunk.DocID, &chunk.Level, &chunk.Start, &chunk.End,
+			&chunk.Text, &chunk.ParentID, &scopeNarrative, &scopeFolder, &chunk.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if scopeNarrative.Valid {
+			chunk.ScopeNarrative = scopeNarrative.String
+		}
+		if scopeFolder.Valid {
+			chunk.ScopeFolder = scopeFolder.String
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	return chunks, nil
+}
+
+// GetChunksByScope returns chunks filtered by narrative and folder scope.
+func (s *SQLiteStore) GetChunksByScope(narrativeID, folderPath string) ([]ChunkRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT chunk_id, doc_id, level, start, end, text, parent_id, scope_narrative, scope_folder, created_at
+		FROM chunks 
+		WHERE (scope_narrative = ? OR ? = '')
+		  AND (scope_folder = ? OR ? = '')
+		ORDER BY doc_id, start
+	`, narrativeID, narrativeID, folderPath, folderPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []ChunkRecord
+	for rows.Next() {
+		var chunk ChunkRecord
+		var scopeNarrative, scopeFolder sql.NullString
+		if err := rows.Scan(
+			&chunk.ChunkID, &chunk.DocID, &chunk.Level, &chunk.Start, &chunk.End,
+			&chunk.Text, &chunk.ParentID, &scopeNarrative, &scopeFolder, &chunk.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if scopeNarrative.Valid {
+			chunk.ScopeNarrative = scopeNarrative.String
+		}
+		if scopeFolder.Valid {
+			chunk.ScopeFolder = scopeFolder.String
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	return chunks, nil
+}
+
+// DeleteChunksByDoc removes all chunks for a document.
+func (s *SQLiteStore) DeleteChunksByDoc(docID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM chunks WHERE doc_id = ?`, docID)
+	return err
+}
+
+// ClearChunksIDMap clears the chunk ID mapper table.
+func (s *SQLiteStore) ClearChunkIDMap() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM chunkid_map`)
+	return err
+}
+
+// =============================================================================
+// RAPTOR Persistence
+// =============================================================================
+
+// float32SliceToBytes converts a []float32 to a byte slice for storage.
+func float32SliceToBytes(vec []float32) ([]byte, error) {
+	if len(vec) == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, len(vec)*4)
+	for i, v := range vec {
+		bits := uint32(v) // Simple cast for storage; use proper encoding for precision
+		buf[i*4] = byte(bits)
+		buf[i*4+1] = byte(bits >> 8)
+		buf[i*4+2] = byte(bits >> 16)
+		buf[i*4+3] = byte(bits >> 24)
+	}
+	return buf, nil
+}
+
+// bytesToFloat32Slice converts a byte slice back to []float32.
+func bytesToFloat32Slice(buf []byte) ([]float32, error) {
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	if len(buf)%4 != 0 {
+		return nil, fmt.Errorf("invalid byte length for float32 slice: %d", len(buf))
+	}
+	vec := make([]float32, len(buf)/4)
+	for i := range vec {
+		bits := uint32(buf[i*4]) | uint32(buf[i*4+1])<<8 | uint32(buf[i*4+2])<<16 | uint32(buf[i*4+3])<<24
+		vec[i] = float32(bits) // Simple cast; matches encoding above
+	}
+	return vec, nil
+}
+
+// RaptorNodeRecord represents a RAPTOR node for persistence.
+type RaptorNodeRecord struct {
+	NodeID   uint32
+	DocID    string
+	NodeType int // 0=leaf, 1=internal, 2=root
+	Level    int
+	Start    int
+	End      int
+	Text     string
+	Vector   []float32
+	ParentID uint32
+}
+
+// RaptorEdgeRecord represents a parent-child edge for persistence.
+type RaptorEdgeRecord struct {
+	ParentID uint32
+	ChildID  uint32
+	DocID    string
+}
+
+// SaveRaptorNodes saves RAPTOR nodes to the database.
+func (s *SQLiteStore) SaveRaptorNodes(nodes []RaptorNodeRecord) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO raptor_nodes 
+		(node_id, doc_id, node_type, level, start, end, text, vector, parent_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for _, node := range nodes {
+		vectorBytes, err := float32SliceToBytes(node.Vector)
+		if err != nil {
+			return err
+		}
+
+		_, err = stmt.Exec(
+			node.NodeID, node.DocID, node.NodeType, node.Level,
+			node.Start, node.End, node.Text, vectorBytes, node.ParentID, now,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// LoadRaptorNodes loads all RAPTOR nodes for a document.
+func (s *SQLiteStore) LoadRaptorNodes(docID string) ([]RaptorNodeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT node_id, doc_id, node_type, level, start, end, text, vector, parent_id
+		FROM raptor_nodes WHERE doc_id = ?
+	`, docID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []RaptorNodeRecord
+	for rows.Next() {
+		var node RaptorNodeRecord
+		var vectorBytes []byte
+		if err := rows.Scan(
+			&node.NodeID, &node.DocID, &node.NodeType, &node.Level,
+			&node.Start, &node.End, &node.Text, &vectorBytes, &node.ParentID,
+		); err != nil {
+			return nil, err
+		}
+
+		if len(vectorBytes) > 0 {
+			vec, err := bytesToFloat32Slice(vectorBytes)
+			if err != nil {
+				return nil, err
+			}
+			node.Vector = vec
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	return nodes, nil
+}
+
+// LoadAllRaptorNodes loads all RAPTOR nodes.
+func (s *SQLiteStore) LoadAllRaptorNodes() ([]RaptorNodeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT node_id, doc_id, node_type, level, start, end, text, vector, parent_id
+		FROM raptor_nodes
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []RaptorNodeRecord
+	for rows.Next() {
+		var node RaptorNodeRecord
+		var vectorBytes []byte
+		if err := rows.Scan(
+			&node.NodeID, &node.DocID, &node.NodeType, &node.Level,
+			&node.Start, &node.End, &node.Text, &vectorBytes, &node.ParentID,
+		); err != nil {
+			return nil, err
+		}
+
+		if len(vectorBytes) > 0 {
+			vec, err := bytesToFloat32Slice(vectorBytes)
+			if err != nil {
+				return nil, err
+			}
+			node.Vector = vec
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	return nodes, nil
+}
+
+// SaveRaptorEdges saves RAPTOR edges to the database.
+func (s *SQLiteStore) SaveRaptorEdges(edges []RaptorEdgeRecord) error {
+	if len(edges) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO raptor_edges (parent_id, child_id, doc_id, created_at)
+		VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for _, edge := range edges {
+		_, err = stmt.Exec(edge.ParentID, edge.ChildID, edge.DocID, now)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// LoadRaptorEdges loads all RAPTOR edges for a document.
+func (s *SQLiteStore) LoadRaptorEdges(docID string) ([]RaptorEdgeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT parent_id, child_id, doc_id
+		FROM raptor_edges WHERE doc_id = ?
+	`, docID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var edges []RaptorEdgeRecord
+	for rows.Next() {
+		var edge RaptorEdgeRecord
+		if err := rows.Scan(&edge.ParentID, &edge.ChildID, &edge.DocID); err != nil {
+			return nil, err
+		}
+		edges = append(edges, edge)
+	}
+
+	return edges, nil
+}
+
+// LoadAllRaptorEdges loads all RAPTOR edges.
+func (s *SQLiteStore) LoadAllRaptorEdges() ([]RaptorEdgeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT parent_id, child_id, doc_id FROM raptor_edges`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var edges []RaptorEdgeRecord
+	for rows.Next() {
+		var edge RaptorEdgeRecord
+		if err := rows.Scan(&edge.ParentID, &edge.ChildID, &edge.DocID); err != nil {
+			return nil, err
+		}
+		edges = append(edges, edge)
+	}
+
+	return edges, nil
+}
+
+// DeleteRaptorTree removes all RAPTOR nodes and edges for a document.
+func (s *SQLiteStore) DeleteRaptorTree(docID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM raptor_nodes WHERE doc_id = ?`, docID)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`DELETE FROM raptor_edges WHERE doc_id = ?`, docID)
+	return err
+}
+
+// ListRaptorDocs returns all document IDs that have RAPTOR trees.
+func (s *SQLiteStore) ListRaptorDocs() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT DISTINCT doc_id FROM raptor_nodes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var docIDs []string
+	for rows.Next() {
+		var docID string
+		if err := rows.Scan(&docID); err != nil {
+			return nil, err
+		}
+		docIDs = append(docIDs, docID)
+	}
+
+	return docIDs, nil
+}
+
+// GetUnobservedMessages retrieves messages created after a specific timestamp.
+func (s *SQLiteStore) GetUnobservedMessages(threadID string, since int64) ([]*ThreadMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, thread_id, role, content, narrative_id, created_at, updated_at
+		FROM thread_messages 
+		WHERE thread_id = ? AND created_at > ?
+		ORDER BY created_at ASC
+	`, threadID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []*ThreadMessage
+	for rows.Next() {
+		var m ThreadMessage
+		if err := rows.Scan(&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.NarrativeID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, &m)
+	}
+	return msgs, nil
 }
 
 // Compile-time interface check

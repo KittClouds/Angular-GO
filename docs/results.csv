@@ -1,0 +1,61 @@
+queryId,query,category,mode,precision,recall,f1,mrr,ndcg,latencyMs,resultCount,relevantCount
+exact-001,"Ryan Romano",exact,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,45.36,10,0
+exact-001,"Ryan Romano",exact,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,20.22,10,0
+exact-001,"Ryan Romano",exact,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,16.56,1,0
+exact-002,"Quicksave",exact,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,16.31,10,0
+exact-002,"Quicksave",exact,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,23.05,10,0
+exact-002,"Quicksave",exact,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,20.87,1,0
+exact-003,"New Rome",exact,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,18.89,10,0
+exact-003,"New Rome",exact,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,21.02,10,0
+exact-003,"New Rome",exact,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,29.46,1,0
+exact-004,"Dynamis Tower",exact,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,31.10,10,0
+exact-004,"Dynamis Tower",exact,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,30.04,10,0
+exact-004,"Dynamis Tower",exact,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,29.02,1,0
+exact-005,"Plymouth Fury",exact,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,31.51,10,0
+exact-005,"Plymouth Fury",exact,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,23.13,10,0
+exact-005,"Plymouth Fury",exact,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,33.87,1,0
+para-001,"What is Ryan's superpower?",paraphrase,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,31.32,10,0
+para-001,"What is Ryan's superpower?",paraphrase,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,30.56,10,0
+para-001,"What is Ryan's superpower?",paraphrase,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,37.26,1,0
+para-002,"Who is the ice assassin?",paraphrase,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,27.08,10,0
+para-002,"Who is the ice assassin?",paraphrase,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,29.57,10,0
+para-002,"Who is the ice assassin?",paraphrase,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,26.19,1,0
+para-003,"What happened at the bar?",paraphrase,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,21.81,10,0
+para-003,"What happened at the bar?",paraphrase,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,25.74,10,0
+para-003,"What happened at the bar?",paraphrase,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,23.34,1,0
+para-004,"Describe the city setting",paraphrase,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,18.38,10,0
+para-004,"Describe the city setting",paraphrase,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,20.83,10,0
+para-004,"Describe the city setting",paraphrase,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,17.53,1,0
+para-005,"What does Quicksave look like?",paraphrase,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,22.49,10,0
+para-005,"What does Quicksave look like?",paraphrase,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,26.45,10,0
+para-005,"What does Quicksave look like?",paraphrase,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,23.70,1,0
+theme-001,"How does Ryan's immortality affect his approach to danger?",thematic,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,26.71,10,0
+theme-001,"How does Ryan's immortality affect his approach to danger?",thematic,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,30.23,10,0
+theme-001,"How does Ryan's immortality affect his approach to danger?",thematic,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,24.74,1,0
+theme-002,"What are the major factions in New Rome?",thematic,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,26.01,10,0
+theme-002,"What are the major factions in New Rome?",thematic,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,26.12,10,0
+theme-002,"What are the major factions in New Rome?",thematic,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,20.03,1,0
+theme-003,"How does corporate power manifest in the city?",thematic,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,25.21,10,0
+theme-003,"How does corporate power manifest in the city?",thematic,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,24.98,10,0
+theme-003,"How does corporate power manifest in the city?",thematic,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,25.81,1,0
+theme-004,"What is the relationship between Genomes and normal humans?",thematic,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,24.29,10,0
+theme-004,"What is the relationship between Genomes and normal humans?",thematic,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,26.69,10,0
+theme-004,"What is the relationship between Genomes and normal humans?",thematic,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,26.05,1,0
+theme-005,"How does the time loop mechanic work?",thematic,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,29.33,10,0
+theme-005,"How does the time loop mechanic work?",thematic,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,25.44,10,0
+theme-005,"How does the time loop mechanic work?",thematic,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,27.15,1,0
+cross-001,"Find all mentions of the black briefcase",cross-chapter,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,29.53,10,0
+cross-001,"Find all mentions of the black briefcase",cross-chapter,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,29.62,10,0
+cross-001,"Find all mentions of the black briefcase",cross-chapter,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,24.47,1,0
+cross-002,"Track character introductions across chapters",cross-chapter,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,20.37,10,0
+cross-002,"Track character introductions across chapters",cross-chapter,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,23.62,10,0
+cross-002,"Track character introductions across chapters",cross-chapter,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,24.87,1,0
+cross-003,"Locate all fight scenes with Genomes",cross-chapter,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,19.81,10,0
+cross-003,"Locate all fight scenes with Genomes",cross-chapter,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,21.28,10,0
+cross-003,"Locate all fight scenes with Genomes",cross-chapter,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,30.70,1,0
+cross-004,"Find all references to Dynamis corporation",cross-chapter,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,18.34,10,0
+cross-004,"Find all references to Dynamis corporation",cross-chapter,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,18.79,10,0
+cross-004,"Find all references to Dynamis corporation",cross-chapter,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,23.73,1,0
+cross-005,"Track Ryan's deaths across the story",cross-chapter,leaf-only,0.0000,0.0000,0.0000,0.0000,0.0000,17.94,10,0
+cross-005,"Track Ryan's deaths across the story",cross-chapter,collapsed-tree,0.0000,0.0000,0.0000,0.0000,0.0000,20.83,10,0
+cross-005,"Track Ryan's deaths across the story",cross-chapter,aggregated,0.0000,0.0000,0.0000,0.0000,0.0000,23.58,1,0

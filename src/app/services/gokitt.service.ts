@@ -12,7 +12,12 @@ import type { EntityKind } from '../lib/cozo/utils';
 /** GoKitt graph data directly from scan result */
 export interface GoKittGraphData {
     nodes: Record<string, { Label?: string; label?: string; Kind?: string; kind?: string; Aliases?: string[] }>;
-    edges: Array<{ Source?: string; source?: string; Target?: string; target?: string; Type?: string; type?: string; Confidence?: number; confidence?: number }>;
+    edges: Array<{
+        Source?: string; source?: string;
+        Target?: string; target?: string;
+        Type?: string; type?: string; relation?: string;
+        Confidence?: number; confidence?: number; weight?: number;
+    }>;
 }
 
 /** Provenance context for folder-aware graph projection */
@@ -67,7 +72,30 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number };
+    | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    // RAPTOR requests
+    | { type: 'RAPTOR_INIT'; payload: { configJSON?: string }; id: number }
+    | { type: 'RAPTOR_BUILD_TREE'; payload: { embeddingsJSON?: string }; id: number }
+    | { type: 'RAPTOR_SEARCH'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_SEARCH_AGGREGATED'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_SEARCH_LEAF_ONLY'; payload: { query: string; queryEmbeddingJSON: string; k: number }; id: number }
+    | { type: 'RAPTOR_GET_STATS'; id: number }
+    | { type: 'RAPTOR_CLEAR'; id: number }
+    | { type: 'RAPTOR_CHUNK'; payload: { docID: string; text: string }; id: number }
+    | { type: 'RAPTOR_INGEST_SAB'; payload: { docID: string; count: number; dim: number }; id: number }
+    // Knowledge Graph requests
+    | { type: 'KNOWLEDGE_INIT'; id: number }
+    | { type: 'KNOWLEDGE_LOAD'; id: number }
+    | { type: 'KNOWLEDGE_SAVE'; id: number }
+    | { type: 'KNOWLEDGE_ADD_NODE'; payload: { nodeJSON: string }; id: number }
+    | { type: 'KNOWLEDGE_ADD_EDGE'; payload: { edgeJSON: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_NODE'; payload: { id: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_CHILDREN'; payload: { id: string; relation?: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_PARENTS'; payload: { id: string; relation?: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_ANCESTORS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
+    | { type: 'KNOWLEDGE_GET_DESCENDANTS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
+    | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD'; payload: { id: string }; id: number }
+    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -135,6 +163,29 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    // RAPTOR responses
+    | { type: 'RAPTOR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RAPTOR_BUILD_TREE_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_SEARCH_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_SEARCH_AGGREGATED_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_SEARCH_LEAF_ONLY_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_GET_STATS_RESULT'; id: number; payload: any }
+    | { type: 'RAPTOR_CLEAR_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RAPTOR_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'RAPTOR_INGEST_SAB_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    // Knowledge Graph responses
+    | { type: 'KNOWLEDGE_INIT_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_LOAD_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_SAVE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_ADD_NODE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_ADD_EDGE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_GET_NODE_RESULT'; id: number; payload: any }
+    | { type: 'KNOWLEDGE_GET_CHILDREN_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_PARENTS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_ANCESTORS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_DESCENDANTS_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT'; id: number; payload: any[] }
+    | { type: 'KNOWLEDGE_GET_GRAPH_RESULT'; id: number; payload: any }
     // Phase 8: Observational Memory responses
     | { type: 'OM_PROCESS_RESULT'; id: number; payload: { observed: boolean; reflected: boolean } }
     | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
@@ -283,18 +334,8 @@ export class GoKittService {
      */
     async initSearchIndex(): Promise<void> {
         if (!this.wasmLoaded) return;
-
-        console.log('[GoKittService] 🔎 Initializing Search Index...');
-        const notes = await db.notes.toArray();
-
-        let indexed = 0;
-        for (const note of notes) {
-            if (note.content) {
-                await this.indexNote(note.id, note.content);
-                indexed++;
-            }
-        }
-        console.log(`[GoKittService] ✅ Search Index Ready (${indexed} docs)`);
+        // Search index is now populated via hydrateNotes() for performance.
+        console.log('[GoKittService] 🔎 Search Index init deferred to hydration.');
     }
 
     async indexNote(id: string, text: string, scope?: SearchScope): Promise<void> {
@@ -411,11 +452,11 @@ export class GoKittService {
      * @param narrativeId - Optional narrative scope for the entities
      * @returns Stats on persisted nodes/edges
      */
-    persistGraph(
+    async persistGraph(
         scanResult: any,
         noteId: string,
         narrativeId?: string
-    ): { nodesCreated: number; nodesUpdated: number; edgesCreated: number; edgesUpdated: number } {
+    ): Promise<{ nodesCreated: number; nodesUpdated: number; edgesCreated: number; edgesUpdated: number }> {
         const stats = { nodesCreated: 0, nodesUpdated: 0, edgesCreated: 0, edgesUpdated: 0 };
 
         if (!scanResult?.graph) {
@@ -430,8 +471,10 @@ export class GoKittService {
         console.log('[GoKittService.persistGraph] Nodes:', nodes ? Object.keys(nodes).length : 0);
         console.log('[GoKittService.persistGraph] Edges:', edges?.length ?? 0);
 
+        const knowledgePromises: Promise<any>[] = [];
+
         // ─────────────────────────────────────────────────────────────
-        // Persist Nodes → entities table
+        // Persist Nodes → entities table (CozoDB) AND Knowledge Graph (GoKitt)
         // ─────────────────────────────────────────────────────────────
         if (nodes && typeof nodes === 'object') {
             const nodeIdMap = new Map<string, string>(); // GoKitt ID → CozoDB ID
@@ -440,7 +483,15 @@ export class GoKittService {
                 const label = node.Label || node.label || goKittId;
                 const kind = (node.Kind || node.kind || 'UNKNOWN').toUpperCase() as EntityKind;
 
-                // Check if entity already exists
+                // Sync to Knowledge Graph (Phase 4)
+                knowledgePromises.push(this.knowledgeAddNode({
+                    id: goKittId,
+                    kind: kind,
+                    label: label,
+                    props: { narrativeId }
+                }));
+
+                // Check if entity already exists (Legacy CozoDB Logic)
                 const existing = graphRegistry.findEntityByLabel(label);
 
                 if (existing) {
@@ -449,7 +500,6 @@ export class GoKittService {
                     graphRegistry.updateNoteMentions(existing.id, noteId, currentCount + 1);
                     nodeIdMap.set(goKittId, existing.id);
                     stats.nodesUpdated++;
-                    console.log(`[GoKittService.persistGraph] Updated existing entity: ${label}`);
                 } else {
                     // Create new entity
                     const entity = graphRegistry.registerEntity(label, kind, noteId, {
@@ -458,54 +508,68 @@ export class GoKittService {
                     });
                     nodeIdMap.set(goKittId, entity.id);
                     stats.nodesCreated++;
-                    console.log(`[GoKittService.persistGraph] Created entity: ${label} (${kind})`);
                 }
             }
 
             // ─────────────────────────────────────────────────────────────
-            // Persist Edges → entity_edge table  
+            // Persist Edges → relationships table (CozoDB) AND Knowledge Graph (GoKitt)
             // ─────────────────────────────────────────────────────────────
             if (edges && Array.isArray(edges)) {
                 for (const edge of edges) {
-                    const sourceGoKittId = edge.Source || edge.source;
-                    const targetGoKittId = edge.Target || edge.target;
-                    const edgeType = (edge.Type || edge.type || 'RELATED_TO').toUpperCase();
-                    const confidence = edge.Confidence ?? edge.confidence ?? 0.8;
+                    const sourceIdx = edge.Source || edge.source;
+                    const targetIdx = edge.Target || edge.target;
+                    const relation = (edge.Type || edge.type || 'RELATED_TO').toUpperCase();
+                    const confidence = edge.Confidence ?? edge.confidence ?? 1;
 
-                    // Map GoKitt IDs to CozoDB IDs
-                    const sourceId = nodeIdMap.get(sourceGoKittId);
-                    const targetId = nodeIdMap.get(targetGoKittId);
+                    // Sync to Knowledge Graph (Phase 4)
+                    knowledgePromises.push(this.knowledgeAddEdge({
+                        source: sourceIdx,
+                        target: targetIdx,
+                        relation: relation,
+                        weight: confidence,
+                        props: { noteId }
+                    }));
 
-                    if (!sourceId || !targetId) {
-                        console.warn(`[GoKittService.persistGraph] Skipping edge - missing node mapping: ${sourceGoKittId} -> ${targetGoKittId}`);
-                        continue;
-                    }
+                    // Legacy CozoDB Logic requires resolved IDs
+                    const sourceId = nodeIdMap.get(sourceIdx);
+                    const targetId = nodeIdMap.get(targetIdx);
 
-                    // Build provenance
-                    const provenance: RelationshipProvenance = {
-                        source: 'gokitt_scan',
-                        originId: noteId,
-                        confidence,
-                        timestamp: new Date(),
-                        context: `Extracted from note via Reality Layer scan`
-                    };
+                    if (sourceId && targetId) {
+                        const existingRel = graphRegistry.findRelationship(sourceId, targetId, relation);
 
-                    // Check if relationship already exists (addRelationship handles dedup)
-                    const existingRel = graphRegistry.findRelationship(sourceId, targetId, edgeType);
+                        // We register/update via graphRegistry
+                        const rel = graphRegistry.addRelationship(
+                            sourceId,
+                            targetId,
+                            relation,
+                            {
+                                source: 'gokitt_scan',
+                                originId: noteId,
+                                confidence,
+                                timestamp: new Date(),
+                                context: 'Extracted from note via Reality Layer scan'
+                            },
+                            { narrativeId }
+                        );
 
-                    graphRegistry.addRelationship(sourceId, targetId, edgeType, provenance, {
-                        narrativeId
-                    });
-
-                    if (existingRel) {
-                        stats.edgesUpdated++;
-                        console.log(`[GoKittService.persistGraph] Updated edge: ${edgeType}`);
+                        if (existingRel) {
+                            stats.edgesUpdated++;
+                            console.log(`[GoKittService.persistGraph] Updated edge: ${relation}`);
+                        } else if (rel) {
+                            stats.edgesCreated++;
+                            console.log(`[GoKittService.persistGraph] Created edge: ${relation} (${sourceId} → ${targetId})`);
+                        }
                     } else {
-                        stats.edgesCreated++;
-                        console.log(`[GoKittService.persistGraph] Created edge: ${edgeType} (${sourceId} → ${targetId})`);
+                        // IDs might be missing if nodes weren't created successfully or mapped
                     }
                 }
             }
+        }
+
+        // Wait for all Knowledge Graph updates
+        if (this.wasmLoaded) {
+            await Promise.all(knowledgePromises);
+            await this.knowledgeSave(); // Persist to disk
         }
 
         console.log(`[GoKittService.persistGraph] ✅ Complete:`, stats);
@@ -885,6 +949,29 @@ export class GoKittService {
                         case 'CHAT_GET_CONTEXT_RESULT':
                         case 'CHAT_CLEAR_THREAD_RESULT':
                         case 'CHAT_EXPORT_THREAD_RESULT':
+                        // RAPTOR responses
+                        case 'RAPTOR_INIT_RESULT':
+                        case 'RAPTOR_CHUNK_RESULT':
+                        case 'RAPTOR_INGEST_SAB_RESULT':
+                        case 'RAPTOR_BUILD_TREE_RESULT':
+                        case 'RAPTOR_SEARCH_RESULT':
+                        case 'RAPTOR_SEARCH_AGGREGATED_RESULT':
+                        case 'RAPTOR_SEARCH_LEAF_ONLY_RESULT':
+                        case 'RAPTOR_GET_STATS_RESULT':
+                        case 'RAPTOR_CLEAR_RESULT':
+                        // Knowledge Graph Responses
+                        case 'KNOWLEDGE_INIT_RESULT':
+                        case 'KNOWLEDGE_LOAD_RESULT':
+                        case 'KNOWLEDGE_SAVE_RESULT':
+                        case 'KNOWLEDGE_ADD_NODE_RESULT':
+                        case 'KNOWLEDGE_ADD_EDGE_RESULT':
+                        case 'KNOWLEDGE_GET_NODE_RESULT':
+                        case 'KNOWLEDGE_GET_CHILDREN_RESULT':
+                        case 'KNOWLEDGE_GET_PARENTS_RESULT':
+                        case 'KNOWLEDGE_GET_ANCESTORS_RESULT':
+                        case 'KNOWLEDGE_GET_DESCENDANTS_RESULT':
+                        case 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT':
+                        case 'KNOWLEDGE_GET_GRAPH_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -954,8 +1041,15 @@ export class GoKittService {
      * Notes are stored in Go memory for fast scanning without JS roundtrips.
      * @param notes Array of { id, text, version? }
      */
-    async hydrateNotes(notes: Array<{ id: string; text: string; version?: number }>): Promise<{ success: boolean; error?: string }> {
+    async hydrateNotes(notes: Array<{ id: string; text: string; version?: number; narrativeId?: string; folderPath?: string }>): Promise<{ success: boolean; error?: string }> {
         console.log(`[GoKittService.hydrateNotes] Hydrating ${notes.length} notes...`);
+
+        // DEBUG: Log first note content to verify text is present
+        if (notes.length > 0) {
+            const first = notes[0];
+            console.log(`[GoKittService.hydrateNotes] Sample Note [${first.id}]: text len=${first.text?.length}, preview="${first.text?.substring(0, 50)}..."`);
+        }
+
         const notesJSON = JSON.stringify(notes);
         return this.sendRequest<{ success: boolean; error?: string }>('HYDRATE_NOTES', { notesJSON });
     }
@@ -1275,4 +1369,81 @@ export class GoKittService {
         return this.sendRequest('CHAT_EXPORT_THREAD', { threadId });
     }
 
+    // =========================================================================
+    // Knowledge Graph API (Phase 4: Unification)
+    // =========================================================================
+
+    /** Initialize the in-memory knowledge graph */
+    async knowledgeInit(): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('KNOWLEDGE_INIT', {});
+    }
+
+    /** Load graph from SQLite persistent store */
+    async knowledgeLoad(): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('KNOWLEDGE_LOAD', {});
+    }
+
+    /** Save in-memory graph to SQLite persistent store */
+    async knowledgeSave(): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('KNOWLEDGE_SAVE', {});
+    }
+
+    /** Add or update a node in the knowledge graph */
+    async knowledgeAddNode(node: { id: string; kind: string; label?: string; props?: Record<string, any> }): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        const nodeJSON = JSON.stringify(node);
+        return this.sendRequest('KNOWLEDGE_ADD_NODE', { nodeJSON });
+    }
+
+    /** Add a directed edge to the knowledge graph */
+    async knowledgeAddEdge(edge: { source: string; target: string; relation: string; weight?: number; props?: Record<string, any> }): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        const edgeJSON = JSON.stringify(edge);
+        return this.sendRequest('KNOWLEDGE_ADD_EDGE', { edgeJSON });
+    }
+
+    /** Get a node by ID */
+    async knowledgeGetNode(id: string): Promise<any> {
+        if (!this.wasmLoaded) return null;
+        return this.sendRequest('KNOWLEDGE_GET_NODE', { id });
+    }
+
+    /** Get children of a node (outbound edges) */
+    async knowledgeGetChildren(id: string, relation?: string): Promise<any[]> {
+        if (!this.wasmLoaded) return [];
+        return this.sendRequest('KNOWLEDGE_GET_CHILDREN', { id, relation });
+    }
+
+    /** Get parents of a node (inbound edges) */
+    async knowledgeGetParents(id: string, relation?: string): Promise<any[]> {
+        if (!this.wasmLoaded) return [];
+        return this.sendRequest('KNOWLEDGE_GET_PARENTS', { id, relation });
+    }
+
+    /** Get ancestors (recursive parents) */
+    async knowledgeGetAncestors(id: string, relation?: string, maxDepth = -1): Promise<any[]> {
+        if (!this.wasmLoaded) return [];
+        return this.sendRequest('KNOWLEDGE_GET_ANCESTORS', { id, relation, maxDepth });
+    }
+
+    /** Get descendants (recursive children) */
+    async knowledgeGetDescendants(id: string, relation?: string, maxDepth = -1): Promise<any[]> {
+        if (!this.wasmLoaded) return [];
+        return this.sendRequest('KNOWLEDGE_GET_DESCENDANTS', { id, relation, maxDepth });
+    }
+
+    /** Get immediate neighborhood (both in and out) */
+    async knowledgeGetNeighborhood(id: string): Promise<any[]> {
+        if (!this.wasmLoaded) return [];
+        return this.sendRequest('KNOWLEDGE_GET_NEIGHBORHOOD', { id });
+    }
+
+    /** Get the full knowledge graph (for visualization) */
+    async knowledgeGetGraph(): Promise<{ nodes: any; edges: any[] }> {
+        if (!this.wasmLoaded) return { nodes: {}, edges: [] };
+        return this.sendRequest('KNOWLEDGE_GET_GRAPH', {});
+    }
 }

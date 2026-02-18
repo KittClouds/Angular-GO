@@ -13,6 +13,7 @@ import { LucideAngularModule, ArrowLeft, RefreshCw, Settings, Maximize2, ZoomIn,
 import { GraphVizService, type ForceGraphData, type GraphQueryOptions } from '../../services/graph-viz.service';
 import { graphRegistry } from '../../lib/cozo/graph';
 import { GoKittService } from '../../services/gokitt.service';
+import { KnowledgeService } from '../../services/knowledge.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Graph Settings Interface
@@ -290,6 +291,7 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
     private router = inject(Router);
     private graphViz = inject(GraphVizService);
     private goKitt = inject(GoKittService);
+    private knowledgeService = inject(KnowledgeService);
 
     // Icons
     readonly ArrowLeft = ArrowLeft;
@@ -344,14 +346,16 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
             const ForceGraph3DModule = await import('3d-force-graph');
             const ForceGraph3D = ForceGraph3DModule.default;
 
-            // PRIMARY: Use GoKitt's last scan result directly
-            const goKittData = this.goKitt.lastGraphData();
-            if (goKittData && Object.keys(goKittData.nodes).length > 0) {
-                console.log('[GraphPage] Using GoKitt graph data (primary source)');
-                this.graphData = this.graphViz.fromGoKittData(goKittData);
+            // PRIMARY: Use KnowledgeService (Phase 4)
+            const kgData = await this.knowledgeService.getGraph();
+            console.log('[GraphPage] KG Data:', kgData);
+
+            if (kgData && Object.keys(kgData.nodes).length > 0) {
+                console.log('[GraphPage] Using GoKitt Knowledge Graph (primary source)');
+                this.graphData = this.graphViz.fromGoKittData(kgData);
             } else {
                 // FALLBACK: Use CozoDB persisted data
-                console.log('[GraphPage] GoKitt data empty, falling back to CozoDB');
+                console.log('[GraphPage] Knowledge Graph empty, falling back to CozoDB');
                 this.graphData = this.graphViz.getFullGraph();
             }
 

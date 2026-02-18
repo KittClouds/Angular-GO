@@ -1,5 +1,3 @@
-// Package conductor orchestrates the entire scanning pipeline.
-// It wires together Syntax, Implicit, Chunker, Narrative, Resolver, and Discovery.
 package conductor
 
 import (
@@ -84,29 +82,18 @@ func (c *Conductor) GetDictionary() *implicitmatcher.RuntimeDictionary {
 
 // Scan processes text through all pipeline stages
 func (c *Conductor) Scan(text string) ScanResult {
-	// 1. Syntax Pass (Explicit Tags/Links)
+	// 1. Run Discovery "Virus" (Unsupervised NER) - First Priority for Candidates
+	discoveryCandidates := c.discoveryEngine.ScanText(text)
+
+	// 2. Syntax Pass (Explicit Tags/Links)
 	synMatches := c.syntaxScanner.Scan(text)
 	c.registerExplicitEntities(synMatches)
 
-	// 2. Implicit Matcher Pass (Registry Entities) - Phase 0 Fix
-	// This allows entities registered via LLM or manual tagging to be found in prose
-	// and create EntitySpan nodes in the CST for relationship extraction.
+	// 3. Implicit Matcher Pass (Registry Entities)
+	var implicitMatches []syntax.SyntaxMatch
 	if c.implicitScanner != nil {
 		implicitHits := c.implicitScanner.ScanWithInfo(text)
 		for _, hit := range implicitHits {
-			// Skip if this span already has a syntax match (explicit takes priority)
-			isOverlapping := false
-			for _, syn := range synMatches {
-				if (hit.Start >= syn.Start && hit.Start < syn.End) ||
-					(hit.End > syn.Start && hit.End <= syn.End) {
-					isOverlapping = true
-					break
-				}
-			}
-			if isOverlapping {
-				continue
-			}
-
 			// Use best entity if multiple match same pattern
 			bestEntity := c.implicitScanner.SelectBest(func() []string {
 				ids := make([]string, 0, len(hit.Entities))
@@ -117,7 +104,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 			}())
 
 			if bestEntity != nil {
-				synMatches = append(synMatches, syntax.SyntaxMatch{
+				implicitMatches = append(implicitMatches, syntax.SyntaxMatch{
 					Start:      hit.Start,
 					End:        hit.End,
 					Text:       hit.MatchedText,
@@ -126,31 +113,71 @@ func (c *Conductor) Scan(text string) ScanResult {
 					EntityKind: bestEntity.Kind.String(),
 					Label:      bestEntity.Label,
 				})
-
-				// Also register with resolver for pronoun resolution
-				c.resolver.ObserveMention(bestEntity.Label)
 			}
 		}
 	}
 
-	// 3. Chunker Pass (Structure)
+	// 4. Merge Streams (Explicit > Implicit > Discovery)
+	finalMatches := make([]syntax.SyntaxMatch, 0, len(synMatches)+len(implicitMatches)+len(discoveryCandidates))
+
+	// Add Explicit Matches First
+	finalMatches = append(finalMatches, synMatches...)
+
+	// Add Implicit Matches (if no overlap with Explicit)
+	for _, imp := range implicitMatches {
+		isOverlapping := false
+		for _, syn := range finalMatches {
+			if (imp.Start >= syn.Start && imp.Start < syn.End) ||
+				(imp.End > syn.Start && imp.End <= syn.End) {
+				isOverlapping = true
+				break
+			}
+		}
+		if !isOverlapping {
+			finalMatches = append(finalMatches, imp)
+			// Also register with resolver
+			c.resolver.ObserveMention(imp.Label)
+		}
+	}
+
+	// Add Discovery Candidates (if no overlap with Explicit/Implicit)
+	for _, cand := range discoveryCandidates {
+		isOverlapping := false
+		for _, existing := range finalMatches {
+			if (cand.Start >= existing.Start && cand.Start < existing.End) ||
+				(cand.End > existing.Start && cand.End <= existing.End) {
+				isOverlapping = true
+				break
+			}
+		}
+
+		if !isOverlapping {
+			kindStr := "Unknown"
+			if cand.Kind != nil {
+				kindStr = cand.Kind.String()
+			}
+
+			// Add as speculative entity
+			finalMatches = append(finalMatches, syntax.SyntaxMatch{
+				Start:      cand.Start,
+				End:        cand.End,
+				Text:       cand.Text,
+				Original:   cand.Text,
+				Kind:       syntax.KindEntity,
+				EntityKind: kindStr,
+				Label:      cand.Text,
+			})
+
+			// Register with resolver so pronouns work
+			c.resolver.ObserveMention(cand.Text)
+		}
+	}
+
+	// 5. Chunker Pass (Structure)
 	chunkResult := c.chunker.Chunk(text)
 
-	// 4. Harvest Candidates (All NPs)
-	for _, chunk := range chunkResult.Chunks {
-		if chunk.Kind == chunker.NounPhrase {
-			head := chunk.HeadText(text)
-			// Only observe if capitalized (heuristic for Proper Noun)
-			if len(head) > 0 {
-				first := []rune(head)[0]
-				if unicode.IsUpper(first) {
-					c.discoveryEngine.ObserveToken(head)
-				}
-			}
-		}
-	}
-
-	// 5. Narrative Pass (Verbs -> Events) & Discovery "Virus"
+	// 6. Narrative Pass (Verbs -> Events)
+	// Note: We used to run Discovery here via side-effects. Now we just do pure Narrative extraction.
 	var narrativeEvents []NarrativeEvent
 
 	for i, chunk := range chunkResult.Chunks {
@@ -175,15 +202,6 @@ func (c *Conductor) Scan(text string) ScanResult {
 					objText = objChunk.HeadText(text)
 				}
 
-				// Run Discovery Logic (Virus)
-				if subjChunk != nil && objChunk != nil {
-					subjKind := c.resolveKind(subjText)
-					// Only propagate from known kinds for now, or assume Character if Proper
-					if subjKind != implicitmatcher.KindOther {
-						c.discoveryEngine.ObserveRelation(subjKind, match, objText)
-					}
-				}
-
 				// Resolve Entity IDs for final output
 				subjID := c.resolver.Resolve(subjText, nil)
 				if subjID == "" {
@@ -206,7 +224,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 		}
 	}
 
-	// 6. Resolver Pass (Pronouns) - Second pass for remaining tokens
+	// 7. Resolver Pass (Pronouns) - Second pass for remaining tokens
 	var resolvedRefs []ResolvedReference
 	for _, token := range chunkResult.Tokens {
 		if token.POS == chunker.Pronoun || token.POS == chunker.ProperNoun {
@@ -224,7 +242,7 @@ func (c *Conductor) Scan(text string) ScanResult {
 	return ScanResult{
 		Text:         text,
 		CleanText:    text,
-		Syntax:       synMatches,
+		Syntax:       finalMatches,
 		Tokens:       chunkResult.Tokens,
 		Chunks:       chunkResult.Chunks,
 		Narrative:    narrativeEvents,

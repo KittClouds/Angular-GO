@@ -55,8 +55,18 @@
               },
               {
                 "glob": "**/*",
+                "input": "docs",
+                "output": "docs"
+              },
+              {
+                "glob": "**/*",
                 "input": "node_modules/katex/dist/fonts",
                 "output": "fonts"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@huggingface/transformers/node_modules/onnxruntime-web/dist",
+                "output": "assets/onnx"
               }
             ],
             "styles": [

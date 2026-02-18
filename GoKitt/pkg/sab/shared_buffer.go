@@ -5,6 +5,7 @@ package sab
 
 import (
 	"encoding/binary"
+	"math"
 	"syscall/js"
 )
 
@@ -14,6 +15,7 @@ const (
 	MsgTypeScanResult  uint32 = 1
 	MsgTypeGraphUpdate uint32 = 2
 	MsgTypeEntitySpans uint32 = 3
+	MsgTypeEmbeddings  uint32 = 4 // Float32 embedding vectors
 	MsgTypeAck         uint32 = 0xFF
 )
 
@@ -25,6 +27,12 @@ const (
 	OffsetReserved  = 12 // uint32: reserved
 	OffsetPayload   = 16 // payload starts here
 	DefaultBufferSz = 65536
+)
+
+// Embedding layout constants
+const (
+	// EmbeddingHeaderSize: [count:4][dim:4] = 8 bytes
+	EmbeddingHeaderSize = 8
 )
 
 // SharedBuffer provides zero-copy access to a JS SharedArrayBuffer
@@ -173,4 +181,63 @@ func EncodeEdges(edges []Edge) []byte {
 	}
 
 	return data
+}
+
+// ReadFloat32s reads `count` float32 values from the SAB at `offset`.
+// Each float32 is 4 bytes, little-endian (native JS Float32Array layout).
+func (s *SharedBuffer) ReadFloat32s(offset, count int) []float32 {
+	byteLen := count * 4
+	if offset+byteLen > s.length {
+		return nil
+	}
+
+	raw := s.ReadBytes(offset, byteLen)
+	if raw == nil {
+		return nil
+	}
+
+	out := make([]float32, count)
+	for i := 0; i < count; i++ {
+		bits := binary.LittleEndian.Uint32(raw[i*4 : i*4+4])
+		out[i] = float32FromBits(bits)
+	}
+	return out
+}
+
+// ReadEmbeddings reads structured embedding vectors from the SAB payload area.
+// Layout at OffsetPayload: [count:uint32][dim:uint32][...flat float32s...]
+// Returns (vectors [][]float32, count int, dim int).
+func (s *SharedBuffer) ReadEmbeddings() ([][]float32, int, int) {
+	// Read header: count + dim
+	headerBytes := s.ReadBytes(OffsetPayload, EmbeddingHeaderSize)
+	if headerBytes == nil || len(headerBytes) < EmbeddingHeaderSize {
+		return nil, 0, 0
+	}
+
+	count := int(binary.LittleEndian.Uint32(headerBytes[0:4]))
+	dim := int(binary.LittleEndian.Uint32(headerBytes[4:8]))
+
+	if count == 0 || dim == 0 {
+		return nil, count, dim
+	}
+
+	totalFloats := count * dim
+	dataOffset := OffsetPayload + EmbeddingHeaderSize
+	flat := s.ReadFloat32s(dataOffset, totalFloats)
+	if flat == nil {
+		return nil, count, dim
+	}
+
+	// Reshape flat -> [][]float32
+	vectors := make([][]float32, count)
+	for i := 0; i < count; i++ {
+		vectors[i] = flat[i*dim : (i+1)*dim]
+	}
+
+	return vectors, count, dim
+}
+
+// float32FromBits converts uint32 bits to float32.
+func float32FromBits(bits uint32) float32 {
+	return math.Float32frombits(bits)
 }

@@ -39,12 +39,21 @@ func (e *DiscoveryEngine) ObserveRelation(sourceKind implicitmatcher.EntityKind,
 	}
 }
 
+// DiscoveryCandidate represents a potential entity found by the virus
+type DiscoveryCandidate struct {
+	Text  string
+	Start int
+	End   int
+	Kind  *implicitmatcher.EntityKind // Optional inferred kind
+}
+
 // ScanText is a simple heuristic scanner (The Virus) that looks for patterns in raw text.
-// Uses TokenizeWithOffsets to properly split on punctuation.
-func (e *DiscoveryEngine) ScanText(text string) {
+// Returns a list of candidates for potential promotion.
+func (e *DiscoveryEngine) ScanText(text string) []DiscoveryCandidate {
+	var candidates []DiscoveryCandidate
 	tokenObjs := implicitmatcher.TokenizeWithOffsets(text)
 	if len(tokenObjs) < 3 {
-		return
+		return candidates
 	}
 
 	// Extract raw tokens from text for matching
@@ -77,11 +86,43 @@ func (e *DiscoveryEngine) ScanText(text string) {
 			continue
 		}
 
-		// 4. Observe Relation
+		// 4. Observe Relation & Collect Candidate
 		// (Also observe the target token itself to bump its count)
 		e.Registry.AddToken(targetTok)
 		e.ObserveRelation(*sourceStats.InferredKind, verbMatch, targetTok)
+
+		// Create candidate
+		// Note: We need the offset of the TARGET token
+		targetObj := tokenObjs[i+2]
+
+		// Infer kind for the candidate
+		inferredKind := e.Scanner.InferTarget(*sourceStats.InferredKind, verbMatch.EventClass)
+		var kindPtr *implicitmatcher.EntityKind
+		if inferredKind != implicitmatcher.KindOther {
+			kindPtr = &inferredKind
+		}
+
+		// Clean the text (trim punctuation etc)
+		_, cleanDisplay, valid := Canonicalize(targetTok)
+		if !valid {
+			continue
+		}
+
+		candidates = append(candidates, DiscoveryCandidate{
+			Text:  cleanDisplay,
+			Start: targetObj.Start,
+			End:   targetObj.End, // Note: End might technically be slightly off if we trimmed trailing chars, but for now full span is safer for highlighting?
+			// Actually, if we trim "Kaido." to "Kaido", the Highlight Range should probably exclude the dot?
+			// But targetObj.End includes the dot.
+			// If we change Text to "Kaido", but Keep Range matching "Kaido.", highlighting might look weird if it includes the dot?
+			// But calculating the new End offset from "cleanDisplay" length relative to Start is risky if trimming happened at Start too.
+			// Canonicalize trims start and end.
+			// Let's assume for Discovery, rough span is fine, or we refine range.
+			// Ideally we adjust End.
+			Kind: kindPtr,
+		})
 	}
+	return candidates
 }
 
 func isCapitalized(s string) bool {
