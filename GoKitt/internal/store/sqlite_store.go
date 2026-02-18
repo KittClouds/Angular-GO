@@ -3073,5 +3073,17 @@ func (s *SQLiteStore) GetUnobservedMessages(threadID string, since int64) ([]*Th
 	return msgs, nil
 }
 
+// GetVersion returns the SQLite library version.
+func (s *SQLiteStore) GetVersion() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var version string
+	if err := s.db.QueryRow("SELECT sqlite_version()").Scan(&version); err != nil {
+		return "", fmt.Errorf("failed to query version: %w", err)
+	}
+	return version, nil
+}
+
 // Compile-time interface check
 var _ Storer = (*SQLiteStore)(nil)

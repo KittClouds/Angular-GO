@@ -83,8 +83,10 @@ func main() {
 		"docCount":          js.FuncOf(docCount),          // Get document count
 		"validateRelations": js.FuncOf(validateRelations), // Phase 2: CST validation
 		// SQLite Store API (Persistent Data Layer)
-		"storeInit":             js.FuncOf(storeInit),
-		"storeUpsertNote":       js.FuncOf(storeUpsertNote),
+		"storeInit":       js.FuncOf(storeInit),
+		"storeGetVersion": js.FuncOf(storeGetVersion),
+		"storeUpsertNote": js.FuncOf(storeUpsertNote),
+
 		"storeGetNote":          js.FuncOf(storeGetNote),
 		"storeDeleteNote":       js.FuncOf(storeDeleteNote),
 		"storeListNotes":        js.FuncOf(storeListNotes),
@@ -863,8 +865,24 @@ func storeInit(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return ErrorResult("failed to initialize SQLite store: " + err.Error())
 	}
-	fmt.Println("[GoKitt] âœ… SQLite Store initialized")
+	fmt.Println("[GoKitt] ✅ SQLite Store initialized")
 	return SuccessResult("store initialized")
+}
+
+// storeGetVersion returns the SQLite library version.
+// Args: []
+// Returns: Version string or error
+func storeGetVersion(this js.Value, args []js.Value) interface{} {
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	version, err := sqlStore.GetVersion()
+	if err != nil {
+		return ErrorResult("version check failed: " + err.Error())
+	}
+
+	return SuccessResult(version)
 }
 
 // storeUpsertNote inserts or updates a note.

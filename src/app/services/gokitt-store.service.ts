@@ -182,6 +182,17 @@ export class GoKittStoreService {
         this.initialized = true;
         console.log('[GoKittStoreService] ✅ SQLite Store initialized');
 
+        // [INTEGRITY] Check SQLite Version
+        try {
+            const vRes = await this.sendRequest<{ version: string; error?: string }>('STORE_GET_VERSION', {});
+            if (vRes.version) {
+                console.log(`[GoKittStoreService] SQLite Engine Version: ${vRes.version}`);
+            }
+        } catch (e) {
+            console.warn('[GoKittStoreService] Failed to check SQLite version:', e);
+        }
+
+
         // [PERSISTENCE] Restore State (Snapshot + WAL)
         await this._restoreState();
 

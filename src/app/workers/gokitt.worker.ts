@@ -144,6 +144,9 @@ type GoKittWorkerResponse =
     | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
     // SQLite Store responses
     | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_VERSION_RESULT'; id: number; payload: { version?: string; error?: string } }
+    | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+
     | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_NOTE_RESULT'; id: number; payload: any | null }
     | { type: 'STORE_DELETE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -307,7 +310,9 @@ declare const GoKitt: {
     validateRelations: (noteId: string, relationsJSON: string) => string;
     // SQLite Store API
     storeInit: () => string;
+    storeGetVersion: () => string;
     storeUpsertNote: (noteJSON: string) => string;
+
     storeGetNote: (id: string) => string;
     storeDeleteNote: (id: string) => string;
     storeListNotes: (folderId?: string) => string;
@@ -855,6 +860,28 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 } as GoKittWorkerResponse);
                 break;
             }
+
+            case 'STORE_GET_VERSION': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_GET_VERSION_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.storeGetVersion();
+                const parsed = JSON.parse(res);
+
+                self.postMessage({
+                    type: 'STORE_GET_VERSION_RESULT',
+                    id: msg.id,
+                    payload: { version: parsed.result, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
 
             case 'STORE_UPSERT_NOTE': {
                 if (!wasmLoaded) {
