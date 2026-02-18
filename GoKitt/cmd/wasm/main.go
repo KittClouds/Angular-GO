@@ -130,6 +130,7 @@ func main() {
 		"storeListDiscoveryCandidates":  js.FuncOf(storeListDiscoveryCandidates),
 		// Store Fact Sheets
 		"storeUpsertEntityCard":   js.FuncOf(storeUpsertEntityCard),
+		"storeUpsertEntityCards":  js.FuncOf(storeUpsertEntityCards),
 		"storeGetEntityCards":     js.FuncOf(storeGetEntityCards),
 		"storeUpsertFolderSchema": js.FuncOf(storeUpsertFolderSchema),
 		"storeGetFolderSchema":    js.FuncOf(storeGetFolderSchema),
@@ -1556,6 +1557,30 @@ func storeUpsertEntityCard(this js.Value, args []js.Value) interface{} {
 	}
 
 	return SuccessResult("upserted card")
+}
+
+// storeUpsertEntityCards inserts or updates multiple entity cards.
+// Args: [cardsJSON string]
+func storeUpsertEntityCards(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertEntityCards requires 1 arg: cardsJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var cards []store.EntityCard
+	if err := json.Unmarshal([]byte(args[0].String()), &cards); err != nil {
+		return ErrorResult("invalid cards json: " + err.Error())
+	}
+
+	for _, card := range cards {
+		if err := sqlStore.UpsertEntityCard(&card); err != nil {
+			return ErrorResult("upsert failed for card " + card.CardID + ": " + err.Error())
+		}
+	}
+
+	return SuccessResult(fmt.Sprintf("upserted %d cards", len(cards)))
 }
 
 // storeGetEntityCards retrieves cards for an entity.

@@ -330,40 +330,35 @@ export class FactSheetService {
         }
 
         // Collect all default cards
-        const allCards: FactSheetCardSchema[] = [];
+        const allCards: any[] = [];
         for (const [kind, data] of Object.entries(DEFAULT_SCHEMAS)) {
-            allCards.push(...data.cards);
-        }
-
-        // Sync cards sequentially to avoid overwhelming the worker
-        let synced = 0;
-        let failed = 0;
-
-        for (const card of allCards) {
-            const goCard = {
-                entityId: card.entityKind,
-                cardId: card.cardId,
-                name: card.title,
-                color: card.gradient,
-                icon: card.icon,
-                displayOrder: card.displayOrder,
-                isCollapsed: false,
-                createdAt: card.createdAt || Date.now(),
-                updatedAt: card.updatedAt || Date.now()
-            };
-
-            try {
-                await this.goKitt.storeUpsertEntityCard(goCard);
-                synced++;
-            } catch (e) {
-                failed++;
-                // Only log first few failures to avoid console spam
-                if (failed <= 3) {
-                    console.warn(`[FactSheetService] Failed to sync card ${card.id} to Go:`, e);
-                }
+            for (const card of data.cards) {
+                allCards.push({
+                    entityId: card.entityKind,
+                    cardId: card.cardId,
+                    name: card.title,
+                    color: card.gradient,
+                    icon: card.icon,
+                    displayOrder: card.displayOrder,
+                    isCollapsed: false,
+                    createdAt: card.createdAt || Date.now(),
+                    updatedAt: card.updatedAt || Date.now()
+                });
             }
         }
 
-        console.log(`[FactSheetService] Synced ${synced} cards to GoKitt (${failed} failed)`);
+        if (allCards.length === 0) return;
+
+        try {
+            console.log(`[FactSheetService] Syncing ${allCards.length} cards to GoKitt (BATCHED)...`);
+            const result = await this.goKitt.storeUpsertEntityCards(allCards);
+            if (result.success) {
+                console.log(`[FactSheetService] ✅ Successfully synced ${allCards.length} cards`);
+            } else {
+                console.error(`[FactSheetService] Batch sync failed:`, result.error);
+            }
+        } catch (e) {
+            console.error(`[FactSheetService] Failed to sync cards to Go:`, e);
+        }
     }
 }

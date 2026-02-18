@@ -2,30 +2,15 @@
  * Tests for WorkspaceOpsService
  *
  * Tests the 10 canonical operations for RLM workspace manipulation.
- * Uses vitest with mocked CozoDB and QueryRunnerService.
+ * Uses vitest with mocked QueryRunnerService.
+ * 
+ * Note: CozoDB has been removed - services use inline stubs.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { WorkspaceOpsService } from './workspace-ops.service';
 import { QueryRunnerService, type QueryResult } from './query-runner.service';
-
-// ============================================================================
-// Mocks - Must be before imports that use them
-// ============================================================================
-
-// Mock the cozo db module
-vi.mock('../../cozo/db', () => ({
-    cozoDb: {
-        isReady: () => true,
-        run: vi.fn(() => JSON.stringify({ ok: true, rows: [], headers: [] })),
-    },
-}));
-
-// Mock recordAction
-vi.mock('../../cozo/memory/EpisodeLogService', () => ({
-    recordAction: vi.fn(),
-}));
 
 // ============================================================================
 // Mock QueryRunnerService

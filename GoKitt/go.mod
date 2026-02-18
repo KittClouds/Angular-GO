@@ -7,6 +7,8 @@ require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/coregx/ahocorasick v0.1.0
 	github.com/coregx/coregex v0.12.1
+	github.com/dominikbraun/graph v0.23.0
+	github.com/google/uuid v1.6.0
 	github.com/ncruces/go-sqlite3 v0.20.3
 	github.com/orsinium-labs/stopwords v1.0.2
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745

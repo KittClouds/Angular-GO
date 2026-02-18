@@ -166,6 +166,7 @@ type GoKittWorkerResponse =
     | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_ENTITY_CARD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_ENTITY_CARDS_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
@@ -967,6 +968,7 @@ export class GoKittService {
                         case 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT':
                         case 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT':
                         case 'STORE_UPSERT_ENTITY_CARD_RESULT':
+                        case 'STORE_UPSERT_ENTITY_CARDS_RESULT':
                         case 'STORE_GET_ENTITY_CARDS_RESULT':
                         case 'STORE_UPSERT_FOLDER_SCHEMA_RESULT':
                         case 'STORE_GET_FOLDER_SCHEMA_RESULT':
@@ -1500,6 +1502,11 @@ export class GoKittService {
     async storeUpsertEntityCard(card: any): Promise<{ success: boolean; error?: string }> {
         const cardJSON = JSON.stringify(card);
         return this.sendRequest('STORE_UPSERT_ENTITY_CARD', { cardJSON });
+    }
+
+    async storeUpsertEntityCards(cards: any[]): Promise<{ success: boolean; error?: string }> {
+        const cardsJSON = JSON.stringify(cards);
+        return this.sendRequest('STORE_UPSERT_ENTITY_CARDS', { cardsJSON });
     }
 
     async storeGetEntityCards(entityId: string): Promise<any[]> {

@@ -23,6 +23,12 @@ type SQLiteStore struct {
 	qidx *qgram.QGramIndex
 }
 
+// GetDB returns the underlying sql.DB instance.
+// CAUTION: Use with care, bypassing the store API may break invariants.
+func (s *SQLiteStore) GetDB() *sql.DB {
+	return s.db
+}
+
 // schema defines all tables for the unified data layer with temporal versioning.
 const schema = `
 -- Notes (Temporal versioning pattern)

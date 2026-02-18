@@ -122,6 +122,7 @@ type GoKittWorkerMessage =
     | { type: 'STORE_LIST_DISCOVERY_CANDIDATES'; id: number }
     // Store: Fact Sheets
     | { type: 'STORE_UPSERT_ENTITY_CARD'; payload: { cardJSON: string }; id: number }
+    | { type: 'STORE_UPSERT_ENTITY_CARDS'; payload: { cardsJSON: string }; id: number }
     | { type: 'STORE_GET_ENTITY_CARDS'; payload: { entityId: string }; id: number }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA'; payload: { schemaJSON: string }; id: number }
     | { type: 'STORE_GET_FOLDER_SCHEMA'; payload: { id: string }; id: number }
@@ -248,6 +249,7 @@ type GoKittWorkerResponse =
     | { type: 'STORE_UPSERT_DISCOVERY_CANDIDATE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_LIST_DISCOVERY_CANDIDATES_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_ENTITY_CARD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_ENTITY_CARDS_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
@@ -400,6 +402,7 @@ declare const GoKitt: {
     storeUpsertDiscoveryCandidate: (candidateJSON: string) => string;
     storeListDiscoveryCandidates: () => string;
     storeUpsertEntityCard: (cardJSON: string) => string;
+    storeUpsertEntityCards: (cardsJSON: string) => string;
     storeGetEntityCards: (entityId: string) => string;
     storeUpsertFolderSchema: (schemaJSON: string) => string;
     storeGetFolderSchema: (id: string) => string;
@@ -1061,6 +1064,44 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
                 self.postMessage({
                     type: 'STORE_UPSERT_ENTITY_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_UPSERT_ENTITY_CARD': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_UPSERT_ENTITY_CARD_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+                const res = GoKitt.storeUpsertEntityCard(msg.payload.cardJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({
+                    type: 'STORE_UPSERT_ENTITY_CARD_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'STORE_UPSERT_ENTITY_CARDS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_UPSERT_ENTITY_CARDS_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+                const res = GoKitt.storeUpsertEntityCards(msg.payload.cardsJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({
+                    type: 'STORE_UPSERT_ENTITY_CARDS_RESULT',
                     id: msg.id,
                     payload: { success: !parsed.error, error: parsed.error }
                 } as GoKittWorkerResponse);
