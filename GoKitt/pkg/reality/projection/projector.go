@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kittclouds/gokitt/pkg/graph"
@@ -16,6 +17,12 @@ type EntityMap map[int]string
 // Project walks the CST and builds a semantic graph
 func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, entities EntityMap, text string, prov *hierarchy.ProvenanceContext) *graph.ConceptGraph {
 	g := graph.NewGraph()
+
+	// LOGGING: Verify entities map
+	fmt.Printf("[Projector] Received %d Entities in Map\n", len(entities))
+	for offset, id := range entities {
+		fmt.Printf(" - Entity Map: Offset %d -> ID '%s'\n", offset, id)
+	}
 
 	// 0. Create World Node (if provenance provided)
 	var worldNode *graph.ConceptNode
@@ -103,18 +110,18 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 					obj, pp := findNearestNPWithContainer(nodes, i, searchOffset, source)
 					objPP = pp
 					if obj != nil {
-						objID := resolveID(obj, entities)
-						if objID == "" {
-							objID = obj.Text(source)
-						}
-						targetID = objID
+						// STRICT: Only use resolved Entity IDs. Do NOT fall back to raw text.
+						// This matches the Rust implementation where only EntitySpans are projected.
+						targetID = resolveID(obj, entities)
 					}
 				}
 
 				if subj != nil && targetID != "" {
 					subjID := resolveID(subj, entities)
+
+					// STRICT: Subject must also be a resolved entity
 					if subjID == "" {
-						subjID = subj.Text(source)
+						continue
 					}
 
 					// Extract Modifiers from unused PPs
@@ -126,6 +133,7 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 							if node == objPP {
 								continue
 							}
+							// ... (rest of logic)
 
 							// Heuristic classification
 							ppText := node.Text(source)
@@ -143,6 +151,7 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 					}
 
 					// Add QuadPlus (with recipient)
+
 					g.AddQuadPlus(
 						subjID, subjID, "Concept",
 						targetID, targetID, "Concept",

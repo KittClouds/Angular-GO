@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -135,7 +136,14 @@ func collectSpans(text string, scan conductor.ScanResult) []span {
 	}
 
 	// 3. Syntax Semantic Spans (Entities/Links)
+	fmt.Printf("[Builder] Collecting Syntax Spans: %d found\n", len(scan.Syntax))
 	for _, m := range scan.Syntax {
+		fmt.Printf(" - SyntaxSpan: %s [%d:%d]\n", m.Label, m.Start, m.End)
+		// Note: Zipper struct expects 'kind', 'start', 'end', 'priority'
+		// It does NOT store the entity ID or Label in the span struct!
+		// It only stores the generic kind 'KindEntitySpan'
+		// This means the Builder constructs a generic 'EntitySpan' node
+		// The Projector must be looking up the Entity ID based on the OFFSET in the 'entities' map.
 		spans = append(spans, span{rsyntax.KindEntitySpan, m.Start, m.End, prioSpan})
 	}
 

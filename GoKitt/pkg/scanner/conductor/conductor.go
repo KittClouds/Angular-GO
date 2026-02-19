@@ -1,6 +1,8 @@
 package conductor
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -42,7 +44,6 @@ type ResolvedReference struct {
 
 // Conductor manages the scanning pipeline
 type Conductor struct {
-	syntaxScanner    *syntax.SyntaxScanner
 	implicitScanner  *implicitmatcher.RuntimeDictionary
 	chunker          *chunker.Chunker
 	narrativeMatcher *narrative.NarrativeMatcher
@@ -61,7 +62,6 @@ func New() (*Conductor, error) {
 	discEngine := discovery.NewEngine(2, nm)
 
 	return &Conductor{
-		syntaxScanner:    syntax.New(),
 		implicitScanner:  nil, // To be loaded if needed
 		chunker:          chunker.New(),
 		narrativeMatcher: nm,
@@ -80,20 +80,70 @@ func (c *Conductor) GetDictionary() *implicitmatcher.RuntimeDictionary {
 	return c.implicitScanner
 }
 
-// Scan processes text through all pipeline stages
+// Scan processes text through all pipeline stages (NER-Native Architecture)
 func (c *Conductor) Scan(text string) ScanResult {
-	// 1. Run Discovery "Virus" (Unsupervised NER) - First Priority for Candidates
+	// -------------------------------------------------------------------------
+	// PHASE 1: NER (Discovery + Implicit) - The Authority
+	// -------------------------------------------------------------------------
+
+	// Collect all valid entity spans to build the mask
+	var entitySpans []struct {
+		Start int
+		End   int
+		Kind  string
+		ID    string
+		Text  string
+		Match syntax.SyntaxMatch // Keep original match for final output
+	}
+
+	// 1a. Run Discovery "Virus" (Unsupervised NER)
 	discoveryCandidates := c.discoveryEngine.ScanText(text)
+	for _, cand := range discoveryCandidates {
+		kindStr := "Unknown"
+		if cand.Kind != nil {
+			kindStr = cand.Kind.String()
+		}
+		// Register with resolver so pronouns work
+		c.resolver.ObserveMention(cand.Text)
 
-	// 2. Syntax Pass (Explicit Tags/Links)
-	synMatches := c.syntaxScanner.Scan(text)
-	c.registerExplicitEntities(synMatches)
+		// Create SyntaxMatch for output
+		sm := syntax.SyntaxMatch{
+			Start:      cand.Start,
+			End:        cand.End,
+			Text:       cand.Text,
+			ID:         cand.Text, // speculative ID
+			Original:   cand.Text,
+			Kind:       syntax.KindEntity,
+			EntityKind: kindStr,
+			Label:      cand.Text,
+		}
 
-	// 3. Implicit Matcher Pass (Registry Entities)
-	var implicitMatches []syntax.SyntaxMatch
+		entitySpans = append(entitySpans, struct {
+			Start int
+			End   int
+			Kind  string
+			ID    string
+			Text  string
+			Match syntax.SyntaxMatch
+		}{
+			Start: cand.Start,
+			End:   cand.End,
+			Kind:  kindStr,
+			ID:    cand.Text,
+			Text:  cand.Text,
+			Match: sm,
+		})
+	}
+
+	// 1b. Implicit Matcher Pass (Registry Entities)
 	if c.implicitScanner != nil {
 		implicitHits := c.implicitScanner.ScanWithInfo(text)
 		for _, hit := range implicitHits {
+			// STOPWORD FILTER: Even if in dictionary, filter if it's a stopword (e.g. "The", "But")
+			if c.discoveryEngine.Registry.IsIgnored(hit.MatchedText) {
+				continue
+			}
+
 			// Use best entity if multiple match same pattern
 			bestEntity := c.implicitScanner.SelectBest(func() []string {
 				ids := make([]string, 0, len(hit.Entities))
@@ -104,80 +154,70 @@ func (c *Conductor) Scan(text string) ScanResult {
 			}())
 
 			if bestEntity != nil {
-				implicitMatches = append(implicitMatches, syntax.SyntaxMatch{
+				// Also register with resolver
+				c.resolver.ObserveMention(bestEntity.Label)
+
+				sm := syntax.SyntaxMatch{
 					Start:      hit.Start,
 					End:        hit.End,
 					Text:       hit.MatchedText,
+					ID:         bestEntity.ID,
 					Original:   hit.MatchedText,
 					Kind:       syntax.KindEntity,
 					EntityKind: bestEntity.Kind.String(),
 					Label:      bestEntity.Label,
+				}
+
+				entitySpans = append(entitySpans, struct {
+					Start int
+					End   int
+					Kind  string
+					ID    string
+					Text  string
+					Match syntax.SyntaxMatch
+				}{
+					Start: hit.Start,
+					End:   hit.End,
+					Kind:  bestEntity.Kind.String(),
+					ID:    bestEntity.ID,
+					Text:  hit.MatchedText,
+					Match: sm,
 				})
 			}
 		}
 	}
 
-	// 4. Merge Streams (Explicit > Implicit > Discovery)
-	finalMatches := make([]syntax.SyntaxMatch, 0, len(synMatches)+len(implicitMatches)+len(discoveryCandidates))
+	// -------------------------------------------------------------------------
+	// PHASE 2: MASKING
+	// -------------------------------------------------------------------------
 
-	// Add Explicit Matches First
-	finalMatches = append(finalMatches, synMatches...)
+	// -------------------------------------------------------------------------
+	// PHASE 2: SORT & MASK
+	// -------------------------------------------------------------------------
 
-	// Add Implicit Matches (if no overlap with Explicit)
-	for _, imp := range implicitMatches {
-		isOverlapping := false
-		for _, syn := range finalMatches {
-			if (imp.Start >= syn.Start && imp.Start < syn.End) ||
-				(imp.End > syn.Start && imp.End <= syn.End) {
-				isOverlapping = true
-				break
-			}
-		}
-		if !isOverlapping {
-			finalMatches = append(finalMatches, imp)
-			// Also register with resolver
-			c.resolver.ObserveMention(imp.Label)
-		}
+	// Sort spans by position to ensure:
+	// 1. Mask is built in order (required for optimal binary search construction, though Add handles sort)
+	sort.Slice(entitySpans, func(i, j int) bool {
+		return entitySpans[i].Start < entitySpans[j].Start
+	})
+
+	mask := chunker.NewIntervalMask()
+
+	for _, span := range entitySpans {
+		// Do NOT observe here. We observe during token iteration to interleave with pronouns.
+		// Add to mask
+		mask.Add(span.Start, span.End, span.Kind, span.ID)
 	}
 
-	// Add Discovery Candidates (if no overlap with Explicit/Implicit)
-	for _, cand := range discoveryCandidates {
-		isOverlapping := false
-		for _, existing := range finalMatches {
-			if (cand.Start >= existing.Start && cand.Start < existing.End) ||
-				(cand.End > existing.Start && cand.End <= existing.End) {
-				isOverlapping = true
-				break
-			}
-		}
+	// -------------------------------------------------------------------------
+	// PHASE 3: MASKED CHUNKING (Structure respecting Entities)
+	// -------------------------------------------------------------------------
 
-		if !isOverlapping {
-			kindStr := "Unknown"
-			if cand.Kind != nil {
-				kindStr = cand.Kind.String()
-			}
+	chunkResult := c.chunker.Chunk(text, mask)
 
-			// Add as speculative entity
-			finalMatches = append(finalMatches, syntax.SyntaxMatch{
-				Start:      cand.Start,
-				End:        cand.End,
-				Text:       cand.Text,
-				Original:   cand.Text,
-				Kind:       syntax.KindEntity,
-				EntityKind: kindStr,
-				Label:      cand.Text,
-			})
-
-			// Register with resolver so pronouns work
-			c.resolver.ObserveMention(cand.Text)
-		}
-	}
-
-	// 5. Chunker Pass (Structure)
-	chunkResult := c.chunker.Chunk(text)
-
-	// 6. Narrative Pass (Verbs -> Events)
-	// Note: We used to run Discovery here via side-effects. Now we just do pure Narrative extraction.
+	// -------------------------------------------------------------------------
+	// PHASE 4: NARRATIVE (Events)
+	// -------------------------------------------------------------------------
 	var narrativeEvents []NarrativeEvent
 
 	for i, chunk := range chunkResult.Chunks {
@@ -224,10 +264,24 @@ func (c *Conductor) Scan(text string) ScanResult {
 		}
 	}
 
-	// 7. Resolver Pass (Pronouns) - Second pass for remaining tokens
+	// -------------------------------------------------------------------------
+	// PHASE 5: RESOLVER (Pronouns & Entities Interlaced)
+	// -------------------------------------------------------------------------
 	var resolvedRefs []ResolvedReference
+
 	for _, token := range chunkResult.Tokens {
-		if token.POS == chunker.Pronoun || token.POS == chunker.ProperNoun {
+		// 1. Is this token a masked entity?
+		if iv := mask.GetInterval(token.Range.Start); iv != nil {
+			// YES: It's a known entity (e.g. "Gandalf" or "Nuclear Bomb")
+			// We must Observe it NOW so it enters the history for subsequent pronouns.
+			// Note: Multi-word entities (Nuclear Bomb) are single tokens in chunkResult,
+			// so this works perfectly.
+			c.resolver.ObserveMention(iv.ID)
+			continue
+		}
+
+		// 2. Is this token a Pronoun?
+		if token.POS == chunker.Pronoun {
 			word := token.Text
 			if id := c.resolver.Resolve(word, nil); id != "" {
 				resolvedRefs = append(resolvedRefs, ResolvedReference{
@@ -239,10 +293,23 @@ func (c *Conductor) Scan(text string) ScanResult {
 		}
 	}
 
+	// -------------------------------------------------------------------------
+	// OUTPUT ASSEMBLY
+	// -------------------------------------------------------------------------
+
+	// Collect "Final Matches" from the Authoritative Entity Spans
+	// Explicit/Legacy syntax is REMOVED from this flow, as per NER-Native plan.
+	finalMatches := make([]syntax.SyntaxMatch, 0, len(entitySpans))
+	for _, span := range entitySpans {
+		finalMatches = append(finalMatches, span.Match)
+	}
+
+	fmt.Printf("[Conductor] NER-Native Scan: %d Entities, %d Chunks\n", len(finalMatches), len(chunkResult.Chunks))
+
 	return ScanResult{
 		Text:         text,
 		CleanText:    text,
-		Syntax:       finalMatches,
+		Syntax:       finalMatches, // Now purely NER-driven
 		Tokens:       chunkResult.Tokens,
 		Chunks:       chunkResult.Chunks,
 		Narrative:    narrativeEvents,

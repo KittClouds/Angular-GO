@@ -29,6 +29,7 @@ import (
 	"github.com/kittclouds/gokitt/pkg/reality/validator"
 	"github.com/kittclouds/gokitt/pkg/sab"
 	"github.com/kittclouds/gokitt/pkg/scanner/conductor"
+	"github.com/kittclouds/gokitt/pkg/scanner/syntax"
 )
 
 // Version info
@@ -534,8 +535,20 @@ func scan(this js.Value, args []js.Value) interface{} {
 	cstRoot := builder.Zip(text, result)
 
 	// 3. Graph (The World)
-	// Build entity map for ID resolution
+	// Build entity map from EVERYTHING found in the scan (Explicit + Implicit + Discovery)
+	// This ensures the projector sees all NEs, not just resolved pronouns.
 	entityMap := make(projection.EntityMap)
+	for _, m := range result.Syntax {
+		if m.Kind == syntax.KindEntity {
+			// Use ID if available (Implicit matches), otherwise Label (Discovery/Explicit)
+			id := m.ID
+			if id == "" {
+				id = m.Label
+			}
+			entityMap[m.Start] = id
+		}
+	}
+	// Also add resolved pronouns (they might not be in Syntax if they are just pronouns)
 	for _, ref := range result.ResolvedRefs {
 		entityMap[ref.Range.Start] = ref.EntityID
 	}
@@ -766,6 +779,15 @@ func scanNote(this js.Value, args []js.Value) interface{} {
 
 	// 3. Graph (The World)
 	entityMap := make(projection.EntityMap)
+	for _, m := range result.Syntax {
+		if m.Kind == syntax.KindEntity {
+			id := m.ID
+			if id == "" {
+				id = m.Label
+			}
+			entityMap[m.Start] = id
+		}
+	}
 	for _, ref := range result.ResolvedRefs {
 		entityMap[ref.Range.Start] = ref.EntityID
 	}

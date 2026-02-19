@@ -88,6 +88,9 @@ func (e *DiscoveryEngine) ScanText(text string) []DiscoveryCandidate {
 
 		// 4. Observe Relation & Collect Candidate
 		// (Also observe the target token itself to bump its count)
+		if e.Registry.IsIgnored(targetTok) {
+			continue
+		}
 		e.Registry.AddToken(targetTok)
 		e.ObserveRelation(*sourceStats.InferredKind, verbMatch, targetTok)
 

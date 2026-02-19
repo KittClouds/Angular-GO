@@ -23,6 +23,7 @@ type SyntaxMatch struct {
 	Kind     SyntaxKind
 	Original string
 	// Matched components
+	ID          string // Unique Entity ID (if known)
 	Target      string // For wikilink/backlink
 	Label       string // For all
 	EntityKind  string // For explicit entity

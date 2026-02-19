@@ -175,6 +175,31 @@ func (r *CandidateRegistry) GetStatus(raw string) CandidateStatus {
 	return StatusWatching // Default (conceptually unknown)
 }
 
+// IsIgnored checks if a raw token should be ignored (stopword, etc.)
+func (r *CandidateRegistry) IsIgnored(raw string) bool {
+	key, _, valid := Canonicalize(raw)
+	if !valid {
+		return true
+	}
+
+	// 1. Check custom stopwords map
+	if r.StopWords[string(key)] {
+		return true
+	}
+
+	// 2. Check robust stopwords library
+	if r.stopwordChecker != nil && r.stopwordChecker.Contains(string(key)) {
+		return true
+	}
+
+	// 3. Check NER-specific stopwords (common capitalized words)
+	if nerStopwords[string(key)] {
+		return true
+	}
+
+	return false
+}
+
 // ProposeInference updates the inferred kind
 func (r *CandidateRegistry) ProposeInference(raw string, kind implicitmatcher.EntityKind) {
 	key, _, valid := Canonicalize(raw)

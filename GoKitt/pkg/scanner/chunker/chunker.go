@@ -162,6 +162,7 @@ func (c *Chunk) Text(source string) string {
 type ChunkResult struct {
 	Chunks []Chunk
 	Tokens []Token
+	Mask   *IntervalMask // The mask used during chunking (for debugging/visualization)
 }
 
 // ============================================================================
@@ -180,24 +181,69 @@ func New() *Chunker {
 	}
 }
 
-// Chunk processes text and returns detected phrases
-func (c *Chunker) Chunk(text string) ChunkResult {
-	// Step 1: Tokenize
-	ranges := c.tokenize(text)
+// Chunk processes text and returns detected phrases.
+// If mask is provided, locked entity spans are preserved as single tokens.
+func (c *Chunker) Chunk(text string, mask *IntervalMask) ChunkResult {
+	// Step 1: Tokenize with mask awareness
+	ranges := c.tokenizeWithMask(text, mask)
 
-	// Step 2: Tag POS
-	tokens := c.tagTokens(ranges, text)
+	// Step 2: Tag POS (locked tokens get ProperNoun)
+	tokens := c.tagTokensWithMask(ranges, text, mask)
 
 	// Step 3: Find chunks
 	chunks := c.findChunks(tokens)
 
-	return ChunkResult{Chunks: chunks, Tokens: tokens}
+	return ChunkResult{Chunks: chunks, Tokens: tokens, Mask: mask}
 }
 
 // ============================================================================
 // Tokenization
 // ============================================================================
 
+// tokenizeWithMask splits text into tokens, respecting locked entity spans.
+// If a position falls within a masked interval, the entire span becomes one token.
+func (c *Chunker) tokenizeWithMask(text string, mask *IntervalMask) []TextRange {
+	// Fast path: no mask or empty mask
+	if mask == nil || mask.IsEmpty() {
+		return c.tokenize(text)
+	}
+
+	tokens := make([]TextRange, 0, len(text)/6)
+	i := 0
+
+	for i < len(text) {
+		// Check if position i is inside a masked interval
+		if iv := mask.GetInterval(i); iv != nil {
+			// Create single token for entire entity span
+			tokens = append(tokens, NewRange(iv.Start, iv.End))
+			i = iv.End
+			continue
+		}
+
+		// Normal tokenization
+		ch := rune(text[i])
+		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '\'' || ch == '-' {
+			start := i
+			for i < len(text) {
+				r := rune(text[i])
+				if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' || r == '-') {
+					break
+				}
+				i++
+			}
+			tokens = append(tokens, NewRange(start, i))
+		} else if unicode.IsPunct(ch) {
+			tokens = append(tokens, NewRange(i, i+1))
+			i++
+		} else {
+			i++
+		}
+	}
+
+	return tokens
+}
+
+// tokenize is the original tokenizer for backward compatibility
 func (c *Chunker) tokenize(text string) []TextRange {
 	// Heuristic: Average word length 5 + punctuation. ~1/6 of text len.
 	tokens := make([]TextRange, 0, len(text)/6)
@@ -232,6 +278,55 @@ func (c *Chunker) tokenize(text string) []TextRange {
 // POS Tagging
 // ============================================================================
 
+// tagTokensWithMask tags tokens, forcing ProperNoun for locked entity spans.
+func (c *Chunker) tagTokensWithMask(ranges []TextRange, text string, mask *IntervalMask) []Token {
+	// Fast path: no mask
+	if mask == nil || mask.IsEmpty() {
+		return c.tagTokens(ranges, text)
+	}
+
+	tokens := make([]Token, len(ranges))
+	for i, r := range ranges {
+		word := r.Slice(text)
+		tokens[i] = Token{Text: word, Range: r}
+
+		// Check if this token is a locked entity span
+		if iv := mask.GetInterval(r.Start); iv != nil && iv.Start == r.Start && iv.End == r.End {
+			// Locked entity: force ProperNoun
+			tokens[i].POS = ProperNoun
+		} else {
+			// Normal tagging using baseline lookup
+			tokens[i].POS = c.tagger.lookupBaseline(word)
+		}
+	}
+
+	// Apply context reinforcement rules (from Tagger.Tag)
+	for i := 0; i < len(tokens); i++ {
+		currentTag := tokens[i].POS
+		var prevTag POS = Other
+		if i > 0 {
+			prevTag = tokens[i-1].POS
+		}
+
+		// Skip locked tokens (ProperNoun from mask)
+		if iv := mask.GetInterval(tokens[i].Range.Start); iv != nil && iv.Start == tokens[i].Range.Start {
+			continue
+		}
+
+		// Rule: Determiner/Adjective force Noun
+		if (prevTag == Determiner || prevTag.IsModifier()) && currentTag.IsVerbal() {
+			tokens[i].POS = Noun
+		}
+		// Rule: Modal forces Verb
+		if prevTag == Modal && currentTag.IsNominal() {
+			tokens[i].POS = Verb
+		}
+	}
+
+	return tokens
+}
+
+// tagTokens tags all tokens using the tagger (original method)
 func (c *Chunker) tagTokens(ranges []TextRange, text string) []Token {
 	// Extract words
 	words := make([]string, len(ranges))

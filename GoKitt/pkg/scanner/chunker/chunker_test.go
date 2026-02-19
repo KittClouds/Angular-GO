@@ -19,7 +19,7 @@ func TestTokenize(t *testing.T) {
 
 func TestNounPhraseSimple(t *testing.T) {
 	c := New()
-	result := c.Chunk("wizard")
+	result := c.Chunk("wizard", nil)
 
 	nps := filterByKind(result.Chunks, NounPhrase)
 	if len(nps) != 1 {
@@ -30,7 +30,7 @@ func TestNounPhraseSimple(t *testing.T) {
 func TestNounPhraseDetNoun(t *testing.T) {
 	c := New()
 	text := "the wizard"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	nps := filterByKind(result.Chunks, NounPhrase)
 	if len(nps) != 1 {
@@ -50,7 +50,7 @@ func TestNounPhraseDetNoun(t *testing.T) {
 func TestNounPhraseDetAdjNoun(t *testing.T) {
 	c := New()
 	text := "the ancient wizard"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	nps := filterByKind(result.Chunks, NounPhrase)
 	if len(nps) != 1 {
@@ -70,7 +70,7 @@ func TestNounPhraseDetAdjNoun(t *testing.T) {
 func TestVerbPhrase(t *testing.T) {
 	c := New()
 	text := "walked quickly"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	vps := filterByKind(result.Chunks, VerbPhrase)
 	if len(vps) != 1 {
@@ -87,7 +87,7 @@ func TestVerbPhrase(t *testing.T) {
 func TestVerbPhraseWithAuxiliary(t *testing.T) {
 	c := New()
 	text := "was walking slowly"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	vps := filterByKind(result.Chunks, VerbPhrase)
 	if len(vps) != 1 {
@@ -104,7 +104,7 @@ func TestVerbPhraseWithAuxiliary(t *testing.T) {
 func TestPrepPhrase(t *testing.T) {
 	c := New()
 	text := "in the forest"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	pps := filterByKind(result.Chunks, PrepPhrase)
 	if len(pps) != 1 {
@@ -124,7 +124,7 @@ func TestPrepPhrase(t *testing.T) {
 func TestMixedChunks(t *testing.T) {
 	c := New()
 	text := "The wizard walked through the forest."
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	nps := filterByKind(result.Chunks, NounPhrase)
 	vps := filterByKind(result.Chunks, VerbPhrase)
@@ -146,7 +146,7 @@ func TestMixedChunks(t *testing.T) {
 func TestProperNounDetection(t *testing.T) {
 	c := New()
 	text := "Gandalf walked"
-	result := c.Chunk(text)
+	result := c.Chunk(text, nil)
 
 	// Gandalf should be detected as ProperNoun -> becomes NP
 	nps := filterByKind(result.Chunks, NounPhrase)
@@ -169,6 +169,120 @@ func TestTextRange(t *testing.T) {
 	r2 := NewRange(6, 11)
 	if r2.Slice(text) != "world" {
 		t.Errorf("Slice should be 'world', got '%s'", r2.Slice(text))
+	}
+}
+
+// ============================================================================
+// Mask-Aware Chunking Tests
+// ============================================================================
+
+func TestChunker_WithMask_EntityPreserved(t *testing.T) {
+	c := New()
+	text := "The Nuclear Bomb exploded"
+
+	// "Nuclear Bomb" is a detected entity (positions 4-16)
+	mask := NewIntervalMask()
+	mask.Add(4, 16, "WEAPON", "nuclear-bomb")
+
+	result := c.Chunk(text, mask)
+
+	// Verify "Nuclear Bomb" is ONE token, not two
+	foundEntityToken := false
+	for _, tok := range result.Tokens {
+		if tok.Text == "Nuclear Bomb" {
+			foundEntityToken = true
+			if tok.POS != ProperNoun {
+				t.Errorf("Expected ProperNoun for entity token, got %v", tok.POS)
+			}
+		}
+	}
+
+	if !foundEntityToken {
+		t.Error("Expected to find 'Nuclear Bomb' as single token")
+	}
+
+	// Verify "The" and "exploded" are still separate tokens
+	foundThe := false
+	foundExploded := false
+	for _, tok := range result.Tokens {
+		if tok.Text == "The" {
+			foundThe = true
+		}
+		if tok.Text == "exploded" {
+			foundExploded = true
+		}
+	}
+
+	if !foundThe {
+		t.Error("Expected to find 'The' as separate token")
+	}
+	if !foundExploded {
+		t.Error("Expected to find 'exploded' as separate token")
+	}
+}
+
+func TestChunker_WithMask_StopwordsNotEntities(t *testing.T) {
+	c := New()
+	text := "But the Raven flies."
+
+	// "Raven" is a detected entity (positions 8-13)
+	mask := NewIntervalMask()
+	mask.Add(8, 13, "CHARACTER", "raven")
+
+	result := c.Chunk(text, mask)
+
+	// Verify ONLY "Raven" has ProperNoun POS
+	entityCount := 0
+	for _, tok := range result.Tokens {
+		if tok.POS == ProperNoun {
+			entityCount++
+			if tok.Text != "Raven" {
+				t.Errorf("Unexpected ProperNoun token: %s", tok.Text)
+			}
+		}
+	}
+
+	if entityCount != 1 {
+		t.Errorf("Expected exactly 1 ProperNoun token (Raven), got %d", entityCount)
+	}
+
+	// Verify "But" and "the" are NOT ProperNoun
+	for _, tok := range result.Tokens {
+		if tok.Text == "But" && tok.POS == ProperNoun {
+			t.Error("'But' should NOT be ProperNoun")
+		}
+		if tok.Text == "the" && tok.POS == ProperNoun {
+			t.Error("'the' should NOT be ProperNoun")
+		}
+	}
+}
+
+func TestChunker_WithMask_MultipleEntities(t *testing.T) {
+	c := New()
+	text := "Raven flew to Erebus"
+
+	// "Raven" (0-5) and "Erebus" (13-19) are entities
+	mask := NewIntervalMask()
+	mask.Add(0, 5, "CHARACTER", "raven")
+	mask.Add(13, 19, "LOCATION", "erebus")
+
+	result := c.Chunk(text, mask)
+
+	// Count ProperNoun tokens
+	properNouns := 0
+	for _, tok := range result.Tokens {
+		if tok.POS == ProperNoun {
+			properNouns++
+		}
+	}
+
+	if properNouns != 2 {
+		t.Errorf("Expected 2 ProperNoun tokens, got %d", properNouns)
+	}
+
+	// Verify the mask is included in result
+	if result.Mask == nil {
+		t.Error("Mask should be included in ChunkResult")
 	}
 }
 
