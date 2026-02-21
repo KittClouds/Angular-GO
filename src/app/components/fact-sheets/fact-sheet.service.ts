@@ -147,13 +147,12 @@ export class FactSheetService {
     // We'll inject it.
     private chapterService = inject(ChapterService);
     private goKitt = inject(GoKittService);
-    private initialized = false;
 
     constructor() {
         // Pre-populate cache with defaults synchronously
         this.initializeFromDefaults();
-        // Then sync to Dexie in background (fire and forget)
-        this.syncToDexie();
+        // Dexie seed runs in background (fire and forget) — no WASM dependency
+        this.seedDexieDefaults();
     }
 
     // =========================================================================
@@ -265,67 +264,17 @@ export class FactSheetService {
     }
 
     // =========================================================================
-    // INITIALIZATION
+    // PUBLIC SYNC — called from AppComponent AFTER WASM + DataSync are ready
     // =========================================================================
 
     /**
-     * Populate schema cache from hardcoded defaults - SYNCHRONOUS
+     * Sync default schema cards to GoKitt backend.
+     * Must be called AFTER WASM is loaded and store is initialized.
+     * No spin-loop — caller guarantees readiness.
      */
-    private initializeFromDefaults(): void {
-        for (const [kind, data] of Object.entries(DEFAULT_SCHEMAS)) {
-            const cardsWithFields: CardWithFields[] = data.cards.map(card => ({
-                schema: card,
-                fields: data.fields.filter(f => f.cardId === card.cardId).sort((a, b) => a.displayOrder - b.displayOrder),
-                gradientCss: getGradientCss(card.gradient),  // Pre-computed!
-            }));
-            this.schemaCache.set(kind, cardsWithFields);
-        }
-        console.log('[FactSheetService] Initialized with default schemas:', [...this.schemaCache.keys()]);
-    }
-
-    /**
-     * Sync defaults to Dexie (background, non-blocking)
-     */
-    private async syncToDexie(): Promise<void> {
-        if (this.initialized) return;
-        this.initialized = true;
-
-        try {
-            // Check if CHARACTER schema exists in Dexie
-            const existingCount = await db.factSheetCardSchemas.where('entityKind').equals('CHARACTER').count();
-            if (existingCount === 0) {
-                const now = Date.now();
-                const cards = DEFAULT_CHARACTER_CARDS.map(c => ({ ...c, createdAt: now, updatedAt: now }));
-                const fields = DEFAULT_CHARACTER_FIELDS.map(f => ({ ...f, createdAt: now, updatedAt: now }));
-                await db.factSheetCardSchemas.bulkPut(cards);
-                await db.factSheetFieldSchemas.bulkPut(fields);
-                console.log('[FactSheetService] Synced CHARACTER schema to Dexie');
-            }
-
-            // GoKitt Sync (Persistence)
-            // Wait for GoKitt to be ready before syncing
-            await this.syncCardsToGoKitt();
-
-        } catch (err) {
-            console.error('[FactSheetService] Error syncing to Dexie:', err);
-        }
-    }
-
-    /**
-     * Sync all default cards to GoKitt backend.
-     * Waits for GoKitt WASM to be ready before attempting sync.
-     */
-    private async syncCardsToGoKitt(): Promise<void> {
-        // Wait for GoKitt to be ready (with timeout)
-        const maxWait = 10000; // 10 seconds max
-        const startTime = Date.now();
-
-        while (!this.goKitt.isReady && (Date.now() - startTime) < maxWait) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
+    async syncToBackend(): Promise<void> {
         if (!this.goKitt.isReady) {
-            console.warn('[FactSheetService] GoKitt not ready after 10s, skipping card sync');
+            console.warn('[FactSheetService] GoKitt not ready, skipping card sync');
             return;
         }
 
@@ -349,16 +298,50 @@ export class FactSheetService {
 
         if (allCards.length === 0) return;
 
+        console.log(`[FactSheetService] Syncing ${allCards.length} cards to GoKitt (BATCHED TX)...`);
+        const result = await this.goKitt.storeUpsertEntityCards(allCards);
+        if (result.success) {
+            console.log(`[FactSheetService] ✅ Successfully synced ${allCards.length} cards`);
+        } else {
+            console.error(`[FactSheetService] Batch sync failed:`, result.error);
+        }
+    }
+
+    // =========================================================================
+    // INITIALIZATION
+    // =========================================================================
+
+    /**
+     * Populate schema cache from hardcoded defaults - SYNCHRONOUS
+     */
+    private initializeFromDefaults(): void {
+        for (const [kind, data] of Object.entries(DEFAULT_SCHEMAS)) {
+            const cardsWithFields: CardWithFields[] = data.cards.map(card => ({
+                schema: card,
+                fields: data.fields.filter(f => f.cardId === card.cardId).sort((a, b) => a.displayOrder - b.displayOrder),
+                gradientCss: getGradientCss(card.gradient),  // Pre-computed!
+            }));
+            this.schemaCache.set(kind, cardsWithFields);
+        }
+        console.log('[FactSheetService] Initialized with default schemas:', [...this.schemaCache.keys()]);
+    }
+
+    /**
+     * Seed Dexie with defaults (background, non-blocking, no WASM dependency)
+     */
+    private async seedDexieDefaults(): Promise<void> {
         try {
-            console.log(`[FactSheetService] Syncing ${allCards.length} cards to GoKitt (BATCHED)...`);
-            const result = await this.goKitt.storeUpsertEntityCards(allCards);
-            if (result.success) {
-                console.log(`[FactSheetService] ✅ Successfully synced ${allCards.length} cards`);
-            } else {
-                console.error(`[FactSheetService] Batch sync failed:`, result.error);
+            const existingCount = await db.factSheetCardSchemas.where('entityKind').equals('CHARACTER').count();
+            if (existingCount === 0) {
+                const now = Date.now();
+                const cards = DEFAULT_CHARACTER_CARDS.map(c => ({ ...c, createdAt: now, updatedAt: now }));
+                const fields = DEFAULT_CHARACTER_FIELDS.map(f => ({ ...f, createdAt: now, updatedAt: now }));
+                await db.factSheetCardSchemas.bulkPut(cards);
+                await db.factSheetFieldSchemas.bulkPut(fields);
+                console.log('[FactSheetService] Synced CHARACTER schema to Dexie');
             }
-        } catch (e) {
-            console.error(`[FactSheetService] Failed to sync cards to Go:`, e);
+        } catch (err) {
+            console.error('[FactSheetService] Error seeding Dexie:', err);
         }
     }
 }

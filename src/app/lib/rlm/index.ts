@@ -1,20 +1,30 @@
 /**
- * Recursive Language Model (RLM) Module
+ * RLM Module
  *
- * Graph-native RLM implementation using CozoDB for recursive reasoning.
- * Key insight: Recursion works better in a graph - Datalog's fixed-point
- * semantics handle recursive queries naturally.
+ * Simplified workspace-first architecture.
+ * All CozoDB-dependent services removed. Logic now lives in Go (WASM).
  *
- * Architecture:
- * - Workspace (ws_*) - isolated namespace for model experimentation
- * - Query Runner - two-lane execution (RO/WS) with validation
- * - Retrieval - FTS, vector, and graph expansion building blocks
- * - RLM Loop - observe/plan/execute/evaluate cycle
+ * Public surface:
+ * - RlmOrchestratorService: thin TS → WASM bridge (processWithWorkspace, getContext)
+ * - RlmLlmService: LLM routing (unchanged)
+ * - AppContextProviderService: live app state for prompt grounding (unchanged)
+ * - Workspace schema types: kept for any legacy UI usage
+ * - Validator utilities: safe to keep (pure TS, no DB deps)
  */
 
-// Schema exports
+// ================================================================
+// New orchestrator (replaces rlm-loop + query-runner + workspace-ops + retrieval)
+// ================================================================
 export {
-    // Types
+    RlmOrchestratorService,
+    type ActivationResult,
+    type ToolCallResult,
+} from './services/rlm-orchestrator.service';
+
+// ================================================================
+// Workspace schema types (UI / legacy read access)
+// ================================================================
+export {
     type WsSession,
     type WsNodeKind,
     type WsNode,
@@ -22,27 +32,24 @@ export {
     type WsEdge,
     type WsViewCache,
     type WsMetric,
-    // Schema DDL
     WS_SESSION_SCHEMA,
     WS_NODE_SCHEMA,
     WS_EDGE_SCHEMA,
     WS_VIEW_CACHE_SCHEMA,
     WS_METRIC_SCHEMA,
-    // Queries
     WS_QUERIES,
-    // Schema list
     WS_SCHEMAS,
     WS_RELATIONS,
 } from './schema/workspace-schema';
 
-// Validator exports
+// ================================================================
+// Validator utilities (pure TS, no DB deps — safe to keep)
+// ================================================================
 export {
-    // Types
     type ValidationResult,
     type QueryCaps,
     DEFAULT_RO_CAPS,
     DEFAULT_WS_CAPS,
-    // Validators
     validateRO,
     validateWS,
     validateAuto,
@@ -53,82 +60,24 @@ export {
     isSafeScript,
 } from './validators/query-validator';
 
-// Query Runner exports
-export {
-    // Types
-    type QueryResult,
-    type RunOptions,
-    // Service
-    QueryRunnerService,
-    // Standalone functions
-    runRO,
-    runWS,
-} from './services/query-runner.service';
-
-// Workspace Ops exports
-export {
-    // Types
-    type OpResult,
-    type CreateNodePayload,
-    type UpdateNodePayload,
-    type LinkPayload,
-    type SnapshotViewPayload,
-    type StoreQueryPayload,
-    type StoreResultPayload,
-    type SpawnTaskPayload,
-    type WorkspaceOpType,
-    // Service
-    WorkspaceOpsService,
-    // Standalone functions
-    createNode,
-    link,
-    storeQuery,
-} from './services/workspace-ops.service';
-
-// RLM Loop exports
-export {
-    // Types
-    type RLMContext,
-    type RLMStepType,
-    type RLMStepResult,
-    type ObservationResult,
-    type ReasoningPlan,
-    type PlanStep,
-    type ExecutionResult,
-    type EvaluationResult,
-    type RLMLoopResult,
-    type RLMLoopOptions,
-    // Service
-    RlmLoopService,
-    // Standalone function
-    // Standalone function
-    runRLMLoop,
-} from './services/rlm-loop.service';
-
-// Context Formatting exports
+// ================================================================
+// Context formatting
+// ================================================================
 export {
     formatRlmContext,
     RLM_CONTEXT_VERSION,
 } from './services/rlm-context';
 
-// Retrieval exports
-export {
-    // Types
-    type BlockSearchResult,
-    type NoteSearchResult,
-    type WsNodeJsonResult,
-    type EpisodePayloadResult,
-    type FolderMetadataResult,
-    // Service
-    RetrievalService,
-} from './services/retrieval.service';
-
-// RLM LLM Provider exports
+// ================================================================
+// LLM routing
+// ================================================================
 export {
     RlmLlmService,
 } from './services/rlm-llm.service';
 
-// App Context exports (live application state for RLM grounding)
+// ================================================================
+// App context (live Angular state for RLM grounding)
+// ================================================================
 export {
     type AppContext,
     type EntitySnapshot,

@@ -1,255 +1,145 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock NoteEditorStore to prevent Angular JIT compilation errors
+// Mock Angular DI
 vi.mock('../lib/store/note-editor.store', () => ({
     NoteEditorStore: vi.fn(),
 }));
 
+vi.mock('../lib/rlm', () => ({
+    RlmOrchestratorService: vi.fn(),
+    RlmLlmService: vi.fn(),
+}));
+
+vi.mock('./gokitt.service', () => ({
+    GoKittService: vi.fn(),
+}));
+
 import { OrchestratorService } from './orchestrator.service';
-import { GoogleGenAIService } from '../lib/services/google-genai.service';
-import { OpenRouterService } from '../lib/services/openrouter.service';
-import { RlmLoopService, RlmLlmService, type RLMLoopResult } from '../lib/rlm';
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeNoteStore(note: Record<string, unknown> | null = null) {
+    return {
+        activeNoteId: vi.fn(() => note?.id ?? null),
+        currentNote: vi.fn(() => note ?? undefined),
+    };
+}
+
+function makeOrchestrator(result: Record<string, unknown> = { triggered: false }) {
+    return {
+        processWithWorkspace: vi.fn(async () => result),
+        getContext: vi.fn(async () => ''),
+        isActivating: { set: vi.fn() },
+        lastActivation: { set: vi.fn() },
+    };
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 describe('OrchestratorService', () => {
     let service: OrchestratorService;
-    let googleGenAiMock: any;
-    let openRouterMock: any;
-    let rlmServiceMock: any;
-    let rlmLlmMock: any;
-    let noteEditorStoreMock: any;
-    let retrievalServiceMock: any;
+    let orchestratorMock: ReturnType<typeof makeOrchestrator>;
+    let noteStoreMock: ReturnType<typeof makeNoteStore>;
 
     beforeEach(() => {
-        googleGenAiMock = {} as unknown as GoogleGenAIService;
+        orchestratorMock = makeOrchestrator({ triggered: false });
+        noteStoreMock = makeNoteStore();
 
-        // OpenRouter configured by default
-        openRouterMock = {
-            getApiKey: vi.fn(() => 'sk-test-key'),
-        } as unknown as OpenRouterService;
+        // OrchestratorService now uses inject() internally; construct manually
+        service = Object.assign(Object.create(OrchestratorService.prototype), {
+            orchestrator: orchestratorMock,
+            rlmLlm: { isConfigured: vi.fn(() => true) },
+            goKitt: { isReady: true },
+            noteEditorStore: noteStoreMock,
+        });
+    });
 
-        rlmServiceMock = {
-            run: vi.fn(),
-        } as unknown as RlmLoopService;
+    it('returns empty string for empty prompt', async () => {
+        const result = await service.orchestrate('   ', 'thread-1');
+        expect(result).toBe('');
+        expect(orchestratorMock.processWithWorkspace).not.toHaveBeenCalled();
+    });
 
-        rlmLlmMock = {
-            isConfigured: vi.fn(() => true),
-        } as unknown as RlmLlmService;
+    it('calls processWithWorkspace with correct args when prompt is provided', async () => {
+        orchestratorMock.processWithWorkspace.mockResolvedValue({ triggered: false });
 
-        // NoteEditorStore — no note open by default
-        noteEditorStoreMock = {
-            activeNoteId: vi.fn(() => null),
-            currentNote: vi.fn(() => undefined),
-        };
+        await service.orchestrate('What is Fiora?', 'thread-99', 'narr-1');
 
-        // RetrievalService
-        retrievalServiceMock = {
-            getFolderAncestors: vi.fn(async () => []),
-            getEntitiesByNarrative: vi.fn(async () => []),
-            getEntityNeighbors: vi.fn(async () => []),
-        };
-
-        service = new OrchestratorService(
-            googleGenAiMock,
-            openRouterMock,
-            rlmServiceMock,
-            rlmLlmMock,
-            noteEditorStoreMock,
-            retrievalServiceMock,
+        expect(orchestratorMock.processWithWorkspace).toHaveBeenCalledWith(
+            'thread-99',
+            'narr-1',
+            'What is Fiora?'
         );
     });
 
-    it('should format RLM context with timing, result, and reasoning', async () => {
-        const mockResult: RLMLoopResult = {
-            ok: true,
-            output: 'The answer is 42.',
-            steps: [
-                { type: 'observe', nodeId: 'obs_1', ok: true, latMs: 10, result: { entities: [], notes: [], blocks: [], contextSummary: 'empty' } } as any,
-                { type: 'plan', nodeId: 'plan_1', ok: true, latMs: 10, result: { reasoning: 'Building plan' } } as any,
-                { type: 'execute', nodeId: 'exec_1', ok: true, latMs: 20 } as any,
-                { type: 'evaluate', nodeId: 'eval_1', ok: true, latMs: 5, result: { reason: 'Found direct answer' } } as any,
-            ],
-            evaluation: {
-                complete: true,
-                shouldRecurse: false,
-                reason: 'Found direct answer',
-                confidence: 0.9,
-                metrics: {} as any,
-            },
-            totalLatMs: 100,
-        };
+    it('returns empty string when workspace does not activate', async () => {
+        orchestratorMock.processWithWorkspace.mockResolvedValue({ triggered: false });
 
-        rlmServiceMock.run.mockResolvedValue(mockResult);
-
-        const result = await service.orchestrate('What is the answer?', 'thread-123');
-
-        // Header
-        expect(result).toContain('[RLM Context gathered in');
-        // Result section
-        expect(result).toContain('Result: The answer is 42.');
-        // Evaluation
-        expect(result).toContain('Reasoning: Found direct answer');
-        expect(result).toContain('Confidence: 0.9');
-        // Reasoning trace
-        expect(result).toContain('[OBSERVE]');
-        expect(result).toContain('[PLAN]');
-        // Footer
-        expect(result).toContain('[End Context]');
-        // Verify RLM was called with correct params
-        expect(rlmServiceMock.run).toHaveBeenCalledWith(expect.objectContaining({
-            threadId: 'thread-123',
-            initialPrompt: 'What is the answer?',
-            maxDepth: 2,
-        }));
-    });
-
-    it('should return empty string if prompt is empty', async () => {
-        const result = await service.orchestrate('   ', 'thread-123');
-        expect(result).toBe('');
-        expect(rlmServiceMock.run).not.toHaveBeenCalled();
-    });
-
-    it('should return empty string if OpenRouter is not configured', async () => {
-        openRouterMock.getApiKey.mockReturnValue(null);
-
-        const result = await service.orchestrate('Hello world', 'thread-123');
-        expect(result).toBe('');
-        expect(rlmServiceMock.run).not.toHaveBeenCalled();
-    });
-
-    it('should return empty string if RLM loop fails', async () => {
-        const mockResult: RLMLoopResult = {
-            ok: false,
-            error: 'Something went wrong',
-            steps: [],
-            totalLatMs: 50,
-        };
-
-        rlmServiceMock.run.mockResolvedValue(mockResult);
-
-        const result = await service.orchestrate('Failing prompt', 'thread-123');
+        const result = await service.orchestrate('Hello', 'thread-1');
         expect(result).toBe('');
     });
 
-    it('should handle exceptions gracefully', async () => {
-        rlmServiceMock.run.mockRejectedValue(new Error('Critical failure'));
-
-        const result = await service.orchestrate('Crash prompt', 'thread-123');
-        expect(result).toBe('');
-    });
-
-    it('should use maxDepth of 2 for cost safety', async () => {
-        rlmServiceMock.run.mockResolvedValue({
-            ok: true,
-            output: 'Done',
-            steps: [],
-            totalLatMs: 10,
+    it('returns new_observation when workspace activates', async () => {
+        const obs = 'Fiora is a blade champion with high mobility.';
+        orchestratorMock.processWithWorkspace.mockResolvedValue({
+            triggered: true,
+            new_observation: obs,
+            miss_reason: 'keyword miss on fiora',
         });
+
+        const result = await service.orchestrate('Tell me about Fiora', 'thread-1');
+        expect(result).toBe(obs);
+    });
+
+    it('returns empty string on workspace error', async () => {
+        orchestratorMock.processWithWorkspace.mockResolvedValue({
+            triggered: false,
+            error: 'go wasm exploded',
+        });
+
+        const result = await service.orchestrate('Test', 'thread-1');
+        expect(result).toBe('');
+    });
+
+    it('returns empty string when processWithWorkspace throws', async () => {
+        orchestratorMock.processWithWorkspace.mockRejectedValue(new Error('Critical failure'));
+
+        const result = await service.orchestrate('Crash prompt', 'thread-1');
+        expect(result).toBe('');
+    });
+
+    it('uses narrativeId from active note when scopeId not provided', async () => {
+        noteStoreMock = makeNoteStore({
+            id: 'note-1', title: 'T', worldId: 'w1',
+            narrativeId: 'narr-from-note', folderId: 'f1', markdownContent: '',
+        });
+        service = Object.assign(Object.create(OrchestratorService.prototype), {
+            orchestrator: orchestratorMock,
+            rlmLlm: { isConfigured: vi.fn(() => true) },
+            goKitt: { isReady: true },
+            noteEditorStore: noteStoreMock,
+        });
+
+        orchestratorMock.processWithWorkspace.mockResolvedValue({ triggered: false });
 
         await service.orchestrate('Test', 'thread-1');
 
-        expect(rlmServiceMock.run).toHaveBeenCalledWith(
-            expect.objectContaining({ maxDepth: 2 }),
+        expect(orchestratorMock.processWithWorkspace).toHaveBeenCalledWith(
+            'thread-1',
+            'narr-from-note',
+            'Test'
         );
     });
 
-    // =========================================================================
-    // AppContext Integration
-    // =========================================================================
+    it('getContext delegates to orchestrator', async () => {
+        orchestratorMock.getContext.mockResolvedValue('ctx-block');
 
-    it('should pass appContext=undefined when no note is open', async () => {
-        noteEditorStoreMock.activeNoteId.mockReturnValue(null);
-        noteEditorStoreMock.currentNote.mockReturnValue(undefined);
-
-        rlmServiceMock.run.mockResolvedValue({
-            ok: true, output: 'ok', steps: [], totalLatMs: 5,
-        });
-
-        await service.orchestrate('Test', 'thread-1');
-
-        expect(rlmServiceMock.run).toHaveBeenCalledWith(
-            expect.objectContaining({ appContext: undefined }),
-        );
-    });
-
-    it('should populate appContext when a note is open', async () => {
-        noteEditorStoreMock.activeNoteId.mockReturnValue('note-42');
-        noteEditorStoreMock.currentNote.mockReturnValue({
-            id: 'note-42',
-            title: 'Dragon Lore',
-            worldId: 'world-1',
-            narrativeId: 'narr-1',
-            folderId: 'folder-chars',
-            markdownContent: 'The dragon breathes fire across the mountains...',
-        });
-
-        retrievalServiceMock.getFolderAncestors.mockResolvedValue(['Root', 'Characters']);
-        retrievalServiceMock.getEntitiesByNarrative.mockResolvedValue([
-            { id: 'e1', label: 'Red Dragon', kind: 'creature', subtype: null },
-        ]);
-
-        rlmServiceMock.run.mockResolvedValue({
-            ok: true, output: 'ok', steps: [], totalLatMs: 5,
-        });
-
-        await service.orchestrate('Tell me about dragons', 'thread-1');
-
-        const ctx = rlmServiceMock.run.mock.calls[0][0];
-        expect(ctx.appContext).toBeDefined();
-        expect(ctx.appContext.activeNoteId).toBe('note-42');
-        expect(ctx.appContext.activeNoteTitle).toBe('Dragon Lore');
-        expect(ctx.appContext.worldId).toBe('world-1');
-        expect(ctx.appContext.narrativeId).toBe('narr-1');
-        expect(ctx.appContext.folderPath).toEqual(['Root', 'Characters']);
-        expect(ctx.appContext.nearbyEntities).toHaveLength(1);
-        expect(ctx.appContext.nearbyEntities[0].label).toBe('Red Dragon');
-    });
-
-    it('should handle retrieval failures gracefully during AppContext gathering', async () => {
-        noteEditorStoreMock.activeNoteId.mockReturnValue('note-1');
-        noteEditorStoreMock.currentNote.mockReturnValue({
-            id: 'note-1',
-            title: 'Test',
-            worldId: 'w1',
-            narrativeId: 'n1',
-            folderId: 'f1',
-            markdownContent: 'content',
-        });
-
-        // Both retrieval calls fail
-        retrievalServiceMock.getFolderAncestors.mockRejectedValue(new Error('DB error'));
-        retrievalServiceMock.getEntitiesByNarrative.mockRejectedValue(new Error('DB error'));
-
-        rlmServiceMock.run.mockResolvedValue({
-            ok: true, output: 'ok', steps: [], totalLatMs: 5,
-        });
-
-        await service.orchestrate('Test', 'thread-1');
-
-        // Should still run successfully with empty folder path and entities
-        const ctx = rlmServiceMock.run.mock.calls[0][0];
-        expect(ctx.appContext).toBeDefined();
-        expect(ctx.appContext.activeNoteId).toBe('note-1');
-        expect(ctx.appContext.folderPath).toEqual([]);
-        expect(ctx.appContext.nearbyEntities).toEqual([]);
-    });
-
-    it('should truncate activeNoteSnippet to 200 chars', async () => {
-        const longContent = 'x'.repeat(500);
-        noteEditorStoreMock.activeNoteId.mockReturnValue('note-1');
-        noteEditorStoreMock.currentNote.mockReturnValue({
-            id: 'note-1',
-            title: 'Long Note',
-            worldId: 'w1',
-            markdownContent: longContent,
-        });
-
-        rlmServiceMock.run.mockResolvedValue({
-            ok: true, output: 'ok', steps: [], totalLatMs: 5,
-        });
-
-        await service.orchestrate('Test', 'thread-1');
-
-        const ctx = rlmServiceMock.run.mock.calls[0][0];
-        expect(ctx.appContext.activeNoteSnippet).toHaveLength(200);
+        const result = await service.getContext('thread-1');
+        expect(result).toBe('ctx-block');
+        expect(orchestratorMock.getContext).toHaveBeenCalledWith('thread-1');
     });
 });

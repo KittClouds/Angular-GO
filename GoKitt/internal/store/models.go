@@ -201,6 +201,7 @@ const (
 // Episode represents a temporal action log entry.
 // Enables "what did the LLM know at time T?" queries.
 type Episode struct {
+	ID          string            `json:"id"`
 	ScopeID     string            `json:"scopeId"` // Usually worldID or narrativeID
 	NoteID      string            `json:"noteId"`
 	Timestamp   int64             `json:"ts"`
@@ -338,6 +339,7 @@ type Storer interface {
 	// Episode Log - Temporal action stream
 	LogEpisode(episode *Episode) error
 	GetEpisodes(scopeID string, limit int) ([]*Episode, error)
+	SearchEpisodes(scopeID, query string, limit int) ([]*Episode, error)
 
 	// Blocks - Vector-searchable text chunks
 	UpsertBlock(block *Block) error

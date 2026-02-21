@@ -1,0 +1,11 @@
+Unable to read angular.json
+TypeError: Cannot read properties of null (reading 'generators')
+    at [90mC:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mnx[24m\src\adapter\ngcli-adapter.js:444:51
+    at [90mC:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\operators\map.js:10:37
+    at OperatorSubscriber._this._next [90m(C:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\operators\OperatorSubscriber.js:33:21[90m)[39m
+    at Subscriber.next [90m(C:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\Subscriber.js:51:18[90m)[39m
+    at [90mC:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\observable\zip.js:50:36
+    at OperatorSubscriber._this._next [90m(C:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\operators\OperatorSubscriber.js:33:21[90m)[39m
+    at Subscriber.next [90m(C:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\Subscriber.js:51:18[90m)[39m
+    at [90mC:\Users\shuga\1kittroot\1code\Angular-build\[39mnode_modules\[4mrxjs[24m\dist\cjs\internal\observable\innerFrom.js:120:28
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)[39m

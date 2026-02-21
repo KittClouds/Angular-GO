@@ -2,7 +2,7 @@
 // CRUD operations using GoSQLite as primary store
 // NO COZODB. NO DEXIE (except model cache).
 
-import type { GoSqliteCozoBridge } from './bridge/GoSqliteCozoBridge';
+import type { DataSyncService } from './bridge/DataSyncService';
 import type { GoKittStoreService, StoreNote, StoreEntity, StoreFolder } from '../services/gokitt-store.service';
 
 // Re-export types for consumers
@@ -68,32 +68,33 @@ export interface Entity {
 // BRIDGE ACCESS
 // =============================================================================
 
-let _bridge: GoSqliteCozoBridge | null = null;
+let _bridge: DataSyncService | null = null;
 let _bridgeResolve: (() => void) | null = null;
 const _bridgeReady = new Promise<void>(resolve => { _bridgeResolve = resolve; });
 
-export function setGoSqliteBridge(bridge: GoSqliteCozoBridge): void {
+export function setGoSqliteBridge(bridge: DataSyncService): void {
     _bridge = bridge;
-    console.log('[Operations] GoSqlite Bridge connected');
+    console.log('[Operations] DataSyncService connected');
     _bridgeResolve?.();
 }
 
-function requireBridge(): GoSqliteCozoBridge {
+function requireBridge(): DataSyncService {
     if (!_bridge || !_bridge.isReadySync()) {
-        throw new Error('[Operations] Bridge not ready - called too early');
+        throw new Error('[Operations] Sync Service not ready - called too early');
     }
     return _bridge;
 }
 
 /** Wait for bridge to be ready (for writes that arrive before boot completes) */
-async function waitForBridge(): Promise<GoSqliteCozoBridge> {
+async function waitForBridge(): Promise<DataSyncService> {
     await _bridgeReady;
     return _bridge!;
 }
 
-function getBridge(): GoSqliteCozoBridge | null {
+function getBridge(): DataSyncService | null {
     return _bridge?.isReadySync() ? _bridge : null;
 }
+
 
 // =============================================================================
 // NOTE OPERATIONS

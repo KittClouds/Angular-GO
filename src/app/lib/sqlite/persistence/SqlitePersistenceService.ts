@@ -1,16 +1,14 @@
 /**
- * Sqlite Persistence Service (Enterprise WAL)
+ * Sqlite Persistence Service (Snapshot Native)
  * 
- * Orchestrator for SQLite persistence using the "Dream FS" architecture:
- * 1. Snapshot (Binary): Full database checkpoints.
- * 2. WAL (JSONL): Ledger of individual mutations for crash recovery.
+ * Orchestrator for SQLite persistence using the "Snapshot Native" architecture:
+ * - Snapshot (Binary): Atomic full-database saves to OPFS.
+ * - WAL REMOVED: No incremental writes, no replay, no compaction.
  * 
  * This service manages the worker thread and ensures data durability.
  */
 
 import { Injectable } from '@angular/core';
-import { Subject } from 'rxjs';
-import type { WalEntry } from './sqlite-opfs-core';
 
 
 type PendingRequest = {
@@ -18,29 +16,23 @@ type PendingRequest = {
     reject: (err: any) => void;
 };
 
+
 export type LoadResult = {
     snapshot: Uint8Array | null;
-    wal: WalEntry[];
-    recoveryMode: boolean;
+    // WAL removed - Snapshot Native
 };
 
 @Injectable({
     providedIn: 'root'
 })
 export class SqlitePersistenceService {
+
     private worker: Worker | null = null;
     private nextId = 1;
     private pending = new Map<number, PendingRequest>();
 
-    // WAL Buffer for debouncing
-    private walBuffer: WalEntry[] = [];
-    private flushTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly FLUSH_DELAY_MS = 500;
+    // WAL Buffer & Compaction removed - Snapshot Native
 
-    // Compaction State
-    private opCount = 0;
-    private readonly COMPACT_THRESHOLD = 500; // Trigger compact after 500 ops
-    public readonly compactNeeded$ = new Subject<void>();
 
 
     constructor() { }
@@ -90,97 +82,25 @@ export class SqlitePersistenceService {
     }
 
     /**
-     * Load Snapshot and WAL from OPFS
+     * Load Snapshot from OPFS (Legacy support for LoadResult type for now)
      */
-    async load(): Promise<LoadResult> {
+    async load(): Promise<{ snapshot: Uint8Array | null }> {
         await this.init();
-        const result = await this.sendToWorker<LoadResult>('LOAD');
-        this.opCount = result.wal.length; // Resuming count from loaded WAL
-        return result;
-    }
-
-
-    /**
-     * Append a mutation to the WAL
-     * @param op Operation type (e.g., 'upsertNote')
-     * @param data The data object
-     */
-    appendWal(op: string, data: any): void {
-        const entry: WalEntry = {
-            ts: Date.now(),
-            op,
-            data
-        };
-
-        this.walBuffer.push(entry);
-        this.opCount++;
-
-        // Trigger compaction check
-        if (this.opCount >= this.COMPACT_THRESHOLD) {
-            console.log(`[SqlitePersistence] WAL threshold reached (${this.opCount}), requesting compaction...`);
-            this.compactNeeded$.next();
-            // Reset count immediately to prevent spamming while compaction runs
-            this.opCount = 0;
-        }
-
-        // meaningful buffer size check
-        if (this.walBuffer.length >= 50) {
-            this.flushWal();
-            return;
-        }
-        this.scheduleFlush();
-    }
-
-
-    private scheduleFlush(): void {
-        if (this.flushTimer) return;
-        this.flushTimer = setTimeout(() => {
-            this.flushWal();
-        }, this.FLUSH_DELAY_MS);
-    }
-
-    private async flushWal(): Promise<void> {
-        this.flushTimer = null;
-        if (this.walBuffer.length === 0) return;
-
-        const entries = [...this.walBuffer];
-        this.walBuffer = [];
-
-        // Batch append
-        try {
-            await this.sendToWorker('APPEND_WAL_BATCH', entries);
-        } catch (e) {
-            console.error('[SqlitePersistence] Failed to append WAL batch:', e);
-            // Re-queue creates risk of order issues if we don't pause, 
-            // but for simple crash recovery, losing limits is acceptable vs blocking
-        }
+        // We only care about the snapshot now.
+        const result = await this.sendToWorker<any>('LOAD');
+        return { snapshot: result.snapshot };
     }
 
     /**
-     * Save a full binary snapshot and truncate WAL
+     * Save a full binary snapshot
      * @param data The full SQLite database as Uint8Array
      */
-    async compact(data: Uint8Array): Promise<void> {
-        // Flush pending WAL first
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
-        await this.flushWal();
-
-        console.log(`[SqlitePersistence] Compacting (${data.byteLength} bytes)...`);
-
-        // Zero-copy transfer of the buffer to the worker
-        // This means main thread loses ownership of 'data' buffer!
-        // Copy if you need to keep it, but here we assume Export() created a fresh copy.
+    async saveSnapshot(data: Uint8Array): Promise<void> {
+        console.log(`[SqlitePersistence] Saving snapshot (${data.byteLength} bytes)...`);
+        // Zero-copy transfer
         await this.sendToWorker('SAVE_SNAPSHOT', data, [data.buffer]);
-
-        // Truncate WAL
-        await this.sendToWorker('TRUNCATE_WAL');
-        this.opCount = 0; // Double ensure count is reset
-        console.log('[SqlitePersistence] Compaction complete');
+        console.log('[SqlitePersistence] Snapshot saved.');
     }
-
 
     /**
      * Clear all persistence (Factory Reset)

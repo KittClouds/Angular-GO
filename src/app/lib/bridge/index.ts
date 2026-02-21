@@ -6,5 +6,5 @@
  * - GoOpfsSyncService: Debounced OPFS persistence
  */
 
-export { GoSqliteCozoBridge, type BridgeStatus, type HydrationReport } from './GoSqliteCozoBridge';
+export * from './DataSyncService';
 export { GoOpfsSyncService, type SyncStatus as OpfsSyncStatus } from '../opfs/GoOpfsSyncService';

@@ -11,7 +11,7 @@ import { GoKittService } from './services/gokitt.service';
 import { GoKittStoreService } from './services/gokitt-store.service';
 import { setGoKittService, setDiscoveryStore } from './api/pretty-text-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
-import { GoSqliteCozoBridge } from './lib/bridge/GoSqliteCozoBridge';
+import { DataSyncService } from './lib/bridge/DataSyncService';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { KnowledgeService } from './services/knowledge.service';
 import { getNavigationApi } from './api/navigation-api';
@@ -20,6 +20,7 @@ import { NoteEditorStore } from './lib/store/note-editor.store';
 import { DiscoveryStore } from './lib/store/discoveryStore';
 import { setGoSqliteBridge } from './lib/operations';
 import * as ops from './lib/operations';
+import { FactSheetService } from './components/fact-sheets/fact-sheet.service';
 
 @Component({
   selector: 'app-root',
@@ -34,12 +35,13 @@ export class AppComponent implements OnInit, OnDestroy {
   private goKitt = inject(GoKittService);
   private goKittStore = inject(GoKittStoreService);
   private orchestrator = inject(AppOrchestrator);
-  private goSqliteBridge = inject(GoSqliteCozoBridge);
+  private dataSync = inject(DataSyncService);
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
   private knowledgeService = inject(KnowledgeService);
   private discoveryStore = inject(DiscoveryStore);
+  private factSheetService = inject(FactSheetService);
 
 
   // Navigation API subscriptions
@@ -91,15 +93,11 @@ export class AppComponent implements OnInit, OnDestroy {
       await this.goKittStore.initialize();
       console.log('[AppComponent] ✓ GoKitt Store initialized');
 
-      // Phase 5: GoSQLite Bridge (OPFS restore — needed for note reads)
-      await this.goSqliteBridge.init(); // Imports data into Store
-      // setGoSqliteBridge(this.goSqliteBridge); // Removed as it's likely handled inside init or redundant
-      console.log('[AppComponent] ✓ GoSQLite-Cozo Bridge initialized');
-
-      // Phase 4.2: Knowledge Graph (SQLite restore)
-      // Now safe to call because Store is populated with data
-      await this.knowledgeService.init();
-      console.log('[AppComponent] ✓ Knowledge Graph hydrated');
+      // Phase 5: Data Sync (SQLite <-> Dexie)
+      // Enforce SQLite as Truth. Syncs to Dexie in background.
+      await this.dataSync.init();
+      setGoSqliteBridge(this.dataSync);
+      console.log('[AppComponent] ✓ Data Sync Service initialized');
 
       // 🚀 APP IS INTERACTIVE — user can see + edit notes
       this.orchestrator.completePhase('ready');
@@ -112,11 +110,23 @@ export class AppComponent implements OnInit, OnDestroy {
       // Background tasks (non-blocking, after first paint)
       // ======================================================================
 
+      // Knowledge Graph (SQLite restore) — doesn't block editing
+      const knowledgePromise = (async () => {
+        try {
+          await this.knowledgeService.init();
+          console.log('[AppComponent] ✓ Knowledge Graph hydrated (background)');
+        } catch (err) {
+          console.error('[AppComponent] Knowledge Graph hydration failed:', err);
+        }
+      })();
+
       // DocStore hydrate (search index) — doesn't block editing
       const docStorePromise = (async () => {
         try {
-          const allNotes = await firstValueFrom(this.notesService.getAllNotes$()) || [];
-          const noteData = allNotes.map((n: any) => {
+          // [CHANGE] Hydraote Search from SQLite (Truth) not Dexie (Shadow)
+          const allNotes = await this.goKittStore.listNotes();
+
+          const noteData = allNotes.map((n) => {
             // Extract plain text from Prosemirror JSON for search indexing
             let text = '';
             if (typeof n.content === 'string') {
@@ -144,15 +154,26 @@ export class AppComponent implements OnInit, OnDestroy {
               folderPath: n.folderId || ''
             };
           });
+
           await this.goKitt.hydrateNotes(noteData);
-          console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes (background)`);
+          console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes (from SQLite)`);
         } catch (err) {
           console.error('[AppComponent] DocStore hydration failed:', err);
         }
       })();
 
-      // Wait for background tasks
-      await docStorePromise;
+      // FactSheet schema sync (batched TX to GoKitt) — doesn't block editing
+      const factSheetPromise = (async () => {
+        try {
+          await this.factSheetService.syncToBackend();
+          console.log('[AppComponent] ✓ FactSheet schemas synced (background)');
+        } catch (err) {
+          console.error('[AppComponent] FactSheet sync failed:', err);
+        }
+      })();
+
+      // Wait for all background tasks
+      await Promise.all([knowledgePromise, docStorePromise, factSheetPromise]);
       this.orchestrator.completePhase('background');
 
     } catch (err) {

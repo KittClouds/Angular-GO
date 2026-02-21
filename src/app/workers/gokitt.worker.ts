@@ -59,6 +59,8 @@ type GoKittWorkerMessage =
     | { type: 'STORE_GET_EDGE'; payload: { id: string }; id: number }
     | { type: 'STORE_DELETE_EDGE'; payload: { id: string }; id: number }
     | { type: 'STORE_LIST_EDGES'; payload: { entityId: string }; id: number }
+    // Batch Operations
+    | { type: 'STORE_REPLAY_WAL'; payload: { walJSON: string }; id: number }
     // Store Export/Import (OPFS Sync)
     | { type: 'STORE_EXPORT'; id: number }
     | { type: 'STORE_IMPORT'; payload: { data: ArrayBuffer }; id: number }
@@ -101,6 +103,7 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    | { type: 'CHAT_PROCESS_WITH_WORKSPACE'; payload: { threadId: string; scopeId: string; userPrompt: string }; id: number }
     // Store: Spans & Links
     | { type: 'STORE_UPSERT_SPAN'; payload: { spanJSON: string }; id: number }
     | { type: 'STORE_GET_SPAN'; payload: { id: string }; id: number }
@@ -186,6 +189,8 @@ type GoKittWorkerResponse =
     | { type: 'STORE_GET_EDGE_RESULT'; id: number; payload: any | null }
     | { type: 'STORE_DELETE_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_LIST_EDGES_RESULT'; id: number; payload: any[] }
+    // Batch Operations Response
+    | { type: 'STORE_REPLAY_WAL_RESULT'; id: number; payload: { success: boolean; error?: string; message?: string } }
     // Store Export/Import responses
     | { type: 'STORE_EXPORT_RESULT'; id: number; payload: { data: ArrayBuffer; size: number } | { success: false; error: string } }
     | { type: 'STORE_IMPORT_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -231,6 +236,7 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    | { type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT'; id: number; payload: string }
     // Store Results
     | { type: 'STORE_UPSERT_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_SPAN_RESULT'; id: number; payload: any | null }
@@ -374,6 +380,8 @@ declare const GoKitt: {
     storeGetEdge: (id: string) => string;
     storeDeleteEdge: (id: string) => string;
     storeListEdges: (entityId: string) => string;
+    // Batch Operations
+    storeReplayWal: (walJSON: string) => string;
     // Store Export/Import (OPFS Sync)
     storeExport: () => any; // Returns Uint8Array
     storeImport: (data: any) => string; // Accepts Uint8Array
@@ -441,6 +449,7 @@ declare const GoKitt: {
     chatGetContext: (threadId: string) => string;
     chatClearThread: (threadId: string) => string;
     chatExportThread: (threadId: string) => string;
+    chatProcessWithWorkspace: (threadId: string, scopeId: string, userPrompt: string) => string;
     // RAPTOR API
     raptorInit: (configJSON?: string) => string;
     raptorBuildTree: (embeddingsJSON?: string) => string;
@@ -897,28 +906,9 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     return;
                 }
 
-                // Register WAL Handler during init
-                // Define the callback that Go will call
-                const walCallback = (op: string, dataJSON: string) => {
-                    try {
-                        const data = JSON.parse(dataJSON);
-                        self.postMessage({
-                            type: 'WAL_EVENT',
-                            op,
-                            data
-                        });
-                    } catch (e) {
-                        console.error('[GoKittWorker] Failed to parse WAL event:', e);
-                    }
-                };
 
-                // Register it
-                try {
-                    GoKitt.setWalHandler(walCallback);
-                    console.log('[GoKittWorker] WAL handler registered with WASM');
-                } catch (e) {
-                    console.warn('[GoKittWorker] Failed to register WAL handler (old WASM?):', e);
-                }
+                // WAL Handler REMOVED - Snapshot Native
+
 
                 const res = GoKitt.storeInit();
                 const parsed = JSON.parse(res);
@@ -1034,9 +1024,9 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.error) {
                     console.error('[Worker] STORE_LIST_NOTES error:', parsed.error);
                     self.postMessage({
-                        type: 'STORE_LIST_NOTES_RESULT',
+                        type: 'ERROR',
                         id: msg.id,
-                        payload: []
+                        payload: { message: parsed.error }
                     } as GoKittWorkerResponse);
                     return;
                 }
@@ -1295,6 +1285,39 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: Array.isArray(parsed) ? parsed : []
                 } as GoKittWorkerResponse);
+                break;
+            }
+
+
+            // =================================================================
+            // Batch Operations
+            // =================================================================
+
+            case 'STORE_REPLAY_WAL': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'STORE_REPLAY_WAL_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                try {
+                    const res = GoKitt.storeReplayWal(msg.payload.walJSON);
+                    const parsed = JSON.parse(res);
+                    self.postMessage({
+                        type: 'STORE_REPLAY_WAL_RESULT',
+                        id: msg.id,
+                        payload: { success: parsed.success, error: parsed.error, message: parsed.message }
+                    } as GoKittWorkerResponse);
+                } catch (e: any) {
+                    self.postMessage({
+                        type: 'STORE_REPLAY_WAL_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: e.toString() }
+                    } as GoKittWorkerResponse);
+                }
                 break;
             }
 
@@ -2378,6 +2401,27 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
                 self.postMessage({
                     type: 'CHAT_EXPORT_THREAD_RESULT',
+                    id: msg.id,
+                    payload: res
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_PROCESS_WITH_WORKSPACE': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT',
+                        id: msg.id,
+                        payload: JSON.stringify({ triggered: false, error: 'WASM not loaded' })
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const { threadId, scopeId, userPrompt } = msg.payload;
+                const res = GoKitt.chatProcessWithWorkspace(threadId, scopeId, userPrompt);
+
+                self.postMessage({
+                    type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT',
                     id: msg.id,
                     payload: res
                 } as GoKittWorkerResponse);

@@ -101,9 +101,9 @@ func main() {
 		"storeDeleteEdge":       js.FuncOf(storeDeleteEdge),
 		"storeListEdges":        js.FuncOf(storeListEdges),
 		// Store Export/Import (OPFS sync)
-		"storeExport":   js.FuncOf(storeExport),
-		"storeImport":   js.FuncOf(storeImport),
-		"setWalHandler": js.FuncOf(setWalHandler), // [NEW] WAL Handler Registration
+		"storeExport": js.FuncOf(storeExport),
+		"storeImport": js.FuncOf(storeImport),
+		// "setWalHandler" REMOVED - Snapshot Native
 		// Store Folder CRUD
 		"storeUpsertFolder": js.FuncOf(storeUpsertFolder),
 
@@ -115,6 +115,9 @@ func main() {
 		"storeGetSpan":          js.FuncOf(storeGetSpan),
 		"storeListSpansForNote": js.FuncOf(storeListSpansForNote),
 		"storeDeleteSpan":       js.FuncOf(storeDeleteSpan),
+
+		// Batch Operations
+		// "storeReplayWal": js.FuncOf(storeReplayWal), // REMOVED - Snapshot Native
 		// Store Network View
 		"storeUpsertNetworkInstance":     js.FuncOf(storeUpsertNetworkInstance),
 		"storeGetNetworkInstance":        js.FuncOf(storeGetNetworkInstance),
@@ -155,20 +158,21 @@ func main() {
 		"extractRelations":   js.FuncOf(jsExtractRelations),
 		"agentChatWithTools": js.FuncOf(jsAgentChatWithTools),
 		// Phase 7: Observational Memory + Chat Service
-		"chatInit":           js.FuncOf(jsChatInit),
-		"chatCreateThread":   js.FuncOf(jsChatCreateThread),
-		"chatGetThread":      js.FuncOf(jsChatGetThread),
-		"chatListThreads":    js.FuncOf(jsChatListThreads),
-		"chatDeleteThread":   js.FuncOf(jsChatDeleteThread),
-		"chatAddMessage":     js.FuncOf(jsChatAddMessage),
-		"chatGetMessages":    js.FuncOf(jsChatGetMessages),
-		"chatUpdateMessage":  js.FuncOf(jsChatUpdateMessage),
-		"chatAppendMessage":  js.FuncOf(jsChatAppendMessage),
-		"chatStartStreaming": js.FuncOf(jsChatStartStreaming),
-		"chatGetMemories":    js.FuncOf(jsChatGetMemories),
-		"chatGetContext":     js.FuncOf(jsChatGetContext),
-		"chatClearThread":    js.FuncOf(jsChatClearThread),
-		"chatExportThread":   js.FuncOf(jsChatExportThread),
+		"chatInit":                 js.FuncOf(jsChatInit),
+		"chatCreateThread":         js.FuncOf(jsChatCreateThread),
+		"chatGetThread":            js.FuncOf(jsChatGetThread),
+		"chatListThreads":          js.FuncOf(jsChatListThreads),
+		"chatDeleteThread":         js.FuncOf(jsChatDeleteThread),
+		"chatAddMessage":           js.FuncOf(jsChatAddMessage),
+		"chatGetMessages":          js.FuncOf(jsChatGetMessages),
+		"chatUpdateMessage":        js.FuncOf(jsChatUpdateMessage),
+		"chatAppendMessage":        js.FuncOf(jsChatAppendMessage),
+		"chatStartStreaming":       js.FuncOf(jsChatStartStreaming),
+		"chatGetMemories":          js.FuncOf(jsChatGetMemories),
+		"chatGetContext":           js.FuncOf(jsChatGetContext),
+		"chatClearThread":          js.FuncOf(jsChatClearThread),
+		"chatExportThread":         js.FuncOf(jsChatExportThread),
+		"chatProcessWithWorkspace": js.FuncOf(jsChatProcessWithWorkspace),
 		// RAPTOR: Hierarchical Document Retrieval
 		"raptorInit":             js.FuncOf(raptorInit),
 		"raptorBuildTree":        js.FuncOf(raptorBuildTree),
@@ -908,6 +912,8 @@ func validateRelations(this js.Value, args []js.Value) interface{} {
 // Args: [] (uses in-memory database for WASM)
 func storeInit(this js.Value, args []js.Value) interface{} {
 	var err error
+	// Snapshot Native: Always use in-memory DB for runtime speed.
+	// Persistence is handled by Export/Import snapshots.
 	sqlStore, err = store.NewSQLiteStore()
 	if err != nil {
 		return ErrorResult("failed to initialize SQLite store: " + err.Error())
@@ -952,7 +958,7 @@ func storeUpsertNote(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Upsert Event
-	emitWal("upsertNote", note)
+	// emitWal("upsertNote", note) // REMOVED - Snapshot Native
 
 	return SuccessResult("upserted " + note.ID)
 }
@@ -996,7 +1002,7 @@ func storeDeleteNote(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Delete Event
-	emitWal("deleteNote", map[string]string{"id": id})
+	// emitWal("deleteNote", map[string]string{"id": id}) // REMOVED - Snapshot Native
 
 	return SuccessResult("deleted")
 }
@@ -1043,7 +1049,7 @@ func storeUpsertEntity(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Upsert Event
-	emitWal("upsertEntity", entity)
+	// emitWal("upsertEntity", entity) // REMOVED - Snapshot Native
 
 	return SuccessResult("upserted " + entity.ID)
 }
@@ -1110,7 +1116,7 @@ func storeDeleteEntity(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Delete Event
-	emitWal("deleteEntity", map[string]string{"id": id})
+	// emitWal("deleteEntity", map[string]string{"id": id}) // REMOVED - Snapshot Native
 
 	return SuccessResult("deleted")
 }
@@ -1157,7 +1163,7 @@ func storeUpsertEdge(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Upsert Event
-	emitWal("upsertEdge", edge)
+	// emitWal("upsertEdge", edge) // REMOVED - Snapshot Native
 
 	return SuccessResult("upserted " + edge.ID)
 }
@@ -1201,7 +1207,7 @@ func storeDeleteEdge(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Delete Event
-	emitWal("deleteEdge", map[string]string{"id": id})
+	// emitWal("deleteEdge", map[string]string{"id": id}) // REMOVED - Snapshot Native
 
 	return SuccessResult("deleted")
 }
@@ -1249,7 +1255,7 @@ func storeUpsertSpan(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
 
-	emitWal("upsertSpan", span)
+	// emitWal("upsertSpan", span) // REMOVED - Snapshot Native
 	return SuccessResult("upserted " + span.ID)
 }
 
@@ -1309,7 +1315,7 @@ func storeDeleteSpan(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("delete failed: " + err.Error())
 	}
 
-	emitWal("deleteSpan", map[string]string{"id": id})
+	// emitWal("deleteSpan", map[string]string{"id": id}) // REMOVED - Snapshot Native
 	return SuccessResult("deleted")
 }
 
@@ -1336,7 +1342,7 @@ func storeUpsertNetworkInstance(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("upsert failed: " + err.Error())
 	}
 
-	emitWal("upsertNetworkInstance", net)
+	// emitWal("upsertNetworkInstance", net) // REMOVED - Snapshot Native
 	return SuccessResult("upserted " + net.ID)
 }
 
@@ -1393,7 +1399,7 @@ func storeDeleteNetworkInstance(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("delete failed: " + err.Error())
 	}
 
-	emitWal("deleteNetworkInstance", map[string]string{"id": id})
+	// emitWal("deleteNetworkInstance", map[string]string{"id": id}) // REMOVED - Snapshot Native
 	return SuccessResult("deleted")
 }
 
@@ -1591,15 +1597,13 @@ func storeUpsertEntityCards(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	var cards []store.EntityCard
+	var cards []*store.EntityCard
 	if err := json.Unmarshal([]byte(args[0].String()), &cards); err != nil {
 		return ErrorResult("invalid cards json: " + err.Error())
 	}
 
-	for _, card := range cards {
-		if err := sqlStore.UpsertEntityCard(&card); err != nil {
-			return ErrorResult("upsert failed for card " + card.CardID + ": " + err.Error())
-		}
+	if err := sqlStore.UpsertEntityCardsBatch(cards); err != nil {
+		return ErrorResult("batch upsert failed: " + err.Error())
 	}
 
 	return SuccessResult(fmt.Sprintf("upserted %d cards", len(cards)))
@@ -1779,7 +1783,7 @@ func storeUpsertFolder(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Upsert Event
-	emitWal("upsertFolder", folder)
+	// emitWal("upsertFolder", folder) // REMOVED - Snapshot Native
 
 	return SuccessResult("upserted " + folder.ID)
 }
@@ -1823,7 +1827,7 @@ func storeDeleteFolder(this js.Value, args []js.Value) interface{} {
 	}
 
 	// [WAL] Emit Delete Event
-	emitWal("deleteFolder", map[string]string{"id": id})
+	// emitWal("deleteFolder", map[string]string{"id": id}) // REMOVED - Snapshot Native
 
 	return SuccessResult("deleted")
 }
@@ -2624,4 +2628,33 @@ func jsChatExportThread(this js.Value, args []js.Value) interface{} {
 	}
 
 	return jsonStr
+}
+
+// jsChatProcessWithWorkspace runs the OM loop and, if a miss signal fires,
+// activates the workspace to resurface lost context from notes/episodes.
+// Args: threadID (string), scopeID (string), userPrompt (string)
+// Returns: JSON-encoded ActivationResult
+func jsChatProcessWithWorkspace(this js.Value, args []js.Value) interface{} {
+	if chatSvc == nil {
+		return ErrorResult("chat service not initialized")
+	}
+	if len(args) < 3 {
+		return ErrorResult("missing arguments: threadID, scopeID, userPrompt")
+	}
+
+	threadID := args[0].String()
+	scopeID := args[1].String()
+	userPrompt := args[2].String()
+
+	result, err := chatSvc.ProcessWithWorkspace(context.Background(), threadID, scopeID, userPrompt)
+	if err != nil {
+		fmt.Printf("[WASM] ProcessWithWorkspace error: %v\n", err)
+		return ErrorResult(err.Error())
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		return ErrorResult("json marshal: " + err.Error())
+	}
+	return string(jsonBytes)
 }

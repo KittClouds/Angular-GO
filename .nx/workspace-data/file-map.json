@@ -1,0 +1,5774 @@
+{
+  "version": "6.0",
+  "nxVersion": "22.4.1",
+  "pathMappings": {
+    "@spartan-ng/helm/sidebar": [
+      "./libs/ui/sidebar/src/index.ts"
+    ],
+    "@spartan-ng/helm/utils": [
+      "./libs/ui/utils/src/index.ts"
+    ],
+    "@spartan-ng/helm/button": [
+      "./libs/ui/button/src/index.ts"
+    ],
+    "@spartan-ng/helm/icon": [
+      "./libs/ui/icon/src/index.ts"
+    ],
+    "@spartan-ng/helm/input": [
+      "./libs/ui/input/src/index.ts"
+    ],
+    "@spartan-ng/helm/separator": [
+      "./libs/ui/separator/src/index.ts"
+    ],
+    "@spartan-ng/helm/sheet": [
+      "./libs/ui/sheet/src/index.ts"
+    ],
+    "@spartan-ng/helm/skeleton": [
+      "./libs/ui/skeleton/src/index.ts"
+    ],
+    "@spartan-ng/helm/tooltip": [
+      "./libs/ui/tooltip/src/index.ts"
+    ]
+  },
+  "nxJsonPlugins": [],
+  "fileMap": {
+    "projectFileMap": {
+      "angular-notes": [
+        {
+          "file": ".editorconfig",
+          "hash": "8037249353422744134"
+        },
+        {
+          "file": ".gitignore",
+          "hash": "15157911861797426828"
+        },
+        {
+          "file": ".tmp/reference_repo/.agent/artifacts/plan_app_orchestration.md",
+          "hash": "2778082585284689904"
+        },
+        {
+          "file": ".tmp/reference_repo/.cargo/config.toml",
+          "hash": "15605693547530495639"
+        },
+        {
+          "file": ".tmp/reference_repo/.gitignore",
+          "hash": "5096204403221046505"
+        },
+        {
+          "file": ".tmp/reference_repo/RAPTOR_STATUS.md",
+          "hash": "1855743653999763142"
+        },
+        {
+          "file": ".tmp/reference_repo/README.md",
+          "hash": "8565568149318534044"
+        },
+        {
+          "file": ".tmp/reference_repo/SQLITE_MIGRATION_GUIDE.md",
+          "hash": "5614358347545230099"
+        },
+        {
+          "file": ".tmp/reference_repo/build_error.txt",
+          "hash": "9465186370400790303"
+        },
+        {
+          "file": ".tmp/reference_repo/build_log.txt",
+          "hash": "6528309320453174165"
+        },
+        {
+          "file": ".tmp/reference_repo/build_output.txt",
+          "hash": "7272837888885408767"
+        },
+        {
+          "file": ".tmp/reference_repo/bun.lockb",
+          "hash": "12028872747687587549"
+        },
+        {
+          "file": ".tmp/reference_repo/check2.txt",
+          "hash": "4752595083186619575"
+        },
+        {
+          "file": ".tmp/reference_repo/check_errors.txt",
+          "hash": "13434799576373049970"
+        },
+        {
+          "file": ".tmp/reference_repo/check_errors_2.txt",
+          "hash": "2043417286764027151"
+        },
+        {
+          "file": ".tmp/reference_repo/check_registry.txt",
+          "hash": "12246065798192260336"
+        },
+        {
+          "file": ".tmp/reference_repo/components.json",
+          "hash": "7593541612323492591"
+        },
+        {
+          "file": ".tmp/reference_repo/debug-dafsa.ts",
+          "hash": "15571355906076505599"
+        },
+        {
+          "file": ".tmp/reference_repo/eslint.config.js",
+          "hash": "11538576952126058721"
+        },
+        {
+          "file": ".tmp/reference_repo/eslint_output.txt",
+          "hash": "9300756465791868494"
+        },
+        {
+          "file": ".tmp/reference_repo/implicit_stress_test.md",
+          "hash": "3558141054787919866"
+        },
+        {
+          "file": ".tmp/reference_repo/index.html",
+          "hash": "5796427175931274241"
+        },
+        {
+          "file": ".tmp/reference_repo/package-lock.json",
+          "hash": "12050703409104098988"
+        },
+        {
+          "file": ".tmp/reference_repo/package.json",
+          "hash": "8198509507690330826"
+        },
+        {
+          "file": ".tmp/reference_repo/postcss.config.js",
+          "hash": "11985548894898047783"
+        },
+        {
+          "file": ".tmp/reference_repo/public/favicon.ico",
+          "hash": "4231445203559994832"
+        },
+        {
+          "file": ".tmp/reference_repo/public/kittcore_bg.wasm",
+          "hash": "14259177723157651843"
+        },
+        {
+          "file": ".tmp/reference_repo/public/logo.png",
+          "hash": "16152609963830068355"
+        },
+        {
+          "file": ".tmp/reference_repo/public/placeholder.svg",
+          "hash": "8334994000532407949"
+        },
+        {
+          "file": ".tmp/reference_repo/public/robots.txt",
+          "hash": "4096381737550925494"
+        },
+        {
+          "file": ".tmp/reference_repo/scanner_test_doc.md",
+          "hash": "17924064495930523092"
+        },
+        {
+          "file": ".tmp/reference_repo/src/App.css",
+          "hash": "2229811984542628135"
+        },
+        {
+          "file": ".tmp/reference_repo/src/App.tsx",
+          "hash": "456472605211348033"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/__tests__/navigation-api.test.ts",
+          "hash": "2905034169799528487"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/editor-api.ts",
+          "hash": "9787290150924301690"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/highlighter-api.ts",
+          "hash": "8686965691982320522"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/index.ts",
+          "hash": "6393411951869835831"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/navigation-api.ts",
+          "hash": "14516885050558214512"
+        },
+        {
+          "file": ".tmp/reference_repo/src/api/types.ts",
+          "hash": "3042139763890978975"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/NavLink.tsx",
+          "hash": "6036023926111859486"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/RightSidebar.tsx",
+          "hash": "9623369210329906269"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ai/AgentInput.tsx",
+          "hash": "5923029805626892333"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ai/AgentSidebar.tsx",
+          "hash": "14396369947980712400"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ai/CitationCard.tsx",
+          "hash": "17632304303905445816"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ai/ToolExecutionLog.tsx",
+          "hash": "3316077574987550280"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/analytics/AnalyticsPanel.tsx",
+          "hash": "2132097392063338730"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/analytics/FlowScoreSection.tsx",
+          "hash": "7133704673046344110"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/analytics/index.ts",
+          "hash": "242779216136058674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/backlinks/BacklinksDrawer.tsx",
+          "hash": "16789257583969668302"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/editor/RichTextEditor.tsx",
+          "hash": "18358099962548445711"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/BindingDialog.tsx",
+          "hash": "1363732937347223643"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/BlueprintCardsPanel.tsx",
+          "hash": "14034415518355289814"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/CharacterFactSheet.tsx",
+          "hash": "6904988246163399199"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/ConceptFactSheet.tsx",
+          "hash": "15655690004916269554"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/EventFactSheet.tsx",
+          "hash": "10700010275537601118"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/FactSheetContainer.tsx",
+          "hash": "9371609079936112496"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/FactionFactSheet.tsx",
+          "hash": "971737469974192076"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/ItemFactSheet.tsx",
+          "hash": "11510285144560701039"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/LocationFactSheet.tsx",
+          "hash": "9931427703353763168"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/MetaCardEditor.tsx",
+          "hash": "5602491546762492028"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/MetaCardsSection.tsx",
+          "hash": "6523414777510819097"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/NPCFactSheet.tsx",
+          "hash": "3738447201291556104"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/SceneFactSheet.tsx",
+          "hash": "1226435154067937352"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/blocks/FieldGroupBlock.tsx",
+          "hash": "7170399745499275493"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/blocks/RelationshipBlock.tsx",
+          "hash": "5161637629483657359"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/blocks/WidgetBlock.tsx",
+          "hash": "12079928807999722010"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/blocks/index.ts",
+          "hash": "12318794861924933177"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/BindableFieldWrapper.tsx",
+          "hash": "4375026202971091664"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/BindingIndicator.tsx",
+          "hash": "15800501926467448020"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableArray.tsx",
+          "hash": "17149748477715914435"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableColor.tsx",
+          "hash": "14661945084321609879"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableCounter.tsx",
+          "hash": "17039244202328027667"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableDate.tsx",
+          "hash": "6917603470302130899"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableDropdown.tsx",
+          "hash": "2216383284917176228"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableField.tsx",
+          "hash": "15707946443236695589"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableNumber.tsx",
+          "hash": "9839567845448478159"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableRating.tsx",
+          "hash": "6170371148700490892"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableRichText.tsx",
+          "hash": "5980839795147001746"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableSlider.tsx",
+          "hash": "10307240972135809435"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableTags.tsx",
+          "hash": "10153209711099349448"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/EditableToggle.tsx",
+          "hash": "4768514511972317484"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/FactSheetCard.tsx",
+          "hash": "11625993825783474475"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/ProgressBar.tsx",
+          "hash": "17094091316891197567"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/RelationshipDetailsPanel.tsx",
+          "hash": "9218871994561099211"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/RelationshipEditorCard.tsx",
+          "hash": "8712317783957837651"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/RelationshipRow.tsx",
+          "hash": "6633220353528625166"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/StatGrid.tsx",
+          "hash": "16765865284634925617"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/cards/index.ts",
+          "hash": "3168322150908617903"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fact-sheets/index.ts",
+          "hash": "1022733761703504832"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/CalendarEntitySidebar.tsx",
+          "hash": "2048909823221918883"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/CalendarSetupWizard.tsx",
+          "hash": "13802317431492067707"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/CalendarSidebar.tsx",
+          "hash": "1422549499946135565"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/CausalityGraph.tsx",
+          "hash": "6040004400867384000"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/DayCell.tsx",
+          "hash": "9318590610622970835"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/DualTimeline.tsx",
+          "hash": "13651097849617852907"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/EraEditor.tsx",
+          "hash": "2790859179491126624"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/EventCard.tsx",
+          "hash": "6029870265484020331"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/EventCreator.tsx",
+          "hash": "3371287009193460225"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/EventDetailPanel.tsx",
+          "hash": "8711968240639135796"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/EventEditDialog.tsx",
+          "hash": "2290693914453383729"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/FantasyCalendarGrid.tsx",
+          "hash": "5669174776886336643"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/NarrativeEventEditor.tsx",
+          "hash": "16325366115011376118"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/StoryBeatSelector.tsx",
+          "hash": "12772883935020423280"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/TimeMarkerEditor.tsx",
+          "hash": "8413098273686636205"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/TimelineBar.tsx",
+          "hash": "14000302037873809392"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/TimelineEditor.tsx",
+          "hash": "10127286052278985837"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/fantasy-calendar/useTimelineSync.ts",
+          "hash": "4962888607767153170"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/D3GraphView.tsx",
+          "hash": "3275752085940604909"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/Force3DGraphView.tsx",
+          "hash": "2129433550973033861"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/GraphControls.tsx",
+          "hash": "3386339173830322938"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/GraphLegend.tsx",
+          "hash": "117173834879810437"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/GraphStats.tsx",
+          "hash": "14290328944526787862"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/GraphToolbar.tsx",
+          "hash": "9129149492512465400"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/GraphView.tsx",
+          "hash": "6612123335164547105"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/NodeInfoPanel.tsx",
+          "hash": "9980231733797423404"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/SearchBar.tsx",
+          "hash": "316982274168094442"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/SidebarGraph.tsx",
+          "hash": "17114769380455880116"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/graph/index.ts",
+          "hash": "4469632973303225672"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/HubPanel.tsx",
+          "hash": "6933203623246854154"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/PatternEditor.tsx",
+          "hash": "3182033029776581672"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/PatternManager.tsx",
+          "hash": "17751858442845001376"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/PatternTester.tsx",
+          "hash": "4222726976246891548"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/index.ts",
+          "hash": "7181486450757995675"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/AddTokenMenu.tsx",
+          "hash": "9402750339989249674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/LiveMatchHighlighter.tsx",
+          "hash": "3167203489663411248"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/PatternBuilder.tsx",
+          "hash": "6336872936332689351"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/TokenChipInline.tsx",
+          "hash": "12855260454436200346"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/index.ts",
+          "hash": "14695599837370991210"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/pattern-builder/types.ts",
+          "hash": "13778460376035766630"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/EntitiesTab.tsx",
+          "hash": "2378849109310452411"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/ExtractionTab.tsx",
+          "hash": "11229104551497547611"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/FieldsTab.tsx",
+          "hash": "16668667274500879921"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/GraphTab.tsx",
+          "hash": "1469093202950674091"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/NetworksTab.tsx",
+          "hash": "5228291762793918176"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/PatternsTab.tsx",
+          "hash": "17162408253170939239"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/RelationshipsTab.tsx",
+          "hash": "416326546113306708"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/tabs/ThemeTab.tsx",
+          "hash": "17024413854319871994"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/hub/types.ts",
+          "hash": "15570555230017158479"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/icons/CustomNoteIcon.tsx",
+          "hash": "4649536132963186580"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/icons/Logo.tsx",
+          "hash": "16472458497412547137"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/layout/AppSidebar.tsx",
+          "hash": "16978932944427957351"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/layout/NoteHeader.tsx",
+          "hash": "14182746719177247962"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/loading/LoadingScreen.tsx",
+          "hash": "18106787555332816415"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/nav-user.tsx",
+          "hash": "10845467378312656635"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/scope/ScopeSelector.tsx",
+          "hash": "1913952597226795289"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/scope/index.ts",
+          "hash": "3363767571009004008"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/search/NerPanel.tsx",
+          "hash": "7242364275502483087"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/search/RustSearchPanel.tsx",
+          "hash": "827070061241252842"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/LLMExtractionSettings.tsx",
+          "hash": "17920321406849993455"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/SettingsPanel.tsx",
+          "hash": "15125175301338217691"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/index.ts",
+          "hash": "1761844689536592845"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/settings/LLMExtractionSettings.tsx",
+          "hash": "17920321406849993455"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/settings/SettingsPanel.tsx",
+          "hash": "4540507352205595061"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/settings/settings/index.ts",
+          "hash": "1761844689536592845"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/AddEntityDialog.tsx",
+          "hash": "16385498382508494867"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/AppSidebar.tsx",
+          "hash": "4656631918046150097"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/ArboristTreeNode.tsx",
+          "hash": "9543482401500544175"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/ArboristTreeView.tsx",
+          "hash": "9077211946872492969"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/EntityCreator.tsx",
+          "hash": "3762065561684891567"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/EntityRegistryPanel.tsx",
+          "hash": "578351055996327207"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/NetworkFolderCreation.tsx",
+          "hash": "3990768811856111316"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/SceneDashboard.tsx",
+          "hash": "11408542611524278672"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/TypedFolderMenu.tsx",
+          "hash": "3227348873263804598"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/index.ts",
+          "hash": "12434910499161322336"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/scenes/NarrativeOrderList.tsx",
+          "hash": "17005633935004018674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/sidebar/scenes/SceneCard.tsx",
+          "hash": "17939588564433293675"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/tabs/NoteTabs.tsx",
+          "hash": "3830226559736897791"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/theme/DarkModeToggle.tsx",
+          "hash": "5360278724421569081"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/tts/TTSPlayer.tsx",
+          "hash": "4649185286510037868"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/tts/index.ts",
+          "hash": "15481458729732405323"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/HighlightingModeToggle.tsx",
+          "hash": "14510732440347579860"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/NavLink.tsx",
+          "hash": "1417043651825738071"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/accordion.tsx",
+          "hash": "7191778799021925458"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/alert-dialog.tsx",
+          "hash": "3848982295108551166"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/alert.tsx",
+          "hash": "4388861947397284337"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/aspect-ratio.tsx",
+          "hash": "5049222743965608042"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/avatar.tsx",
+          "hash": "4999300554042707302"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/badge.tsx",
+          "hash": "14407526327272352665"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/breadcrumb.tsx",
+          "hash": "4838518489886570050"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/button.tsx",
+          "hash": "14158606896302313986"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/calendar.tsx",
+          "hash": "18406087458428647547"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/card.tsx",
+          "hash": "4747042597379952450"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/carousel.tsx",
+          "hash": "14103867123195423494"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/chart.tsx",
+          "hash": "11826496109517181692"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/checkbox.tsx",
+          "hash": "13174251555598973816"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/collapsible.tsx",
+          "hash": "1544485808011185800"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/command.tsx",
+          "hash": "1221036124246023880"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/context-menu.tsx",
+          "hash": "4620392296815217091"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/dialog.tsx",
+          "hash": "15082262457616858815"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/drawer.tsx",
+          "hash": "15179762568624192802"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/dropdown-menu.tsx",
+          "hash": "17477507392901238038"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/form.tsx",
+          "hash": "12497072996513651494"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/hover-card.tsx",
+          "hash": "17644109990326101673"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/input-otp.tsx",
+          "hash": "9327806927811293281"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/input.tsx",
+          "hash": "3094824116584836715"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/label.tsx",
+          "hash": "11980706920645705085"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/menubar.tsx",
+          "hash": "15518725403625388583"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/navigation-menu.tsx",
+          "hash": "1587781184481102955"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/pagination.tsx",
+          "hash": "1246537921930093509"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/popover.tsx",
+          "hash": "4068494183437861868"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/progress.tsx",
+          "hash": "16085828608162949382"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/radio-group.tsx",
+          "hash": "14276104310220221647"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/resizable.tsx",
+          "hash": "18153979664618435983"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/scroll-area.tsx",
+          "hash": "14189638831360890657"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/select.tsx",
+          "hash": "17127204543562840459"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/separator.tsx",
+          "hash": "15512956659616684942"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/sheet.tsx",
+          "hash": "5176017883853710737"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/sidebar.tsx",
+          "hash": "2339643889740565320"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/skeleton.tsx",
+          "hash": "5018604564820304226"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/slider.tsx",
+          "hash": "18147220207953585896"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/sonner.tsx",
+          "hash": "12882035983930788554"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/switch.tsx",
+          "hash": "10344607768798883771"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/table.tsx",
+          "hash": "7547674054075294824"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/tabs.tsx",
+          "hash": "3262246972125574056"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/textarea.tsx",
+          "hash": "338729089306295634"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/toast.tsx",
+          "hash": "1164073370287336729"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/toaster.tsx",
+          "hash": "11975695899367802564"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/toggle-group.tsx",
+          "hash": "17873349350212689827"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/toggle.tsx",
+          "hash": "4630552958289250073"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/tooltip.tsx",
+          "hash": "13528045205525697097"
+        },
+        {
+          "file": ".tmp/reference_repo/src/components/ui/use-toast.ts",
+          "hash": "14516856149560591106"
+        },
+        {
+          "file": ".tmp/reference_repo/src/constants/fonts.ts",
+          "hash": "1137124142073297812"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/BlueprintHubContext.tsx",
+          "hash": "4150129513126454829"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/CalendarContext.tsx",
+          "hash": "5038951567496893810"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/EntitySelectionContext.tsx",
+          "hash": "13489814630404539228"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/NERContext.tsx",
+          "hash": "13324447103526413510"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/NarrativeFocusContext.tsx",
+          "hash": "4667014938858557406"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/ScopeContext.tsx",
+          "hash": "5066953576611455645"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/TemporalHighlightContext.tsx",
+          "hash": "3727980764440740253"
+        },
+        {
+          "file": ".tmp/reference_repo/src/contexts/UIStateContext.tsx",
+          "hash": "5225360106059735673"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/index.ts",
+          "hash": "6125457816649694057"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/milkdown.css",
+          "hash": "15354676049119141547"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/blockHandle/BlockHandleUI.tsx",
+          "hash": "5716568513145959683"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/blockHandle/blockHandle.css",
+          "hash": "6448626443793261353"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/blockHandle/index.tsx",
+          "hash": "11600079418959341893"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/details/details.css",
+          "hash": "628401593852034581"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/details/details.ts",
+          "hash": "14057228463921592754"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/details/detailsInteractive.ts",
+          "hash": "11764752099830184945"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/details/indentGuides.ts",
+          "hash": "16648611942734486547"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/details/index.ts",
+          "hash": "16776254520477105367"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/entityHighlighter.ts",
+          "hash": "8552982844469643463"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/marks/fontFamily.ts",
+          "hash": "10093821005799920899"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/marks/fontSize.ts",
+          "hash": "1389306384192663447"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/marks/index.ts",
+          "hash": "5577010565202834259"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/marks/textColor.ts",
+          "hash": "13719322521872198881"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/marks/underline.ts",
+          "hash": "9362980323733824748"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/nodes/indent.ts",
+          "hash": "817659402890840500"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/nodes/index.ts",
+          "hash": "353463472760130344"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/nodes/textAlign.ts",
+          "hash": "14236759217848217309"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/ColorPicker.tsx",
+          "hash": "1428903027899008524"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/ToolbarView.tsx",
+          "hash": "3375122806523112150"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/aiActions.ts",
+          "hash": "16591951329854433645"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/commands.tsx",
+          "hash": "9764659129689105389"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/index.ts",
+          "hash": "8834014933191451649"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/selectionToolbar.ts",
+          "hash": "2640561028415741142"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/toolbar.css",
+          "hash": "15776440655892767159"
+        },
+        {
+          "file": ".tmp/reference_repo/src/editor/plugins/toolbar/types.ts",
+          "hash": "1457127688572834787"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/api/seedBlueprint.ts",
+          "hash": "3422149731544508652"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/api/storage.ts",
+          "hash": "16666010473804332156"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/BlueprintHubPanel.tsx",
+          "hash": "3219137721301944503"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/MocsTab.tsx",
+          "hash": "14576064083176806978"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/PatternEditor.tsx",
+          "hash": "3182033029776581672"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/PatternManager.tsx",
+          "hash": "17163220933933110064"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/RefPatternTester.tsx",
+          "hash": "4222726976246891548"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/TagInput.tsx",
+          "hash": "6411822309699289202"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/ViewTemplatesTab.tsx",
+          "hash": "7673031217131614295"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/AddTokenMenu.tsx",
+          "hash": "9402750339989249674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/LiveMatchHighlighter.tsx",
+          "hash": "3167203489663411248"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/PatternBuilder.tsx",
+          "hash": "6336872936332689351"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/TokenChipInline.tsx",
+          "hash": "12855260454436200346"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/index.ts",
+          "hash": "14695599837370991210"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/pattern-builder/types.ts",
+          "hash": "13778460376035766630"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/previews/RelationshipPreview.tsx",
+          "hash": "17838164492144770784"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/AdvancedTab.tsx",
+          "hash": "4825815008239048691"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/BlueprintsTab.tsx",
+          "hash": "5369689642542097826"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/EntityKindSelector.tsx",
+          "hash": "15758111451716781056"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/QuickCreateTab.tsx",
+          "hash": "13300503841665645342"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/RelationshipInstancesDialog.tsx",
+          "hash": "4680031955872384338"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/index.ts",
+          "hash": "11945773496098807691"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/relationships/relationshipPresets.ts",
+          "hash": "6931647808299409365"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/AttributeBlueprintsTab.tsx",
+          "hash": "14039508544822268982"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/EntityThemeTab.tsx",
+          "hash": "971601891255182629"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/EntityTypesTab.tsx",
+          "hash": "670880344923056098"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/ExtractionTab.tsx",
+          "hash": "11610263890068617464"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/FieldsTab.tsx",
+          "hash": "9362681491891368278"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/NetworksTab.tsx",
+          "hash": "633907383407568262"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/components/tabs/RelationshipTypesTab.tsx",
+          "hash": "3272191747291957042"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/context/BlueprintHubContext.tsx",
+          "hash": "15704657712981014659"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useAttributeBlueprints.ts",
+          "hash": "9166334162522491050"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useBlueprintHub.ts",
+          "hash": "15932137122477131504"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useEntities.ts",
+          "hash": "14645140353722377226"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useEntityRelationships.ts",
+          "hash": "6801060254884847997"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useEntityTypes.ts",
+          "hash": "7899230056641943798"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useExtractionProfile.ts",
+          "hash": "13764125718980322082"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useFields.ts",
+          "hash": "13415654064444430329"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useMOCs.ts",
+          "hash": "8914702132718548726"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useRelationshipPatterns.ts",
+          "hash": "11538913356868988442"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useRelationshipTypes.ts",
+          "hash": "6610169216328653516"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/hooks/useViewTemplates.ts",
+          "hash": "16720981889581027746"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/services/compiler.ts",
+          "hash": "2998082401265524005"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/services/validator.ts",
+          "hash": "12659965575541994706"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/types/index.ts",
+          "hash": "5795121726760827617"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/types/layout.ts",
+          "hash": "8619959813135215912"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/blueprint-hub/utils/layoutMerger.ts",
+          "hash": "11264537563319658944"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiCollections.tsx",
+          "hash": "11769349847966294112"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiEntityPage.tsx",
+          "hash": "5186127916843221829"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiHome.tsx",
+          "hash": "15423214816393756567"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiLayout.tsx",
+          "hash": "16257668334765853931"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiMedia.tsx",
+          "hash": "7246514410956894874"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiPeekPanel.tsx",
+          "hash": "17109460282756028793"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiPlaceholder.tsx",
+          "hash": "13375664579179150392"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiRelationships.tsx",
+          "hash": "10463020161533069993"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiStoryBeats.tsx",
+          "hash": "3444511916718231547"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiTimelines.tsx",
+          "hash": "6060344082612761595"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/components/WikiWorldbuilding.tsx",
+          "hash": "14730926554916395674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/hooks/useMediaAggregator.ts",
+          "hash": "15081605894357486621"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/hooks/useTimelineEvents.ts",
+          "hash": "12103345619884985680"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/hooks/useWikiData.ts",
+          "hash": "6464403709354381311"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/index.ts",
+          "hash": "5269768671636787490"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/pages/WikiPage.tsx",
+          "hash": "8255443447732479820"
+        },
+        {
+          "file": ".tmp/reference_repo/src/features/wiki/types/wikiTypes.ts",
+          "hash": "17992434673171108549"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/use-mobile.tsx",
+          "hash": "3462509458170365925"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/use-toast.ts",
+          "hash": "14315189795171901823"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useBacklinks.ts",
+          "hash": "6016984779961749423"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useCalendar.ts",
+          "hash": "13089660098385010526"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useEntityRelationships.ts",
+          "hash": "16516635628013488008"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useExtractionProfile.ts",
+          "hash": "16007805269580736118"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useFactSheet.ts",
+          "hash": "8890824900004863434"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useFantasyCalendar.ts",
+          "hash": "9063833923579356975"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useFolders.ts",
+          "hash": "1297978803647077882"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useGraphData.ts",
+          "hash": "1315222219686797862"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useJotaiNotes.ts",
+          "hash": "12621980659383986286"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNarrativeAwareCreation.ts",
+          "hash": "11928901431929735988"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNarrativeDashboard.ts",
+          "hash": "1188269017341279035"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNarrativeManagement.ts",
+          "hash": "16602906147308285640"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNoteEditor.ts",
+          "hash": "3123496680527178882"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNotes.ts",
+          "hash": "17407341952433542662"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useNotesStore.ts",
+          "hash": "13629850823643043327"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useRelationshipPatterns.ts",
+          "hash": "10088269698603479580"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useRelationshipTypes.ts",
+          "hash": "3714623203961632788"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useSQLite.ts",
+          "hash": "3183664555739966695"
+        },
+        {
+          "file": ".tmp/reference_repo/src/hooks/useUnifiedEntityAttributes.ts",
+          "hash": "2253791188724811198"
+        },
+        {
+          "file": ".tmp/reference_repo/src/index.css",
+          "hash": "2310043033596023662"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/NLP/chunker.test.ts",
+          "hash": "698467170837867098"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/NLP/chunker.ts",
+          "hash": "2220708443839660034"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/DeltaScanner.test.ts",
+          "hash": "7323796078736425259"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/DeltaScanner.ts",
+          "hash": "15248983763486087332"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/EntityEventBus.test.ts",
+          "hash": "16697972148765079516"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/EntityEventBus.ts",
+          "hash": "17342281012369179967"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/ScanCoordinator.test.ts",
+          "hash": "17359551187991572884"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/ScanCoordinator.ts",
+          "hash": "16591873528787022175"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/index.ts",
+          "hash": "15310982906607113107"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/pattern-scanner.ts",
+          "hash": "3635373796101613233"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/scanCoordinatorInstance.ts",
+          "hash": "9727276444714286209"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/styles.ts",
+          "hash": "12813387591828424175"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/Scanner/types.ts",
+          "hash": "4839225430418296953"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/__tests__/scope-isolation.test.ts",
+          "hash": "17707189942216980759"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/agents/chatService.ts",
+          "hash": "11894600340492121554"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/agents/mastra.config.ts",
+          "hash": "1942626442888374690"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/analytics/textAnalytics.ts",
+          "hash": "7444707585040965655"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/arborist/adapter.ts",
+          "hash": "3795017051727308984"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/arborist/index.ts",
+          "hash": "14941823549462852687"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/arborist/type-aware-rename.ts",
+          "hash": "16579221540328874499"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/arborist/types.ts",
+          "hash": "3675919197117894659"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/BindingEngine.ts",
+          "hash": "9854627937760810332"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/BindingEngineAdapter.ts",
+          "hash": "9546427265276217242"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/aggregations.ts",
+          "hash": "16232552191040507313"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/index.ts",
+          "hash": "11987080834734252953"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/transforms.ts",
+          "hash": "7356858000253936099"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/bindings/types.ts",
+          "hash": "6011210233118831588"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/chunking/ChunkerCore.test.ts",
+          "hash": "2656500284642739823"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/chunking/ChunkerCore.ts",
+          "hash": "13068689225643674621"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/chunking/index.ts",
+          "hash": "11765605148780496072"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/core/AppOrchestrator.ts",
+          "hash": "5869881149982080044"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/crossdoc/crossdoc-service.ts",
+          "hash": "218686035866834258"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/crossdoc/hybrid-linker.ts",
+          "hash": "292991920225311953"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/crossdoc/index.ts",
+          "hash": "13441075322800852963"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/db/client/db-client.ts",
+          "hash": "17215446764407325341"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/dexie/db.ts",
+          "hash": "3116001084836553869"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/dexie/decorations.ts",
+          "hash": "14499990023144320161"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/dexie/hooks.ts",
+          "hash": "3649164022389831866"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/dexie/operations.ts",
+          "hash": "1005291583134505883"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/EmbeddingEngine.ts",
+          "hash": "16621578610342387250"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/embeddingService.ts",
+          "hash": "5714498182266640160"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/index.ts",
+          "hash": "3445315675431311816"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/model-cache.ts",
+          "hash": "6922766733080988357"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/models/ModelRegistry.ts",
+          "hash": "8277348512401987712"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/pipeline/queue.ts",
+          "hash": "10927275728326342159"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/pipeline/types.ts",
+          "hash": "3153109710533533820"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/providers/LocalEmbeddingProvider.ts",
+          "hash": "18252842263810414441"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/providers/RustEmbeddingProvider.ts",
+          "hash": "16978210100486607914"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/embeddings/providers/types.ts",
+          "hash": "8520290601240932843"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/characterSchema.ts",
+          "hash": "5315408453462811592"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/conceptSchema.ts",
+          "hash": "10244818407413113752"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/eventSchema.ts",
+          "hash": "3073252336460871108"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/factionSchema.ts",
+          "hash": "13068267982355593176"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/index.ts",
+          "hash": "16379334670596541705"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/itemSchema.ts",
+          "hash": "16550242825543134706"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/locationSchema.ts",
+          "hash": "13100190180786823075"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/npcSchema.ts",
+          "hash": "7200526644990345448"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/entity-schemas/sceneSchema.ts",
+          "hash": "5643278359114119174"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/extraction/ExtractionService.ts",
+          "hash": "9924570277668248970"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/extraction/PromptTemplateBuilder.ts",
+          "hash": "14117808232128433524"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/extraction/extractionConfig.ts",
+          "hash": "2011177076048388220"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/extraction/index.ts",
+          "hash": "2572835644089942828"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/extraction/types.ts",
+          "hash": "4306713084142201663"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheet/FieldSchemaRegistry.ts",
+          "hash": "729285474665375298"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheet/api.ts",
+          "hash": "17248861411457840169"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheet/index.ts",
+          "hash": "10703251318657089282"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheets/FactSheetService.ts",
+          "hash": "15501346008344953453"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheets/index.ts",
+          "hash": "15647581177431926159"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fact-sheets/schema-definitions.ts",
+          "hash": "4744906872958194668"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fantasy-calendar/calendarEventSchema.ts",
+          "hash": "17272787896469548140"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fantasy-calendar/eventTypeRegistry.ts",
+          "hash": "3260179878860044933"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fantasy-calendar/orbital.ts",
+          "hash": "246031029560825471"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fantasy-calendar/types.ts",
+          "hash": "11803138745045475088"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/fantasy-calendar/utils.ts",
+          "hash": "5306755232951148412"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/api/network-auto-creator.ts",
+          "hash": "11507159266445859546"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/folder-hierarchy-extractor.ts",
+          "hash": "13444582114176216094"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/index.ts",
+          "hash": "10603847826652670861"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schema-registry.ts",
+          "hash": "11594160372068938690"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas.ts",
+          "hash": "18075279219524920484"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/act.ts",
+          "hash": "2555120937798401559"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/arc.ts",
+          "hash": "15231258653761669647"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/beat.ts",
+          "hash": "3329303425623659602"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/chapter.ts",
+          "hash": "12603076046079858616"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/character.ts",
+          "hash": "13816825522853169623"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/concept.ts",
+          "hash": "18123799730174181638"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/event.ts",
+          "hash": "7382374016634332545"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/index.ts",
+          "hash": "13457240046097993082"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/item.ts",
+          "hash": "10086239737183191794"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/location.ts",
+          "hash": "16773999072699897716"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/narrative.ts",
+          "hash": "13440131842517717500"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/npc.ts",
+          "hash": "3548860419344648674"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/scene.ts",
+          "hash": "10570537011662377783"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/folders/schemas/timeline.ts",
+          "hash": "17046026683486129792"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/graph/index.ts",
+          "hash": "5346949525218420156"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/graph/services/graph-data-service.ts",
+          "hash": "13546383216312333714"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/graph/services/index.ts",
+          "hash": "3126756846493589961"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/graph/types/graph-types.ts",
+          "hash": "14618724682395862428"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/graph/types/index.ts",
+          "hash": "137639904285518667"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/kittcore/index.ts",
+          "hash": "10706793407733652341"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/llm/ModelRegistry.ts",
+          "hash": "17669798335219399673"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/llm/UnifiedLLMEngine.ts",
+          "hash": "8116601375562184856"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/llm/index.ts",
+          "hash": "603195426792489378"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/llm/types.ts",
+          "hash": "17923606231548620295"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/schema/index.ts",
+          "hash": "14726843567144042170"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/schema/node.ts",
+          "hash": "17121678220992282012"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/transformers/sentence.test.ts",
+          "hash": "8340413160432196259"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/transformers/sentence.ts",
+          "hash": "12728011544222613745"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/transformers/text.ts",
+          "hash": "11062225144005246326"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/transformers/transformer.ts",
+          "hash": "8687158282283382455"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/mastra/types.ts",
+          "hash": "13486335620612136586"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/narrative/NarrativeChronologyRegistry.test.ts",
+          "hash": "9423180654674715307"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/narrative/NarrativeChronologyRegistry.ts",
+          "hash": "12209141129904412407"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/narrative/index.ts",
+          "hash": "16252640124484150315"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/autoMembership.ts",
+          "hash": "1701144427801704470"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/index.ts",
+          "hash": "7888981567522261931"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/queries.ts",
+          "hash": "18446500326939137849"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/allianceSchema.ts",
+          "hash": "10049741908175146022"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/factionSchema.ts",
+          "hash": "990477479310629551"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/familySchema.ts",
+          "hash": "7825423248727713096"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/guildSchema.ts",
+          "hash": "9457544887201563514"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/index.ts",
+          "hash": "3574207085091905318"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/schemas/organizationSchema.ts",
+          "hash": "10941668197641703598"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/storage-adapter.ts",
+          "hash": "3799516009723806638"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/storage.ts",
+          "hash": "6623315786408272563"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/types.ts",
+          "hash": "1773640589278188947"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/networks/validator.ts",
+          "hash": "18213645900101973235"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/BlobStore.test.ts",
+          "hash": "13626996072504241121"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/BlobStore.ts",
+          "hash": "18154256364631301520"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/GraphObjectStore.test.ts",
+          "hash": "3314367884768382915"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/GraphObjectStore.ts",
+          "hash": "178371778143894491"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/README.md",
+          "hash": "16825267909595704079"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/RealOpfsBackend.ts",
+          "hash": "974442856833988355"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/Wal.test.ts",
+          "hash": "16713133661013399769"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/Wal.ts",
+          "hash": "12152287681841995534"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/index.ts",
+          "hash": "6258226363933500315"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/opfs/schema.ts",
+          "hash": "8821305179492870196"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/queryClient.ts",
+          "hash": "814678758655773086"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/clustering.test.ts",
+          "hash": "13520769868102515814"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/clustering.ts",
+          "hash": "7983007356845989510"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/embedding-utils.ts",
+          "hash": "18119861534903224343"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/index.ts",
+          "hash": "11487178433023369573"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/models.ts",
+          "hash": "5916818160607122079"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/raptor-service.test.ts",
+          "hash": "14860250973085952957"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/rag/raptor-service.ts",
+          "hash": "5378549306285033133"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/constraints.ts",
+          "hash": "13407822612867186056"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/index.ts",
+          "hash": "8410189949290442837"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/parser.ts",
+          "hash": "7325113221762628860"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/patterns/defaults.ts",
+          "hash": "12800077819248389035"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/patterns/registry.ts",
+          "hash": "1799943008186513686"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/patterns/schema.ts",
+          "hash": "6670280294322824847"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/projections.ts",
+          "hash": "14922899688549101750"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/refs/types.ts",
+          "hash": "15793064867878712944"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/registry/RustSmartGraphRegistry.ts",
+          "hash": "8757443637026364551"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/registry/SmartGraphRegistry.ts",
+          "hash": "14617950867960204668"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/registry/index.ts",
+          "hash": "2592913845421426585"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/scope/computeNodeScope.ts",
+          "hash": "735389804542482916"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/scope/index.ts",
+          "hash": "9788935073779338147"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/scope/scopeTypes.ts",
+          "hash": "10759493895579261350"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/settings/SettingsManager.ts",
+          "hash": "824252731463495890"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/settings/index.ts",
+          "hash": "1991184949862187640"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/settings/types.ts",
+          "hash": "15413914735729849851"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage.ts",
+          "hash": "16149522625654928412"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/bootCache.test.ts",
+          "hash": "17102918674232899433"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/bootCache.ts",
+          "hash": "2806823475366737195"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/ContentRepo.test.ts",
+          "hash": "15797107246115072706"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/ContentRepo.ts",
+          "hash": "11933700290700014000"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/ContentSchema.ts",
+          "hash": "6262936034303138153"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/ContentTypes.ts",
+          "hash": "5508313718304727182"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/EntityMetadataService.ts",
+          "hash": "10953382958043803577"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/content/index.ts",
+          "hash": "12890785103650753636"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/cozoBootCache.ts",
+          "hash": "16612385042214074783"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/index.ts",
+          "hash": "5917499994358598007"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/storage/rustCozoBootCache.ts",
+          "hash": "10293474260695866423"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/store/discoveryStore.ts",
+          "hash": "13424892934292480293"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/store/entityAttributeStore.ts",
+          "hash": "12137545663309552776"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/store/entityColorStore.ts",
+          "hash": "13301816867145528873"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/store/highlightingStore.ts",
+          "hash": "3507661827026037497"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/time/ChronologyEngine.ts",
+          "hash": "13800872673259026973"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/time/TimeRegistry.ts",
+          "hash": "11510880514858455614"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/time/index.ts",
+          "hash": "15483015269056113559"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/tts/TTSContext.tsx",
+          "hash": "11530706924033402008"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/tts/index.ts",
+          "hash": "10839878584900582991"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/tts/playerEngine.ts",
+          "hash": "10672862441597209210"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/types/entityAttributes.ts",
+          "hash": "11878175825419771838"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/types/entityTypes.ts",
+          "hash": "546169743768085734"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/types/index.ts",
+          "hash": "7141859838259097722"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/utils.ts",
+          "hash": "6502578908330605140"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/utils/ids.ts",
+          "hash": "9754540337798054508"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/utils/notePerf.ts",
+          "hash": "16369701723470073285"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/utils/titleParser.ts",
+          "hash": "10560896651763318528"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/wasm-shared.test.ts",
+          "hash": "5791528021821537023"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/wasm-shared.ts",
+          "hash": "4591846151804394709"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/components/MeterStackWidget.tsx",
+          "hash": "336134846066993188"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/components/ProgressBarWidget.tsx",
+          "hash": "11042913909982214064"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/components/StatsGridWidget.tsx",
+          "hash": "4586756130427000808"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/index.ts",
+          "hash": "9121989022712897522"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/registry.ts",
+          "hash": "8837215718320541504"
+        },
+        {
+          "file": ".tmp/reference_repo/src/lib/widgets/types.ts",
+          "hash": "14273758035621197196"
+        },
+        {
+          "file": ".tmp/reference_repo/src/main.tsx",
+          "hash": "7263665888074038396"
+        },
+        {
+          "file": ".tmp/reference_repo/src/pages/FantasyCalendarPage.tsx",
+          "hash": "8721993803905587637"
+        },
+        {
+          "file": ".tmp/reference_repo/src/pages/GraphPage.tsx",
+          "hash": "5656560896268788580"
+        },
+        {
+          "file": ".tmp/reference_repo/src/pages/Index.tsx",
+          "hash": "156700709366018790"
+        },
+        {
+          "file": ".tmp/reference_repo/src/pages/NotFound.tsx",
+          "hash": "4174068812604289219"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/.gitignore",
+          "hash": "7288756170041727119"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/Cargo.lock",
+          "hash": "10631314393502142325"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/Cargo.toml",
+          "hash": "11540042808697397422"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/PORT_SUMMARY.md",
+          "hash": "7232892620929315277"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/README.md",
+          "hash": "14787951250487867851"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build.txt",
+          "hash": "15840403458918762195"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build_error.txt",
+          "hash": "1944114603764298443"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build_errors.txt",
+          "hash": "13536172831369542526"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build_output.txt",
+          "hash": "10444193445212661434"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build_wasm.txt",
+          "hash": "10625258852393598008"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/build_wasm2.txt",
+          "hash": "14204215186072373510"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/cargo_error.txt",
+          "hash": "6917859112033480334"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/cargo_errors.txt",
+          "hash": "18003362532124751881"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check.txt",
+          "hash": "4532542969317338895"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_clean.txt",
+          "hash": "12963347880952771295"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_error.txt",
+          "hash": "17802834908781984159"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_errors.txt",
+          "hash": "17594631629442480258"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_fail.txt",
+          "hash": "11177690064585035642"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_final.txt",
+          "hash": "11184446336690007198"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_latest.txt",
+          "hash": "10444888150307830409"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_log.txt",
+          "hash": "16032848287735747230"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_no_embed.txt",
+          "hash": "5650840554736814303"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_output.txt",
+          "hash": "412407943645663744"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_phase1.txt",
+          "hash": "9268837232361061551"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/check_phase1b.txt",
+          "hash": "8805319432802266741"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/compile_error.txt",
+          "hash": "6854577482331767557"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/daach_error.txt",
+          "hash": "11253542510102905390"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/daach_test_output.txt",
+          "hash": "10273563592327855330"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/diag_test.txt",
+          "hash": "18118895230300966563"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/errors.txt",
+          "hash": "9368842232777058512"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/native_check.txt",
+          "hash": "17306479150729652134"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/native_test_output.txt",
+          "hash": "9678933677334992396"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output.txt",
+          "hash": "379361329086524778"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output_lib.txt",
+          "hash": "2260551802879663264"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output_lib_2.txt",
+          "hash": "17658574310437054081"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output_native.txt",
+          "hash": "5724391764386199015"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output_scanner.txt",
+          "hash": "4056349400057766823"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/output_scope.txt",
+          "hash": "8531829612232528486"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/pagerank_test.txt",
+          "hash": "12809916745739339804"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/short_error.txt",
+          "hash": "4772545330552359308"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/alex/fuzzy.rs",
+          "hash": "3418127275022836826"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/alex/mod.rs",
+          "hash": "12805602205132248808"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/alex/normalize.rs",
+          "hash": "10935639791659420636"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/alex/persistence.rs",
+          "hash": "2785622478969942347"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_calendar.rs",
+          "hash": "1428476268428208132"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_crossdoc.rs",
+          "hash": "6024987440426979623"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_graph.rs",
+          "hash": "1608357451223902997"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_opfs.rs",
+          "hash": "9930503455491207851"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_registry.rs",
+          "hash": "13471766385370364430"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/cozo_shared.rs",
+          "hash": "1499045906005437377"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/mod.rs",
+          "hash": "14871058517481571083"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/schema.rs",
+          "hash": "14011875291217791059"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/db/store.rs",
+          "hash": "13541438275709024764"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/embeddings/chunker.rs",
+          "hash": "16580129964787427786"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/embeddings/config.rs",
+          "hash": "2415496872057634759"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/embeddings/mod.rs",
+          "hash": "5291029720851871970"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/embeddings/model.rs",
+          "hash": "11553732601373829302"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/embeddings/tokenize.rs",
+          "hash": "9638252602393528070"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/graphdb/indexes.rs",
+          "hash": "1730662862367194690"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/graphdb/mod.rs",
+          "hash": "6014125137235733124"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/graphdb/storage.rs",
+          "hash": "2669971387108068886"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/binary_quantization.rs",
+          "hash": "9548523266830801029"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/distance.rs",
+          "hash": "9813272598864564272"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/filter.rs",
+          "hash": "2762339160834300316"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/index.rs",
+          "hash": "13644586017340337891"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/mmr.rs",
+          "hash": "13944234511991360404"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/mod.rs",
+          "hash": "12334262396909252260"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/node.rs",
+          "hash": "9548813878143689695"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/pqueue.rs",
+          "hash": "679956165117582487"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/quantization.rs",
+          "hash": "7978248962948114213"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/binary_quantization_tests.rs",
+          "hash": "3267929877729005562"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/distance_tests.rs",
+          "hash": "4915991943761081149"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/diversity_tests.rs",
+          "hash": "296014707197260916"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/filter_tests.rs",
+          "hash": "5232925644612274058"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/hnsw_tests.rs",
+          "hash": "11459428920143012599"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/hybrid_tests.rs",
+          "hash": "10111856251011691829"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/mmr_tests.rs",
+          "hash": "12690117933578120623"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/mod.rs",
+          "hash": "2476712898385178923"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/node_tests.rs",
+          "hash": "11952151827771826407"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/pqueue_tests.rs",
+          "hash": "803091298767053790"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/quantization_tests.rs",
+          "hash": "2703890677871671281"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/serialization_tests.rs",
+          "hash": "11430459318348105669"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/tests/two_stage_tests.rs",
+          "hash": "12328478687925044086"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/hnsw/wasm.rs",
+          "hash": "9085726244764812178"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/lib.rs",
+          "hash": "16223314977700203225"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/narrative.rs",
+          "hash": "9710393111936276678"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/rag/chunker.rs",
+          "hash": "1394027022410956725"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/rag/index.rs",
+          "hash": "2111550859197595063"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/rag/mod.rs",
+          "hash": "3828234204174858709"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/rag/pipeline.rs",
+          "hash": "11391590164264362688"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/rag/raptor.rs",
+          "hash": "12462336307359309961"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/algorithms.rs",
+          "hash": "7100398272046297742"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/api.rs",
+          "hash": "5479619965226604258"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/ast.rs",
+          "hash": "16952534936206976215"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/bridge.rs",
+          "hash": "8863132042758950443"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/engine.rs",
+          "hash": "2585779880734550458"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/entity_layer.rs",
+          "hash": "12909719111485694812"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/evidence_graph.rs",
+          "hash": "13272412392538448238"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/global.rs",
+          "hash": "14423552062188464742"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/graph.rs",
+          "hash": "8544952132827764072"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/intern.rs",
+          "hash": "9690135350361732183"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/metadata_layer.rs",
+          "hash": "11000561271925594329"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/mod.rs",
+          "hash": "1635011127964478522"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/parser.rs",
+          "hash": "15309397435244527904"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/pcst.rs",
+          "hash": "9683990247937996705"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/projection.rs",
+          "hash": "6282808708979000445"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/synapse.rs",
+          "hash": "12276310579731613398"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/syntax.rs",
+          "hash": "7954358503766778222"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/temporal.rs",
+          "hash": "9627164102148428333"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/tests/mod.rs",
+          "hash": "4662299929049769466"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/tests/steiner_tests.rs",
+          "hash": "4892406424836361933"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/reality/unification.rs",
+          "hash": "2305762707004996706"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/config.rs",
+          "hash": "7162295512676862047"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/entropy.rs",
+          "hash": "6683503955788042884"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/incremental.rs",
+          "hash": "16860851880997697492"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/math.rs",
+          "hash": "10239126007033812847"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/mod.rs",
+          "hash": "9708704540862298317"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/proximity.rs",
+          "hash": "14740982909766032813"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/scorer.rs",
+          "hash": "16587435155459982427"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/resorank/types.rs",
+          "hash": "5821972366976383117"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/attacher.rs",
+          "hash": "8934864120800211969"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/change.rs",
+          "hash": "9489112376382448210"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/chunker.rs",
+          "hash": "947696633094218906"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/conductor.rs",
+          "hash": "8866012956823073570"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/constraints.rs",
+          "hash": "5074149661548997951"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/core.rs",
+          "hash": "707125139389210409"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/daach/bridge.rs",
+          "hash": "3866653333204817283"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/daach/mod.rs",
+          "hash": "3620254621413110929"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dafsa/bridge.rs",
+          "hash": "1847713886165015242"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dafsa/compiler.rs",
+          "hash": "6957969558800741484"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dafsa/mod.rs",
+          "hash": "17510868899620656479"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dafsa/scanner.rs",
+          "hash": "2076788903317173255"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dafsa/types.rs",
+          "hash": "9609187657447386211"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/dialogue.rs",
+          "hash": "17057723971245077174"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/discovery/mod.rs",
+          "hash": "16275944943947417529"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/document.rs",
+          "hash": "1485147962043063952"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/graph.rs",
+          "hash": "1048258371559654287"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/implicit.rs",
+          "hash": "15004950093326835887"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/incremental.rs",
+          "hash": "1292259664998719465"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/mod.rs",
+          "hash": "4118255410694411653"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/narrative.rs",
+          "hash": "13313007370808537113"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/projections.rs",
+          "hash": "6909396328694525870"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/reflex.rs",
+          "hash": "6287820006872697034"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/relation.rs",
+          "hash": "12084839041544761941"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/relation_filter.rs",
+          "hash": "11747001749168152205"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/relation_schema.rs",
+          "hash": "15547765210379289547"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/resolver.rs",
+          "hash": "2838530953609258702"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/structured_relation.rs",
+          "hash": "14402000167445711242"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/syntax.rs",
+          "hash": "7669396131624312940"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/temporal.rs",
+          "hash": "7124013126006774357"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/triple.rs",
+          "hash": "10895694324533679422"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/unified.rs",
+          "hash": "13403435091745854416"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/scanner/verb_morphology.rs",
+          "hash": "10790500535494640718"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/shared_mem.rs",
+          "hash": "13023038176694146712"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/src/shared_mem_test.rs",
+          "hash": "10155174510357577256"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_build_error.txt",
+          "hash": "3912205239086017816"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_fail.txt",
+          "hash": "3352541839940151689"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_harness.html",
+          "hash": "13951316118253699077"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_output2.txt",
+          "hash": "286101877059556244"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_output3.txt",
+          "hash": "7190414582361125586"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/test_output4.txt",
+          "hash": "13039561831020590805"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test.txt",
+          "hash": "3695252562317884021"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_output.txt",
+          "hash": "11952183260118007574"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_phase2.txt",
+          "hash": "12450070773893550773"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_phase2b.txt",
+          "hash": "8898235133679301614"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/wasm_build.txt",
+          "hash": "14864310950069626736"
+        },
+        {
+          "file": ".tmp/reference_repo/src/rust/kittcore/wasm_pack_output.txt",
+          "hash": "5960962889559470152"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/attributes.ts",
+          "hash": "14866420130992789169"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/blueprints.ts",
+          "hash": "1976136136112709124"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/factSheetTypes.ts",
+          "hash": "7113328116679573034"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/narrativeEntities.ts",
+          "hash": "17248835440005423467"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/noteTypes.ts",
+          "hash": "2702764157564745116"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/notes.ts",
+          "hash": "8648606447245291912"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/schema.ts",
+          "hash": "10593854165952893849"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/storyEntities.ts",
+          "hash": "11359156304735464343"
+        },
+        {
+          "file": ".tmp/reference_repo/src/types/temporal.ts",
+          "hash": "11996703945731056008"
+        },
+        {
+          "file": ".tmp/reference_repo/src/utils/fontLoader.ts",
+          "hash": "7365485756655389828"
+        },
+        {
+          "file": ".tmp/reference_repo/src/vite-env.d.ts",
+          "hash": "7856441258253745083"
+        },
+        {
+          "file": ".tmp/reference_repo/src/workers/crossdoc.worker.ts",
+          "hash": "7115205109793100104"
+        },
+        {
+          "file": ".tmp/reference_repo/src/workers/folder-tree.worker.ts",
+          "hash": "16007366969379624628"
+        },
+        {
+          "file": ".tmp/reference_repo/src/workers/kittcore.worker.ts",
+          "hash": "5540124512425666688"
+        },
+        {
+          "file": ".tmp/reference_repo/src/workers/rag.worker.ts",
+          "hash": "10484855625104196188"
+        },
+        {
+          "file": ".tmp/reference_repo/src/workers/tts.worker.ts",
+          "hash": "6975608248962183301"
+        },
+        {
+          "file": ".tmp/reference_repo/tailwind.config.ts",
+          "hash": "5290920166260177639"
+        },
+        {
+          "file": ".tmp/reference_repo/test-output.txt",
+          "hash": "2081619910101617307"
+        },
+        {
+          "file": ".tmp/reference_repo/tsconfig.app.json",
+          "hash": "6314735070403023646"
+        },
+        {
+          "file": ".tmp/reference_repo/tsconfig.json",
+          "hash": "13259475426775971376"
+        },
+        {
+          "file": ".tmp/reference_repo/tsconfig.node.json",
+          "hash": "8688120545729863785"
+        },
+        {
+          "file": ".tmp/reference_repo/vite.config.ts",
+          "hash": "6732800600492921089"
+        },
+        {
+          "file": ".vscode/extensions.json",
+          "hash": "11934160580685414355"
+        },
+        {
+          "file": ".vscode/launch.json",
+          "hash": "17406702432687230417"
+        },
+        {
+          "file": ".vscode/mcp.json",
+          "hash": "11492871017727097845"
+        },
+        {
+          "file": ".vscode/tasks.json",
+          "hash": "11080398893561185157"
+        },
+        {
+          "file": "GoKitt/bench_results.txt",
+          "hash": "13654835352852927404"
+        },
+        {
+          "file": "GoKitt/build_error.log",
+          "hash": "4678882821062058266"
+        },
+        {
+          "file": "GoKitt/builder_test.exe",
+          "hash": "1710076372626320742"
+        },
+        {
+          "file": "GoKitt/chunker_test.exe",
+          "hash": "1356571898258631474"
+        },
+        {
+          "file": "GoKitt/cmd/debug_knowledge/main.go",
+          "hash": "301571880401255929"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/gokitt.wasm",
+          "hash": "15685628643952448374"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/knowledge.go",
+          "hash": "815990483995951044"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/main.go",
+          "hash": "4867077042962943011"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/raptor.go",
+          "hash": "7445412396625140341"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/wal_replay.go",
+          "hash": "13510120986918774866"
+        },
+        {
+          "file": "GoKitt/conductor_test.exe",
+          "hash": "15527220934900791593"
+        },
+        {
+          "file": "GoKitt/debug.exe",
+          "hash": "11975688912943350065"
+        },
+        {
+          "file": "GoKitt/debug_windows.exe",
+          "hash": "16398001777054145209"
+        },
+        {
+          "file": "GoKitt/doc_vector.txt",
+          "hash": "14743460017765350381"
+        },
+        {
+          "file": "GoKitt/docs/ARCHITECTURE_DEFENSE.md",
+          "hash": "4389241975199954887"
+        },
+        {
+          "file": "GoKitt/docs/rusthnsw.md",
+          "hash": "14574874173270110104"
+        },
+        {
+          "file": "GoKitt/error.txt",
+          "hash": "16671569342068757026"
+        },
+        {
+          "file": "GoKitt/fields.txt",
+          "hash": "15724889310918404570"
+        },
+        {
+          "file": "GoKitt/go.mod",
+          "hash": "1619286746059863451"
+        },
+        {
+          "file": "GoKitt/go.sum",
+          "hash": "13116249917431110049"
+        },
+        {
+          "file": "GoKitt/gokitt.wasm",
+          "hash": "8135184833781460158"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/algo_components.go",
+          "hash": "3029935457999183013"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/algo_paths.go",
+          "hash": "8627993289618548897"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/algo_ranking.go",
+          "hash": "2272410872195012627"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/algo_structural.go",
+          "hash": "10522976096838015768"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/algo_test.go",
+          "hash": "8380816002224013770"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/cache.go",
+          "hash": "11574246664156111009"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/codec.go",
+          "hash": "3552230306232379978"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/index.go",
+          "hash": "7099893268562161673"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/migrate.go",
+          "hash": "4649141826651647481"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/properties.go",
+          "hash": "10075266159433588456"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/query_engine.go",
+          "hash": "5159775330322797133"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/query_types.go",
+          "hash": "11254085353577423186"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/rule_engine.go",
+          "hash": "11111302031265624184"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store.go",
+          "hash": "14117574572000304326"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_bitmap_test.go",
+          "hash": "8501818430600529076"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_edge.go",
+          "hash": "1836438414363953513"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_label.go",
+          "hash": "4772329032204247726"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_query_test.go",
+          "hash": "5596296131172574851"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_rules_test.go",
+          "hash": "12744489331639382550"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_temporal.go",
+          "hash": "6079527911921729859"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_test.go",
+          "hash": "6026423244657183201"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_traversal_test.go",
+          "hash": "13658609334973992032"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_typed_test.go",
+          "hash": "8754636324684134370"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/store_vertex.go",
+          "hash": "15427077908390577251"
+        },
+        {
+          "file": "GoKitt/internal/graphstore/traversal.go",
+          "hash": "6587487002376940257"
+        },
+        {
+          "file": "GoKitt/internal/store/integration_test.go",
+          "hash": "16412896921306139483"
+        },
+        {
+          "file": "GoKitt/internal/store/knowledge_store.go",
+          "hash": "13956297008347158852"
+        },
+        {
+          "file": "GoKitt/internal/store/models.go",
+          "hash": "12847288244284234345"
+        },
+        {
+          "file": "GoKitt/internal/store/phase9_test.go",
+          "hash": "14387049031826365644"
+        },
+        {
+          "file": "GoKitt/internal/store/sqlite_store.go",
+          "hash": "2660108326650495403"
+        },
+        {
+          "file": "GoKitt/internal/store/sqlite_store_test.go",
+          "hash": "11167955631122759829"
+        },
+        {
+          "file": "GoKitt/internal/store/store_test.go",
+          "hash": "9476095983065521355"
+        },
+        {
+          "file": "GoKitt/internal/store/workspace_test.go",
+          "hash": "16724997821110626051"
+        },
+        {
+          "file": "GoKitt/pkg/agent/service.go",
+          "hash": "7181031943135392060"
+        },
+        {
+          "file": "GoKitt/pkg/agent/service_test.go",
+          "hash": "7405287145011434552"
+        },
+        {
+          "file": "GoKitt/pkg/analysis/analyzer.go",
+          "hash": "2421680642039702719"
+        },
+        {
+          "file": "GoKitt/pkg/analysis/analyzer_test.go",
+          "hash": "6661613169906600640"
+        },
+        {
+          "file": "GoKitt/pkg/batch/google.go",
+          "hash": "16721059543020139819"
+        },
+        {
+          "file": "GoKitt/pkg/batch/google_stub.go",
+          "hash": "6174429086050934696"
+        },
+        {
+          "file": "GoKitt/pkg/batch/openrouter.go",
+          "hash": "17982736803961191909"
+        },
+        {
+          "file": "GoKitt/pkg/batch/openrouter_stub.go",
+          "hash": "16094423439272947887"
+        },
+        {
+          "file": "GoKitt/pkg/batch/service.go",
+          "hash": "13255127360938484251"
+        },
+        {
+          "file": "GoKitt/pkg/chat/service.go",
+          "hash": "14800073696724035125"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/chunker.go",
+          "hash": "773469990684821758"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/chunker_test.go",
+          "hash": "10962928851061727781"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/semantic_chunker.go",
+          "hash": "4737387454460634547"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/semantic_chunker_test.go",
+          "hash": "3012431190235678638"
+        },
+        {
+          "file": "GoKitt/pkg/docstore/store.go",
+          "hash": "4318688980219342928"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/parser.go",
+          "hash": "13354502265854281036"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/prompts.go",
+          "hash": "11802219779739042585"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/service.go",
+          "hash": "4710878299201640664"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/service_test.go",
+          "hash": "18372181509267485353"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/types.go",
+          "hash": "12146740876994904105"
+        },
+        {
+          "file": "GoKitt/pkg/fst/automaton.go",
+          "hash": "17804845407991357535"
+        },
+        {
+          "file": "GoKitt/pkg/fst/builder.go",
+          "hash": "2538099224344028116"
+        },
+        {
+          "file": "GoKitt/pkg/fst/common.go",
+          "hash": "4854356106500971786"
+        },
+        {
+          "file": "GoKitt/pkg/fst/decoder_v1.go",
+          "hash": "3137762232699916339"
+        },
+        {
+          "file": "GoKitt/pkg/fst/encoder_v1.go",
+          "hash": "12270591231690358283"
+        },
+        {
+          "file": "GoKitt/pkg/fst/encoding.go",
+          "hash": "12413197046330089133"
+        },
+        {
+          "file": "GoKitt/pkg/fst/fst.go",
+          "hash": "14911037387037105812"
+        },
+        {
+          "file": "GoKitt/pkg/fst/fst_iterator.go",
+          "hash": "1651345044959555146"
+        },
+        {
+          "file": "GoKitt/pkg/fst/merge_iterator.go",
+          "hash": "4542313578900554013"
+        },
+        {
+          "file": "GoKitt/pkg/fst/pack.go",
+          "hash": "2265177154629637686"
+        },
+        {
+          "file": "GoKitt/pkg/fst/registry.go",
+          "hash": "7857078105876506323"
+        },
+        {
+          "file": "GoKitt/pkg/fst/vellum.go",
+          "hash": "10926919534476072863"
+        },
+        {
+          "file": "GoKitt/pkg/fst/wrapper.go",
+          "hash": "7533331294511998471"
+        },
+        {
+          "file": "GoKitt/pkg/fst/writer.go",
+          "hash": "4598417116758552026"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/benchmark_test.go",
+          "hash": "7784994930720328116"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/dimension_router.go",
+          "hash": "8451464082698412823"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/dimension_router_test.go",
+          "hash": "8249996046862383975"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/gate.go",
+          "hash": "8009480816264470753"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/gdr.go",
+          "hash": "5587760969864752588"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/gdr_test.go",
+          "hash": "6896034637902963190"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/metrics.go",
+          "hash": "10433663620847286743"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/metrics_test.go",
+          "hash": "9312455991511009148"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/scorer.go",
+          "hash": "14474430693248556060"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/search.go",
+          "hash": "14255294106351897136"
+        },
+        {
+          "file": "GoKitt/pkg/gdr/search_brute.go",
+          "hash": "17667541313412096737"
+        },
+        {
+          "file": "GoKitt/pkg/graph/graph.go",
+          "hash": "8344530618195031461"
+        },
+        {
+          "file": "GoKitt/pkg/graph/graph_test.go",
+          "hash": "16211231844834617256"
+        },
+        {
+          "file": "GoKitt/pkg/hierarchy/hierarchy.go",
+          "hash": "11759707524125433514"
+        },
+        {
+          "file": "GoKitt/pkg/hierarchy/hierarchy_test.go",
+          "hash": "4979930267385084302"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/distance/distance.go",
+          "hash": "17410311270985945838"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/distance/distance_test.go",
+          "hash": "4680994993220940495"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/filter/filter.go",
+          "hash": "5822768088554967455"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/filter/filter_test.go",
+          "hash": "9416183877642883434"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/index.go",
+          "hash": "14267265206480600288"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/index_test.go",
+          "hash": "15814842010109880194"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/mmr/mmr.go",
+          "hash": "16568099109892054598"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/mmr/mmr_test.go",
+          "hash": "15865015997262324894"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/node/node.go",
+          "hash": "9038385891799900499"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/node/node_test.go",
+          "hash": "5063587808717227283"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/pqueue/pqueue.go",
+          "hash": "6809867501517392653"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/pqueue/pqueue_test.go",
+          "hash": "77211728440779415"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/quantization/binary.go",
+          "hash": "10949185955421190204"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/quantization/binary_test.go",
+          "hash": "17793202336534059449"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/quantization/scalar.go",
+          "hash": "16291248543529691571"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/quantization/scalar_test.go",
+          "hash": "17406396840963522871"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/serialize.go",
+          "hash": "17008118585543580581"
+        },
+        {
+          "file": "GoKitt/pkg/hnsw/serialize_test.go",
+          "hash": "11751569344238003598"
+        },
+        {
+          "file": "GoKitt/pkg/implicit-matcher/dictionary.go",
+          "hash": "2520308767472642098"
+        },
+        {
+          "file": "GoKitt/pkg/implicit-matcher/dictionary_test.go",
+          "hash": "10631593667470547358"
+        },
+        {
+          "file": "GoKitt/pkg/knowledge/graph.go",
+          "hash": "1289636697074210273"
+        },
+        {
+          "file": "GoKitt/pkg/knowledge/knowledge_test.go",
+          "hash": "14948723314747409827"
+        },
+        {
+          "file": "GoKitt/pkg/knowledge/test_output.txt",
+          "hash": "7210178804838159355"
+        },
+        {
+          "file": "GoKitt/pkg/knowledge/traversal.go",
+          "hash": "13950940338625163964"
+        },
+        {
+          "file": "GoKitt/pkg/knowledge/traversal_test.go",
+          "hash": "14172749766306684251"
+        },
+        {
+          "file": "GoKitt/pkg/memory/memory.go",
+          "hash": "11689192489334034648"
+        },
+        {
+          "file": "GoKitt/pkg/memory/prompts.go",
+          "hash": "10848833397722242922"
+        },
+        {
+          "file": "GoKitt/pkg/memory/workspace.go",
+          "hash": "14383519768025124742"
+        },
+        {
+          "file": "GoKitt/pkg/memory/workspace_test.go",
+          "hash": "16680116388651493852"
+        },
+        {
+          "file": "GoKitt/pkg/pool/pool.go",
+          "hash": "9749176148073642632"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/candidates.go",
+          "hash": "10461590158348568120"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/candidates_test.go",
+          "hash": "17112193982193930222"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/compressed_postings.go",
+          "hash": "873482685344600902"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/compressed_postings_test.go",
+          "hash": "17353529493153463667"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/indexer.go",
+          "hash": "12677857800616051843"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/indexer_test.go",
+          "hash": "6039494032564475125"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/payload_store.go",
+          "hash": "11364530591147433830"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/payload_store_test.go",
+          "hash": "10814997451365563202"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/posting_list.go",
+          "hash": "8982212929152078715"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/posting_list_test.go",
+          "hash": "14042063344828895685"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/query.go",
+          "hash": "15724929965268073775"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/query_test.go",
+          "hash": "8450377460546532575"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/query_verifier.go",
+          "hash": "15721057578932350124"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/query_verifier_test.go",
+          "hash": "2933808449983193422"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/real_world_test.go",
+          "hash": "3868423724445174514"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/repro_test.go",
+          "hash": "13323776854190269368"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/scorer.go",
+          "hash": "5419576138758459529"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/scorer_test.go",
+          "hash": "492623349198684134"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/uint32_pipeline.go",
+          "hash": "11848902733423367326"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/uint32_pipeline_test.go",
+          "hash": "7255460349081018102"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/verify.go",
+          "hash": "6515210239176538951"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/verify_test.go",
+          "hash": "6459482341305020065"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/wand.go",
+          "hash": "9543277071342503142"
+        },
+        {
+          "file": "GoKitt/pkg/qgram/wand_test.go",
+          "hash": "16457502550605022281"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/min_router_test.go",
+          "hash": "16380047515917299741"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/raptor.go",
+          "hash": "12550965092703456769"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/raptor_test.go",
+          "hash": "1692041028233488663"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/retrieval.go",
+          "hash": "17294634322298500316"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/retrieval_test.go",
+          "hash": "16059745313744041976"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/tree_builder.go",
+          "hash": "10380170858108292075"
+        },
+        {
+          "file": "GoKitt/pkg/raptor/tree_builder_test.go",
+          "hash": "18443927302190428030"
+        },
+        {
+          "file": "GoKitt/pkg/reality/builder/zipper.go",
+          "hash": "15602650023359287207"
+        },
+        {
+          "file": "GoKitt/pkg/reality/builder/zipper_test.go",
+          "hash": "18015415688053354954"
+        },
+        {
+          "file": "GoKitt/pkg/reality/cst/builder.go",
+          "hash": "2456497307383153800"
+        },
+        {
+          "file": "GoKitt/pkg/reality/cst/cst.go",
+          "hash": "7350305021166434677"
+        },
+        {
+          "file": "GoKitt/pkg/reality/cst/pooled_builder.go",
+          "hash": "3504138457704758899"
+        },
+        {
+          "file": "GoKitt/pkg/reality/merger/merger.go",
+          "hash": "3771037741528166990"
+        },
+        {
+          "file": "GoKitt/pkg/reality/pcst/pcst.go",
+          "hash": "7400145107866663071"
+        },
+        {
+          "file": "GoKitt/pkg/reality/pcst/pcst_test.go",
+          "hash": "17602252293765529529"
+        },
+        {
+          "file": "GoKitt/pkg/reality/projection/projector.go",
+          "hash": "4076727373902319300"
+        },
+        {
+          "file": "GoKitt/pkg/reality/projection/provenance_test.go",
+          "hash": "1765326539055604218"
+        },
+        {
+          "file": "GoKitt/pkg/reality/syntax/kind.go",
+          "hash": "2141179608462718058"
+        },
+        {
+          "file": "GoKitt/pkg/reality/validator/validator.go",
+          "hash": "10512631664123254645"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/entropy.go",
+          "hash": "1983831097554434296"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/entropy_test.go",
+          "hash": "12746985721265631916"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/fst_index.go",
+          "hash": "16174469113824823226"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/fst_index_test.go",
+          "hash": "14286814953168255451"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/math.go",
+          "hash": "17341765523130443022"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/proximity.go",
+          "hash": "3935217820778338048"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/scorer.go",
+          "hash": "6396846979880502527"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/scorer_test.go",
+          "hash": "15950643162994112299"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/types.go",
+          "hash": "14944510586301196869"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/vector.go",
+          "hash": "17911013050683016306"
+        },
+        {
+          "file": "GoKitt/pkg/resorank/vector_test.go",
+          "hash": "7110167683790807466"
+        },
+        {
+          "file": "GoKitt/pkg/response/slim.go",
+          "hash": "1774450215508572773"
+        },
+        {
+          "file": "GoKitt/pkg/sab/shared_buffer.go",
+          "hash": "6081891499484131022"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/chunker/chunker.go",
+          "hash": "8375245078748967585"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/chunker/chunker_test.go",
+          "hash": "12572976113855189199"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/chunker/mask.go",
+          "hash": "18240619456206490332"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/chunker/mask_test.go",
+          "hash": "13814621862479620245"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/chunker/tagger.go",
+          "hash": "15891568519355171749"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/conductor/conductor.go",
+          "hash": "15495045342678544236"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/conductor/conductor_test.go",
+          "hash": "17537153235747457020"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/conductor/helpers/helpers.go",
+          "hash": "14963147977858203663"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/canonical.go",
+          "hash": "2701963372177360193"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/discovery_test.exe",
+          "hash": "15398792035262324891"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/discovery_test.go",
+          "hash": "4009008857415804491"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/discovery_test_stopword.go",
+          "hash": "6294173627975154662"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/engine.go",
+          "hash": "948947026696689171"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/inference.go",
+          "hash": "17361395226206843674"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/discovery/registry.go",
+          "hash": "16099676881696599883"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/narrative/events.go",
+          "hash": "631685029362034656"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/narrative/narrative.go",
+          "hash": "16906703693735664910"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/narrative/narrative_test.go",
+          "hash": "15637206758356993622"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/resolver/resolver.go",
+          "hash": "17461481501009655440"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/resolver/resolver_test.go",
+          "hash": "16727358738264333935"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/syntax/scanner.go",
+          "hash": "250773109726803224"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/syntax/syntax.go",
+          "hash": "1012137641394756922"
+        },
+        {
+          "file": "GoKitt/pkg/scanner/syntax/syntax_test.go",
+          "hash": "8084294636537692641"
+        },
+        {
+          "file": "GoKitt/results.txt",
+          "hash": "6681858820685640437"
+        },
+        {
+          "file": "GoKitt/results_v2.txt",
+          "hash": "9219128797957029649"
+        },
+        {
+          "file": "GoKitt/results_v3.txt",
+          "hash": "16470112160501076914"
+        },
+        {
+          "file": "GoKitt/results_v4.txt",
+          "hash": "8722207594603633325"
+        },
+        {
+          "file": "GoKitt/storetest",
+          "hash": "10452160091393994066"
+        },
+        {
+          "file": "GoKitt/test.json",
+          "hash": "11097851464412892104"
+        },
+        {
+          "file": "GoKitt/test_discovery.log",
+          "hash": "16534364274100241146"
+        },
+        {
+          "file": "GoKitt/test_error.txt",
+          "hash": "6539282777994807381"
+        },
+        {
+          "file": "GoKitt/test_failure.txt",
+          "hash": "15995654274404915922"
+        },
+        {
+          "file": "GoKitt/test_final_final_results.txt",
+          "hash": "7386264033158417977"
+        },
+        {
+          "file": "GoKitt/test_final_results.txt",
+          "hash": "15667349357675637561"
+        },
+        {
+          "file": "GoKitt/test_full_results.txt",
+          "hash": "17666775850519442044"
+        },
+        {
+          "file": "GoKitt/test_results.txt",
+          "hash": "8226257450572660642"
+        },
+        {
+          "file": "GoKitt/test_results_final_phase4_v2.txt",
+          "hash": "267795556353197731"
+        },
+        {
+          "file": "GoKitt/wasm",
+          "hash": "13819031093671907233"
+        },
+        {
+          "file": "GoKitt/workspace_test_results.txt",
+          "hash": "13699507065423662044"
+        },
+        {
+          "file": "README.md",
+          "hash": "16424050032508714258"
+        },
+        {
+          "file": "README_ONNX_FIX.md",
+          "hash": "13824633098200185634"
+        },
+        {
+          "file": "SHAREDARRAYBUFFER_DEPLOYMENT.md",
+          "hash": "10535363088602918502"
+        },
+        {
+          "file": "angular.json",
+          "hash": "7434538648278960590"
+        },
+        {
+          "file": "components.json",
+          "hash": "8643432392505072058"
+        },
+        {
+          "file": "docs/cozo-span-migration-plan.md",
+          "hash": "15243446393592105303"
+        },
+        {
+          "file": "docs/gomemplan.md",
+          "hash": "16953735709987768867"
+        },
+        {
+          "file": "docs/observer-agent.md",
+          "hash": "18152410278258991014"
+        },
+        {
+          "file": "docs/perfect_run.md",
+          "hash": "8570192362825379770"
+        },
+        {
+          "file": "docs/reflector-agent.md",
+          "hash": "3559985127523003084"
+        },
+        {
+          "file": "docs/results.csv",
+          "hash": "14503353893056396787"
+        },
+        {
+          "file": "docs/results2-analysis.txt",
+          "hash": "17953738816572888311"
+        },
+        {
+          "file": "docs/results2-summary.md",
+          "hash": "10205928021793260608"
+        },
+        {
+          "file": "docs/results2.md",
+          "hash": "1879948898642430329"
+        },
+        {
+          "file": "docs/shortrun.md",
+          "hash": "9438866556911319218"
+        },
+        {
+          "file": "docs/tree logs.md",
+          "hash": "6052319387773464972"
+        },
+        {
+          "file": "exposed_api_verification.md",
+          "hash": "7650784198444854645"
+        },
+        {
+          "file": "gokitt.wasm",
+          "hash": "1062189048027005679"
+        },
+        {
+          "file": "implementation_plan.md",
+          "hash": "3751116149176228422"
+        },
+        {
+          "file": "libs/ui/button/src/index.ts",
+          "hash": "5168917203269790378"
+        },
+        {
+          "file": "libs/ui/button/src/lib/hlm-button.token.ts",
+          "hash": "9576183639981922411"
+        },
+        {
+          "file": "libs/ui/button/src/lib/hlm-button.ts",
+          "hash": "2575647234151243279"
+        },
+        {
+          "file": "libs/ui/icon/src/index.ts",
+          "hash": "50232955296608235"
+        },
+        {
+          "file": "libs/ui/icon/src/lib/hlm-icon.token.ts",
+          "hash": "14997959720888420814"
+        },
+        {
+          "file": "libs/ui/icon/src/lib/hlm-icon.ts",
+          "hash": "11632766376988804619"
+        },
+        {
+          "file": "libs/ui/input/src/index.ts",
+          "hash": "7356458584027653927"
+        },
+        {
+          "file": "libs/ui/input/src/lib/hlm-input.ts",
+          "hash": "1275563885902969392"
+        },
+        {
+          "file": "libs/ui/separator/src/index.ts",
+          "hash": "5012659381478231670"
+        },
+        {
+          "file": "libs/ui/separator/src/lib/hlm-separator.ts",
+          "hash": "4114130021092199434"
+        },
+        {
+          "file": "libs/ui/sheet/src/index.ts",
+          "hash": "14817381428697666049"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-close.ts",
+          "hash": "4223995582110013267"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-content.ts",
+          "hash": "16752679973755752924"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-description.ts",
+          "hash": "8289694957058397955"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-footer.ts",
+          "hash": "6411759874400821232"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-header.ts",
+          "hash": "1629423387222853500"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-overlay.ts",
+          "hash": "4864836187884436424"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-title.ts",
+          "hash": "2568271149947625519"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet-trigger.ts",
+          "hash": "9671239976926865390"
+        },
+        {
+          "file": "libs/ui/sheet/src/lib/hlm-sheet.ts",
+          "hash": "11376623275774037733"
+        },
+        {
+          "file": "libs/ui/sidebar/src/index.ts",
+          "hash": "1899598596437967720"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-content.ts",
+          "hash": "11923476163316715651"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-footer.ts",
+          "hash": "5275767573024696703"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-group-action.ts",
+          "hash": "8986816624629218406"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-group-content.ts",
+          "hash": "2469862431372988090"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-group-label.ts",
+          "hash": "9221030981747141455"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-group.ts",
+          "hash": "12630630054354990055"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-header.ts",
+          "hash": "10210639148957262598"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-input.ts",
+          "hash": "11841363746854124394"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-inset.ts",
+          "hash": "9719974236234912368"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-action.ts",
+          "hash": "2281736233608904285"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-badge.ts",
+          "hash": "3787698097400408562"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-button.ts",
+          "hash": "2194175696707967245"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-item.ts",
+          "hash": "13074540744001160928"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-skeleton.ts",
+          "hash": "594605864815009783"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-sub-button.ts",
+          "hash": "8249247444637094142"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-sub-item.ts",
+          "hash": "6999351075510334390"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu-sub.ts",
+          "hash": "14064227978747416926"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-menu.ts",
+          "hash": "9418948890066916458"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-rail.ts",
+          "hash": "18208782653107824622"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-separator.ts",
+          "hash": "1700485219183274374"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-trigger.ts",
+          "hash": "17041317006893566207"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar-wrapper.ts",
+          "hash": "7070047202218538161"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar.service.ts",
+          "hash": "1902128438002555129"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar.token.ts",
+          "hash": "8433420078050347986"
+        },
+        {
+          "file": "libs/ui/sidebar/src/lib/hlm-sidebar.ts",
+          "hash": "11143807643175762060"
+        },
+        {
+          "file": "libs/ui/skeleton/src/index.ts",
+          "hash": "6668817637837984675"
+        },
+        {
+          "file": "libs/ui/skeleton/src/lib/hlm-skeleton.ts",
+          "hash": "14468673955488081525"
+        },
+        {
+          "file": "libs/ui/tooltip/src/index.ts",
+          "hash": "9141640634281929346"
+        },
+        {
+          "file": "libs/ui/tooltip/src/lib/hlm-tooltip-trigger.ts",
+          "hash": "6221607037000165852"
+        },
+        {
+          "file": "libs/ui/tooltip/src/lib/hlm-tooltip.ts",
+          "hash": "15786157794257538043"
+        },
+        {
+          "file": "libs/ui/utils/src/index.ts",
+          "hash": "1762895332825194971"
+        },
+        {
+          "file": "libs/ui/utils/src/lib/hlm.ts",
+          "hash": "5232690141135494514"
+        },
+        {
+          "file": "manual_verification_wal.md",
+          "hash": "7561223807399228168"
+        },
+        {
+          "file": "package-lock.json",
+          "hash": "7720202512401214655"
+        },
+        {
+          "file": "package.json",
+          "hash": "16213390297591631547"
+        },
+        {
+          "file": "plans/Go_RLM.md",
+          "hash": "14217025497078669827"
+        },
+        {
+          "file": "plans/ai-chat-service-port.md",
+          "hash": "3276138727012730383"
+        },
+        {
+          "file": "plans/blueprint-hub-ngrx-migration.md",
+          "hash": "18105344064688862334"
+        },
+        {
+          "file": "plans/cozo-deprecation-phase0.md",
+          "hash": "3653453129466579144"
+        },
+        {
+          "file": "plans/cozo-removal-phase3.md",
+          "hash": "8876432109416670098"
+        },
+        {
+          "file": "plans/data-river-redirect-gosqlite-opfs.md",
+          "hash": "7491588450493519039"
+        },
+        {
+          "file": "plans/full-state-management-dexie.md",
+          "hash": "15348896689586731733"
+        },
+        {
+          "file": "plans/go-wasm-persistence-audit.md",
+          "hash": "2303202220290547751"
+        },
+        {
+          "file": "plans/gochat-null-reference-fix.md",
+          "hash": "11155596841634914471"
+        },
+        {
+          "file": "plans/graphstore-algorithms-plan.md",
+          "hash": "3430192137897435863"
+        },
+        {
+          "file": "plans/hnsw-go-port-plan.md",
+          "hash": "1595868353152712421"
+        },
+        {
+          "file": "plans/hybrid-index-phase-8.5.md",
+          "hash": "17522998323860299333"
+        },
+        {
+          "file": "plans/llm-batch-service-port.md",
+          "hash": "4848381838846125656"
+        },
+        {
+          "file": "plans/memory-rlm-audit.md",
+          "hash": "8283288891682468766"
+        },
+        {
+          "file": "plans/memory.md",
+          "hash": "1172126837301746645"
+        },
+        {
+          "file": "plans/ner-native-cst-pipeline.md",
+          "hash": "4636963761925715819"
+        },
+        {
+          "file": "plans/observational-memory-completion-plan.md",
+          "hash": "11775352927124638250"
+        },
+        {
+          "file": "plans/observational-memory-go.md",
+          "hash": "11156117137879679026"
+        },
+        {
+          "file": "plans/observational-memory-implementation.md",
+          "hash": "4586990311953292103"
+        },
+        {
+          "file": "plans/observational-memory-status.md",
+          "hash": "9310974448109720444"
+        },
+        {
+          "file": "plans/phase5-cleanup-plan.md",
+          "hash": "4547920487402972975"
+        },
+        {
+          "file": "plans/phase9-sqlite-vec-storage.md",
+          "hash": "7733363289290850344"
+        },
+        {
+          "file": "plans/raptor-eval-harness.md",
+          "hash": "7162915138209701306"
+        },
+        {
+          "file": "plans/recursive-language-model-architecture.md",
+          "hash": "12555463648379928366"
+        },
+        {
+          "file": "plans/rlm-integration-safe-plan.md",
+          "hash": "2924899614232401451"
+        },
+        {
+          "file": "plans/rlm-memory-deletion-plan.md",
+          "hash": "17548636560443453651"
+        },
+        {
+          "file": "plans/sqlite-temporal-versioning-architecture.md",
+          "hash": "8635777896154451875"
+        },
+        {
+          "file": "plans/unified-extraction-service.md",
+          "hash": "5722444149340373434"
+        },
+        {
+          "file": "plans/unified-extractor-service.md",
+          "hash": "6004476864029144573"
+        },
+        {
+          "file": "plans/vite-hmr-memory-leak-prevention.md",
+          "hash": "13042332794747846404"
+        },
+        {
+          "file": "public/assets/gokitt.wasm",
+          "hash": "1062189048027005679"
+        },
+        {
+          "file": "public/favicon.ico",
+          "hash": "3988961587069885523"
+        },
+        {
+          "file": "public/gokitt.wasm",
+          "hash": "12646155330840769440"
+        },
+        {
+          "file": "scripts/analyze_results.js",
+          "hash": "17749007385827537528"
+        },
+        {
+          "file": "scripts/format_shortrun.js",
+          "hash": "12752966745383742789"
+        },
+        {
+          "file": "src/app/api/index.ts",
+          "hash": "16738367559325945844"
+        },
+        {
+          "file": "src/app/api/navigation-api.ts",
+          "hash": "12316781285559678541"
+        },
+        {
+          "file": "src/app/api/pretty-text-api.ts",
+          "hash": "3238430136238636295"
+        },
+        {
+          "file": "src/app/api/types.ts",
+          "hash": "5441418643521771854"
+        },
+        {
+          "file": "src/app/api/web-editor.service.ts",
+          "hash": "10000984953903930772"
+        },
+        {
+          "file": "src/app/app.component.css",
+          "hash": "17952199478162501621"
+        },
+        {
+          "file": "src/app/app.component.html",
+          "hash": "16192108488597455427"
+        },
+        {
+          "file": "src/app/app.component.ts",
+          "hash": "3025617124390749509"
+        },
+        {
+          "file": "src/app/app.config.ts",
+          "hash": "8400809299122216404"
+        },
+        {
+          "file": "src/app/app.routes.ts",
+          "hash": "7056672122616446571"
+        },
+        {
+          "file": "src/app/components/analytics-panel/analytics-panel.component.ts",
+          "hash": "2085690526025779042"
+        },
+        {
+          "file": "src/app/components/analytics-panel/flow-score/flow-score.component.ts",
+          "hash": "9750477091851483997"
+        },
+        {
+          "file": "src/app/components/analytics-panel/index.ts",
+          "hash": "5346830007901036898"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/blueprint-hub.component.css",
+          "hash": "9732380356212172949"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/blueprint-hub.component.html",
+          "hash": "848679057888697787"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/blueprint-hub.component.ts",
+          "hash": "5130356931731164284"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/blueprint-hub.service.ts",
+          "hash": "2338823215412691014"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/hub-footer/hub-footer.component.css",
+          "hash": "1034436888232789461"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/hub-footer/hub-footer.component.html",
+          "hash": "5606055470458385751"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/hub-footer/hub-footer.component.ts",
+          "hash": "10395892891595842870"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/hub-footer/scope-indicator.component.ts",
+          "hash": "7107877424977105331"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/hub-footer/tts-settings-popup.component.ts",
+          "hash": "14089958800803609032"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/entity-creator-dialog/entity-creator-dialog.component.ts",
+          "hash": "6637333968579370107"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-detail/connection-group/connection-group.component.ts",
+          "hash": "386800826830048765"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-detail/graph-detail.component.ts",
+          "hash": "8670723785872506175"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-tab.component.css",
+          "hash": "18015217936717939882"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-tab.component.html",
+          "hash": "3631992681977357452"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-tab.component.ts",
+          "hash": "50578707735162777"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/add-token-menu/add-token-menu.component.html",
+          "hash": "9203981796406330564"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/add-token-menu/add-token-menu.component.ts",
+          "hash": "13409732276396417662"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/live-match-highlighter/live-match-highlighter.component.ts",
+          "hash": "8206742225531514214"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/pattern-builder.component.html",
+          "hash": "3358104376230820915"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/pattern-builder.component.ts",
+          "hash": "3406173801985582171"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/token-chip/token-chip.component.html",
+          "hash": "786059533602466865"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/token-chip/token-chip.component.ts",
+          "hash": "2694578541176432343"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/types.ts",
+          "hash": "6727338897957291293"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-editor/pattern-editor.component.html",
+          "hash": "16684714637595208200"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-editor/pattern-editor.component.ts",
+          "hash": "1365150324137363420"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/patterns-tab.component.html",
+          "hash": "17186248657345965259"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/patterns-tab/patterns-tab.component.ts",
+          "hash": "1820308347052945162"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/story-beats-tab/story-beats-tab.component.html",
+          "hash": "5681787373149023465"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/story-beats-tab/story-beats-tab.component.ts",
+          "hash": "14859072455300185833"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/highlighting-mode-toggle/highlighting-mode-toggle.component.css",
+          "hash": "6076340894161070876"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/highlighting-mode-toggle/highlighting-mode-toggle.component.html",
+          "hash": "14577645965870119546"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/highlighting-mode-toggle/highlighting-mode-toggle.component.ts",
+          "hash": "11876135787990375907"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/theme-tab.component.css",
+          "hash": "7220628658524717054"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/theme-tab.component.html",
+          "hash": "5793017784671169086"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/theme-tab/theme-tab.component.ts",
+          "hash": "8546066814548334860"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/cultures.component.ts",
+          "hash": "2272832877397109563"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/geography.component.ts",
+          "hash": "15575440792307272076"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/magic-system.component.ts",
+          "hash": "4403752778219631761"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/mystery.component.ts",
+          "hash": "5197999553514272176"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/politics.component.ts",
+          "hash": "7297583529626039765"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/religion.component.ts",
+          "hash": "8904595245458415143"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/world-overview.component.ts",
+          "hash": "3624082906420315836"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/worldbuilding-tab.component.html",
+          "hash": "2278764968061304997"
+        },
+        {
+          "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/worldbuilding-tab.component.ts",
+          "hash": "3498784280010254940"
+        },
+        {
+          "file": "src/app/components/editor/editor.component.css",
+          "hash": "12885458500798810070"
+        },
+        {
+          "file": "src/app/components/editor/editor.component.html",
+          "hash": "14285625164139342570"
+        },
+        {
+          "file": "src/app/components/editor/editor.component.ts",
+          "hash": "13616144912813326077"
+        },
+        {
+          "file": "src/app/components/editor/editor.css",
+          "hash": "3244421341483603138"
+        },
+        {
+          "file": "src/app/components/editor/editor.html",
+          "hash": "8934862927232006393"
+        },
+        {
+          "file": "src/app/components/editor/editor.ts",
+          "hash": "5191831092080241620"
+        },
+        {
+          "file": "src/app/components/editor/plugins/block-handle/block-handle.component.ts",
+          "hash": "3960126750312423265"
+        },
+        {
+          "file": "src/app/components/editor/plugins/block-handle/block-menu.component.ts",
+          "hash": "2169733833913261503"
+        },
+        {
+          "file": "src/app/components/editor/plugins/block-handle/index.ts",
+          "hash": "7377101743064703667"
+        },
+        {
+          "file": "src/app/components/editor/plugins/details/details.css",
+          "hash": "1275722044078923443"
+        },
+        {
+          "file": "src/app/components/editor/plugins/details/details.ts",
+          "hash": "5818280140252044330"
+        },
+        {
+          "file": "src/app/components/editor/plugins/details/detailsInteractive.ts",
+          "hash": "8354320914375863905"
+        },
+        {
+          "file": "src/app/components/editor/plugins/details/index.ts",
+          "hash": "6036119589346029769"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/entity.ts",
+          "hash": "3323672627851144073"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/fontFamily.ts",
+          "hash": "5125102313382710587"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/fontSize.ts",
+          "hash": "2043509554587860743"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/index.ts",
+          "hash": "5577010565202834259"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/textColor.ts",
+          "hash": "14343572104516667326"
+        },
+        {
+          "file": "src/app/components/editor/plugins/marks/underline.ts",
+          "hash": "4756939336894760177"
+        },
+        {
+          "file": "src/app/components/editor/plugins/nodes/indent.ts",
+          "hash": "8827563212733061753"
+        },
+        {
+          "file": "src/app/components/editor/plugins/nodes/index.ts",
+          "hash": "11541010893036404336"
+        },
+        {
+          "file": "src/app/components/editor/plugins/nodes/textAlign.ts",
+          "hash": "6441791350354445309"
+        },
+        {
+          "file": "src/app/components/editor/plugins/pretty-text-toolkit.ts",
+          "hash": "14178668296931214653"
+        },
+        {
+          "file": "src/app/components/editor/plugins/prettyTextPlugin.ts",
+          "hash": "12853152482946291232"
+        },
+        {
+          "file": "src/app/components/editor/plugins/toolbar/color-picker.component.ts",
+          "hash": "13370062951678239769"
+        },
+        {
+          "file": "src/app/components/editor/plugins/toolbar/index.ts",
+          "hash": "5943275509528343393"
+        },
+        {
+          "file": "src/app/components/editor/plugins/toolbar/toolbar-dropdown.component.ts",
+          "hash": "11982049732937344888"
+        },
+        {
+          "file": "src/app/components/editor/plugins/toolbar/toolbar.component.ts",
+          "hash": "16274673568669723901"
+        },
+        {
+          "file": "src/app/components/fact-sheets/fact-sheet-card/fact-sheet-card.component.ts",
+          "hash": "15481983997235793732"
+        },
+        {
+          "file": "src/app/components/fact-sheets/fact-sheet-container/fact-sheet-container.component.ts",
+          "hash": "17404364586322511538"
+        },
+        {
+          "file": "src/app/components/fact-sheets/fact-sheet.service.ts",
+          "hash": "8105337411191260113"
+        },
+        {
+          "file": "src/app/components/fact-sheets/fields/dynamic-slider.component.ts",
+          "hash": "9276193437497229594"
+        },
+        {
+          "file": "src/app/components/fact-sheets/fields/slider-manager.component.ts",
+          "hash": "14647225657819813643"
+        },
+        {
+          "file": "src/app/components/fact-sheets/index.ts",
+          "hash": "18181733711104267497"
+        },
+        {
+          "file": "src/app/components/fact-sheets/schemas/character.schema.ts",
+          "hash": "8296767754915150079"
+        },
+        {
+          "file": "src/app/components/fact-sheets/schemas/index.ts",
+          "hash": "14585173976776702933"
+        },
+        {
+          "file": "src/app/components/fact-sheets/schemas/scene.schema.ts",
+          "hash": "4686742878013652859"
+        },
+        {
+          "file": "src/app/components/fact-sheets/services/custom-slider.service.ts",
+          "hash": "7401285353415130239"
+        },
+        {
+          "file": "src/app/components/fact-sheets/types.ts",
+          "hash": "9497098589270372314"
+        },
+        {
+          "file": "src/app/components/fact-sheets/types/umbra-presets.ts",
+          "hash": "17946971907080407493"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/calendar-grid/calendar-grid.component.ts",
+          "hash": "10973542771773724475"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/calendar-sidebar/calendar-sidebar.component.ts",
+          "hash": "9196524186583408190"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/calendar-wizard/calendar-wizard.component.ts",
+          "hash": "15152567627472527662"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/day-cell/day-cell.component.ts",
+          "hash": "2667474473445699884"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/event-card/event-card.component.ts",
+          "hash": "13508072717765296707"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/event-creator/event-creator.component.ts",
+          "hash": "5610493941048976557"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/event-edit-dialog/event-edit-dialog.component.ts",
+          "hash": "18345758803865920744"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/index.ts",
+          "hash": "5858407620901505132"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/narrative-editor/narrative-editor.component.ts",
+          "hash": "11859576812606503431"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/timeline-bar/timeline-bar.component.ts",
+          "hash": "3919017912016250839"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/timeline-editor/timeline-editor.component.ts",
+          "hash": "1971254742872431646"
+        },
+        {
+          "file": "src/app/components/footer/footer.component.css",
+          "hash": "1683037422175993677"
+        },
+        {
+          "file": "src/app/components/footer/footer.component.html",
+          "hash": "16967686867848357401"
+        },
+        {
+          "file": "src/app/components/footer/footer.component.ts",
+          "hash": "17645456367692748331"
+        },
+        {
+          "file": "src/app/components/footer/footer.css",
+          "hash": "3244421341483603138"
+        },
+        {
+          "file": "src/app/components/footer/footer.html",
+          "hash": "12965503917554229835"
+        },
+        {
+          "file": "src/app/components/footer/footer.ts",
+          "hash": "16874720484503553854"
+        },
+        {
+          "file": "src/app/components/header/editor-tabs/editor-tabs.component.ts",
+          "hash": "2095909482102371118"
+        },
+        {
+          "file": "src/app/components/header/header.component.css",
+          "hash": "1683037422175993677"
+        },
+        {
+          "file": "src/app/components/header/header.component.html",
+          "hash": "1914099483158692581"
+        },
+        {
+          "file": "src/app/components/header/header.component.ts",
+          "hash": "16930175971948166447"
+        },
+        {
+          "file": "src/app/components/header/header.css",
+          "hash": "3244421341483603138"
+        },
+        {
+          "file": "src/app/components/header/header.html",
+          "hash": "13270834388122929549"
+        },
+        {
+          "file": "src/app/components/header/header.ts",
+          "hash": "15567049978200302481"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.component.css",
+          "hash": "1683037422175993677"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.component.html",
+          "hash": "11370259699923315832"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.component.ts",
+          "hash": "17204266229175366290"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.css",
+          "hash": "3244421341483603138"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.html",
+          "hash": "9872635413980860965"
+        },
+        {
+          "file": "src/app/components/layout/main-layout/main-layout.ts",
+          "hash": "5272120533285662421"
+        },
+        {
+          "file": "src/app/components/raptor-eval/index.ts",
+          "hash": "2644230613299932181"
+        },
+        {
+          "file": "src/app/components/raptor-eval/raptor-eval.component.ts",
+          "hash": "16079566874690132357"
+        },
+        {
+          "file": "src/app/components/right-sidebar/ai-chat-panel/ai-chat-panel.component.ts",
+          "hash": "10766671882150253418"
+        },
+        {
+          "file": "src/app/components/right-sidebar/ai-chat-panel/index.ts",
+          "hash": "11355064738494958296"
+        },
+        {
+          "file": "src/app/components/right-sidebar/right-sidebar.component.ts",
+          "hash": "4689997681065595072"
+        },
+        {
+          "file": "src/app/components/right-sidebar/timeline-view/timeline-view.component.ts",
+          "hash": "3004749936287137018"
+        },
+        {
+          "file": "src/app/components/search-panel/search-panel.component.ts",
+          "hash": "6994852014766756325"
+        },
+        {
+          "file": "src/app/components/sidebar/file-tree/file-tree.component.ts",
+          "hash": "16346934243496303648"
+        },
+        {
+          "file": "src/app/components/sidebar/file-tree/tree-node.component.ts",
+          "hash": "2393109195871380690"
+        },
+        {
+          "file": "src/app/components/sidebar/ner-panel/ner-panel.component.ts",
+          "hash": "18199008427592204542"
+        },
+        {
+          "file": "src/app/components/sidebar/ner-panel/suggestion-card/suggestion-card.component.ts",
+          "hash": "4250221090587186744"
+        },
+        {
+          "file": "src/app/components/sidebar/sidebar.component.css",
+          "hash": "6403988062780127998"
+        },
+        {
+          "file": "src/app/components/sidebar/sidebar.component.html",
+          "hash": "8701311623433503276"
+        },
+        {
+          "file": "src/app/components/sidebar/sidebar.component.ts",
+          "hash": "16203681894567738072"
+        },
+        {
+          "file": "src/app/lib/Scanner/DeltaScanner.ts",
+          "hash": "448425486316893269"
+        },
+        {
+          "file": "src/app/lib/Scanner/EntityEventBus.ts",
+          "hash": "17342281012369179967"
+        },
+        {
+          "file": "src/app/lib/Scanner/ScanCoordinator.ts",
+          "hash": "8973387431171680775"
+        },
+        {
+          "file": "src/app/lib/Scanner/anchor-utils.ts",
+          "hash": "7094289687378151153"
+        },
+        {
+          "file": "src/app/lib/Scanner/index.ts",
+          "hash": "7008182710664034399"
+        },
+        {
+          "file": "src/app/lib/Scanner/pattern-scanner.ts",
+          "hash": "13029362390035941189"
+        },
+        {
+          "file": "src/app/lib/Scanner/scanCoordinatorInstance.ts",
+          "hash": "3481536845045366333"
+        },
+        {
+          "file": "src/app/lib/Scanner/styles.ts",
+          "hash": "824338363248099450"
+        },
+        {
+          "file": "src/app/lib/Scanner/types.ts",
+          "hash": "12571108650756355020"
+        },
+        {
+          "file": "src/app/lib/analytics/index.ts",
+          "hash": "3389757935541099875"
+        },
+        {
+          "file": "src/app/lib/analytics/text-analytics.ts",
+          "hash": "7365270801411024457"
+        },
+        {
+          "file": "src/app/lib/arborist/flatten.ts",
+          "hash": "10562256915556170026"
+        },
+        {
+          "file": "src/app/lib/arborist/index.ts",
+          "hash": "8390059885880950886"
+        },
+        {
+          "file": "src/app/lib/arborist/types.ts",
+          "hash": "14056701852745667447"
+        },
+        {
+          "file": "src/app/lib/bridge/DataSyncService.ts",
+          "hash": "11122553157368803126"
+        },
+        {
+          "file": "src/app/lib/bridge/index.ts",
+          "hash": "17231453959082221913"
+        },
+        {
+          "file": "src/app/lib/constants/fonts.ts",
+          "hash": "273108317440795974"
+        },
+        {
+          "file": "src/app/lib/core/BOOT_ORCHESTRATION.md",
+          "hash": "16717039921519094720"
+        },
+        {
+          "file": "src/app/lib/core/app-orchestrator.ts",
+          "hash": "520288734138991692"
+        },
+        {
+          "file": "src/app/lib/core/boot-cache.ts",
+          "hash": "3325242994256287150"
+        },
+        {
+          "file": "src/app/lib/dexie/db.ts",
+          "hash": "15283639826310385201"
+        },
+        {
+          "file": "src/app/lib/dexie/decorations.ts",
+          "hash": "9490039516506638253"
+        },
+        {
+          "file": "src/app/lib/dexie/index.ts",
+          "hash": "16627658394793226452"
+        },
+        {
+          "file": "src/app/lib/dexie/notes.service.ts",
+          "hash": "2272407542261341979"
+        },
+        {
+          "file": "src/app/lib/dexie/settings.service.ts",
+          "hash": "8456792229254773396"
+        },
+        {
+          "file": "src/app/lib/embeddings/EmbeddingEngine.ts",
+          "hash": "6226986463323180402"
+        },
+        {
+          "file": "src/app/lib/embeddings/embeddingService.ts",
+          "hash": "15952099752959839714"
+        },
+        {
+          "file": "src/app/lib/embeddings/index.ts",
+          "hash": "10353670353732833517"
+        },
+        {
+          "file": "src/app/lib/embeddings/model-cache.ts",
+          "hash": "305148554901892610"
+        },
+        {
+          "file": "src/app/lib/embeddings/models/ModelRegistry.ts",
+          "hash": "2106155391773835254"
+        },
+        {
+          "file": "src/app/lib/embeddings/pipeline/queue.ts",
+          "hash": "13209991258610456598"
+        },
+        {
+          "file": "src/app/lib/embeddings/pipeline/types.ts",
+          "hash": "8346735965436557524"
+        },
+        {
+          "file": "src/app/lib/embeddings/providers/LocalEmbeddingProvider.ts",
+          "hash": "12551805041923922336"
+        },
+        {
+          "file": "src/app/lib/embeddings/providers/OpenRouterEmbeddingProvider.ts",
+          "hash": "12387041266999744143"
+        },
+        {
+          "file": "src/app/lib/embeddings/providers/RustEmbeddingProvider.ts",
+          "hash": "11184697293667059524"
+        },
+        {
+          "file": "src/app/lib/embeddings/providers/types.ts",
+          "hash": "7725625633824132841"
+        },
+        {
+          "file": "src/app/lib/eval/eval-runner.ts",
+          "hash": "11118367644194883370"
+        },
+        {
+          "file": "src/app/lib/eval/generate-gold-queries.ts",
+          "hash": "3699836728806689757"
+        },
+        {
+          "file": "src/app/lib/eval/gold-queries.ts",
+          "hash": "6791829712420763545"
+        },
+        {
+          "file": "src/app/lib/eval/index.ts",
+          "hash": "8603139569018676629"
+        },
+        {
+          "file": "src/app/lib/fantasy-calendar/event-type-registry.ts",
+          "hash": "3917924332535784124"
+        },
+        {
+          "file": "src/app/lib/fantasy-calendar/orbital.ts",
+          "hash": "2515705461240681955"
+        },
+        {
+          "file": "src/app/lib/fantasy-calendar/types.ts",
+          "hash": "17068100460320241696"
+        },
+        {
+          "file": "src/app/lib/fantasy-calendar/utils.ts",
+          "hash": "10247896496938708468"
+        },
+        {
+          "file": "src/app/lib/folders/default-network-schemas.ts",
+          "hash": "4986005146791355928"
+        },
+        {
+          "file": "src/app/lib/folders/default-schemas.ts",
+          "hash": "17549236356090205181"
+        },
+        {
+          "file": "src/app/lib/folders/index.ts",
+          "hash": "2137613497055297903"
+        },
+        {
+          "file": "src/app/lib/folders/seed.ts",
+          "hash": "17665494941596621354"
+        },
+        {
+          "file": "src/app/lib/kittcore.ts",
+          "hash": "15253009792235109259"
+        },
+        {
+          "file": "src/app/lib/math/progression.math.spec.ts",
+          "hash": "1811918152095823070"
+        },
+        {
+          "file": "src/app/lib/math/progression.math.ts",
+          "hash": "8467802206546915465"
+        },
+        {
+          "file": "src/app/lib/model-cache/db.ts",
+          "hash": "14166463876426479480"
+        },
+        {
+          "file": "src/app/lib/model-cache/index.ts",
+          "hash": "9204282750069906181"
+        },
+        {
+          "file": "src/app/lib/model-cache/service.ts",
+          "hash": "11004135256558008111"
+        },
+        {
+          "file": "src/app/lib/operations.ts",
+          "hash": "4998034548143526555"
+        },
+        {
+          "file": "src/app/lib/opfs/BlobStore.test.ts",
+          "hash": "13626996072504241121"
+        },
+        {
+          "file": "src/app/lib/opfs/BlobStore.ts",
+          "hash": "18062948722985835412"
+        },
+        {
+          "file": "src/app/lib/opfs/GoOpfsSyncService.ts",
+          "hash": "9252871897235637123"
+        },
+        {
+          "file": "src/app/lib/opfs/GraphObjectStore.test.ts",
+          "hash": "3097646829379409205"
+        },
+        {
+          "file": "src/app/lib/opfs/GraphObjectStore.ts",
+          "hash": "178371778143894491"
+        },
+        {
+          "file": "src/app/lib/opfs/README.md",
+          "hash": "16825267909595704079"
+        },
+        {
+          "file": "src/app/lib/opfs/RealOpfsBackend.ts",
+          "hash": "17025233295629633855"
+        },
+        {
+          "file": "src/app/lib/opfs/Wal.ts",
+          "hash": "12152287681841995534"
+        },
+        {
+          "file": "src/app/lib/opfs/index.ts",
+          "hash": "6258226363933500315"
+        },
+        {
+          "file": "src/app/lib/opfs/schema.ts",
+          "hash": "8821305179492870196"
+        },
+        {
+          "file": "src/app/lib/rag/clustering.ts",
+          "hash": "7983007356845989510"
+        },
+        {
+          "file": "src/app/lib/rag/embedding-utils.ts",
+          "hash": "18119861534903224343"
+        },
+        {
+          "file": "src/app/lib/refs/index.ts",
+          "hash": "17479976038275361809"
+        },
+        {
+          "file": "src/app/lib/refs/patterns/defaults.ts",
+          "hash": "12800077819248389035"
+        },
+        {
+          "file": "src/app/lib/refs/patterns/registry.ts",
+          "hash": "16859723903520016664"
+        },
+        {
+          "file": "src/app/lib/refs/patterns/schema.ts",
+          "hash": "6670280294322824847"
+        },
+        {
+          "file": "src/app/lib/refs/types.ts",
+          "hash": "11195427919732800018"
+        },
+        {
+          "file": "src/app/lib/registry.ts",
+          "hash": "833891983311732322"
+        },
+        {
+          "file": "src/app/lib/rlm/index.ts",
+          "hash": "10913162033652997069"
+        },
+        {
+          "file": "src/app/lib/rlm/schema/workspace-schema.ts",
+          "hash": "12615286395051316146"
+        },
+        {
+          "file": "src/app/lib/rlm/services/app-context-provider.service.spec.ts",
+          "hash": "9654863606085040859"
+        },
+        {
+          "file": "src/app/lib/rlm/services/app-context-provider.service.ts",
+          "hash": "15177192295268313680"
+        },
+        {
+          "file": "src/app/lib/rlm/services/app-context.ts",
+          "hash": "5749829566875164977"
+        },
+        {
+          "file": "src/app/lib/rlm/services/rlm-context.ts",
+          "hash": "15916201689338398200"
+        },
+        {
+          "file": "src/app/lib/rlm/services/rlm-llm.service.spec.ts",
+          "hash": "16490073948410191588"
+        },
+        {
+          "file": "src/app/lib/rlm/services/rlm-llm.service.ts",
+          "hash": "10898933073435509398"
+        },
+        {
+          "file": "src/app/lib/rlm/services/rlm-orchestrator.service.ts",
+          "hash": "1358992550907504471"
+        },
+        {
+          "file": "src/app/lib/rlm/validators/query-validator.spec.ts",
+          "hash": "17861331251614908398"
+        },
+        {
+          "file": "src/app/lib/rlm/validators/query-validator.ts",
+          "hash": "4930579210585463741"
+        },
+        {
+          "file": "src/app/lib/schemas/entity-fact-sheet-schemas.ts",
+          "hash": "372066817906299165"
+        },
+        {
+          "file": "src/app/lib/services/app-state.service.ts",
+          "hash": "6596560933706648495"
+        },
+        {
+          "file": "src/app/lib/services/chapter.service.ts",
+          "hash": "2082488098108626657"
+        },
+        {
+          "file": "src/app/lib/services/codex.service.ts",
+          "hash": "16651242552192170043"
+        },
+        {
+          "file": "src/app/lib/services/embedding-queue.service.ts",
+          "hash": "8369692069505686293"
+        },
+        {
+          "file": "src/app/lib/services/embedding-worker.service.ts",
+          "hash": "825740765323835008"
+        },
+        {
+          "file": "src/app/lib/services/folder.service.ts",
+          "hash": "11106004678351430966"
+        },
+        {
+          "file": "src/app/lib/services/go-chat.service.ts",
+          "hash": "9263829416283433660"
+        },
+        {
+          "file": "src/app/lib/services/google-genai.service.ts",
+          "hash": "11963898795112598257"
+        },
+        {
+          "file": "src/app/lib/services/llm-batch.service.ts",
+          "hash": "5825060897872896274"
+        },
+        {
+          "file": "src/app/lib/services/llm-entity-extractor.service.ts",
+          "hash": "16716230322685772990"
+        },
+        {
+          "file": "src/app/lib/services/llm-relation-extractor.service.ts",
+          "hash": "8133447289182622182"
+        },
+        {
+          "file": "src/app/lib/services/network.service.ts",
+          "hash": "13220829838977629050"
+        },
+        {
+          "file": "src/app/lib/services/openrouter.service.ts",
+          "hash": "8525648055847187029"
+        },
+        {
+          "file": "src/app/lib/services/projection-cache.service.ts",
+          "hash": "6181176965245652409"
+        },
+        {
+          "file": "src/app/lib/services/rag-worker.service.ts",
+          "hash": "7657800211504797520"
+        },
+        {
+          "file": "src/app/lib/services/reorder.service.ts",
+          "hash": "5472555345510491957"
+        },
+        {
+          "file": "src/app/lib/services/right-sidebar.service.ts",
+          "hash": "3686177337557313923"
+        },
+        {
+          "file": "src/app/lib/services/scope.service.ts",
+          "hash": "4704676684966673998"
+        },
+        {
+          "file": "src/app/lib/services/semantic-search.service.ts",
+          "hash": "10837172186673694318"
+        },
+        {
+          "file": "src/app/lib/services/sidebar.service.ts",
+          "hash": "10582509245112008643"
+        },
+        {
+          "file": "src/app/lib/services/theme.service.ts",
+          "hash": "2738947045903914322"
+        },
+        {
+          "file": "src/app/lib/services/timeline.service.ts",
+          "hash": "7426536832082868241"
+        },
+        {
+          "file": "src/app/lib/services/world-building.service.ts",
+          "hash": "5017906046983127486"
+        },
+        {
+          "file": "src/app/lib/sqlite/persistence/SqlitePersistenceService.ts",
+          "hash": "4708775865278259975"
+        },
+        {
+          "file": "src/app/lib/sqlite/persistence/sqlite-opfs-core.ts",
+          "hash": "2428173756358213706"
+        },
+        {
+          "file": "src/app/lib/sqlite/persistence/sqlite-opfs.worker.ts",
+          "hash": "9174981280357952832"
+        },
+        {
+          "file": "src/app/lib/storage/cozoBootCache.ts",
+          "hash": "11356559138399312107"
+        },
+        {
+          "file": "src/app/lib/store/discoveryStore.ts",
+          "hash": "16219773743360188776"
+        },
+        {
+          "file": "src/app/lib/store/entityColorStore.ts",
+          "hash": "3542541484489064646"
+        },
+        {
+          "file": "src/app/lib/store/highlightingStore.ts",
+          "hash": "441606687034918589"
+        },
+        {
+          "file": "src/app/lib/store/note-editor.store.ts",
+          "hash": "6218100826593450342"
+        },
+        {
+          "file": "src/app/lib/store/tab.store.ts",
+          "hash": "998407735427652271"
+        },
+        {
+          "file": "src/app/lib/types/entity.ts",
+          "hash": "14594082470956444574"
+        },
+        {
+          "file": "src/app/lib/types/index.ts",
+          "hash": "5345615219888100082"
+        },
+        {
+          "file": "src/app/lib/types/span.ts",
+          "hash": "12328749525451393246"
+        },
+        {
+          "file": "src/app/pages/fantasy-calendar/fantasy-calendar-page.component.ts",
+          "hash": "1204035903476130290"
+        },
+        {
+          "file": "src/app/pages/graph/graph-page.component.ts",
+          "hash": "11534372721250227821"
+        },
+        {
+          "file": "src/app/services/calendar.service.ts",
+          "hash": "12640177053336166856"
+        },
+        {
+          "file": "src/app/services/editor.service.ts",
+          "hash": "9736753396223510438"
+        },
+        {
+          "file": "src/app/services/footer-stats.service.ts",
+          "hash": "5195084838422587927"
+        },
+        {
+          "file": "src/app/services/gokitt-store.service.ts",
+          "hash": "2872599994663426903"
+        },
+        {
+          "file": "src/app/services/gokitt.service.ts",
+          "hash": "4881272550085674921"
+        },
+        {
+          "file": "src/app/services/graph-viz.service.ts",
+          "hash": "11373662160105154024"
+        },
+        {
+          "file": "src/app/services/knowledge.service.ts",
+          "hash": "13944985352872163424"
+        },
+        {
+          "file": "src/app/services/ner.service.ts",
+          "hash": "3324786087579094843"
+        },
+        {
+          "file": "src/app/services/orchestrator.service.spec.ts",
+          "hash": "12903329454857885097"
+        },
+        {
+          "file": "src/app/services/orchestrator.service.ts",
+          "hash": "18228969827726019496"
+        },
+        {
+          "file": "src/app/services/raptor-eval.service.ts",
+          "hash": "14993105703569725694"
+        },
+        {
+          "file": "src/app/services/tts.service.ts",
+          "hash": "1141526118751191626"
+        },
+        {
+          "file": "src/app/test/gokitt-graph-test.component.html",
+          "hash": "14374363664188822347"
+        },
+        {
+          "file": "src/app/test/gokitt-graph-test.component.ts",
+          "hash": "16190345101812848881"
+        },
+        {
+          "file": "src/app/workers/embedding.worker.ts",
+          "hash": "14287848575005221194"
+        },
+        {
+          "file": "src/app/workers/godoc.worker.ts",
+          "hash": "2617678043214834746"
+        },
+        {
+          "file": "src/app/workers/gokitt.worker.ts",
+          "hash": "3686577423778546182"
+        },
+        {
+          "file": "src/app/workers/rag.worker.ts",
+          "hash": "4214240634265104039"
+        },
+        {
+          "file": "src/app/workers/shared-buffer.ts",
+          "hash": "2703751079982049600"
+        },
+        {
+          "file": "src/app/workers/tts.worker.ts",
+          "hash": "2465256250684072161"
+        },
+        {
+          "file": "src/assets/cozo_lib_wasm_bg.wasm",
+          "hash": "16725961148101436481"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_AMS-Regular.ttf",
+          "hash": "14622021838352450257"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_AMS-Regular.woff",
+          "hash": "1277800741298674636"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_AMS-Regular.woff2",
+          "hash": "400070926396392784"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Bold.ttf",
+          "hash": "5410650203063340288"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Bold.woff",
+          "hash": "1439588089800526148"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Bold.woff2",
+          "hash": "17773998729490398442"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Regular.ttf",
+          "hash": "5368343561724911408"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Regular.woff",
+          "hash": "4786128265507980435"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Caligraphic-Regular.woff2",
+          "hash": "6972383420055087842"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Bold.ttf",
+          "hash": "4142865484389588061"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Bold.woff",
+          "hash": "158849985897434220"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Bold.woff2",
+          "hash": "2853409548802189963"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Regular.ttf",
+          "hash": "2148996003343892353"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Regular.woff",
+          "hash": "7486345181022549489"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Fraktur-Regular.woff2",
+          "hash": "7924663624690393747"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Bold.ttf",
+          "hash": "6275446520502512176"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Bold.woff",
+          "hash": "14918630935010253577"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Bold.woff2",
+          "hash": "13388762392327813041"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-BoldItalic.ttf",
+          "hash": "11647334597346444531"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-BoldItalic.woff",
+          "hash": "17688694731864974610"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-BoldItalic.woff2",
+          "hash": "12168495543757901041"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Italic.ttf",
+          "hash": "6222531716790704439"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Italic.woff",
+          "hash": "3660672195146820684"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Italic.woff2",
+          "hash": "7832154381612898317"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Regular.ttf",
+          "hash": "94239326971186"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Regular.woff",
+          "hash": "9860930478578792427"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Main-Regular.woff2",
+          "hash": "12794056538857396342"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-BoldItalic.ttf",
+          "hash": "8460438217918274935"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-BoldItalic.woff",
+          "hash": "17293715683219956514"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-BoldItalic.woff2",
+          "hash": "15042472496155827865"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-Italic.ttf",
+          "hash": "960463891222664223"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-Italic.woff",
+          "hash": "7268422078187951040"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Math-Italic.woff2",
+          "hash": "8122469853361661741"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Bold.ttf",
+          "hash": "13447096195208589701"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Bold.woff",
+          "hash": "14837426218220004059"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Bold.woff2",
+          "hash": "8504833597625381365"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Italic.ttf",
+          "hash": "2949340768385524248"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Italic.woff",
+          "hash": "7406634087846786819"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Italic.woff2",
+          "hash": "17845822591085125559"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Regular.ttf",
+          "hash": "144899282971435853"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Regular.woff",
+          "hash": "2760027797446125970"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_SansSerif-Regular.woff2",
+          "hash": "11899842994954110147"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Script-Regular.ttf",
+          "hash": "5657331075135907513"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Script-Regular.woff",
+          "hash": "6587177092818258425"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Script-Regular.woff2",
+          "hash": "8890579655401521399"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size1-Regular.ttf",
+          "hash": "8222318362290270939"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size1-Regular.woff",
+          "hash": "17379255633636489141"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size1-Regular.woff2",
+          "hash": "13141996307402917926"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size2-Regular.ttf",
+          "hash": "2172471716568465531"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size2-Regular.woff",
+          "hash": "11616558039420309288"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size2-Regular.woff2",
+          "hash": "3146167665028817394"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size3-Regular.ttf",
+          "hash": "9517864763967383008"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size3-Regular.woff",
+          "hash": "3675572402052639635"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size3-Regular.woff2",
+          "hash": "16236180148932597536"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size4-Regular.ttf",
+          "hash": "811900156212090070"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size4-Regular.woff",
+          "hash": "16675321320309324613"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Size4-Regular.woff2",
+          "hash": "10381738071138559717"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Typewriter-Regular.ttf",
+          "hash": "572795109381120503"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Typewriter-Regular.woff",
+          "hash": "14375522155816273332"
+        },
+        {
+          "file": "src/assets/fonts/KaTeX_Typewriter-Regular.woff2",
+          "hash": "14776693690915023502"
+        },
+        {
+          "file": "src/assets/gokitt.wasm",
+          "hash": "10823818787496546994"
+        },
+        {
+          "file": "src/assets/wasm/gokitt.wasm",
+          "hash": "11124046784997353610"
+        },
+        {
+          "file": "src/assets/wasm_exec.js",
+          "hash": "4595035866681961581"
+        },
+        {
+          "file": "src/index.html",
+          "hash": "9317575656937472718"
+        },
+        {
+          "file": "src/main.ts",
+          "hash": "13498211040569957818"
+        },
+        {
+          "file": "src/styles.css",
+          "hash": "14847806236464950284"
+        },
+        {
+          "file": "src/test-setup.ts",
+          "hash": "12948170869971876755"
+        },
+        {
+          "file": "tailwind.config.js",
+          "hash": "14214376874232382716"
+        },
+        {
+          "file": "tsconfig.app.json",
+          "hash": "16729244122961969701"
+        },
+        {
+          "file": "tsconfig.json",
+          "hash": "9700988000214745487"
+        },
+        {
+          "file": "tsconfig.spec.json",
+          "hash": "189877243707603707"
+        },
+        {
+          "file": "vitest.config.ts",
+          "hash": "17303362663145534356"
+        }
+      ]
+    },
+    "nonProjectFiles": []
+  },
+  "externalNodesHash": "12966491871548248436"
+}

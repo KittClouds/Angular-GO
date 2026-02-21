@@ -28,7 +28,8 @@ export class KnowledgeService {
     }
 
     /**
-     * Initialize the graph and load data from persistence
+     * Initialize the graph and load data from persistence.
+     * Safe to call multiple times — will retry if previous attempt failed.
      */
     async init(): Promise<void> {
         if (this.isReady()) return;
@@ -36,7 +37,7 @@ export class KnowledgeService {
         try {
             // 1. Init in-memory graph
             const initRes = await this.gokitt.knowledgeInit();
-            if (!initRes.success) throw new Error(initRes.error);
+            if (!initRes.success) throw new Error(initRes.error || 'knowledgeInit returned success=false');
 
             // 2. Load from SQLite
             console.log('[KnowledgeService] 📂 Loading graph from SQLite...');
@@ -54,6 +55,7 @@ export class KnowledgeService {
             // TODO: Update stats signal
         } catch (e) {
             console.error('[KnowledgeService] Initialization failed:', e);
+            // Don't set isReady — allows retry on next call
         }
     }
 

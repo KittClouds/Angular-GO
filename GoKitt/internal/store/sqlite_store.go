@@ -314,16 +314,17 @@ CREATE INDEX IF NOT EXISTS idx_raptor_edges_doc ON raptor_edges(doc_id);
 
 -- Episodes: Temporal action log
 CREATE TABLE IF NOT EXISTS episodes (
+    id TEXT PRIMARY KEY,
     scope_id TEXT NOT NULL,
     note_id TEXT,
-    timestamp INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
     action_type TEXT NOT NULL,
     target_id TEXT NOT NULL,
     target_kind TEXT NOT NULL,
     payload TEXT,
     narrative_id TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_episodes_scope ON episodes(scope_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_episodes_scope ON episodes(scope_id, ts);
 
 -- Spans & Links
 CREATE TABLE IF NOT EXISTS spans (
@@ -479,6 +480,15 @@ func NewSQLiteStoreWithDSN(dsn string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// [Snapshot Native] Disable all disk I/O for the wazero VFS.
+	// The ncruces driver runs SQLite as Wasm-in-Wasm (Go WASM → wazero → SQLite WASM).
+	// Without these, SQLite's default journal_mode=DELETE tries to create temp files
+	// through wazero's non-existent FS emulation → SQLITE_IOERR.
+	db.Exec("PRAGMA journal_mode=OFF")
+	db.Exec("PRAGMA synchronous=OFF")
+	db.Exec("PRAGMA temp_store=MEMORY")
+	db.Exec("PRAGMA locking_mode=EXCLUSIVE")
+
 	// Create schema
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -587,7 +597,7 @@ func (s *SQLiteStore) CreateNote(note *Note) error {
 	note.IsCurrent = true
 
 	_, err := s.db.Exec(`
-		INSERT INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
+		INSERT OR REPLACE INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
 			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id, 
 			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -609,7 +619,6 @@ func (s *SQLiteStore) CreateNote(note *Note) error {
 // UpdateNote creates a new version of an existing note.
 func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Get current version info
 	var currentVersion int
@@ -618,12 +627,12 @@ func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 		SELECT version, created_at FROM notes 
 		WHERE id = ? AND is_current = 1
 	`, note.ID).Scan(&currentVersion, &createdAt)
-	if err == sql.ErrNoRows {
-		// Note doesn't exist, fall back to create
-		s.mu.Unlock()
-		return s.CreateNote(note)
-	}
 	if err != nil {
+		s.mu.Unlock()
+		if err == sql.ErrNoRows {
+			// Note doesn't exist, fall back to create (acquires its own lock)
+			return s.CreateNote(note)
+		}
 		return err
 	}
 
@@ -633,6 +642,7 @@ func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 		WHERE id = ? AND is_current = 1
 	`, note.UpdatedAt, note.ID)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
@@ -646,7 +656,7 @@ func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 	note.ChangeReason = reason
 
 	_, err = s.db.Exec(`
-		INSERT INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
+		INSERT OR REPLACE INTO notes (id, version, world_id, title, content, markdown_content, folder_id, 
 			entity_kind, entity_subtype, is_entity, is_pinned, favorite, owner_id, 
 			narrative_id, "order", created_at, updated_at, valid_from, valid_to, is_current, change_reason)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -657,12 +667,14 @@ func (s *SQLiteStore) UpdateNote(note *Note, reason string) error {
 		note.ValidFrom, note.ValidTo, boolToInt(note.IsCurrent), note.ChangeReason)
 
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
 	// Reindex in qgram (remove old, add new)
 	s.qidx.RemoveDocument(note.ID)
 	s.indexNote(note)
+	s.mu.Unlock()
 	return nil
 }
 
@@ -2121,9 +2133,9 @@ func (s *SQLiteStore) LogEpisode(episode *Episode) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		INSERT INTO episodes (scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, episode.ScopeID, episode.NoteID, episode.Timestamp, episode.ActionType,
+		INSERT INTO episodes (id, scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, episode.ID, episode.ScopeID, episode.NoteID, episode.Timestamp, episode.ActionType,
 		episode.TargetID, episode.TargetKind, episode.Payload, episode.NarrativeID)
 
 	return err
@@ -2139,7 +2151,7 @@ func (s *SQLiteStore) GetEpisodes(scopeID string, limit int) ([]*Episode, error)
 	}
 
 	rows, err := s.db.Query(`
-		SELECT scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id
+		SELECT id, scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id
 		FROM episodes WHERE scope_id = ? ORDER BY ts DESC LIMIT ?
 	`, scopeID, limit)
 	if err != nil {
@@ -2153,7 +2165,48 @@ func (s *SQLiteStore) GetEpisodes(scopeID string, limit int) ([]*Episode, error)
 		var ep Episode
 		var narrativeID sql.NullString
 		if err := rows.Scan(
-			&ep.ScopeID, &ep.NoteID, &ep.Timestamp, &ep.ActionType,
+			&ep.ID, &ep.ScopeID, &ep.NoteID, &ep.Timestamp, &ep.ActionType,
+			&ep.TargetID, &ep.TargetKind, &ep.Payload, &narrativeID,
+		); err != nil {
+			return nil, err
+		}
+		if narrativeID.Valid {
+			ep.NarrativeID = narrativeID.String
+		}
+		episodes = append(episodes, &ep)
+	}
+
+	return episodes, rows.Err()
+}
+
+// SearchEpisodes retrieves episodes whose payload JSON contains the query string.
+// Used by the Reflector workspace to resurface lost context from the full episode log.
+func (s *SQLiteStore) SearchEpisodes(scopeID, query string, limit int) ([]*Episode, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	pattern := "%" + query + "%"
+	rows, err := s.db.Query(`
+		SELECT id, scope_id, note_id, ts, action_type, target_id, target_kind, payload, narrative_id
+		FROM episodes
+		WHERE scope_id = ? AND (payload LIKE ? OR target_id LIKE ? OR target_kind LIKE ?)
+		ORDER BY ts DESC LIMIT ?
+	`, scopeID, pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	episodes := make([]*Episode, 0)
+	for rows.Next() {
+		var ep Episode
+		var narrativeID sql.NullString
+		if err := rows.Scan(
+			&ep.ID, &ep.ScopeID, &ep.NoteID, &ep.Timestamp, &ep.ActionType,
 			&ep.TargetID, &ep.TargetKind, &ep.Payload, &narrativeID,
 		); err != nil {
 			return nil, err
@@ -3759,6 +3812,51 @@ func (s *SQLiteStore) UpsertEntityCard(card *EntityCard) error {
 	`, card.EntityID, card.CardID, card.Name, card.Color, card.Icon,
 		card.DisplayOrder, card.IsCollapsed, card.CreatedAt, card.UpdatedAt)
 	return err
+}
+
+// UpsertEntityCardsBatch inserts or updates multiple entity cards in a single transaction.
+// Much faster than calling UpsertEntityCard individually for bulk operations.
+func (s *SQLiteStore) UpsertEntityCardsBatch(cards []*EntityCard) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(cards) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO entity_cards (
+			entity_id, card_id, name, color, icon, display_order, is_collapsed, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(entity_id, card_id) DO UPDATE SET
+			name = excluded.name,
+			color = excluded.color,
+			icon = excluded.icon,
+			display_order = excluded.display_order,
+			is_collapsed = excluded.is_collapsed,
+			updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, card := range cards {
+		if _, err := stmt.Exec(
+			card.EntityID, card.CardID, card.Name, card.Color, card.Icon,
+			card.DisplayOrder, card.IsCollapsed, card.CreatedAt, card.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("exec card %s: %w", card.CardID, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // GetEntityCards retrieves cards for an entity.

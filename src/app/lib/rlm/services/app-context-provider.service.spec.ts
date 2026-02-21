@@ -1,64 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AppContextProviderService } from './app-context-provider.service';
 import { signal } from '@angular/core';
-import { emptyAppContext, EntitySnapshot } from './app-context';
+import { AppContextProviderService } from './app-context-provider.service';
+import { emptyAppContext } from './app-context';
 
-// Mock dependencies to avoid side effects (like db instantiation or DI errors)
+// Mock DI-heavy deps
 vi.mock('../../store/note-editor.store', () => ({
-    NoteEditorStore: class { }
-}));
-vi.mock('./retrieval.service', () => ({
-    RetrievalService: class {
-        getFolderAncestors = vi.fn();
-        getEntityNeighbors = vi.fn();
-        getEntitiesByNarrative = vi.fn();
-    }
+    NoteEditorStore: class { },
 }));
 vi.mock('../../services/scope.service', () => ({
-    ScopeService: class { }
+    ScopeService: class { },
 }));
-
-import { NoteEditorStore } from '../../store/note-editor.store';
-import { RetrievalService } from './retrieval.service';
-import { ScopeService } from '../../services/scope.service';
-
 
 describe('AppContextProviderService', () => {
     let service: AppContextProviderService;
-    let mockNoteStore: any;
-    let mockRetrievalService: any;
-    let mockScopeService: any;
-
-    // Helper to create signal-like mocks
-    const createSignal = (initialValue: any) => {
-        const s = signal(initialValue);
-        return s;
-    };
+    let noteStoreMock: any;
+    let scopeServiceMock: any;
 
     beforeEach(() => {
-        // Mock NoteEditorStore
-        mockNoteStore = {
-            currentNote: createSignal(null),
+        noteStoreMock = {
+            currentNote: signal(null),
+        };
+        scopeServiceMock = {
+            activeScope: signal({ narrativeId: 'narrative-1', id: 'scope-1' }),
         };
 
-        // Mock ScopeService
-        mockScopeService = {
-            activeScope: createSignal({ narrativeId: 'narrative-1', id: 'scope-1' }),
-        };
-
-        // Mock RetrievalService
-        mockRetrievalService = {
-            getFolderAncestors: vi.fn(),
-            getEntityNeighbors: vi.fn(),
-            getEntitiesByNarrative: vi.fn(),
-        };
-
-        // Manual injection
-        service = new AppContextProviderService(
-            mockNoteStore as NoteEditorStore,
-            mockRetrievalService as RetrievalService,
-            mockScopeService as ScopeService
-        );
+        // Manual construction via prototype trick (inject() removed from service)
+        service = Object.assign(Object.create(AppContextProviderService.prototype), {
+            noteStore: noteStoreMock,
+            scopeService: scopeServiceMock,
+        });
     });
 
     it('should be created', () => {
@@ -66,18 +36,15 @@ describe('AppContextProviderService', () => {
     });
 
     it('should return empty context if no note is open', async () => {
-        mockNoteStore.currentNote.set(null);
-        mockScopeService.activeScope.set({ narrativeId: 'narrative-1', id: 'scope-1' });
+        noteStoreMock.currentNote.set(null);
+        scopeServiceMock.activeScope.set({ narrativeId: 'narrative-1', id: 'scope-1' });
 
         const ctx = await service.getCurrentContext();
-
-        // Check against expected empty context structure
-        // emptyAppContext uses worldId as passed, checks narrativeId logic
         expect(ctx.activeNoteId).toBeNull();
         expect(ctx.worldId).toBe('narrative-1');
     });
 
-    it('should populate context from active note (Narrative mode)', async () => {
+    it('should populate context from active note', async () => {
         const fakeNote = {
             id: 'note-1',
             title: 'Chapter 1',
@@ -85,83 +52,44 @@ describe('AppContextProviderService', () => {
             folderId: 'folder-1',
             worldId: 'world-1',
             narrativeId: 'narrative-1',
-            isEntity: false,
         };
-        mockNoteStore.currentNote.set(fakeNote);
-
-        const fakeEntities: EntitySnapshot[] = [
-            { id: 'e1', label: 'Hero', kind: 'CHARACTER', subtype: 'PROTAGONIST' }
-        ];
-
-        mockRetrievalService.getEntitiesByNarrative.mockResolvedValue(fakeEntities);
-        mockRetrievalService.getFolderAncestors.mockResolvedValue(['Global', 'Drafts']);
+        noteStoreMock.currentNote.set(fakeNote);
 
         const ctx = await service.getCurrentContext();
 
-        // Verify retrieval calls
-        expect(mockRetrievalService.getFolderAncestors).toHaveBeenCalledWith('folder-1');
-        expect(mockRetrievalService.getEntitiesByNarrative).toHaveBeenCalledWith('narrative-1');
-        expect(mockRetrievalService.getEntityNeighbors).not.toHaveBeenCalled();
-
-        // Verify context structure
         expect(ctx.activeNoteId).toBe('note-1');
         expect(ctx.activeNoteTitle).toBe('Chapter 1');
         expect(ctx.activeNoteSnippet).toBe('Once upon a time...');
-        expect(ctx.folderPath).toEqual(['Global', 'Drafts']);
-        expect(ctx.nearbyEntities).toEqual(fakeEntities);
         expect(ctx.narrativeId).toBe('narrative-1');
+        // Folder path and entities are empty (no WASM store hook yet)
+        expect(ctx.folderPath).toEqual([]);
+        expect(ctx.nearbyEntities).toEqual([]);
     });
 
-    it('should populate context from active note (Entity mode)', async () => {
-        const fakeNote = {
-            id: 'entity-1',
-            title: 'Gandalf',
-            markdownContent: 'A wizard...',
-            folderId: 'folder-2',
-            worldId: 'world-1',
-            narrativeId: null, // No narrative specific
-            isEntity: true,
-        };
-        mockNoteStore.currentNote.set(fakeNote);
-
-        const fakeNeighbors: EntitySnapshot[] = [
-            { id: 'e2', label: 'Frodo', kind: 'CHARACTER', subtype: 'PROTAGONIST' }
-        ];
-
-        mockRetrievalService.getEntityNeighbors.mockResolvedValue(fakeNeighbors);
-        mockRetrievalService.getFolderAncestors.mockResolvedValue(['World', 'Characters']);
-
-        const ctx = await service.getCurrentContext();
-
-        // Verify retrieval calls
-        expect(mockRetrievalService.getEntityNeighbors).toHaveBeenCalledWith('entity-1');
-        expect(mockRetrievalService.getEntitiesByNarrative).not.toHaveBeenCalled();
-
-        // Verify context structure
-        expect(ctx.activeNoteId).toBe('entity-1');
-        expect(ctx.nearbyEntities).toEqual(fakeNeighbors);
-    });
-
-    it('should handle missing narrative ID correctly (fallback to empty entities)', async () => {
+    it('should fall back to scope narrativeId when note has none', async () => {
         const fakeNote = {
             id: 'note-2',
-            title: 'Random Note',
-            markdownContent: 'Just text',
-            folderId: 'folder-3',
-            worldId: 'world-1',
+            title: 'Orphan Note',
+            markdownContent: 'text',
+            folderId: 'f',
+            worldId: 'w1',
             narrativeId: null,
-            isEntity: false,
         };
-        // Ensure active scope also has no narrative ID to force fallback
-        mockScopeService.activeScope.set({ narrativeId: null, id: 'global' });
-        mockNoteStore.currentNote.set(fakeNote);
-
-        mockRetrievalService.getFolderAncestors.mockResolvedValue([]);
+        scopeServiceMock.activeScope.set({ narrativeId: 'from-scope', id: 'scope-1' });
+        noteStoreMock.currentNote.set(fakeNote);
 
         const ctx = await service.getCurrentContext();
+        expect(ctx.narrativeId).toBe('from-scope');
+    });
 
-        expect(mockRetrievalService.getEntitiesByNarrative).not.toHaveBeenCalled();
-        expect(mockRetrievalService.getEntityNeighbors).not.toHaveBeenCalled();
-        expect(ctx.nearbyEntities).toEqual([]);
+    it('should truncate note snippet to 500 chars', async () => {
+        const longContent = 'x'.repeat(1000);
+        noteStoreMock.currentNote.set({
+            id: 'n', title: 'T', markdownContent: longContent,
+            folderId: 'f', worldId: 'w', narrativeId: null,
+        });
+
+        const ctx = await service.getCurrentContext();
+        expect(ctx.activeNoteSnippet.length).toBe(500);
     });
 });

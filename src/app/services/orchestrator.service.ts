@@ -1,174 +1,107 @@
 import { Injectable, inject } from '@angular/core';
-import { GoogleGenAIService } from '../lib/services/google-genai.service';
-import { OpenRouterService } from '../lib/services/openrouter.service';
-import { RlmLoopService, RlmLlmService, type RLMContext, formatRlmContext } from '../lib/rlm';
+import { RlmOrchestratorService, type ActivationResult } from '../lib/rlm';
+import { RlmLlmService } from '../lib/rlm';
+import { GoKittService } from './gokitt.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
-import { RetrievalService } from '../lib/rlm/services/retrieval.service';
 import { type AppContext, type EntitySnapshot } from '../lib/rlm/services/app-context';
 
 /**
- * OrchestratorService - Context gathering for chat via RLM.
- * 
- * Uses the graph-native Recursive Language Model (RLM) loop to:
- * 1. Observe context from FTS/Vector/Graph
- * 2. Plan reasoning steps
- * 3. Execute queries and mutations
- * 4. Evaluate results and recurse if needed
- * 
- * Now includes AppContext - live application state (open note, folder path, nearby entities)
- * to ground the RLM observe step in the user's current context.
+ * OrchestratorService — workspace-aware context gathering for chat.
+ *
+ * The CozoDB-based RLM loop is gone. This service now:
+ * 1. Gathers live app context (active note, folder path, entities).
+ * 2. Delegates to RlmOrchestratorService.processWithWorkspace which
+ *    runs the OM miss-signal check and, if fired, resurfaces context
+ *    from notes/episodes via Go WASM tools.
+ * 3. Returns the new observation string for injection into the LLM prompt.
  */
 @Injectable({ providedIn: 'root' })
 export class OrchestratorService {
-    private googleGenAi: GoogleGenAIService;
-    private openRouter: OpenRouterService;
-    private rlmService: RlmLoopService;
-    private rlmLlm: RlmLlmService;
-    private noteEditorStore: NoteEditorStore;
-    private retrievalService: RetrievalService;
-
-    constructor(
-        googleGenAi?: GoogleGenAIService,
-        openRouter?: OpenRouterService,
-        rlmService?: RlmLoopService,
-        rlmLlm?: RlmLlmService,
-        noteEditorStore?: NoteEditorStore,
-        retrievalService?: RetrievalService
-    ) {
-        this.googleGenAi = googleGenAi || inject(GoogleGenAIService);
-        this.openRouter = openRouter || inject(OpenRouterService);
-        this.rlmService = rlmService || inject(RlmLoopService);
-        this.rlmLlm = rlmLlm || inject(RlmLlmService);
-        this.noteEditorStore = noteEditorStore || inject(NoteEditorStore);
-        this.retrievalService = retrievalService || inject(RetrievalService);
-    }
+    private readonly orchestrator = inject(RlmOrchestratorService);
+    private readonly rlmLlm = inject(RlmLlmService);
+    private readonly goKitt = inject(GoKittService);
+    private readonly noteEditorStore = inject(NoteEditorStore);
 
     /**
-     * Gather live application context for RLM grounding.
-     * 
-     * Snapshots:
-     * - Active note ID, title, and snippet
-     * - Folder path (ancestor chain)
-     * - World/narrative IDs
-     * - Nearby entities (from narrative scope + entity neighbors)
-     * 
-     * @param narrativeId Optional narrative scope override
-     * @returns AppContext object with live state
+     * Orchestrates context gathering for a chat message using the
+     * Go workspace sandbox. Miss signal drives workspace activation.
+     *
+     * @param userPrompt  The user's full chat message text
+     * @param threadId    Active chat thread ID
+     * @param narrativeId Narrative/world scope for episode search
+     * @returns New observation string injected into OM (empty if no miss)
      */
-    private async gatherAppContext(narrativeId?: string): Promise<AppContext | undefined> {
-        const activeNoteId = this.noteEditorStore.activeNoteId();
-        const currentNote = this.noteEditorStore.currentNote();
-
-        // No active note - return minimal context
-        if (!activeNoteId || !currentNote) {
-            return undefined;
-        }
-
-        // Extract snippet from note content (first 200 chars of markdown)
-        const snippet = currentNote.markdownContent
-            ?.slice(0, 200)
-            ?.replace(/\n/g, ' ')
-            ?.trim() ?? null;
-
-        // Determine world/narrative IDs
-        const worldId = currentNote.worldId ?? '';
-        const effectiveNarrativeId = narrativeId ?? currentNote.narrativeId ?? null;
-        const folderId = currentNote.folderId ?? null;
-
-        // Get folder path (ancestors)
-        let folderPath: string[] = [];
-        if (folderId) {
-            try {
-                folderPath = await this.retrievalService.getFolderAncestors(folderId);
-            } catch (err) {
-                console.warn('[Orchestrator] Failed to get folder ancestors:', err);
-            }
-        }
-
-        // Get nearby entities
-        let nearbyEntities: EntitySnapshot[] = [];
-        if (effectiveNarrativeId) {
-            try {
-                nearbyEntities = await this.retrievalService.getEntitiesByNarrative(effectiveNarrativeId, 10);
-            } catch (err) {
-                console.warn('[Orchestrator] Failed to get nearby entities:', err);
-            }
-        }
-
-        return {
-            activeNoteId,
-            activeNoteTitle: currentNote.title ?? null,
-            activeNoteSnippet: snippet,
-            worldId,
-            narrativeId: effectiveNarrativeId,
-            folderId,
-            folderPath,
-            nearbyEntities,
-        };
-    }
-
-    /**
-     * Orchestrates context gathering for chat responses using RLM.
-     * 
-     * @param userPrompt The user's chat message
-     * @param threadId The current chat thread ID
-     * @param narrativeId (Optional) Narrative scope
-     * @returns Context string containing RLM reasoning and results
-     */
-    async orchestrate(userPrompt: string, threadId: string, narrativeId: string = ''): Promise<string> {
+    async orchestrate(userPrompt: string, threadId: string, narrativeId = ''): Promise<string> {
         if (!userPrompt.trim()) return '';
 
-        // Graceful degradation: require at least one LLM provider
-        if (!this.openRouter.getApiKey()) {
-            console.warn('[Orchestrator] No OpenRouter API key — skipping RLM loop');
-            return '';
-        }
-
-        console.log(`[Orchestrator] Starting RLM loop for thread ${threadId}`);
-        const startTime = Date.now();
-
-        // unique workspace for this reasoning episode
-        const workspaceId = `ws_${threadId}_${Date.now()}`;
-
-        // Gather live app context before starting RLM loop
-        let appContext: AppContext | undefined;
-        try {
-            appContext = await this.gatherAppContext(narrativeId || undefined);
-            if (appContext) {
-                console.log(`[Orchestrator] AppContext gathered: note=${appContext.activeNoteTitle}, entities=${appContext.nearbyEntities.length}`);
-            }
-        } catch (err) {
-            console.warn('[Orchestrator] Failed to gather AppContext:', err);
-        }
-
-        const ctx: Partial<RLMContext> = {
-            workspaceId,
-            threadId,
-            narrativeId,
-            initialPrompt: userPrompt,
-            maxDepth: 2, // Cost-safe default: 2 recursive calls max
-            appContext, // Live application context for grounding
-        };
+        const scopeId = narrativeId || this.deriveScopeId();
 
         try {
-            const result = await this.rlmService.run(ctx);
+            const result = await this.orchestrator.processWithWorkspace(
+                threadId,
+                scopeId,
+                userPrompt
+            );
 
-            if (!result.ok) {
-                console.warn('[Orchestrator] RLM loop failed:', result.error);
+            if (result.error) {
+                console.warn('[Orchestrator] Workspace error:', result.error);
                 return '';
             }
 
-            const latMs = Date.now() - startTime;
-            console.log(`[Orchestrator] RLM loop completed in ${latMs}ms`, result);
+            if (result.triggered && result.new_observation) {
+                console.log(
+                    `[Orchestrator] Workspace activated — injecting ${result.new_observation.length} chars of context`
+                );
+                return result.new_observation;
+            }
 
-            // Format context for the LLM
-            return formatRlmContext(result, workspaceId);
-
-
-
+            return '';
         } catch (err) {
-            console.error('[Orchestrator] Detailed error running RLM:', err);
+            console.error('[Orchestrator] orchestrate error:', err);
             return '';
         }
+    }
+
+    /**
+     * Get the OM context block for the current thread (for system prompts).
+     * Returns empty string if no context or service not ready.
+     */
+    async getContext(threadId: string): Promise<string> {
+        return this.orchestrator.getContext(threadId);
+    }
+
+    // =========================================================================
+    // App context helpers (previously RetrievalService)
+    // =========================================================================
+
+    /**
+     * Derive a scope ID from the active note's narrative context.
+     * Falls back to an empty string (world-level scope).
+     */
+    private deriveScopeId(): string {
+        const note = this.noteEditorStore.currentNote();
+        return note?.narrativeId ?? '';
+    }
+
+    /**
+     * Build a lightweight app context snapshot for display purposes
+     * (no longer used in the core RLM path, kept for UI grounding).
+     */
+    async getAppContext(): Promise<AppContext | undefined> {
+        const note = this.noteEditorStore.currentNote();
+        if (!note) return undefined;
+
+        return {
+            activeNoteId: note.id,
+            activeNoteTitle: note.title ?? null,
+            activeNoteSnippet: note.markdownContent?.slice(0, 200)?.replace(/\n/g, ' ')?.trim() ?? null,
+            worldId: note.worldId ?? '',
+            narrativeId: note.narrativeId ?? null,
+            folderId: note.folderId ?? null,
+            // Folder ancestors and nearby entities require store queries;
+            // return empty until a dedicated GoKitt store API is wired.
+            folderPath: [],
+            nearbyEntities: [],
+        };
     }
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/agent"
+	"github.com/kittclouds/gokitt/pkg/gdr"
 )
 
 // Config defines the thresholds for observation and reflection.
@@ -18,6 +19,7 @@ type Config struct {
 	ObservationThreshold int // Tokens in unobserved messages before triggering observation
 	ReflectionThreshold  int // Tokens in active observations before triggering reflection
 	Model                string
+	Workspace            WorkspaceConfig // Workspace tool sandbox config
 }
 
 // DefaultConfig returns the standard configuration.
@@ -26,14 +28,16 @@ func DefaultConfig() Config {
 		ObservationThreshold: 2000,
 		ReflectionThreshold:  4000,
 		Model:                "google/gemini-2.0-flash", // Default fast model
+		Workspace:            DefaultWorkspaceConfig(),
 	}
 }
 
 // Observer manages the observational memory process.
 type Observer struct {
-	store *store.SQLiteStore
-	agent *agent.Service
-	cfg   Config
+	store     *store.SQLiteStore
+	agent     *agent.Service
+	cfg       Config
+	workspace *Workspace // nil when GDR not yet hydrated
 }
 
 // NewObserver creates a new Observer.
@@ -43,6 +47,76 @@ func NewObserver(s *store.SQLiteStore, a *agent.Service, cfg Config) *Observer {
 		agent: a,
 		cfg:   cfg,
 	}
+}
+
+// NewObserverWithGDR creates an Observer with GDR-backed workspace tools.
+func NewObserverWithGDR(s *store.SQLiteStore, a *agent.Service, g *gdr.GateDrivenRetriever, cfg Config) *Observer {
+	ws := NewWorkspace(s, g, cfg.Workspace)
+	return &Observer{
+		store:     s,
+		agent:     a,
+		cfg:       cfg,
+		workspace: ws,
+	}
+}
+
+// SetGDR wires a GDR index into the Observer workspace after initialization.
+// Safe to call at any time — replaces the existing workspace instance.
+func (o *Observer) SetGDR(g *gdr.GateDrivenRetriever) {
+	o.workspace = NewWorkspace(o.store, g, o.cfg.Workspace)
+}
+
+// ProcessWithWorkspace is the main entry point for RLM-aware memory processing.
+// It runs the normal observer loop, then checks whether the incoming user prompt
+// represents a "miss" against the current observations. If so, the workspace
+// activates: it searches notes/blocks/episodes and injects a resurfaced
+// observation back into the OMRecord.
+//
+// scopeID is the world/narrative scope used for episode searches.
+func (o *Observer) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, userPrompt string) (*ActivationResult, error) {
+	// 1. Run the normal observation loop first.
+	if err := o.ProcessLoop(ctx, threadID); err != nil {
+		return nil, fmt.Errorf("observation loop failed: %w", err)
+	}
+
+	// 2. If workspace not wired, bail early.
+	if o.workspace == nil {
+		return &ActivationResult{Triggered: false}, nil
+	}
+
+	// 3. Load current observations to check miss signal.
+	record, err := o.store.GetOMRecord(threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load OM record: %w", err)
+	}
+
+	var currentObs string
+	if record != nil {
+		currentObs = record.Observations
+	}
+
+	// 4. Check miss signal.
+	activate, reason := o.workspace.ShouldActivate(userPrompt, currentObs)
+	if !activate {
+		return &ActivationResult{Triggered: false}, nil
+	}
+
+	// 5. Run workspace tools.
+	scope := &store.ScopeKey{ThreadID: threadID}
+	activationResult := o.workspace.Activate(threadID, scopeID, userPrompt, scope)
+	activationResult.MissReason = reason
+
+	// 6. Inject resurfaced context back into OMRecord.
+	if activationResult.NewObservation != "" && record != nil {
+		record.Observations += "\n\n" + activationResult.NewObservation
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.ObsTokenCount = o.approxTokenCount(record.Observations)
+		if err := o.store.UpsertOMRecord(record); err != nil {
+			return &activationResult, fmt.Errorf("failed to persist workspace observation: %w", err)
+		}
+	}
+
+	return &activationResult, nil
 }
 
 // ProcessLoop is the main entry point to check and update memory for a thread.

@@ -133,7 +133,9 @@ export class GoKittStoreService {
     private worker: Worker | null = null;
 
     private pendingRequests = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
-    private nextRequestId = 1;
+    // Offset from GoKittService (starts at 1) to prevent ID collisions
+    // Both services share the SAME worker — overlapping IDs cause misrouted responses
+    private nextRequestId = 100000;
 
     private initialized = false;
     private initPromise: Promise<void> | null = null;
@@ -193,107 +195,57 @@ export class GoKittStoreService {
         }
 
 
-        // [PERSISTENCE] Restore State (Snapshot + WAL)
+        // [PERSISTENCE] Restore State (Snapshot Only - Snapshot Native)
         await this._restoreState();
 
-        // [PERSISTENCE] Register WAL Handler
-        // [PERSISTENCE] Register WAL Handler
-        this._registerWalHandler();
-
-        // [PERSISTENCE] Setup Auto-Compaction
-        this.persistence.compactNeeded$.subscribe(async () => {
-            console.log('[GoKittStoreService] Auto-compacting database...');
-            try {
-                const data = await this.exportDatabase();
-                await this.persistence.compact(data);
-                console.log('[GoKittStoreService] Auto-compaction successful');
-            } catch (e) {
-                console.error('[GoKittStoreService] Auto-compaction failed:', e);
-            }
-        });
+        // WAL Handler, Auto-Compaction REMOVED - Snapshot Native
     }
 
 
     private async _restoreState(): Promise<void> {
         console.log('[GoKittStoreService] Restoring state from persistence...');
-        const { snapshot, wal, recoveryMode } = await this.persistence.load();
+        const { snapshot } = await this.persistence.load();
 
-        // 1. Load Snapshot (Binary)
+        // Load Snapshot (Binary) — the only persistence source now
         if (snapshot) {
             console.log(`[GoKittStoreService] Importing snapshot (${snapshot.byteLength} bytes)...`);
-            // We need to send this Uint8Array to the worker -> Go
-            // Since we can't easily pass it via the generic sendRequest (yet), 
-            // we rely on the implementationdetails of GoOpfsSyncService being replaced
-            // For now, we reuse the existing infrastructure or add a specialized call
+            try {
+                await this.importDatabase(snapshot);
 
-            // To properly send ArrayBuffer transferables, we need direct worker access or updated GoKittService
-            // Assuming we can send it as payload for now (copy overhead, but works for V1)
+                // Health Check: verify the DB is actually queryable
+                const notes = await this.listNotes();
+                console.log(`[GoKittStoreService] ✅ Snapshot imported successfully. Health check: ${notes.length} notes readable.`);
+            } catch (e) {
+                console.error('[GoKittStoreService] ❌ Snapshot is CORRUPT. Discarding and starting fresh.', e);
 
-            // @todo: Optimize with Transferable when GoKittService supports it
-            await this.importDatabase(snapshot);
-        }
-
-        // 2. Replay WAL (JSONL)
-        if (wal.length > 0) {
-            console.log(`[GoKittStoreService] Replaying ${wal.length} WAL entries...`);
-            for (const entry of wal) {
+                // Reinitialize with a clean in-memory DB
                 try {
-                    await this._replayWalEntry(entry);
-                } catch (e) {
-                    console.warn(`[GoKittStoreService] Failed to replay WAL entry ${entry.op}:`, e);
+                    await this.sendRequest('STORE_INIT', {});
+                    console.log('[GoKittStoreService] ✅ Clean store re-initialized.');
+                } catch (reinitErr) {
+                    console.error('[GoKittStoreService] FATAL: Could not re-initialize store:', reinitErr);
+                }
+
+                // Nuke the corrupted snapshot from OPFS so it never loads again
+                try {
+                    await this.persistence.clear();
+                    console.log('[GoKittStoreService] 🗑️ Corrupted snapshot cleared from OPFS.');
+                } catch (clearErr) {
+                    console.error('[GoKittStoreService] Failed to clear OPFS:', clearErr);
                 }
             }
-        }
-
-        if (recoveryMode) {
-            console.warn('[GoKittStoreService] ⚠️ System recovered from backup');
+        } else {
+            console.log('[GoKittStoreService] No snapshot found. Starting with empty database.');
         }
     }
 
-    private async _replayWalEntry(entry: { op: string; data: any }): Promise<void> {
-        // Map WAL op to Store method
-        switch (entry.op) {
-            case 'upsertNote':
-                await this.upsertNote(entry.data);
-                break;
-            case 'deleteNote':
-                await this.deleteNote(entry.data.id);
-                break;
-            case 'upsertEntity':
-                await this.upsertEntity(entry.data);
-                break;
-            case 'deleteEntity':
-                await this.deleteEntity(entry.data.id);
-                break;
-            case 'upsertEdge':
-                await this.upsertEdge(entry.data);
-                break;
-            case 'deleteEdge':
-                await this.deleteEdge(entry.data.id);
-                break;
-            case 'upsertFolder':
-                await this.upsertFolder(entry.data);
-                break;
-            case 'deleteFolder':
-                await this.deleteFolder(entry.data.id);
-                break;
-        }
-    }
 
-    private _registerWalHandler(): void {
-        // The handler is registered in the worker during init and events are sent as WAL_EVENT messages.
-        // We listen for them in handleMessage().
-        console.log('[GoKittStoreService] Listening for WAL events from worker');
-    }
+    // _replayWalEntry REMOVED - Snapshot Native
+    // _registerWalHandler REMOVED - Snapshot Native
 
 
     private handleMessage(msg: any): void {
-        // [WAL] Handle incoming WAL events
-        if (msg.type === 'WAL_EVENT') {
-            const { op, data } = msg;
-            this.persistence.appendWal(op, data);
-            return;
-        }
+        // WAL_EVENT handler REMOVED - Snapshot Native
 
         // Only handle store-related responses
         if (!msg.type?.startsWith('STORE_')) return;
