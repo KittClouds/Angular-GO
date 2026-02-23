@@ -408,6 +408,15 @@ func (d *RuntimeDictionary) GetInfo(id string) *EntityInfo {
 	return d.idToInfo[id]
 }
 
+// GetAllEntities returns all entity info in the dictionary.
+func (d *RuntimeDictionary) GetAllEntities() []*EntityInfo {
+	entities := make([]*EntityInfo, 0, len(d.idToInfo))
+	for _, info := range d.idToInfo {
+		entities = append(entities, info)
+	}
+	return entities
+}
+
 // ============================================================================
 // Text Scanning (Use 2)
 // ============================================================================

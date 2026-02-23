@@ -1,594 +1,786 @@
-# GRAPTOR: Graph-Augmented RAPTOR with Reality Integration
+# Graptor + Reality Integration Plan
 
-**Status:** Architecture Design  
-**Author:** KAMMI  
-**Date:** 2026-02-21
+## Implementation Status (Updated 2026-02-23)
+
+### ✅ All Phases Complete
+
+| Phase | Component | Status | Files |
+|-------|-----------|--------|-------|
+| **Phase 1** | GlobalEntityRegistry | ✅ Complete | [`entity_registry.go`](GoKitt/pkg/graptor/entity_registry.go) (917 lines) |
+| **Phase 2** | ChapterContext | ✅ Complete | [`chapter_context.go`](GoKitt/pkg/graptor/chapter_context.go) |
+| **Phase 3** | Conductor Integration | ✅ Complete | Dictionary seeding, ID preservation |
+| **Phase 4** | Projector Integration | ✅ Complete | Uses Reality's Projector in `processLeaf()` |
+| **Phase 5** | GraptorConductor | ✅ Complete | [`graptor_conductor.go`](GoKitt/pkg/graptor/graptor_conductor.go) (700+ lines) |
+| **Phase 6** | Co-occurrence Statistics | ✅ Complete | [`cooccurrence.go`](GoKitt/pkg/graptor/cooccurrence.go) |
+| **Phase 6** | Alias Propagation | ✅ Complete | [`alias_detection.go`](GoKitt/pkg/graptor/alias_detection.go) |
+| **Phase 6** | Chapter Transition | ✅ Complete | Implemented in `chapter_context.go` |
+
+### Test Results
+
+```
+📊 MULTI-CHAPTER ENTITIES:
+  Ryan: appears in 11 chapters [0 1 2 3 4 5 6 7 8 9 10]
+  Len: appears in 11 chapters [0 1 2 3 4 5 6 7 8 9 10]
+  Wyvern: appears in 8 chapters [0 1 2 3 6 7 9 10]
+  Ghoul: appears in 9 chapters [0 1 2 3 4 5 6 7 9]
+  Zanbato: appears in 8 chapters [0 3 4 5 6 7 9 10]
+  Meta-Gang: appears in 11 chapters [0 1 2 3 4 5 6 7 8 9 10]
+  Augusti: appears in 10 chapters [0 1 2 3 4 5 6 7 9 10]
+  New Rome: appears in 7 chapters [0 1 2 3 7 9 10]
+```
+
+### Phase 6 Implementation Details
+
+#### Alias Propagation Strategy
+- **File**: [`alias_detection.go`](GoKitt/pkg/graptor/alias_detection.go)
+- **Patterns Supported**:
+  - "X, also known as Y"
+  - "X, aka Y"
+  - "X (Y)" parenthetical
+  - "X or Y"
+  - "X, real name Y"
+  - "X, otherwise known as Y"
+  - "X - Y" dash separated
+- **Integration**: Called in `processLeaf()` via `detectAndRegisterAliases()`
+- **Registry Update**: Automatically adds detected aliases to `GlobalEntityRegistry`
+
+#### Chapter Transition Strategy
+- **File**: [`chapter_context.go`](GoKitt/pkg/graptor/chapter_context.go)
+- **Components**:
+  - `ChapterContext.Finish()` - Computes carry-over entities based on gender and recency
+  - `ChapterTransition.ResolvePronoun()` - Resolves pronouns at chapter boundaries
+  - `ChapterManager.CreateTransition()` - Creates transition handler between chapters
+- **Carry-over Logic**: Prioritizes entities with known gender for pronoun resolution
+
+#### Co-occurrence Statistics
+- **File**: [`cooccurrence.go`](GoKitt/pkg/graptor/cooccurrence.go)
+- **Features**:
+  - Tracks entity pair co-occurrences within sliding windows
+  - Provides `GetRelated()` for relationship queries
+  - Integrated in `processLeaf()` for automatic tracking
+
+### ❌ Remaining Work (Future Enhancement)
+
+| Component | Description |
+|-----------|-------------|
+| SQLite Persistence | Store GlobalEntityRegistry in database for document reload |
 
 ---
 
 ## Executive Summary
 
-GRAPTOR overlays a bipartite entity-chunk graph on top of existing RAPTOR trees. Unlike the original plan that used only the scanner pipeline, this refined architecture leverages the **full reality projection system** to extract richer semantic relationships including narrative events, provenance tracking, and proper entity resolution.
+**Goal**: Integrate the existing Reality layer (CST → Graph) with Graptor's cross-chapter entity linking to create a fully unified ingestion pipeline.
+
+**Key Insight**: Reality already creates graphs from text. We need to inject Graptor's GlobalEntityRegistry at the right integration points.
 
 ---
 
-## The Problem
+## Current Architecture Analysis
 
-Our RAPTOR system builds one tree per document. Trees are structurally isolated:
-
-- A chunk in `chapter-3` cannot "see" that the same character appears in `chapter-98`
-- The scanner pipeline extracts entities and relations, but they never feed back into retrieval
-- Entity knowledge and retrieval knowledge live in two disconnected worlds
-
----
-
-## Why Mastra's GraphRAG Doesn't Fit
-
-Mastra's approach (`packages/rag/src/graph-rag/index.ts`):
-
-1. **Flat similarity graph** — connect chunks if cosine > threshold (O(n²) pair scan)
-2. **Random-walk-with-restart (RWR) reranking** — walk the similarity graph to boost neighbors
-3. **Only semantic edges** — no entity, hierarchy, or narrative edge types
-
-**Problems for us:**
-
-- O(n²) edge construction at scale (520+ leaf chunks per document)
-- RWR on similarity graph is just smoothed vector search — no new information
-- Zero entity awareness — two chunks mentioning "Kaido" never discover they're connected
-- No hierarchy — parent/child structure of trees is lost
-
-**Verdict:** The concept of graph reranking is useful. The implementation is not. We rebuild on our primitives.
-
----
-
-## Architecture: GRAPTOR with Reality Integration
-
-### Core Idea
-
-Overlay a bipartite entity-chunk graph on top of existing RAPTOR trees. Use the **reality projection pipeline** to extract entities, relations, and narrative events from each chunk.
+### The Reality Stack
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         GRAPTOR ARCHITECTURE                                │
+│                            REALITY LAYER                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐      │
-│   │  Document A     │     │  Document B     │     │  Document C     │      │
-│   │  RAPTOR Tree    │     │  RAPTOR Tree    │     │  RAPTOR Tree    │      │
-│   └────────┬────────┘     └────────┬────────┘     └────────┬────────┘      │
-│            │                       │                       │               │
-│            ▼                       ▼                       ▼               │
-│   ┌─────────────────────────────────────────────────────────────────┐      │
-│   │                    ENTITY LINKER (Reality)                       │      │
-│   │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐     │      │
-│   │  │ Chunker  │ → │ Scanner  │ → │   CST    │ → │Projector │     │      │
-│   │  │          │   │Conductor │   │  Builder │   │          │     │      │
-│   │  └──────────┘   └──────────┘   └──────────┘   └──────────┘     │      │
-│   └──────────────────────────────┬──────────────────────────────────┘      │
-│                                  │                                          │
-│                                  ▼                                          │
-│   ┌─────────────────────────────────────────────────────────────────┐      │
-│   │                     GRAPH OVERLAY                                │      │
-│   │  ┌─────────────────────────────────────────────────────────┐   │      │
-│   │  │                 KnowledgeGraph                           │   │      │
-│   │  │  ┌─────────┐  MENTIONED_IN  ┌─────────┐                │   │      │
-│   │  │  │ Entity  │ ◄──────────────│  Chunk  │                │   │      │
-│   │  │  │  Node   │───────────────►│  Node   │                │   │      │
-│   │  │  └─────────┘ ENTITY_BRIDGE  └─────────┘                │   │      │
-│   │  │       ▲                         ▲                       │   │      │
-│   │  │       │ NARRATIVE_REL          │ CHAPTER_NEXT          │   │      │
-│   │  │       │                         │                       │   │      │
-│   │  │  ┌─────────┐             ┌─────────┐                   │   │      │
-│   │  │  │ Event   │             │ Adjacent│                   │   │      │
-│   │  │  │ Node    │             │ Chunk   │                   │   │      │
-│   │  │  └─────────┘             └─────────┘                   │   │      │
-│   │  └─────────────────────────────────────────────────────────┘   │      │
-│   └──────────────────────────────┬──────────────────────────────────┘      │
-│                                  │                                          │
-│                                  ▼                                          │
-│   ┌─────────────────────────────────────────────────────────────────┐      │
-│   │                   GRAPTOR RETRIEVER                              │      │
-│   │  1. CollapsedRetriever.Search() → base results                  │      │
-│   │  2. Graph expansion via ENTITY_BRIDGE edges                      │      │
-│   │  3. Score boost: bridge_boost = base × entity_overlap_ratio     │      │
-│   │  4. Merge, dedupe, re-rank                                       │      │
-│   └─────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
+│                                                                              │
+│   Text ──► Conductor.Scan() ──► ScanResult                                   │
+│                                     │                                        │
+│                                     ▼                                        │
+│                              Builder.Zip() ──► CST                           │
+│                                     │                                        │
+│                                     ▼                                        │
+│                           Projector.Project() ──► ConceptGraph               │
+│                                     │                                        │
+│                                     ▼                                        │
+│                          Merger.AddScannerGraph() ──► MergedGraph            │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Component Responsibilities
+
+| Component | Location | Role | Current Limitation |
+|-----------|----------|------|-------------------|
+| **Conductor** | [`pkg/scanner/conductor/conductor.go`](GoKitt/pkg/scanner/conductor/conductor.go) | Orchestrates NER pipeline | Per-scan scope only |
+| **Discovery** | [`pkg/scanner/discovery/engine.go`](GoKitt/pkg/scanner/discovery/engine.go) | Unsupervised NER via relational patterns | No cross-chapter memory |
+| **Resolver** | [`pkg/scanner/resolver/resolver.go`](GoKitt/pkg/scanner/resolver/resolver.go) | Pronoun resolution | `maxHistory = 10` |
+| **Builder/Zipper** | [`pkg/reality/builder/zipper.go`](GoKitt/pkg/reality/builder/zipper.go) | CST construction from ScanResult | No chapter awareness |
+| **Projector** | [`pkg/reality/projection/projector.go`](GoKitt/pkg/reality/projection/projector.go) | CST → Graph projection | Uses local EntityMap |
+| **Merger** | [`pkg/reality/merger/merger.go`](GoKitt/pkg/reality/merger/merger.go) | Combines multiple graph sources | No entity deduplication |
+
+---
+
+## Data Flow Deep Dive
+
+### Phase 1: Discovery Anchoring
+
+```go
+// From discovery/engine.go - The "Virus" Pattern
+func (e *DiscoveryEngine) ScanText(text string) []DiscoveryCandidate {
+    // Pattern: Source (Known) → Verb → Target (Capitalized)
+    // If Source is Promoted + Has Kind, and Verb matches narrative pattern,
+    // then Target becomes a candidate entity.
+    
+    for i := 0; i < len(tokens)-2; i++ {
+        sourceTok := tokens[i]
+        verbTok := tokens[i+1]
+        targetTok := tokens[i+2]
+        
+        // 1. Source must be Known + Promoted + Have Kind
+        sourceStats := e.Registry.GetStats(sourceTok)
+        if sourceStats.Status != StatusPromoted {
+            continue
+        }
+        
+        // 2. Target must be Capitalized
+        if !isCapitalized(targetTok) {
+            continue
+        }
+        
+        // 3. Verb must match narrative pattern
+        verbMatch := e.Matcher.Lookup(verbTok)
+        if verbMatch == nil {
+            continue
+        }
+        
+        // 4. Infer target kind from source + verb
+        inferredKind := e.Scanner.InferTarget(*sourceStats.InferredKind, verbMatch)
+    }
+}
+```
+
+**Key Insight**: Discovery already does entity anchoring via relational inference. This is the "seed" for cross-chapter linking.
+
+### Phase 2: CST Construction
+
+```go
+// From builder/zipper.go
+func Zip(text string, scan conductor.ScanResult) *cst.Node {
+    spans := collectSpans(text, scan)
+    
+    // Spans include:
+    // - Paragraphs (priority 90)
+    // - Sentences (priority 80)
+    // - Chunks - NP, VP, PP (priority 50)
+    // - EntitySpans (priority 40)
+    // - Tokens (priority 10)
+    
+    // Build tree via event-based construction
+    // Higher priority = outer container
+}
+```
+
+**Key Insight**: CST provides structural context. Entity spans are embedded in the tree with parent/child relationships.
+
+### Phase 3: Graph Projection
+
+```go
+// From projection/projector.go
+func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, 
+             entities EntityMap, text string, prov *hierarchy.ProvenanceContext) *graph.ConceptGraph {
+    
+    // EntityMap is: offset → entityID
+    // Used to resolve EntitySpan nodes to actual entity IDs
+    
+    // Walk CST looking for Sentences
+    // For each VP, find Subject (left NP) and Object (right NP)
+    // Create edge: Subject --[Relation]--> Object
+}
+```
+
+**Key Insight**: Projector uses EntityMap to resolve entity spans. This is where GlobalEntityRegistry should integrate.
+
+---
+
+## Integration Architecture
+
+### Unified Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      GRAPTOR + REALITY INTEGRATION                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Document                                                                   │
+│      │                                                                       │
+│      ▼                                                                       │
+│   ChunkerX2.ChunkDocumentExtended() ──► ChunkTreeExtended                   │
+│      │                              (Chapters → Parents → Leaves)            │
+│      │                                                                       │
+│      ├──────────────────────────────────────────────────────────┐            │
+│      │                                                          │            │
+│      ▼                                                          ▼            │
+│   For each Chapter:                                    GlobalEntityRegistry  │
+│      │                                                       │              │
+│      ▼                                                       │              │
+│   For each Leaf:                                             │              │
+│      │                                                       │              │
+│      ▼                                                       │              │
+│   ┌────────────────────────────────────────┐                 │              │
+│   │         Conductor.Scan(leaf.Text)       │                 │              │
+│   │  ┌────────────────────────────────────┐ │                 │              │
+│   │  │ Discovery (Virus)                  │ │                 │              │
+│   │  │  - Relational entity discovery     │ │                 │              │
+│   │  │  - Kind inference                  │ │                 │              │
+│   │  └────────────────────────────────────┘ │                 │              │
+│   │  ┌────────────────────────────────────┐ │                 │              │
+│   │  │ Implicit Matcher (Registry)        │◄┼─────────────────┘              │
+│   │  │  - Aho-Corasick exact match        │ │                                │
+│   │  │  - Alias lookup                    │ │                                │
+│   │  └────────────────────────────────────┘ │                                │
+│   │  ┌────────────────────────────────────┐ │                                │
+│   │  │ Resolver (Pronouns)                │ │                                │
+│   │  │  - Gender-aware resolution         │ │                                │
+│   │  │  - History: 10 (per-leaf)          │ │                                │
+│   │  └────────────────────────────────────┘ │                                │
+│   └────────────────────────────────────────┘                 │              │
+│      │                                                       │              │
+│      ▼                                                       │              │
+│   ScanResult ──► Builder.Zip() ──► CST                       │              │
+│      │                              │                        │              │
+│      │                              ▼                        │              │
+│      │                    Projector.Project()                │              │
+│      │                              │                        │              │
+│      │                              ▼                        │              │
+│      │                    LeafGraph ◄────────────────────────┘              │
+│      │                              │                                       │
+│      ▼                              ▼                                       │
+│   Register Entities ──► GlobalEntityRegistry.Update()                       │
+│                              │                                              │
+│                              ▼                                              │
+│                    CrossChapterLinker.Link()                                │
+│                              │                                              │
+│                              ▼                                              │
+│                    ChapterGraph (merged)                                    │
+│                              │                                              │
+│                              ▼                                              │
+│                    DocumentGraph (final)                                    │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Edge Types
+## Integration Points
 
-| Edge Type | Source → Target | How Created | Weight |
-|-----------|-----------------|-------------|--------|
-| `MENTIONED_IN` | Entity → Chunk | Reality Projector finds entity in chunk span | 1.0 |
-| `ENTITY_BRIDGE` | Chunk → Chunk | Two chunks share ≥1 entity | Jaccard similarity |
-| `CHAPTER_NEXT` | Chunk → Chunk | Sequential chunks in same document | 1.0 |
-| `PARENT_OF` | Internal → Leaf | Exists in `RaptorNode.ChildIDs` | 1.0 |
-| `NARRATIVE_REL` | Entity → Entity | Reality Projector extracts relation | Event weight |
-| `WORLD_CONTAINS` | World → Entity | Provenance tracking | 1.0 |
+### Point 1: GlobalEntityRegistry Injection
 
----
-
-## Component 1: Entity Linker (Using Reality Pipeline)
-
-**File:** `pkg/raptor/entity_linker.go`
-
-### Design
-
-The EntityLinker wraps the full reality projection pipeline to extract entities and relations from chunk text:
+**Location**: [`Conductor.SetDictionary()`](GoKitt/pkg/scanner/conductor/conductor.go:74)
 
 ```go
-// EntityLinker bridges RAPTOR chunks with the reality projection pipeline.
-type EntityLinker struct {
-    conductor *conductor.Conductor
-    builder   *cst.Builder
+// CURRENT
+func (c *Conductor) SetDictionary(dict *implicitmatcher.RuntimeDictionary) {
+    c.implicitScanner = dict
 }
 
-// EntityMention records an entity occurrence within a chunk.
-type EntityMention struct {
-    EntityID   string       // Canonical entity ID from resolver
-    EntityKind string       // Character, Location, Concept, etc.
-    ChunkKey   string       // "docID:start:end"
-    Offsets    [2]int       // Span within chunk text
-    Text       string       // Original mention text
-}
-
-// NarrativeLink records a relation extracted from chunk text.
-type NarrativeLink struct {
-    SubjectID  string       // Entity ID or "Unknown"
-    ObjectID   string       // Entity ID or "Unknown"
-    Relation   string       // SPEAKS_TO, MENTIONS, etc.
-    ChunkKey   string       // Source chunk
-    Manner     string       // Optional modifier
-    Location   string       // Optional location
+// PROPOSED: Add GlobalEntityRegistry
+func (c *Conductor) SetGlobalRegistry(registry *graptor.GlobalEntityRegistry) {
+    c.globalRegistry = registry
+    // Also inject into Resolver for cross-chapter pronoun resolution
+    c.resolver.SetGlobalRegistry(registry)
 }
 ```
 
-### Key Methods
+### Point 2: EntityMap Construction
+
+**Location**: [`Projector.Project()`](GoKitt/pkg/reality/projection/projector.go:18)
 
 ```go
-// NewEntityLinker creates a linker with the full reality pipeline.
-func NewEntityLinker() (*EntityLinker, error)
+// CURRENT: EntityMap is built per-scan
+type EntityMap map[int]string  // offset → entityID
 
-// LinkChunks processes all leaf nodes through reality projection.
-// Returns entity mentions and narrative links for graph overlay.
-func (el *EntityLinker) LinkChunks(tree *RaptorTree) LinkResult
-
-// LinkSingleChunk processes one chunk - useful for incremental updates.
-func (el *EntityLinker) LinkSingleChunk(chunk *RaptorNode) ([]EntityMention, []NarrativeLink)
+// PROPOSED: Use GlobalEntityRegistry for resolution
+func Project(root *cst.Node, matcher *narrative.NarrativeMatcher,
+             registry *graptor.GlobalEntityRegistry,  // Changed from EntityMap
+             text string, prov *hierarchy.ProvenanceContext) *graph.ConceptGraph {
+    
+    // Resolve entities via registry instead of static map
+    // This enables cross-chapter alias matching
+}
 ```
 
-### Integration with Reality
+### Point 3: Resolver History Expansion
+
+**Location**: [`resolver.NarrativeContext`](GoKitt/pkg/scanner/resolver/resolver.go:33)
 
 ```go
-func (el *EntityLinker) LinkSingleChunk(chunk *RaptorNode) ([]EntityMention, []NarrativeLink) {
-    // 1. Run Conductor.Scan() to get entities and tokens
-    scanResult := el.conductor.Scan(chunk.Text)
+// CURRENT: Limited history
+type NarrativeContext struct {
+    history    []string  // maxHistory = 10
+    maxHistory int
+}
+
+// PROPOSED: Chapter-aware history
+type NarrativeContext struct {
+    localHistory   []string           // Per-leaf history (10)
+    globalRegistry *GlobalEntityRegistry  // Cross-chapter lookup
+    chapterContext *ChapterContext    // Entities active in current chapter
+}
+```
+
+### Point 4: Discovery → Registry Feedback Loop
+
+**Location**: [`DiscoveryEngine.ScanText()`](GoKitt/pkg/scanner/discovery/engine.go:52)
+
+```go
+// CURRENT: Discovery candidates are per-scan
+func (e *DiscoveryEngine) ScanText(text string) []DiscoveryCandidate
+
+// PROPOSED: Feed discovered entities back to GlobalEntityRegistry
+func (e *DiscoveryEngine) ScanText(text string, registry *graptor.GlobalEntityRegistry) []DiscoveryCandidate {
+    candidates := e.scanTextInternal(text)
     
-    // 2. Build EntityMap from ResolvedReferences
-    entityMap := make(projection.EntityMap)
-    for _, ref := range scanResult.ResolvedRefs {
-        entityMap[ref.Range.Start] = ref.EntityID
+    // Register discovered entities globally
+    for _, cand := range candidates {
+        registry.RegisterMention(cand.Text, cand.Kind, currentChapter)
     }
-    for _, syn := range scanResult.Syntax {
-        if syn.Kind == syntax.KindEntity {
-            entityMap[syn.Start] = syn.ID
-        }
-    }
     
-    // 3. Build CST from chunk text
-    cstRoot := el.builder.Parse(chunk.Text)
-    
-    // 4. Project to semantic graph
-    conceptGraph := projection.Project(
-        cstRoot,
-        el.conductor.GetMatcher(),
-        entityMap,
-        chunk.Text,
-        nil, // No provenance for single chunk
-    )
-    
-    // 5. Extract mentions and links from concept graph
-    mentions := el.extractMentions(conceptGraph, chunk)
-    links := el.extractLinks(conceptGraph, chunk)
-    
-    return mentions, links
+    return candidates
 }
 ```
 
 ---
 
-## Component 2: Graph Overlay
+## New Components
 
-**File:** `pkg/raptor/graph_overlay.go`
-
-### Design
-
-The GraphOverlay maintains a unified `KnowledgeGraph` that spans all RAPTOR trees:
+### 1. ChapterContext
 
 ```go
-// GraphOverlay maintains the cross-document entity-chunk graph.
-type GraphOverlay struct {
-    graph    *knowledge.KnowledgeGraph
+// pkg/graptor/chapter_context.go
+package graptor
+
+// ChapterContext maintains entity state within a chapter
+type ChapterContext struct {
+    ChapterID      uint32
     
-    // Inverted indices for fast lookup
-    entityChunks map[string][]string  // entityID → []chunkKey
-    chunkEntities map[string][]string // chunkKey → []entityID
+    // Entities first mentioned in this chapter
+    FirstMentions  map[string]*EntityMention  // entityID → first mention
     
-    // Narrative links
-    narrativeLinks []NarrativeLink
+    // Entities active (mentioned) in this chapter
+    ActiveEntities map[string]int  // entityID → mention count
     
-    // Configuration
-    config OverlayConfig
+    // Last N entities mentioned (for pronoun resolution at chapter boundary)
+    LastMentioned  []string  // max 20
+    
+    // Carry-over to next chapter
+    CarryOver      []string  // Entities to propagate to next chapter
 }
 
-// OverlayConfig tunes graph construction.
-type OverlayConfig struct {
-    MinEntityMentions int     // Min mentions to include entity (default: 1)
-    BridgeMinOverlap  int     // Min shared entities for bridge (default: 1)
-    NarrativeWeight   float64 // Weight for NARRATIVE_REL edges (default: 0.5)
+// ChapterTransition handles chapter boundary logic
+type ChapterTransition struct {
+    prevContext *ChapterContext
+    currContext *ChapterContext
+    registry    *GlobalEntityRegistry
 }
 
-// BridgeResult represents a chunk connected via shared entities.
-type BridgeResult struct {
-    ChunkKey       string
-    SharedEntities []string
-    OverlapRatio   float64  // Jaccard: |A∩B| / |A∪B|
-}
-```
-
-### Key Methods
-
-```go
-// NewGraphOverlay creates an empty overlay.
-func NewGraphOverlay(config OverlayConfig) *GraphOverlay
-
-// IngestMentions adds entity-chunk relationships from a document.
-func (go *GraphOverlay) IngestMentions(mentions []EntityMention, docID string)
-
-// IngestNarrativeLinks adds entity-entity relationships.
-func (go *GraphOverlay) IngestNarrativeLinks(links []NarrativeLink)
-
-// GetBridgedChunks finds chunks connected via shared entities.
-func (go *GraphOverlay) GetBridgedChunks(chunkKey string, topK int) []BridgeResult
-
-// GetEntityContext returns all chunks mentioning an entity.
-func (go *GraphOverlay) GetEntityContext(entityID string) []string
-
-// GetRelatedEntities finds entities connected via narrative relations.
-func (go *GraphOverlay) GetRelatedEntities(entityID string) []string
-```
-
-### Bridge Edge Computation
-
-```go
-func (go *GraphOverlay) GetBridgedChunks(chunkKey string, topK int) []BridgeResult {
-    // Get entities in source chunk
-    sourceEntities := go.chunkEntities[chunkKey]
-    if len(sourceEntities) == 0 {
-        return nil
-    }
-    
-    // Find candidate chunks via entity inverted index
-    candidates := make(map[string]int) // chunkKey → shared count
-    for _, entityID := range sourceEntities {
-        for _, otherChunk := range go.entityChunks[entityID] {
-            if otherChunk != chunkKey {
-                candidates[otherChunk]++
+// ResolveAtBoundary resolves pronouns at chapter start using previous chapter context
+func (ct *ChapterTransition) ResolveAtBoundary(pronoun string, gender Gender) string {
+    // Check carry-over from previous chapter first
+    for _, entityID := range ct.prevContext.CarryOver {
+        if entity, ok := ct.registry.Get(entityID); ok {
+            if gendersCompatible(entity.Gender, gender) {
+                return entityID
             }
         }
     }
+    return ""
+}
+```
+
+### 2. GraptorConductor
+
+```go
+// pkg/graptor/graptor_conductor.go
+package graptor
+
+import (
+    "github.com/kittclouds/gokitt/pkg/chunker"
+    "github.com/kittclouds/gokitt/pkg/scanner/conductor"
+    "github.com/kittclouds/gokitt/pkg/reality/builder"
+    "github.com/kittclouds/gokitt/pkg/reality/projection"
+)
+
+// GraptorConductor orchestrates the full ingestion pipeline
+type GraptorConductor struct {
+    chunker      *chunker.ChunkerX2
+    conductor    *conductor.Conductor
+    registry     *GlobalEntityRegistry
+    linker       *CrossChapterLinker
+    merger       *ChapterMerger
+}
+
+// IngestDocument processes a full document
+func (gc *GraptorConductor) IngestDocument(docID, text string) *DocumentGraph {
+    // 1. Chunk into 3-level hierarchy
+    chunkTree := gc.chunker.ChunkDocumentExtended(docID, text)
     
-    // Compute Jaccard similarity and sort
-    results := make([]BridgeResult, 0, len(candidates))
-    for otherKey, sharedCount := range candidates {
-        otherEntities := go.chunkEntities[otherKey]
-        unionSize := len(sourceEntities) + len(otherEntities) - sharedCount
-        ratio := float64(sharedCount) / float64(unionSize)
+    // 2. Process each chapter
+    for _, chapter := range chunkTree.Chapters {
+        gc.processChapter(chapter)
+    }
+    
+    // 3. Cross-chapter linking
+    gc.linker.LinkAllChapters(gc.registry)
+    
+    // 4. Build final document graph
+    return gc.merger.Merge()
+}
+
+func (gc *GraptorConductor) processChapter(chapter *chunker.ChapterNode) {
+    chapterCtx := NewChapterContext(chapter.ID)
+    
+    // Process each leaf in chapter
+    for _, leaf := range chapter.Leaves {
+        gc.processLeaf(leaf, chapterCtx)
+    }
+    
+    // Store chapter context for cross-chapter linking
+    gc.registry.AddChapterContext(chapter.ID, chapterCtx)
+}
+
+func (gc *GraptorConductor) processLeaf(leaf *chunker.LeafNode, ctx *ChapterContext) *graph.ConceptGraph {
+    // 1. Run Conductor scan
+    scanResult := gc.conductor.Scan(leaf.Text)
+    
+    // 2. Build CST
+    cst := builder.Zip(leaf.Text, scanResult)
+    
+    // 3. Project to graph (using global registry)
+    leafGraph := projection.Project(cst, gc.conductor.GetMatcher(), 
+                                    gc.registry, leaf.Text, nil)
+    
+    // 4. Register entities in global registry
+    for _, entity := range leafGraph.AllNodes() {
+        gc.registry.RegisterMention(entity.ID, entity.Kind, ctx.ChapterID)
+    }
+    
+    return leafGraph
+}
+```
+
+### 3. ChapterMerger
+
+```go
+// pkg/graptor/chapter_merger.go
+package graptor
+
+// ChapterMerger combines leaf graphs into chapter graphs, then document graph
+type ChapterMerger struct {
+    leafGraphs    map[uint32][]*graph.ConceptGraph  // chapterID → leaf graphs
+    chapterGraphs map[uint32]*graph.ConceptGraph    // chapterID → merged chapter graph
+    registry      *GlobalEntityRegistry
+}
+
+// AddLeafGraph adds a leaf graph to the chapter
+func (cm *ChapterMerger) AddLeafGraph(chapterID uint32, g *graph.ConceptGraph) {
+    cm.leafGraphs[chapterID] = append(cm.leafGraphs[chapterID], g)
+}
+
+// MergeChapter combines all leaf graphs in a chapter
+func (cm *ChapterMerger) MergeChapter(chapterID uint32) *graph.ConceptGraph {
+    merged := graph.NewGraph()
+    
+    for _, leafGraph := range cm.leafGraphs[chapterID] {
+        // Merge nodes
+        for _, node := range leafGraph.AllNodes() {
+            merged.EnsureNode(node.ID, node.Label, node.Kind)
+        }
         
-        if sharedCount >= go.config.BridgeMinOverlap {
-            results = append(results, BridgeResult{
-                ChunkKey:       otherKey,
-                SharedEntities: go.getSharedEntities(sourceEntities, otherEntities),
-                OverlapRatio:   ratio,
-            })
+        // Merge edges (deduplicate using registry)
+        for _, edge := range leafGraph.AllEdges() {
+            // Normalize entity IDs using registry
+            sourceID := cm.registry.NormalizeID(edge.Source.ID)
+            targetID := cm.registry.NormalizeID(edge.Target.ID)
+            
+            merged.AddEdge(sourceID, targetID, edge.Edge.Relation, edge.Edge.Weight)
         }
     }
     
-    // Sort by overlap ratio, limit to topK
-    sort.Slice(results, func(i, j int) bool {
-        return results[i].OverlapRatio > results[j].OverlapRatio
-    })
-    
-    if len(results) > topK {
-        results = results[:topK]
+    cm.chapterGraphs[chapterID] = merged
+    return merged
+}
+
+// Merge combines all chapter graphs into document graph
+func (cm *ChapterMerger) Merge() *DocumentGraph {
+    docGraph := &DocumentGraph{
+        Chapters: make(map[uint32]*graph.ConceptGraph),
+        CrossChapterEdges: []*CrossChapterEdge{},
     }
     
-    return results
+    // Merge each chapter
+    for chapterID := range cm.leafGraphs {
+        docGraph.Chapters[chapterID] = cm.MergeChapter(chapterID)
+    }
+    
+    // Add cross-chapter edges from registry
+    for _, link := range cm.registry.GetCrossChapterLinks() {
+        docGraph.CrossChapterEdges = append(docGraph.CrossChapterEdges, link)
+    }
+    
+    return docGraph
 }
 ```
 
 ---
 
-## Component 3: GRAPTOR Retriever
+## Cross-Chapter Linking Strategies
 
-**File:** `pkg/raptor/retrieval.go` (modifications)
-
-### Design
-
-The GraptorRetriever wraps CollapsedRetriever and adds graph expansion:
+### Strategy 1: Alias Propagation
 
 ```go
-// GraptorRetriever implements graph-augmented RAPTOR retrieval.
-type GraptorRetriever struct {
-    collapsed *CollapsedRetriever
-    overlay   *GraphOverlay
-    config    GraptorConfig
-}
+// When "Ryan Romano" and "Quicksave" appear in same sentence:
+// 1. Detect apposition pattern: "Ryan Romano, also known as Quicksave"
+// 2. Register as aliases in GlobalEntityRegistry
+// 3. Propagate to all chapters
 
-// GraptorConfig tunes retrieval behavior.
-type GraptorConfig struct {
-    BridgeBoost     float64  // Score multiplier for bridged chunks (default: 0.3)
-    MaxBridgeExpand int      // Max additional chunks from graph (default: 5)
-    MinOverlap      int      // Minimum shared entities for bridge (default: 1)
-    UseNarrative    bool     // Include narrative relations in expansion (default: true)
-}
-
-// GraptorResult extends CollapsedResult with graph metadata.
-type GraptorResult struct {
-    CollapsedResult
-    BridgedFrom   string   // Source chunk if graph-expanded
-    SharedEntities []string // Entities that triggered bridge
-    GraphScore    float64  // Score contribution from graph
+func (r *GlobalEntityRegistry) RegisterAliasFromApposition(text string, entities []string) {
+    if len(entities) == 2 {
+        // Check for apposition pattern
+        if strings.Contains(text, "also known as") ||
+           strings.Contains(text, "aka") ||
+           strings.Contains(text, ", the ") {
+            r.AddAlias(entities[0], entities[1])
+        }
+    }
 }
 ```
 
-### Search Algorithm
+### Strategy 2: Chapter Transition Carry-Over
 
 ```go
-func (gr *GraptorRetriever) Search(query string, queryVec []float32, k int) []GraptorResult {
-    // 1. Base retrieval via collapsed tree
-    baseResults := gr.collapsed.Search(query, queryVec, k)
+// Last mentioned entities in Chapter N become candidates for pronouns in Chapter N+1
+
+func (r *GlobalEntityRegistry) GetCarryOverEntities(chapterID uint32) []string {
+    ctx := r.chapterContexts[chapterID]
     
-    // 2. Graph expansion for each result
-    expanded := make(map[string]*GraptorResult) // dedupe by chunkKey
+    // Sort by recency, take top N
+    sorted := sortEntitiesByLastMention(ctx.ActiveEntities)
     
-    for _, base := range baseResults {
-        // Add base result
-        gr.addResult(expanded, base, nil, 0)
-        
-        // Find bridged chunks
-        bridges := gr.overlay.GetBridgedChunks(base.ChunkKey, gr.config.MaxBridgeExpand)
-        
-        for _, bridge := range bridges {
-            // Compute boosted score
-            boost := gr.config.BridgeBoost * bridge.OverlapRatio
-            graphScore := base.Score * boost
-            
-            // Create expanded result
-            exp := GraptorResult{
-                BridgedFrom:    base.ChunkKey,
-                SharedEntities: bridge.SharedEntities,
-                GraphScore:     graphScore,
+    carryOver := make([]string, 0, 10)
+    for _, entityID := range sorted[:min(10, len(sorted))] {
+        entity := r.entities[entityID]
+        // Prefer entities with gender (for pronoun resolution)
+        if entity.Gender != GenderUnknown {
+            carryOver = append(carryOver, entityID)
+        }
+    }
+    
+    return carryOver
+}
+```
+
+### Strategy 3: Co-occurrence Statistics
+
+```go
+// Entities appearing together frequently are likely related
+
+type CooccurrenceStats struct {
+    pairCounts  map[string]int  // "entity1|entity2" → count
+    windowSize  int             // sentences
+}
+
+func (cs *CooccurrenceStats) RecordCooccurrence(entities []string) {
+    for i, e1 := range entities {
+        for _, e2 := range entities[i+1:] {
+            key := cooccurrenceKey(e1, e2)
+            cs.pairCounts[key]++
+        }
+    }
+}
+
+func (cs *CooccurrenceStats) GetRelated(entityID string, threshold int) []string {
+    related := []string{}
+    for key, count := range cs.pairCounts {
+        if count >= threshold {
+            e1, e2 := parseCooccurrenceKey(key)
+            if e1 == entityID {
+                related = append(related, e2)
+            } else if e2 == entityID {
+                related = append(related, e1)
             }
-            
-            // Need to fetch chunk details from index
-            // ... populate CollapsedResult fields
-            
-            gr.addResult(expanded, exp, bridge, graphScore)
         }
     }
-    
-    // 3. Sort by combined score
-    results := make([]GraptorResult, 0, len(expanded))
-    for _, r := range expanded {
-        results = append(results, *r)
-    }
-    sort.Slice(results, func(i, j int) bool {
-        return results[i].Score+results[i].GraphScore > results[j].Score+results[j].GraphScore
-    })
-    
-    // 4. Limit to k
-    if len(results) > k {
-        results = results[:k]
-    }
-    
-    return results
+    return related
 }
 ```
 
 ---
 
-## Component 4: RaptorIndex Integration
+## Implementation Phases
 
-**File:** `pkg/raptor/raptor.go` (modifications)
+### Phase 1: GlobalEntityRegistry (Week 1)
 
-### New Fields
+1. Create `pkg/graptor/entity_registry.go`
+2. Implement core registry with:
+   - Entity storage (canonical ID → Entity)
+   - Alias map (alias → canonical ID)
+   - Chapter index (chapter → entities)
+   - Entity chapters (entity → chapters)
+3. Write unit tests
 
-```go
-type RaptorIndex struct {
-    // ... existing fields ...
-    
-    // GRAPTOR components
-    linker *EntityLinker
-    overlay *GraphOverlay
-}
+### Phase 2: ChapterContext (Week 1)
+
+1. Create `pkg/graptor/chapter_context.go`
+2. Implement chapter-scoped entity tracking
+3. Integrate with Resolver for chapter-boundary pronoun resolution
+4. Write unit tests
+
+### Phase 3: Conductor Integration (Week 2)
+
+1. Modify `Conductor` to accept `GlobalEntityRegistry`
+2. Update `Resolver` to use global registry for lookups
+3. Update `Discovery` to feed entities to registry
+4. Integration tests
+
+### Phase 4: Projector Integration (Week 2)
+
+1. Modify `Projector.Project()` to use `GlobalEntityRegistry`
+2. Update entity resolution logic
+3. Add cross-chapter edge creation
+4. Integration tests
+
+### Phase 5: GraptorConductor (Week 3)
+
+1. Create `pkg/graptor/graptor_conductor.go`
+2. Implement full pipeline orchestration
+3. Integrate ChunkerX2
+4. End-to-end tests with `docs/perfect_run.md`
+
+### Phase 6: Cross-Chapter Linking (Week 3-4)
+
+1. Implement alias propagation strategy
+2. Implement chapter transition strategy
+3. Implement co-occurrence statistics
+4. Validation tests
+
+---
+
+## File Structure
+
 ```
-
-### Modified Ingestion
-
-```go
-func (ri *RaptorIndex) IngestDocument(docID string, text string, vecFn func(text string) []float32) (*RaptorTree, error) {
-    // 1. Existing chunking and indexing
-    tree, err := ri.ingestDocumentChunks(docID, text, vecFn)
-    if err != nil {
-        return nil, err
-    }
-    
-    // 2. GRAPTOR: Extract entities and relations via reality pipeline
-    if ri.linker != nil && ri.overlay != nil {
-        linkResult := ri.linker.LinkChunks(tree)
-        
-        // Add to overlay
-        ri.overlay.IngestMentions(linkResult.Mentions, docID)
-        ri.overlay.IngestNarrativeLinks(linkResult.Links)
-    }
-    
-    return tree, nil
-}
-```
-
-### Factory Method
-
-```go
-// NewGraptorRetriever creates a graph-augmented retriever.
-func (ri *RaptorIndex) NewGraptorRetriever(config GraptorConfig) *GraptorRetriever {
-    return &GraptorRetriever{
-        collapsed: NewCollapsedRetriever(ri),
-        overlay:   ri.overlay,
-        config:    config,
-    }
-}
-```
-
----
-
-## What We Don't Change
-
-| Component | Why |
-|-----------|-----|
-| `TreeBuilder` | Tree structure stays. Graph is an overlay, not a replacement. |
-| `GDR / HNSW` | Leaf search still uses hard hybrid. Graph only helps expansion. |
-| `Chunker` | Chunks stay the same. We just scan their text for entities. |
-| `KnowledgeGraph` | We reuse `pkg/knowledge` as-is. No new graph implementation. |
-| `Reality/Projector` | We call it. No modifications needed. |
-| `Scanner/Conductor` | We call it. No modifications needed. |
-
----
-
-## Execution Order
-
-1. **`entity_linker.go`** (~150 lines) — Bridges reality → raptor
-2. **`graph_overlay.go`** (~200 lines) — Builds bipartite graph
-3. **Modify `raptor.go`** — Wire linker + overlay
-4. **`GraptorRetriever` in `retrieval.go`** (~150 lines) — Graph-expanded search
-5. **Tests** — Entity linking, bridge computation, retrieval expansion
-6. **WASM** — Expose `graptorSearch` alongside existing raptor search
-
----
-
-## Verification Plan
-
-### Automated Tests
-
-| Test File | Purpose |
-|-----------|---------|
-| `entity_linker_test.go` | Verify entity extraction from known text |
-| `graph_overlay_test.go` | Verify bridge edges form between chunks sharing entities |
-| `retrieval_test.go` additions | Verify GRAPTOR retriever finds cross-document results |
-
-### Test Cases
-
-```go
-// entity_linker_test.go
-func TestLinkChunks_ExtractsEntities(t *testing.T) {
-    // Given: Chunk with "Kaido stood at the gates of Wano"
-    // Expect: EntityMention{EntityID: "Kaido", Kind: "Character"}
-    // Expect: EntityMention{EntityID: "Wano", Kind: "Location"}
-}
-
-func TestLinkChunks_ExtractsNarrative(t *testing.T) {
-    // Given: Chunk with "Luffy punched Kaido"
-    // Expect: NarrativeLink{Subject: "Luffy", Object: "Kaido", Relation: "ATTACKS"}
-}
-
-// graph_overlay_test.go
-func TestBridgeChunks_SharesEntity(t *testing.T) {
-    // Given: Chunk A mentions "Kaido", Chunk B mentions "Kaido"
-    // Expect: BridgeResult with SharedEntities: ["Kaido"]
-}
-
-func TestBridgeChunks_CrossDocument(t *testing.T) {
-    // Given: Chunk in docA mentions "Kaido", Chunk in docB mentions "Kaido"
-    // Expect: Bridge edge connects them despite different documents
-}
-
-// retrieval_test.go
-func TestGraptorRetriever_CrossDocumentRecall(t *testing.T) {
-    // Given: Query "Who fought Kaido?"
-    // And: Doc A has "Luffy fought Kaido" (matches query)
-    // And: Doc B has "Zoro fought Kaido" (shares entity, not direct match)
-    // Expect: Both chunks returned, Doc B via graph expansion
-}
-```
-
-### Eval Harness Integration
-
-1. Add GRAPTOR search mode to existing eval page
-2. Compare RAPTOR vs GRAPTOR recall on queries referencing entities spanning multiple chapters
-3. Measure precision@k and recall@k for both approaches
-
----
-
-## Performance Considerations
-
-### Memory
-
-- Entity-chunk edges: O(E × C) where E = entities, C = chunks
-- Inverted indices: O(E + C) for fast lookup
-- Typical: 10K entities × 50K chunks = 500K edges (manageable)
-
-### Latency
-
-- Bridge computation: O(k × avg_entities_per_chunk) for top-k expansion
-- Pre-compute bridge edges on ingestion for faster retrieval
-- Lazy evaluation option for large corpora
-
-### Incremental Updates
-
-- `LinkSingleChunk()` supports adding new documents without reprocessing
-- Overlay supports incremental edge addition
-- No need to rebuild entire graph for new documents
-
----
-
-## WASM API
-
-```go
-// Exposed to JS
-func graptorSearch(queryJSON string) string {
-    // Parse query
-    var req struct {
-        Query   string
-        Vector  []float32
-        K       int
-        Config  GraptorConfig
-    }
-    json.Unmarshal([]byte(queryJSON), &req)
-    
-    // Search
-    results := graptorRetriever.Search(req.Query, req.Vector, req.K)
-    
-    // Return JSON
-    out, _ := json.Marshal(results)
-    return string(out)
-}
+GoKitt/pkg/graptor/
+├── graptor_conductor.go      # Main pipeline orchestrator
+├── entity_registry.go        # Global entity registry
+├── entity_matcher.go         # String-based matching
+├── chapter_context.go        # Chapter-scoped context
+├── chapter_merger.go         # Graph merging
+├── cross_chapter_linker.go   # Cross-chapter strategies
+├── strategies/
+│   ├── alias_propagation.go
+│   ├── chapter_transition.go
+│   └── cooccurrence.go
+└── graptor_test.go
 ```
 
 ---
 
-## Summary
+## Success Metrics
 
-GRAPTOR with Reality Integration:
+| Metric | Current | Target |
+|--------|---------|--------|
+| Entity history scope | 10 mentions | Unlimited (global) |
+| Cross-chapter linking | None | 85%+ accuracy |
+| Alias propagation | Manual | Automatic |
+| Chapter boundary resolution | None | 80%+ accuracy |
+| Memory per 1MB document | N/A | < 100MB |
+| Processing time per chapter | N/A | < 100ms |
 
-1. **Leverages existing infrastructure** — Reality projection, scanner pipeline, knowledge graph
-2. **No O(n²) construction** — Bridge edges computed from entity co-occurrence, not pair scanning
-3. **Entity-aware** — Chunks connected via shared entities, not just semantic similarity
-4. **Narrative-aware** — Relations extracted from text enrich the graph
-5. **Incremental** — New documents add to overlay without full rebuild
-6. **Testable** — Clear test cases for each component
+---
 
-The result: Cross-document retrieval that understands entity relationships, not just text similarity.
+## Design Decisions (Confirmed)
+
+Based on user feedback, the following design decisions have been made:
+
+### 1. Separation from Original Systems
+- **Decision**: Keep Graptor components completely separate from existing systems
+- **Rationale**: Easier debugging, no risk of breaking existing functionality
+- **Implementation**: Graptor has its own package (`pkg/graptor/`) with no modifications to existing packages
+
+### 2. Persistence
+- **Decision**: Persist GlobalEntityRegistry to SQLiteStore
+- **Rationale**: Cross-session entity memory, supports incremental document processing
+- **Implementation**: New SQLite tables for entities, aliases, and chapter indices
+
+### 3. Conductor Architecture
+- **Decision**: Create new GraptorConductor (not wrapping existing Conductor)
+- **Rationale**: Clean separation, purpose-built for cross-chapter processing
+- **Implementation**: GraptorConductor uses its own internal pipeline components
+
+### 4. Graph Output Type
+- **Decision**: Create new chapter-aware DocumentGraph type
+- **Rationale**: Need chapter-level granularity for cross-chapter linking
+- **Implementation**: New type with chapter graphs + cross-chapter edges
+
+---
+
+## SQLite Schema for GlobalEntityRegistry
+
+```sql
+-- Graptor Entity Tables (separate from existing entities table)
+
+-- Canonical entities
+CREATE TABLE IF NOT EXISTS graptor_entities (
+    id TEXT PRIMARY KEY,
+    canonical_name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    gender TEXT,
+    first_chapter_id INTEGER,
+    first_chunk_id INTEGER,
+    total_mentions INTEGER DEFAULT 1,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+
+-- Aliases (all known surface forms)
+CREATE TABLE IF NOT EXISTS graptor_aliases (
+    alias TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    source TEXT,  -- 'explicit', 'discovered', 'apposition', 'user'
+    confidence REAL DEFAULT 1.0,
+    PRIMARY KEY (alias, entity_id),
+    FOREIGN KEY (entity_id) REFERENCES graptor_entities(id)
+);
+
+-- Chapter index (which entities appear in which chapters)
+CREATE TABLE IF NOT EXISTS graptor_chapter_entities (
+    chapter_id INTEGER NOT NULL,
+    entity_id TEXT NOT NULL,
+    mention_count INTEGER DEFAULT 1,
+    first_mention_offset INTEGER,
+    last_mention_offset INTEGER,
+    PRIMARY KEY (chapter_id, entity_id),
+    FOREIGN KEY (entity_id) REFERENCES graptor_entities(id)
+);
+
+-- Cross-chapter links (provenance for entity linking)
+CREATE TABLE IF NOT EXISTS graptor_cross_chapter_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_entity_id TEXT NOT NULL,
+    target_entity_id TEXT NOT NULL,
+    link_type TEXT NOT NULL,  -- 'SAME_AS', 'ALIAS_OF', 'RELATED_TO'
+    confidence REAL,
+    source_chapter INTEGER,
+    evidence TEXT,  -- JSON: {text, offset, pattern}
+    created_at INTEGER,
+    FOREIGN KEY (source_entity_id) REFERENCES graptor_entities(id),
+    FOREIGN KEY (target_entity_id) REFERENCES graptor_entities(id)
+);
+
+-- Co-occurrence statistics
+CREATE TABLE IF NOT EXISTS graptor_cooccurrences (
+    entity1_id TEXT NOT NULL,
+    entity2_id TEXT NOT NULL,
+    cooccurrence_count INTEGER DEFAULT 1,
+    last_chapter INTEGER,
+    PRIMARY KEY (entity1_id, entity2_id),
+    FOREIGN KEY (entity1_id) REFERENCES graptor_entities(id),
+    FOREIGN KEY (entity2_id) REFERENCES graptor_entities(id)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_graptor_aliases_entity ON graptor_aliases(entity_id);
+CREATE INDEX IF NOT EXISTS idx_graptor_chapter_entities_entity ON graptor_chapter_entities(entity_id);
+CREATE INDEX IF NOT EXISTS idx_graptor_cross_chapter_source ON graptor_cross_chapter_links(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_graptor_cross_chapter_target ON graptor_cross_chapter_links(target_entity_id);
+```

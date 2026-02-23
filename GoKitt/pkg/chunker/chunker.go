@@ -9,6 +9,19 @@ import (
 )
 
 // ============================================================================
+// ChunkKey - Zero-Allocation Struct Key (Phase-2 Optimization)
+// ============================================================================
+
+// ChunkKey is a struct-based map key that avoids string allocation.
+// Go does not heap-allocate struct keys, eliminating thousands of allocations.
+type ChunkKey struct {
+	DocID string
+	Level uint8
+	Start int
+	End   int
+}
+
+// ============================================================================
 // ChunkIDMapper - "IDs never reused" invariant
 // ============================================================================
 
@@ -16,11 +29,14 @@ import (
 // that IDs are never reused. This aligns with the DocIDMapper pattern used
 // in qgram for hybrid index integration.
 type ChunkIDMapper struct {
-	mu       sync.RWMutex
-	nextID   uint32
-	byString map[string]uint32 // chunk key -> uint32 ID
-	byID     map[uint32]string // uint32 ID -> chunk key
-	byDoc    map[uint32]string // uint32 ID -> docID
+	mu        sync.RWMutex
+	nextID    uint32
+	byKey     map[ChunkKey]uint32 // chunk key struct -> uint32 ID (zero-allocation)
+	byID      map[uint32]ChunkKey // uint32 ID -> chunk key struct
+	byString  map[string]uint32   // chunk key string -> uint32 ID (legacy compatibility)
+	byIDStr   map[uint32]string   // uint32 ID -> chunk key string (legacy compatibility)
+	byDoc     map[uint32]string   // uint32 ID -> docID
+	useStruct bool                // whether to use struct keys
 }
 
 // NewChunkIDMapper creates a new mapper
@@ -28,8 +44,19 @@ func NewChunkIDMapper() *ChunkIDMapper {
 	return &ChunkIDMapper{
 		nextID:   1, // 0 is reserved for "not found"
 		byString: make(map[string]uint32),
-		byID:     make(map[uint32]string),
+		byIDStr:  make(map[uint32]string),
 		byDoc:    make(map[uint32]string),
+	}
+}
+
+// NewChunkIDMapperOptimized creates a mapper with zero-allocation struct keys.
+func NewChunkIDMapperOptimized() *ChunkIDMapper {
+	return &ChunkIDMapper{
+		nextID:    1,
+		byKey:     make(map[ChunkKey]uint32),
+		byID:      make(map[uint32]ChunkKey),
+		byDoc:     make(map[uint32]string),
+		useStruct: true,
 	}
 }
 
@@ -46,8 +73,25 @@ func (m *ChunkIDMapper) GetOrAssign(key, docID string) uint32 {
 	id := m.nextID
 	m.nextID++
 	m.byString[key] = id
-	m.byID[id] = key
+	m.byIDStr[id] = key
 	m.byDoc[id] = docID
+	return id
+}
+
+// GetOrAssignKey returns the uint32 ID for a ChunkKey struct (zero-allocation).
+func (m *ChunkIDMapper) GetOrAssignKey(key ChunkKey) uint32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if id, ok := m.byKey[key]; ok {
+		return id
+	}
+
+	id := m.nextID
+	m.nextID++
+	m.byKey[key] = id
+	m.byID[id] = key
+	m.byDoc[id] = key.DocID
 	return id
 }
 
@@ -58,11 +102,22 @@ func (m *ChunkIDMapper) Get(key string) uint32 {
 	return m.byString[key]
 }
 
+// GetKey returns the uint32 ID for a ChunkKey struct, or 0 if not found.
+func (m *ChunkIDMapper) GetKey(key ChunkKey) uint32 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.byKey[key]
+}
+
 // GetString returns the chunk key for an ID, or "" if not found.
 func (m *ChunkIDMapper) GetString(id uint32) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.byID[id]
+	if m.useStruct {
+		ck := m.byID[id]
+		return chunkKey(ck.DocID, ck.Level, ck.Start, ck.End)
+	}
+	return m.byIDStr[id]
 }
 
 // GetDocID returns the document ID for a chunk ID, or "" if not found.
@@ -76,6 +131,9 @@ func (m *ChunkIDMapper) GetDocID(chunkID uint32) string {
 func (m *ChunkIDMapper) Len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.useStruct {
+		return len(m.byKey)
+	}
 	return len(m.byString)
 }
 
@@ -91,8 +149,15 @@ func (m *ChunkIDMapper) NextID() uint32 {
 func (m *ChunkIDMapper) GetAll() map[uint32]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	result := make(map[uint32]string, len(m.byID))
-	for id, key := range m.byID {
+	if m.useStruct {
+		result := make(map[uint32]string, len(m.byID))
+		for id, key := range m.byID {
+			result[id] = chunkKey(key.DocID, key.Level, key.Start, key.End)
+		}
+		return result
+	}
+	result := make(map[uint32]string, len(m.byIDStr))
+	for id, key := range m.byIDStr {
 		result[id] = key
 	}
 	return result
@@ -111,7 +176,7 @@ func (m *ChunkIDMapper) Restore(id uint32, key, docID string) {
 	defer m.mu.Unlock()
 
 	m.byString[key] = id
-	m.byID[id] = key
+	m.byIDStr[id] = key
 	m.byDoc[id] = docID
 	if id >= m.nextID {
 		m.nextID = id + 1
