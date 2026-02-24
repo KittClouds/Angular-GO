@@ -525,3 +525,18 @@ type DocumentChapterStats struct {
 	ChapterStats      map[uint32]ChapterStats `json:"chapterStats"`
 	EntityAppearances map[string][]uint32     `json:"entityAppearances"` // entityID → chapter IDs
 }
+
+// GetTotalRingBufferSize returns the total size of all ring buffers across chapters.
+// ZERO-COPY: Does not allocate any slices, iterates in-place.
+func (cm *ChapterManager) GetTotalRingBufferSize() int {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	total := 0
+	for _, ctx := range cm.chapters {
+		if ctx.lastMentioned != nil {
+			total += ctx.lastMentioned.Len()
+		}
+	}
+	return total
+}

@@ -567,7 +567,7 @@ export class AnalyticsPanelComponent {
     }
 
     openEval() {
-        this.router.navigate(['/raptor-eval']);
+        this.router.navigate(['/playground']);
     }
 
     // ... formatTime ...

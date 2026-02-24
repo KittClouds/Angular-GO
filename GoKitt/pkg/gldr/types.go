@@ -1,0 +1,74 @@
+// Package gldr provides Graph-based Lexical Document Retrieval.
+// It fuses qgram BM25 lexical scoring with graph proximity scoring
+// from entity relationships, providing embedding-free retrieval for Graptor.
+package gldr
+
+import "github.com/kittclouds/gokitt/pkg/qgram"
+
+// EntityMention records an entity occurrence in a chunk.
+type EntityMention struct {
+	EntityID   string  // Canonical entity ID
+	Confidence float64 // Discovery confidence (1.0 for known entities)
+	Start      int     // Character offset in chunk
+	End        int     // End offset
+}
+
+// GraphEdge represents a relationship between entities.
+type GraphEdge struct {
+	TargetID   string  // Target entity ID
+	RelType    string  // Relationship type (e.g., "cooccurs", "interacts")
+	Confidence float64 // Edge confidence
+	Source     string  // "explicit" | "inferred" | "cooccurrence"
+}
+
+// EntityAnchor represents an anchored entity for graph traversal.
+type EntityAnchor struct {
+	EntityID   string  // Canonical entity ID
+	Confidence float64 // 1.0 for direct, <1.0 for soft
+	Source     string  // "direct" | "soft"
+}
+
+// GLDRQuery represents a parsed query with entity anchors.
+type GLDRQuery struct {
+	RawText       string
+	DirectAnchors []EntityAnchor // Entities found via canonicalization
+	SoftAnchors   []EntityAnchor // Entities from chunk-based lookup
+	Clauses       []qgram.Clause // Parsed lexical clauses
+}
+
+// AllAnchors returns direct + soft anchors merged.
+func (q *GLDRQuery) AllAnchors() []EntityAnchor {
+	if len(q.DirectAnchors) > 0 {
+		return q.DirectAnchors
+	}
+	return q.SoftAnchors
+}
+
+// HasDirectAnchors returns true if any direct anchors were found.
+func (q *GLDRQuery) HasDirectAnchors() bool {
+	return len(q.DirectAnchors) > 0
+}
+
+// GLDRResult represents a scored chunk result.
+type GLDRResult struct {
+	ChunkID         string        // Chunk document ID
+	ChunkScore      float64       // Fused score (for ranking)
+	LexScore        float64       // Raw lexical BM25 score
+	GraphScore      float64       // Raw graph proximity score
+	MatchedEntities []EntityMatch // Entity attribution
+}
+
+// EntityMatch records why an entity matched.
+type EntityMatch struct {
+	EntityID     string  // Canonical entity ID
+	Proximity    float64 // Graph proximity from anchor
+	MentionCount int     // Times mentioned in chunk
+}
+
+// NodeResult represents a ranked entity/node.
+type NodeResult struct {
+	EntityID           string   // Canonical entity ID
+	NodeScore          float64  // Combined score
+	TopChunks          []string // Top supporting chunk IDs
+	ProximityFromQuery float64  // Graph distance from anchors
+}

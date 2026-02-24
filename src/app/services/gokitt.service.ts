@@ -117,7 +117,14 @@ type GoKittWorkerMessage =
     | { type: 'KNOWLEDGE_GET_ANCESTORS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
     | { type: 'KNOWLEDGE_GET_DESCENDANTS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
     | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD'; payload: { id: string }; id: number }
-    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number };
+    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number }
+    // GLDR requests
+    | { type: 'GLDR_INIT'; id: number }
+    | { type: 'GLDR_INDEX_CHUNK'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string }; id: number }
+    | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
+    | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_STATS'; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -1032,6 +1039,13 @@ export class GoKittService {
                         case 'KNOWLEDGE_GET_DESCENDANTS_RESULT':
                         case 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT':
                         case 'KNOWLEDGE_GET_GRAPH_RESULT':
+                        // GLDR responses
+                        case 'GLDR_INIT_RESULT':
+                        case 'GLDR_INDEX_CHUNK_RESULT':
+                        case 'GLDR_LOAD_COOCCURRENCES_RESULT':
+                        case 'GLDR_SEARCH_RESULT':
+                        case 'GLDR_SEARCH_NODES_RESULT':
+                        case 'GLDR_STATS_RESULT':
                             pending.resolve(msg.payload);
                             break;
                         default:
@@ -1618,5 +1632,75 @@ export class GoKittService {
     async knowledgeGetGraph(): Promise<{ nodes: any; edges: any[] }> {
         if (!this.wasmLoaded) return { nodes: {}, edges: [] };
         return this.sendRequest('KNOWLEDGE_GET_GRAPH', {});
+    }
+
+    // =========================================================================
+    // GLDR API — Graph-Based Lexical Document Retrieval (Graptor's retriever)
+    // These methods become active once the WASM bridge exports are wired.
+    // =========================================================================
+
+    /** Initialize the GLDR in-memory index. */
+    async gldrInit(): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('GLDR_INIT', {});
+    }
+
+    /**
+     * Index a single chunk into GLDR.
+     * @param chunkId  Stable chunk identifier (e.g. chapter-3)
+     * @param fields   Field map { content: string, title?: string }
+     * @param mentions Entity mentions in this chunk (from Graptor conductor)
+     */
+    async gldrIndexChunk(
+        chunkId: string,
+        fields: Record<string, string>,
+        mentions: Array<{ entityId: string; count: number }>
+    ): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        const fieldsJSON = JSON.stringify(fields);
+        const mentionsJSON = JSON.stringify(mentions);
+        return this.sendRequest('GLDR_INDEX_CHUNK', { chunkId, fieldsJSON, mentionsJSON });
+    }
+
+    /**
+     * Bulk-load entity co-occurrence graph from Graptor's CooccurrenceStats.
+     * @param minCount Minimum co-occurrence count to include as an edge
+     */
+    async gldrLoadCooccurrences(minCount = 2): Promise<{ success: boolean; edgesLoaded?: number; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('GLDR_LOAD_COOCCURRENCES', { minCount });
+    }
+
+    /**
+     * Run fused lexical + graph proximity search.
+     * @param query      Natural language query string
+     * @param config     Optional GLDRConfig overrides
+     * @returns JSON-encoded GraptorSearchResult[]
+     */
+    async gldrSearch(query: string, config: Record<string, unknown> = {}): Promise<string> {
+        if (!this.wasmLoaded) return '[]';
+        const configJSON = JSON.stringify(config);
+        return this.sendRequest('GLDR_SEARCH', { query, configJSON });
+    }
+
+    /**
+     * Run entity node ranking search.
+     * @param query  Natural language query string
+     * @param config Optional GLDRConfig overrides
+     * @returns JSON-encoded GraptorNodeResult[]
+     */
+    async gldrSearchNodes(query: string, config: Record<string, unknown> = {}): Promise<string> {
+        if (!this.wasmLoaded) return '[]';
+        const configJSON = JSON.stringify(config);
+        return this.sendRequest('GLDR_SEARCH_NODES', { query, configJSON });
+    }
+
+    /**
+     * Get GLDR index statistics.
+     * @returns JSON-encoded { entities: number, chunks: number, edges: number }
+     */
+    async gldrStats(): Promise<string> {
+        if (!this.wasmLoaded) return '{"entities":0,"chunks":0,"edges":0}';
+        return this.sendRequest('GLDR_STATS', {});
     }
 }

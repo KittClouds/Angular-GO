@@ -130,20 +130,14 @@ func (mp *MemoryProfiler) CaptureSnapshot(registry *GlobalEntityRegistry, cooccu
 		}
 	}
 
+	// ZERO-COPY: Use Stats() instead of GetTopPairs() which allocates millions of structs
 	if cooccurrence != nil {
-		pairs := cooccurrence.GetTopPairs(1000000) // Get all
-		graptorStats.CooccurrenceCount = len(pairs)
+		graptorStats.CooccurrenceCount = cooccurrence.Stats().TotalPairs
 	}
 
+	// ZERO-COPY: Use dedicated method instead of GetAllChapters() which allocates slices
 	if chapterMgr != nil {
-		chapters := chapterMgr.GetAllChapters()
-		totalRingSize := 0
-		for _, ch := range chapters {
-			if ch.lastMentioned != nil {
-				totalRingSize += ch.lastMentioned.Len()
-			}
-		}
-		graptorStats.RingBufferSize = totalRingSize
+		graptorStats.RingBufferSize = chapterMgr.GetTotalRingBufferSize()
 	}
 
 	snapshot := ProfileSnapshot{
@@ -169,10 +163,33 @@ func (mp *MemoryProfiler) CaptureSnapshot(registry *GlobalEntityRegistry, cooccu
 }
 
 // GetSnapshots returns all captured snapshots.
+// DEPRECATED: Use ForEachSnapshot for zero-copy iteration.
 func (mp *MemoryProfiler) GetSnapshots() []ProfileSnapshot {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return append([]ProfileSnapshot{}, mp.snapshots...)
+}
+
+// ForEachSnapshot iterates over all snapshots without allocating a copy.
+// ZERO-COPY: The callback receives each snapshot directly from the internal slice.
+// Return false from the callback to stop iteration early.
+func (mp *MemoryProfiler) ForEachSnapshot(fn func(ProfileSnapshot) bool) {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+
+	for _, snapshot := range mp.snapshots {
+		if !fn(snapshot) {
+			break
+		}
+	}
+}
+
+// GetSnapshotCount returns the number of captured snapshots.
+// ZERO-COPY: O(1) operation without any allocation.
+func (mp *MemoryProfiler) GetSnapshotCount() int {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return len(mp.snapshots)
 }
 
 // GetBaseline returns the baseline memory stats.
