@@ -5,8 +5,7 @@ import { Component, OnInit, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Button } from 'primeng/button';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabs';
-import { Divider } from 'primeng/divider';
-import { Tag } from 'primeng/tag';
+
 import { SelectModule } from 'primeng/select';
 import { FormsModule } from '@angular/forms';
 
@@ -19,32 +18,30 @@ import { RlmModuleComponent } from '../../components/rlm-module/rlm-module.compo
 
 const DOC_URL = '/docs/shortrun.md';
 
-const FILTER_OPTIONS = [
-    { label: 'All Sources', value: null },
-    { label: '🔵 RAPTOR', value: 'raptor' },
-    { label: '🟢 Graptor', value: 'graptor' },
-    { label: '🟣 Memory/OM', value: 'memory' },
-    { label: '🟠 RLM', value: 'rlm' },
-    { label: '⚙️  System', value: 'system' },
-] as const;
+const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
+  { label: 'All Sources', value: null },
+  { label: '🔵 RAPTOR', value: 'raptor' },
+  { label: '🟢 Graptor', value: 'graptor' },
+  { label: '🟣 Memory/OM', value: 'memory' },
+  { label: '🟠 RLM', value: 'rlm' },
+  { label: '⚙️  System', value: 'system' },
+];
 
 @Component({
-    selector: 'app-playground-page',
-    standalone: true,
-    imports: [
-        CommonModule,
-        FormsModule,
-        Button,
-        Tabs, TabList, Tab, TabPanels, TabPanel,
-        Divider,
-        Tag,
-        SelectModule,
-        RaptorModuleComponent,
-        GraptorModuleComponent,
-        MemoryModuleComponent,
-        RlmModuleComponent,
-    ],
-    template: `
+  selector: 'app-playground-page',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    Button,
+    Tabs, TabList, Tab, TabPanels, TabPanel,
+    SelectModule,
+    RaptorModuleComponent,
+    GraptorModuleComponent,
+    MemoryModuleComponent,
+    RlmModuleComponent,
+  ],
+  template: `
     <div class="playground-root">
 
       <!-- ===== HEADER ===== -->
@@ -93,7 +90,7 @@ const FILTER_OPTIONS = [
 
       <!-- ===== MODULE TABS ===== -->
       <div class="playground-body">
-        <p-tabs [value]="activeTab()" (valueChange)="activeTab.set($event)" styleClass="module-tabs">
+        <p-tabs [value]="activeTab()" (valueChange)="onTabChange($event)" styleClass="module-tabs">
           <p-tablist>
             <p-tab value="raptor">
               <span class="tab-dot raptor-dot"></span>
@@ -175,7 +172,7 @@ const FILTER_OPTIONS = [
 
     </div>
   `,
-    styles: [`
+  styles: [`
     /* ======== Layout ======== */
     .playground-root {
       display: flex;
@@ -289,32 +286,36 @@ const FILTER_OPTIONS = [
   `],
 })
 export class PlaygroundPageComponent implements OnInit {
-    protected readonly logService = inject(PlaygroundLogService);
-    protected readonly dataService = inject(PlaygroundDataService);
+  protected readonly logService = inject(PlaygroundLogService);
+  protected readonly dataService = inject(PlaygroundDataService);
 
-    readonly activeTab = signal<string>('raptor');
-    readonly filterOptions = FILTER_OPTIONS;
-    selectedFilter: LogSource | null = null;
+  readonly activeTab = signal<string>('raptor');
+  readonly filterOptions = FILTER_OPTIONS;
+  selectedFilter: LogSource | null = null;
 
-    ngOnInit(): void {
-        this.logService.info('system', 'Research Playground ready 🚀');
-    }
+  ngOnInit(): void {
+    this.logService.info('system', 'Research Playground ready 🚀');
+  }
 
-    async loadDocument(): Promise<void> {
-        await this.dataService.loadDocument(DOC_URL);
-    }
+  async loadDocument(): Promise<void> {
+    await this.dataService.loadDocument(DOC_URL);
+  }
 
-    clearAll(): void {
-        this.dataService.clear();
-        this.logService.clear();
-        this.logService.info('system', 'All data cleared');
-    }
+  clearAll(): void {
+    this.dataService.clear();
+    this.logService.clear();
+    this.logService.info('system', 'All data cleared');
+  }
 
-    clearLog(): void {
-        this.logService.clear(this.selectedFilter ?? undefined);
-    }
+  clearLog(): void {
+    this.logService.clear(this.selectedFilter ?? undefined);
+  }
 
-    onFilterChange(value: LogSource | null): void {
-        this.logService.filter.set(value);
-    }
+  onTabChange(value: string | number | undefined): void {
+    if (typeof value === 'string') this.activeTab.set(value);
+  }
+
+  onFilterChange(value: LogSource | null): void {
+    this.logService.filter.set(value);
+  }
 }
