@@ -96,7 +96,7 @@ func (s *SQLiteStore[T]) warmCache() error {
 	// Reset cache maps
 	s.cache.vertices = make(map[uuid.UUID]cachedVertex[T], vCount)
 	s.cache.outEdges = make(map[uint32]*bitmapAdjacency, vCount)
-	s.cache.inEdges = make(map[uint32]*bitmapAdjacency, vCount)
+	s.cache.slab = newEdgeSlab(eCount)
 	s.cache.edgeCount.Store(int64(eCount))
 
 	// Load vertices
@@ -195,34 +195,26 @@ func (s *SQLiteStore[T]) warmCache() error {
 			},
 		}
 
-		// Helper to safely add to bitmap adjacency
-		addToCache := func(maps map[uint32]*bitmapAdjacency, fromIdx, toIdx uint32, e graph.Edge[uuid.UUID]) {
-			adj, ok := maps[fromIdx]
+		// Store edge once in canonical slab
+		s.cache.slab.Put(uIdx, vIdx, edge)
+
+		// Add neighbor bitmaps (bidirectional)
+		addNeighbor := func(fromIdx, toIdx uint32) {
+			adj, ok := s.cache.outEdges[fromIdx]
 			if !ok {
 				adj = newBitmapAdjacency()
-				maps[fromIdx] = adj
+				s.cache.outEdges[fromIdx] = adj
 			}
 			adj.neighbors.Add(toIdx)
-			adj.edges[toIdx] = e
 		}
 
-		// 1. Forward direction (Source -> Target)
-		addToCache(s.cache.outEdges, uIdx, vIdx, edge)
-		addToCache(s.cache.inEdges, vIdx, uIdx, edge)
-
-		// 2. Reverse direction (Target -> Source) - same edge object
-		reverseEdge := edge
-		reverseEdge.Source = tgt
-		reverseEdge.Target = src
-
-		addToCache(s.cache.outEdges, vIdx, uIdx, reverseEdge)
-		addToCache(s.cache.inEdges, uIdx, vIdx, reverseEdge)
+		addNeighbor(uIdx, vIdx)
+		addNeighbor(vIdx, uIdx)
 	}
 
 	// Load Labels
 	lRows, err := s.db.Query("SELECT vertex_id, label FROM graph_vertex_labels")
 	if err != nil {
-		// Fallback for migration safety? No, strict schema update.
 		return fmt.Errorf("query labels: %w", err)
 	}
 	defer lRows.Close()

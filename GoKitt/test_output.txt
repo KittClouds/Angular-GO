@@ -1,0 +1,27 @@
+﻿=== RUN   TestAddGraphEdge
+--- FAIL: TestAddGraphEdge (1.36s)
+panic: failed to create index registry: query node_index: sqlite3: SQL logic error: no such table: graph_node_index [recovered, repanicked]
+
+goroutine 30 [running]:
+testing.tRunner.func1.2({0x7ff613ee0c80, 0xc000694f80})
+	C:/Users/shuga/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.windows-amd64/src/testing/testing.go:1872 +0x239
+testing.tRunner.func1()
+	C:/Users/shuga/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.windows-amd64/src/testing/testing.go:1875 +0x35b
+panic({0x7ff613ee0c80?, 0xc000694f80?})
+	C:/Users/shuga/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.windows-amd64/src/runtime/panic.go:783 +0x132
+github.com/kittclouds/gokitt/internal/graphstore.New[...](0xc0000f2750, 0xc00008c350, 0xc00008c360)
+	C:/Users/shuga/1kittroot/1code/Angular-build/GoKitt/internal/graphstore/store.go:37 +0x1ff
+github.com/kittclouds/gokitt/internal/graphstore.NewJSON[...](0xc0000f2750)
+	C:/Users/shuga/1kittroot/1code/Angular-build/GoKitt/internal/graphstore/store.go:53 +0xbe
+github.com/kittclouds/gokitt/pkg/gldr.NewGLDRWithDB({{0x3ff3333333333333, 0x3fe8000000000000, 0xc00042ba70, 0x4008000000000000, 0x3fb999999999999a, 0x1, 0x3fe0000000000000, 0x3fb999999999999a, 0x20, 0x0}, ...}, ...)
+	C:/Users/shuga/1kittroot/1code/Angular-build/GoKitt/pkg/gldr/gldr.go:62 +0xd0
+github.com/kittclouds/gokitt/pkg/gldr.NewGLDR({{0x3ff3333333333333, 0x3fe8000000000000, 0xc00042ba70, 0x4008000000000000, 0x3fb999999999999a, 0x1, 0x3fe0000000000000, 0x3fb999999999999a, 0x20, 0x0}, ...})
+	C:/Users/shuga/1kittroot/1code/Angular-build/GoKitt/pkg/gldr/gldr.go:57 +0x198
+github.com/kittclouds/gokitt/pkg/gldr.TestAddGraphEdge(0xc000087a40)
+	C:/Users/shuga/1kittroot/1code/Angular-build/GoKitt/pkg/gldr/gldr_test.go:58 +0x15e
+testing.tRunner(0xc000087a40, 0x7ff613fa8108)
+	C:/Users/shuga/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.windows-amd64/src/testing/testing.go:1934 +0xc3
+created by testing.(*T).Run in goroutine 1
+	C:/Users/shuga/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.windows-amd64/src/testing/testing.go:1997 +0x44b
+FAIL	github.com/kittclouds/gokitt/pkg/gldr	1.634s
+FAIL

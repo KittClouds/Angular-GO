@@ -1,0 +1,17 @@
+﻿go : # github.com/kittclouds
+/gokitt/pkg/gldr
+At line:1 char:1
++ go build ./pkg/gldr/ 2>&1 
+| Out-File -Encoding utf8 
+build_check.txt;  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (# git  
+  hub.com/kittclouds/goki   
+ tt/pkg/gldr:String) [],    
+ RemoteException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+pkg\gldr\gldr.go:164:24: 
+undefined: strings.Itoa

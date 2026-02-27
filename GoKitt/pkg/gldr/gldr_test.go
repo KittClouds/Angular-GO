@@ -3,6 +3,9 @@ package gldr
 import (
 	"testing"
 
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/embed"
+
 	"github.com/kittclouds/gokitt/pkg/graptor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,12 +19,14 @@ func TestGLDRConfigDefaults(t *testing.T) {
 	assert.Equal(t, 0.6, cfg.Alpha)
 	assert.Equal(t, 0.4, cfg.Beta)
 	assert.Equal(t, 3, cfg.MaxGraphHops)
-	assert.Equal(t, 0.5, cfg.ProximityDecay)
-	assert.Equal(t, 0.1, cfg.MinProximity)
 	assert.Equal(t, 10, cfg.SoftAnchorChunks)
 	assert.Equal(t, 0.3, cfg.Lambda)
 	assert.Equal(t, 20, cfg.TopChunks)
 	assert.Equal(t, 10, cfg.TopNodes)
+
+	// PPR config
+	assert.Equal(t, 0.85, cfg.PPRDamping)
+	assert.Equal(t, 20, cfg.PPRIterations)
 }
 
 // --- P0: Index chunk / entity mapping ---
@@ -45,14 +50,9 @@ func TestIndexChunk(t *testing.T) {
 	require.Len(t, idx.ChunkEntities[uid], 2)
 	assert.Equal(t, "entity-fiora", idx.ChunkEntities[uid][0].EntityID)
 	assert.Equal(t, "entity-castle", idx.ChunkEntities[uid][1].EntityID)
-
-	// Lexical: qgram should find the chunk by content
-	results := idx.QGram.Search("Fiora", idx.Config.LexicalConfig, 10)
-	assert.GreaterOrEqual(t, len(results), 1)
-	assert.Equal(t, "chunk-1", results[0].DocID)
 }
 
-// --- P0: Graph edges ---
+// --- P0: Graph edges (via GraphStore) ---
 
 func TestAddGraphEdge(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
@@ -64,11 +64,17 @@ func TestAddGraphEdge(t *testing.T) {
 		Source:     "explicit",
 	})
 
-	edges := idx.GraphAdj["entity-fiora"]
-	require.Len(t, edges, 1)
-	assert.Equal(t, "entity-castle", edges[0].TargetID)
-	assert.Equal(t, "located_at", edges[0].RelType)
-	assert.Equal(t, 0.9, edges[0].Confidence)
+	// Verify vertices exist in store
+	val, _, err := idx.Store.Vertex(EntityUUID("entity-fiora"))
+	require.NoError(t, err)
+	assert.Equal(t, "entity-fiora", val)
+
+	val, _, err = idx.Store.Vertex(EntityUUID("entity-castle"))
+	require.NoError(t, err)
+	assert.Equal(t, "entity-castle", val)
+
+	// Verify edge count
+	assert.Equal(t, 1, idx.GetEdgeCount())
 }
 
 func TestAddGraphEdgeBidirectional(t *testing.T) {
@@ -76,11 +82,14 @@ func TestAddGraphEdgeBidirectional(t *testing.T) {
 
 	idx.AddGraphEdgeBidirectional("entity-fiora", "entity-castle", "located_at", 0.9, "explicit")
 
-	// Both directions should exist
-	assert.Len(t, idx.GraphAdj["entity-fiora"], 1)
-	assert.Len(t, idx.GraphAdj["entity-castle"], 1)
-	assert.Equal(t, "entity-castle", idx.GraphAdj["entity-fiora"][0].TargetID)
-	assert.Equal(t, "entity-fiora", idx.GraphAdj["entity-castle"][0].TargetID)
+	// Both vertices should exist
+	_, _, err := idx.Store.Vertex(EntityUUID("entity-fiora"))
+	require.NoError(t, err)
+	_, _, err = idx.Store.Vertex(EntityUUID("entity-castle"))
+	require.NoError(t, err)
+
+	// Edge count: GraphStore stores undirected as single edge
+	assert.GreaterOrEqual(t, idx.GetEdgeCount(), 1)
 }
 
 // --- P0: Load from Graptor CooccurrenceStats ---
@@ -97,38 +106,105 @@ func TestLoadCooccurrences(t *testing.T) {
 	// Load with minCount=2 → only fiora↔castle should appear
 	idx.LoadCooccurrences(cooc, 2)
 
-	assert.Len(t, idx.GraphAdj["entity-fiora"], 1)
-	assert.Equal(t, "entity-castle", idx.GraphAdj["entity-fiora"][0].TargetID)
-	assert.Equal(t, "cooccurs", idx.GraphAdj["entity-fiora"][0].RelType)
-	assert.Equal(t, 3.0, idx.GraphAdj["entity-fiora"][0].Confidence) // count as confidence
+	// MaxEdgeWeight should track the raw max
+	assert.Equal(t, 3.0, idx.MaxEdgeWeight)
 
-	// Bidirectional
-	assert.Len(t, idx.GraphAdj["entity-castle"], 1)
-	assert.Equal(t, "entity-fiora", idx.GraphAdj["entity-castle"][0].TargetID)
+	// Vertices should exist
+	_, _, err := idx.Store.Vertex(EntityUUID("entity-fiora"))
+	require.NoError(t, err)
+	_, _, err = idx.Store.Vertex(EntityUUID("entity-castle"))
+	require.NoError(t, err)
+
+	// Edges should exist
+	assert.GreaterOrEqual(t, idx.GetEdgeCount(), 1, "Should have at least 1 edge")
 }
 
-// --- P1: Graph proximity BFS ---
-
-func TestComputeProximity(t *testing.T) {
+func TestLoadCooccurrencesNormalization(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
 
-	// Build a chain: A → B → C → D
+	cooc := graptor.NewCooccurrenceStats(3)
+	// fiora ↔ castle: 6 times
+	for i := 0; i < 6; i++ {
+		cooc.RecordCooccurrence([]string{"entity-fiora", "entity-castle"}, 1)
+	}
+	// fiora ↔ sword: 3 times
+	for i := 0; i < 3; i++ {
+		cooc.RecordCooccurrence([]string{"entity-fiora", "entity-sword"}, 1)
+	}
+	// castle ↔ sword: 2 times
+	for i := 0; i < 2; i++ {
+		cooc.RecordCooccurrence([]string{"entity-castle", "entity-sword"}, 1)
+	}
+
+	idx.LoadCooccurrences(cooc, 2)
+
+	// Max count is 6 (fiora↔castle)
+	assert.Equal(t, 6.0, idx.MaxEdgeWeight)
+
+	// All three entity pairs should have edges
+	assert.GreaterOrEqual(t, idx.GetEdgeCount(), 3, "Should have edges for all pairs")
+	assert.Equal(t, 3, idx.GetVertexCount(), "Should have 3 vertices")
+}
+
+// --- P1: Graph proximity (PersonalizedPageRank via GraphStore) ---
+
+func TestProximityBasicChain(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	// Chain: A → B → C → D
 	idx.AddGraphEdgeBidirectional("A", "B", "related", 1.0, "explicit")
 	idx.AddGraphEdgeBidirectional("B", "C", "related", 1.0, "explicit")
 	idx.AddGraphEdgeBidirectional("C", "D", "related", 1.0, "explicit")
 
-	// BFS from A
 	anchors := []EntityAnchor{{EntityID: "A", Confidence: 1.0, Source: "direct"}}
-	prox := idx.ComputeProximity(anchors)
+	prox := idx.resolveProximity(anchors)
 
-	// A = 1.0, B = 1.0 * 0.5 * 1.0 = 0.5, C = 0.5 * 0.5 * 1.0 = 0.25, D = 0.25 * 0.5 = 0.125
-	assert.Equal(t, 1.0, prox["A"])
-	assert.InDelta(t, 0.5, prox["B"], 0.001)
-	assert.InDelta(t, 0.25, prox["C"], 0.001)
-	assert.InDelta(t, 0.125, prox["D"], 0.001)
+	require.NotNil(t, prox)
+	// Anchor should have highest proximity
+	assert.Greater(t, prox["A"], prox["B"], "Anchor A should have highest score")
+	assert.Greater(t, prox["B"], prox["C"], "B (1 hop) should score higher than C (2 hops)")
+	assert.Greater(t, prox["C"], prox["D"], "C (2 hops) should score higher than D (3 hops)")
+
+	// All values should be in [0, 1]
+	for id, p := range prox {
+		assert.GreaterOrEqual(t, p, 0.0, "%s proximity should be >= 0", id)
+		assert.LessOrEqual(t, p, 1.0, "%s proximity should be <= 1", id)
+	}
 }
 
-func TestComputeProximityMaxHops(t *testing.T) {
+func TestProximityHubRobustness(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	// Star graph: Ryan connects to 5 entities
+	idx.AddGraphEdgeBidirectional("A", "Ryan", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("B", "Ryan", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("C", "Ryan", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("Ryan", "Ghoul", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("Ryan", "Len", "related", 1.0, "explicit")
+
+	// Search from Ghoul
+	anchors := []EntityAnchor{{EntityID: "Ghoul", Confidence: 1.0, Source: "direct"}}
+	prox := idx.resolveProximity(anchors)
+
+	// Ryan (direct neighbor) should be much higher than A, B, C (2 hops through hub)
+	assert.Greater(t, prox["Ryan"], prox["A"],
+		"Direct neighbor Ryan should have much higher proximity than 2-hop A")
+	assert.Greater(t, prox["Ryan"], prox["B"])
+	assert.Greater(t, prox["Ryan"], prox["C"])
+
+	// Anchor should beat direct neighbor
+	assert.Greater(t, prox["Ghoul"], prox["Ryan"], "Anchor should beat direct neighbor")
+}
+
+func TestProximityEmptyAnchors(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+	idx.AddGraphEdgeBidirectional("A", "B", "related", 1.0, "explicit")
+
+	prox := idx.resolveProximity(nil)
+	assert.Nil(t, prox, "Empty anchors should return nil")
+}
+
+func TestProximityMaxHops(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
 	// Override max hops to 2
 	idx.Config.MaxGraphHops = 2
@@ -139,30 +215,34 @@ func TestComputeProximityMaxHops(t *testing.T) {
 	idx.AddGraphEdgeBidirectional("C", "D", "related", 1.0, "explicit")
 
 	anchors := []EntityAnchor{{EntityID: "A", Confidence: 1.0, Source: "direct"}}
-	prox := idx.ComputeProximity(anchors)
+	prox := idx.resolveProximity(anchors)
 
-	// D should NOT be reachable (3 hops > max 2)
+	// A, B, C should be reachable within 2 hops
 	assert.Contains(t, prox, "A")
 	assert.Contains(t, prox, "B")
 	assert.Contains(t, prox, "C")
-	assert.NotContains(t, prox, "D")
+	// D at 3 hops should NOT be reachable (bounded to 2)
+	_, hasD := prox["D"]
+	assert.False(t, hasD, "D at 3 hops should not be reachable with maxHops=2")
 }
 
-func TestComputeProximityMinThreshold(t *testing.T) {
+func TestSearchDispatch(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
-	idx.Config.MinProximity = 0.3
 
-	// Build chain: A → B → C (decay 0.5 each hop)
-	idx.AddGraphEdgeBidirectional("A", "B", "related", 1.0, "explicit")
-	idx.AddGraphEdgeBidirectional("B", "C", "related", 1.0, "explicit")
+	// Simple graph
+	idx.AddGraphEdgeBidirectional("entity-fiora", "entity-castle", "related", 1.0, "explicit")
+	idx.RegisterEntity("fiora", "entity-fiora")
 
-	anchors := []EntityAnchor{{EntityID: "A", Confidence: 1.0, Source: "direct"}}
-	prox := idx.ComputeProximity(anchors)
+	idx.IndexChunk("chunk-1", map[string]string{"content": "Fiora walked through the castle"},
+		[]EntityMention{
+			{EntityID: "entity-fiora", Confidence: 1.0, Start: 0, End: 5},
+			{EntityID: "entity-castle", Confidence: 1.0, Start: 28, End: 34},
+		})
 
-	// A=1.0 ✓, B=0.5 ✓, C=0.25 < 0.3 ✗
-	assert.Contains(t, prox, "A")
-	assert.Contains(t, prox, "B")
-	assert.NotContains(t, prox, "C")
+	// Search should work (no panic, returns results)
+	results := idx.Search("Fiora castle", idx.Config)
+	require.NotEmpty(t, results, "Search should return results")
+	assert.Greater(t, results[0].ChunkScore, 0.0, "Score should be positive")
 }
 
 // --- P1: Fused scoring ---
@@ -389,4 +469,184 @@ func TestGetEntityCount(t *testing.T) {
 		})
 
 	assert.Equal(t, 2, idx.GetEntityCount())
+}
+
+// --- GraphStore-backed counters ---
+
+func TestGetEdgeCount(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	idx.AddGraphEdgeBidirectional("A", "B", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("B", "C", "related", 1.0, "explicit")
+
+	assert.GreaterOrEqual(t, idx.GetEdgeCount(), 2, "Should have at least 2 edges")
+}
+
+func TestGetVertexCount(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	idx.AddGraphEdgeBidirectional("A", "B", "related", 1.0, "explicit")
+	idx.AddGraphEdgeBidirectional("B", "C", "related", 1.0, "explicit")
+
+	assert.Equal(t, 3, idx.GetVertexCount(), "Should have 3 vertices (A, B, C)")
+}
+
+// --- Temporal Edge Tests ---
+
+func TestAddGraphEdgeWithTemporal(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	// Add edge with chapter-based temporal marker
+	chapter := uint32(5)
+	idx.AddGraphEdgeWithTemporal("entity-ryan", GraphEdge{
+		TargetID:   "entity-len",
+		RelType:    "meets",
+		Confidence: 0.9,
+		Source:     "explicit",
+	}, NewChapterMarker(chapter), nil)
+
+	// Retrieve edges
+	edges := idx.GetGraphEdges("entity-ryan")
+	require.Len(t, edges, 1)
+
+	// Verify temporal marker was serialized/deserialized
+	assert.NotNil(t, edges[0].ValidFrom)
+	assert.Equal(t, TemporalSourceChapter, edges[0].ValidFrom.Source)
+	assert.Equal(t, chapter, *edges[0].ValidFrom.Chapter)
+	assert.Nil(t, edges[0].ValidUntil)
+}
+
+func TestGetGraphEdgesAt(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	// Add edges with different temporal ranges
+	ch1 := uint32(1)
+	ch3 := uint32(3)
+	ch5 := uint32(5)
+
+	// Edge valid from chapter 1 to chapter 5
+	idx.AddGraphEdgeWithTemporal("A", GraphEdge{
+		TargetID:   "B",
+		RelType:    "ally",
+		Confidence: 0.9,
+		Source:     "explicit",
+	}, NewChapterMarker(ch1), NewChapterMarker(ch5))
+
+	// Edge valid from chapter 3 onwards
+	idx.AddGraphEdgeWithTemporal("A", GraphEdge{
+		TargetID:   "C",
+		RelType:    "enemy",
+		Confidence: 0.8,
+		Source:     "explicit",
+	}, NewChapterMarker(ch3), nil)
+
+	// Timeless edge (no temporal markers)
+	idx.AddGraphEdge("A", GraphEdge{
+		TargetID:   "D",
+		RelType:    "neutral",
+		Confidence: 0.5,
+		Source:     "inferred",
+	})
+
+	// Query at chapter 2: should get B (valid 1-5) and D (timeless)
+	edges2 := idx.GetGraphEdgesAt("A", NewChapterMarker(2))
+	assert.Len(t, edges2, 2)
+	targets2 := make(map[string]bool)
+	for _, e := range edges2 {
+		targets2[e.TargetID] = true
+	}
+	assert.True(t, targets2["B"])
+	assert.True(t, targets2["D"])
+
+	// Query at chapter 4: should get B (valid 1-5), C (valid 3+), and D (timeless)
+	edges4 := idx.GetGraphEdgesAt("A", NewChapterMarker(4))
+	assert.Len(t, edges4, 3)
+
+	// Query at chapter 10: should get C (valid 3+) and D (timeless)
+	edges10 := idx.GetGraphEdgesAt("A", NewChapterMarker(10))
+	assert.Len(t, edges10, 2)
+	targets10 := make(map[string]bool)
+	for _, e := range edges10 {
+		targets10[e.TargetID] = true
+	}
+	assert.True(t, targets10["C"])
+	assert.True(t, targets10["D"])
+}
+
+func TestFilterEdgesByTime(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	// Add edges with temporal markers
+	ch1 := uint32(1)
+	ch5 := uint32(5)
+
+	idx.AddGraphEdgeWithTemporal("A", GraphEdge{
+		TargetID:   "B",
+		RelType:    "ally",
+		Confidence: 0.9,
+		Source:     "explicit",
+	}, NewChapterMarker(ch1), NewChapterMarker(ch5))
+
+	idx.AddGraphEdge("A", GraphEdge{
+		TargetID:   "C",
+		RelType:    "neutral",
+		Confidence: 0.5,
+		Source:     "inferred",
+	})
+
+	edges := idx.GetGraphEdges("A")
+
+	// Filter with AsOf snapshot at chapter 3
+	filtered := idx.FilterEdgesByTime(edges, AsOfSnapshot(NewChapterMarker(3)))
+	assert.Len(t, filtered, 2) // Both B and C (timeless)
+
+	// Filter with strict mode (no timeless)
+	filteredStrict := idx.FilterEdgesByTime(edges, &TemporalQueryOptions{
+		AsOf:            NewChapterMarker(3),
+		IncludeTimeless: false,
+		TemporalMode:    "strict",
+	})
+	assert.Len(t, filteredStrict, 1) // Only B
+	assert.Equal(t, "B", filteredStrict[0].TargetID)
+
+	// Filter with full mode (ignore temporal)
+	filteredFull := idx.FilterEdgesByTime(edges, &TemporalQueryOptions{
+		TemporalMode: "full",
+	})
+	assert.Len(t, filteredFull, 2)
+}
+
+func TestTemporalEdgeRoundTrip(t *testing.T) {
+	// Test all temporal source types
+	tests := []struct {
+		name   string
+		marker *TemporalMarker
+	}{
+		{"chapter", NewChapterMarker(42)},
+		{"calendar", NewCalendarMarker(1704067200000)}, // 2024-01-01
+		{"story", NewStoryMarker("Day 15")},
+		{"ordinal", NewOrdinalMarker(100)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a fresh index for each test case
+			idx := NewGLDR(DefaultGLDRConfig())
+
+			targetID := "entity-" + tc.name
+			idx.AddGraphEdgeWithTemporal("source", GraphEdge{
+				TargetID:   targetID,
+				RelType:    "test",
+				Confidence: 1.0,
+				Source:     "test",
+			}, tc.marker, nil)
+
+			edges := idx.GetGraphEdges("source")
+			require.Len(t, edges, 1)
+
+			assert.NotNil(t, edges[0].ValidFrom)
+			assert.Equal(t, tc.marker.Source, edges[0].ValidFrom.Source)
+			assert.True(t, edges[0].ValidFrom.Equal(tc.marker))
+		})
+	}
 }

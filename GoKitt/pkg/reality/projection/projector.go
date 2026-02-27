@@ -68,6 +68,9 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 	gather(sent)
 
 	// 2. Iterate VPs to find relations
+	var lastEvent *graph.ConceptNode
+	var lastVPIdx int
+
 	for i, n := range nodes {
 		if n.Kind == rsyntax.KindVerbPhrase {
 			verbText := n.Text(source)
@@ -77,41 +80,30 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 				// Find Subject (Left)
 				subj := findNearestNP(nodes, i, -1, source)
 
-				// For communication verbs (SPEAKS_TO), look for "to [Name]" pattern first
 				var targetID, recipientID string
-				var objPP *cst.Node
 
 				relType := match.RelationType.String()
 				isCommunication := relType == "SPEAKS_TO" || relType == "MENTIONS" || relType == "REVEALS"
-
-				searchOffset := 1 // Start searching for object at verb + 1
+				searchOffset := 1
 
 				if isCommunication {
-					// 1. Check for "that" (Attribution)
-					thatIdx := findToken(nodes, i+1, "that", source, 4) // Look ahead 4 nodes
+					thatIdx := findToken(nodes, i+1, "that", source, 4)
 					if thatIdx != -1 {
 						relType = "MENTIONS"
-						searchOffset = (thatIdx - i) + 1 // Skip "that"
+						searchOffset = (thatIdx - i) + 1
 					}
-
-					// 2. Look for "to [CapitalizedWord]" pattern (Recipient)
 					recipient := findRecipient(nodes, i, source)
 					if recipient != "" {
 						recipientID = recipient
-						// If NOT attribution, default target to recipient
 						if relType == "SPEAKS_TO" {
 							targetID = recipient
 						}
 					}
 				}
 
-				// If target not yet set (or we are in MENTIONS mode looking for content), scan for object
 				if targetID == "" {
-					obj, pp := findNearestNPWithContainer(nodes, i, searchOffset, source)
-					objPP = pp
+					obj, _ := findNearestNPWithContainer(nodes, i, searchOffset, source)
 					if obj != nil {
-						// STRICT: Only use resolved Entity IDs. Do NOT fall back to raw text.
-						// This matches the Rust implementation where only EntitySpans are projected.
 						targetID = resolveID(obj, entities)
 					}
 				}
@@ -119,60 +111,60 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 				if subj != nil && targetID != "" {
 					subjID := resolveID(subj, entities)
 
-					// STRICT: Subject must also be a resolved entity
 					if subjID == "" {
 						continue
 					}
 
-					// Extract Modifiers from unused PPs
-					var manner, location, time string
+					// Note: PP modifiers like manner, location, time removed for event representation
 
-					for _, node := range nodes {
-						if node.Kind == rsyntax.KindPrepPhrase {
-							// Skip if this PP contained the object
-							if node == objPP {
-								continue
-							}
-							// ... (rest of logic)
+					// Build Event Node
+					eventID := fmt.Sprintf("event:%s_%d", relType, n.Range.Start)
+					eventNode := g.EnsureNode(eventID, strings.ToUpper(verbText), graph.KindEvent)
 
-							// Heuristic classification
-							ppText := node.Text(source)
-							lower := strings.ToLower(ppText)
+					// Link Event to Entities
+					g.EnsureNode(subjID, subjID, "Concept")
+					g.EnsureNode(targetID, targetID, "Concept")
+					g.AddLabeledEdge(eventID, subjID, graph.RelHasSubject, 1.0)
+					g.AddLabeledEdge(eventID, targetID, graph.RelHasObject, 1.0)
 
-							if strings.HasPrefix(lower, "with ") {
-								manner = strings.TrimPrefix(lower, "with ")
-							} else if strings.HasPrefix(lower, "in ") || strings.HasPrefix(lower, "at ") || strings.HasPrefix(lower, "on ") {
-								location = ppText
-							} else if strings.HasPrefix(lower, "during ") || strings.HasPrefix(lower, "after ") || strings.HasPrefix(lower, "before ") {
-								time = ppText
-							}
-							// Note: "to [X]" for communication is handled separately as recipient
-						}
+					if recipientID != "" {
+						g.EnsureNode(recipientID, recipientID, "Concept")
+						g.AddLabeledEdge(eventID, recipientID, "HAS_RECIPIENT", 1.0)
 					}
 
-					// Add QuadPlus (with recipient)
+					// Causal / Temporal Linking
+					if lastEvent != nil {
+						// Scan tokens between lastVP and this VP
+						connType := "PRECEDES" // default sequential
+						for k := lastVPIdx + 1; k < i; k++ {
+							if nodes[k].Kind == rsyntax.KindWord || nodes[k].Kind == rsyntax.KindPunctuation {
+								word := strings.ToLower(nodes[k].Text(source))
+								if word == "because" || word == "so" || word == "therefore" {
+									connType = graph.RelCauses
+									break
+								} else if word == "before" { // simple reverse
+									// Reverse edges? Let's just keep PRECEDES
+									break
+								}
+							}
+						}
+						g.AddLabeledEdge(lastEvent.ID, eventID, connType, 1.0)
+					}
 
-					g.AddQuadPlus(
-						subjID, subjID, "Concept",
-						targetID, targetID, "Concept",
-						relType,
-						1.0,
-						manner, location, time, recipientID,
-					)
-
-					// Link to World (if exists and hasn't been linked yet)
 					if worldNode != nil {
-						// Link Subject
-						subjNode, _ := g.Nodes[subjID] // Should exist after AddQuadPlus
+						subjNode, _ := g.Nodes[subjID]
 						if subjNode != nil {
 							ensureWorldLink(g, worldNode, subjNode)
 						}
-						// Link Target
 						targetNode, _ := g.Nodes[targetID]
 						if targetNode != nil {
 							ensureWorldLink(g, worldNode, targetNode)
 						}
+						ensureWorldLink(g, worldNode, eventNode)
 					}
+
+					lastEvent = eventNode
+					lastVPIdx = i
 				}
 			}
 		}

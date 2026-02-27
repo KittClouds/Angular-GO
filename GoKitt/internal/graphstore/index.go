@@ -130,3 +130,20 @@ func (r *IndexRegistry) ReverseLookup(idx uint32) (uuid.UUID, bool) {
 	}
 	return r.idxToUUID[idx], true
 }
+
+// MaxIndex returns the next available index (one past the highest assigned).
+// Used for sizing dense arrays.
+func (r *IndexRegistry) MaxIndex() uint32 {
+	return r.nextIdx.Load()
+}
+
+// AllIndices returns a copy of all assigned indices. Caller must not modify.
+func (r *IndexRegistry) AllIndices() []uint32 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]uint32, 0, len(r.uuidToIdx))
+	for _, idx := range r.uuidToIdx {
+		out = append(out, idx)
+	}
+	return out
+}

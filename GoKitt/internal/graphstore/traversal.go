@@ -81,11 +81,11 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 			}
 		}
 
-		// Visited set (Bitmap)
+		// Visited set (Bitmap) - don't use pool, reassigned in loop
 		visited := roaring.New()
 		visited.Add(rootIdx)
 
-		// Frontier (Bitmap) for BFS
+		// Frontier (Bitmap) for BFS - don't use pool, reassigned in loop
 		frontier := roaring.New()
 		frontier.Add(rootIdx)
 
@@ -129,7 +129,8 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 						neighbors = adj.neighbors
 					}
 				case DirectionInbound:
-					if adj, ok := s.cache.inEdges[uIdx]; ok {
+					// Graph is always undirected: outEdges contains all neighbors.
+					if adj, ok := s.cache.outEdges[uIdx]; ok {
 						neighbors = adj.neighbors
 					}
 				}
@@ -156,15 +157,11 @@ func (s *SQLiteStore[T]) Traverse(ctx context.Context, opts TraversalOptions) <-
 
 					// Apply Edge Filter (if any)
 					if opts.EdgeFilter != nil {
-						// Retrieve edge (u -> v)
-						// For speed, check s.cache.outEdges[uIdx].edges[vIdx]
-						// This exists because we got vIdx from neighbors of uIdx
-						if adj, ok := s.cache.outEdges[uIdx]; ok {
-							if edge, ok := adj.edges[vIdx]; ok {
-								// Placeholder for actual filter logic
-								// if !opts.EdgeFilter.Match(edge) { continue }
-								_ = edge // use it
-							}
+						// Retrieve edge from slab
+						if edge, ok := s.cache.slab.Get(uIdx, vIdx); ok {
+							// Placeholder for actual filter logic
+							// if !opts.EdgeFilter.Match(edge) { continue }
+							_ = edge // use it
 						}
 					}
 

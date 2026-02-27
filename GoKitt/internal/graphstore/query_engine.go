@@ -90,7 +90,7 @@ func (s *SQLiteStore[T]) Execute(q Query) (*ResultSet, error) {
 				for idx := range s.cache.outEdges {
 					current.Add(idx)
 				}
-				// Also check inEdges or registry.
+				// Also check registry for isolated vertices.
 				// Better: registry reverse map logic or track MaxIndex.
 			}
 		}

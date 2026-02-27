@@ -44,7 +44,11 @@ func TestProjectWithProvenance(t *testing.T) {
 	}
 
 	// 4. Run Project
-	g := Project(root, matcher, nil, text, prov)
+	entities := EntityMap{
+		0:  "Frodo",
+		16: "Sam",
+	}
+	g := Project(root, matcher, entities, text, prov)
 
 	// 5. Assert World Node
 	worldNode := g.GetNode("world:note-123")

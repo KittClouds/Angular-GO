@@ -137,7 +137,7 @@ func (s *SQLiteStore[T]) ClusteringCoefficient(id uuid.UUID) (float64, error) {
 	for it.HasNext() {
 		uIdx := it.Next()
 		if uAdj, ok := s.cache.outEdges[uIdx]; ok {
-			triangles += roaring.And(uAdj.neighbors, adj.neighbors).GetCardinality()
+			triangles += uAdj.neighbors.AndCardinality(adj.neighbors)
 		}
 	}
 	triangles /= 2

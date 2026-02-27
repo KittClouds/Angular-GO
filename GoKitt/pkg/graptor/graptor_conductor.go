@@ -83,14 +83,36 @@ type ChapterGraph struct {
 }
 
 // CrossChapterEdge represents an edge between entities in different chapters.
+// Uses TemporalMarker for polymorphic time representation.
 type CrossChapterEdge struct {
 	SourceID      string
 	TargetID      string
 	RelationType  string
-	SourceChapter uint32
-	TargetChapter uint32
+	SourceChapter uint32 // Legacy: kept for backward compatibility
+	TargetChapter uint32 // Legacy: kept for backward compatibility
 	Confidence    float64
 	Evidence      string
+	// Temporal markers for the edge validity period
+	ValidFrom  *TemporalMarker
+	ValidUntil *TemporalMarker
+}
+
+// TemporalMarker is imported from gldr package for polymorphic time representation.
+// This alias allows graptor to use the same temporal system.
+type TemporalMarker = struct {
+	Source    string
+	Chapter   *uint32
+	Calendar  *int64
+	StoryTime *string
+	Ordinal   *int64
+}
+
+// NewChapterTemporalMarker creates a TemporalMarker for a chapter.
+func NewChapterTemporalMarker(chapter uint32) *TemporalMarker {
+	return &TemporalMarker{
+		Source:  "chapter",
+		Chapter: &chapter,
+	}
 }
 
 // DocumentStats contains statistics about the processed document.
@@ -132,6 +154,20 @@ func (dg *DocumentGraph) Dispose() {
 
 	// Clear cross-chapter edges
 	dg.CrossChapterEdges = nil
+}
+
+// GetChapters safely returns a copy of the chapter graph map for downstream ingestion.
+func (dg *DocumentGraph) GetChapters() map[uint32]*ChapterGraph {
+	dg.mu.RLock()
+	defer dg.mu.RUnlock()
+
+	// Return a shallow copy of the map to prevent concurrent map read/write panics
+	// while callers iterate over it.
+	chapters := make(map[uint32]*ChapterGraph, len(dg.Chapters))
+	for k, v := range dg.Chapters {
+		chapters[k] = v
+	}
+	return chapters
 }
 
 // GraptorConductor orchestrates the full document ingestion pipeline.
@@ -538,6 +574,7 @@ func (gc *GraptorConductor) mergeLeafGraph(chapterGraph, leafGraph *graph.Concep
 }
 
 // buildCrossChapterEdges builds edges between entities across chapters.
+// Sets temporal markers for edge validity periods.
 func (gc *GraptorConductor) buildCrossChapterEdges(docGraph *DocumentGraph) {
 	// Get all entities with their chapters
 	allEntities := gc.registry.GetAllEntities()
@@ -549,14 +586,20 @@ func (gc *GraptorConductor) buildCrossChapterEdges(docGraph *DocumentGraph) {
 
 		// Create cross-chapter links for entities appearing in multiple chapters
 		for i := 0; i < len(entity.Chapters)-1; i++ {
+			sourceChapter := entity.Chapters[i]
+			targetChapter := entity.Chapters[i+1]
+
 			docGraph.CrossChapterEdges = append(docGraph.CrossChapterEdges, &CrossChapterEdge{
 				SourceID:      entity.ID,
 				TargetID:      entity.ID,
 				RelationType:  "SAME_AS",
-				SourceChapter: entity.Chapters[i],
-				TargetChapter: entity.Chapters[i+1],
+				SourceChapter: sourceChapter,
+				TargetChapter: targetChapter,
 				Confidence:    1.0,
-				Evidence:      fmt.Sprintf("Entity '%s' appears in chapters %d and %d", entity.CanonicalName, entity.Chapters[i], entity.Chapters[i+1]),
+				Evidence:      fmt.Sprintf("Entity '%s' appears in chapters %d and %d", entity.CanonicalName, sourceChapter, targetChapter),
+				// Set temporal markers: edge is valid from source chapter onwards
+				ValidFrom:  NewChapterTemporalMarker(sourceChapter),
+				ValidUntil: nil, // No end - entity persists
 			})
 		}
 	}
@@ -578,6 +621,9 @@ func (gc *GraptorConductor) buildCrossChapterEdges(docGraph *DocumentGraph) {
 					TargetChapter: aliasEntity.FirstChapter,
 					Confidence:    0.9,
 					Evidence:      fmt.Sprintf("'%s' is an alias of '%s'", alias, entity.CanonicalName),
+					// Set temporal markers for alias relationship
+					ValidFrom:  NewChapterTemporalMarker(entity.FirstChapter),
+					ValidUntil: nil, // Alias relationship persists
 				})
 			}
 		}

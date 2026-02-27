@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/dominikbraun/graph"
@@ -97,30 +96,24 @@ func (s *SQLiteStore[T]) AddEdge(sourceHash, targetHash uuid.UUID, edge graph.Ed
 		return err
 	}
 
-	// 7. Update Cache (Bidirectional)
-	fwd := edge
-	fwd.Source = sourceHash
-	fwd.Target = targetHash
+	// 7. Update Cache — store 1 copy in slab, add bidirectional neighbor bitmaps
+	canonEdge := edge
+	canonEdge.Source = sourceHash
+	canonEdge.Target = targetHash
 
-	rev := edge
-	rev.Source = targetHash
-	rev.Target = sourceHash
+	s.cache.slab.Put(uIdx, vIdx, canonEdge)
 
-	addToCache := func(maps map[uint32]*bitmapAdjacency, fromIdx, toIdx uint32, e graph.Edge[uuid.UUID]) {
-		adj, ok := maps[fromIdx]
+	addNeighbor := func(fromIdx, toIdx uint32) {
+		adj, ok := s.cache.outEdges[fromIdx]
 		if !ok {
 			adj = newBitmapAdjacency()
-			maps[fromIdx] = adj
+			s.cache.outEdges[fromIdx] = adj
 		}
 		adj.neighbors.Add(toIdx)
-		adj.edges[toIdx] = e
 	}
 
-	addToCache(s.cache.outEdges, uIdx, vIdx, fwd)
-	addToCache(s.cache.inEdges, vIdx, uIdx, fwd)
-
-	addToCache(s.cache.outEdges, vIdx, uIdx, rev)
-	addToCache(s.cache.inEdges, uIdx, vIdx, rev)
+	addNeighbor(uIdx, vIdx)
+	addNeighbor(vIdx, uIdx)
 
 	// Update edge count (new edge)
 	s.cache.edgeCount.Add(1)
@@ -218,23 +211,16 @@ func (s *SQLiteStore[T]) UpdateEdge(sourceHash, targetHash uuid.UUID, edge graph
 		return err
 	}
 
-	// Update Cache (Bidirectional)
-	fwd := edge
-	fwd.Source = sourceHash
-	fwd.Target = targetHash
+	// Update Cache — single copy in slab
+	canonEdge := edge
+	canonEdge.Source = sourceHash
+	canonEdge.Target = targetHash
 
-	rev := edge
-	rev.Source = targetHash
-	rev.Target = sourceHash
+	s.cache.slab.Put(uIdx, vIdx, canonEdge)
 
 	if s.Rules != nil {
 		s.Rules.InvalidateByLabel("")
 	}
-
-	s.cache.outEdges[uIdx].edges[vIdx] = fwd
-	s.cache.inEdges[vIdx].edges[uIdx] = fwd
-	s.cache.outEdges[vIdx].edges[uIdx] = rev
-	s.cache.inEdges[uIdx].edges[vIdx] = rev
 
 	return nil
 }
@@ -289,17 +275,15 @@ func (s *SQLiteStore[T]) RemoveEdge(sourceHash, targetHash uuid.UUID) error {
 	}
 
 	// Remove from Cache
-	removeFromCache := func(maps map[uint32]*bitmapAdjacency, from, to uint32) {
-		if adj, ok := maps[from]; ok {
+	removeNeighbor := func(from, to uint32) {
+		if adj, ok := s.cache.outEdges[from]; ok {
 			adj.neighbors.Remove(to)
-			delete(adj.edges, to)
 		}
 	}
 
-	removeFromCache(s.cache.outEdges, uIdx, vIdx)
-	removeFromCache(s.cache.inEdges, vIdx, uIdx)
-	removeFromCache(s.cache.outEdges, vIdx, uIdx)
-	removeFromCache(s.cache.inEdges, uIdx, vIdx)
+	removeNeighbor(uIdx, vIdx)
+	removeNeighbor(vIdx, uIdx)
+	s.cache.slab.Remove(uIdx, vIdx)
 
 	// Update edge count (removed edge)
 	s.cache.edgeCount.Add(-1)
@@ -325,14 +309,18 @@ func (s *SQLiteStore[T]) Edge(sourceHash, targetHash uuid.UUID) (graph.Edge[uuid
 	}
 
 	adj, ok := s.cache.outEdges[uIdx]
+	if !ok || !adj.neighbors.Contains(vIdx) {
+		return graph.Edge[uuid.UUID]{}, graph.ErrEdgeNotFound
+	}
+
+	edge, ok := s.cache.slab.Get(uIdx, vIdx)
 	if !ok {
 		return graph.Edge[uuid.UUID]{}, graph.ErrEdgeNotFound
 	}
 
-	edge, ok := adj.edges[vIdx]
-	if !ok {
-		return graph.Edge[uuid.UUID]{}, graph.ErrEdgeNotFound
-	}
+	// Orient edge to match the requested direction
+	edge.Source = sourceHash
+	edge.Target = targetHash
 
 	return edge, nil
 }
@@ -345,27 +333,44 @@ func (s *SQLiteStore[T]) ListEdges() ([]graph.Edge[uuid.UUID], error) {
 	s.cache.mu.RLock()
 	defer s.cache.mu.RUnlock()
 
-	var edges []graph.Edge[uuid.UUID]
-
-	// Iterate sorted by index for deterministic output
-	var sources []uint32
-	for uIdx := range s.cache.outEdges {
-		sources = append(sources, uIdx)
+	// Iterate slab directly — each entry is a unique canonical edge
+	edges := make([]graph.Edge[uuid.UUID], 0, s.cache.slab.Len())
+	for _, slabIdx := range s.cache.slab.lookup {
+		edges = append(edges, s.cache.slab.edges[slabIdx])
 	}
-	sort.Slice(sources, func(i, j int) bool { return sources[i] < sources[j] })
 
-	for _, uIdx := range sources {
-		adj := s.cache.outEdges[uIdx]
-		it := adj.neighbors.Iterator()
-		for it.HasNext() {
-			vIdx := it.Next()
-			// Undirected store: only return canonical direction (e.g. u <= v) to avoid duplicates
-			if uIdx > vIdx {
-				continue
-			}
-			if e, ok := adj.edges[vIdx]; ok {
-				edges = append(edges, e)
-			}
+	return edges, nil
+}
+
+// Edges returns all edges incident to a vertex (both outgoing and incoming).
+// Since the graph is undirected, this returns all edges connected to the vertex.
+func (s *SQLiteStore[T]) Edges(vertexID uuid.UUID) ([]graph.Edge[uuid.UUID], error) {
+	if err := s.warmCache(); err != nil {
+		return nil, err
+	}
+
+	s.cache.mu.RLock()
+	defer s.cache.mu.RUnlock()
+
+	// Get the uint32 index for the vertex
+	idx, ok := s.registry.Get(vertexID)
+	if !ok {
+		return nil, graph.ErrVertexNotFound
+	}
+
+	// Get neighbors bitmap
+	adj, ok := s.cache.outEdges[idx]
+	if !ok {
+		return nil, nil // No edges
+	}
+
+	edges := make([]graph.Edge[uuid.UUID], 0)
+	it := adj.neighbors.Iterator()
+	for it.HasNext() {
+		neighborIdx := it.Next()
+		edge, ok := s.cache.slab.Get(idx, neighborIdx)
+		if ok {
+			edges = append(edges, edge)
 		}
 	}
 

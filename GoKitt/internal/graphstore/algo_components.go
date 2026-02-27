@@ -33,6 +33,7 @@ func (s *SQLiteStore[T]) ConnectedComponents() ([][]uuid.UUID, error) {
 		}
 
 		// BFS from seed to find component
+		// Don't use pool for frontier - it's reassigned in loop
 		component := roaring.New()
 		frontier := roaring.New()
 		frontier.Add(seed)

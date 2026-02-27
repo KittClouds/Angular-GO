@@ -92,11 +92,11 @@ func TestGlobalEntityRegistry_GetMentionCount(t *testing.T) {
 func TestDocumentGraph_Dispose(t *testing.T) {
 	// Create a document graph with data
 	dg := &DocumentGraph{
-		DocumentID: "test-doc",
-		Chapters: make(map[uint32]*ChapterGraph),
+		DocumentID:        "test-doc",
+		Chapters:          make(map[uint32]*ChapterGraph),
 		CrossChapterEdges: make([]*CrossChapterEdge, 5),
-		Registry: NewGlobalEntityRegistry(nil),
-		Cooccurrence: NewCooccurrenceStats(3),
+		Registry:          NewGlobalEntityRegistry(nil),
+		Cooccurrence:      NewCooccurrenceStats(3),
 	}
 
 	// Add some data
@@ -158,7 +158,7 @@ func TestMemoryLeak_Prevention(t *testing.T) {
 
 	// Add many entities
 	for i := 0; i < 1000; i++ {
-		name := string(rune('A' + i%26)) + string(rune('a'+i%26))
+		name := string(rune('A'+i%26)) + string(rune('a'+i%26))
 		registry.RegisterMention(name, KindPerson, uint32(i/100), 0, i*10, i*10+5)
 	}
 

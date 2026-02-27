@@ -106,7 +106,7 @@ func NewCooccurrenceMap(hint int) map[string]int {
 // BatchMentionAccumulator accumulates mentions for batch registration.
 // This reduces lock contention by batching updates.
 type BatchMentionAccumulator struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	mentions []*EntityMention
 }
 

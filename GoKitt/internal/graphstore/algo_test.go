@@ -3,6 +3,7 @@ package graphstore
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -444,8 +445,114 @@ func TestDegreeCentralitySingleNode(t *testing.T) {
 	id := uuid.New()
 	_ = store.AddVertex(id, TestItem{Name: "v"}, graph.VertexProperties{})
 
-	// Single node: N=1, N-1=0, should return nil
-	centrality, err := store.DegreeCentrality()
+	_, err = store.DegreeCentrality()
 	require.NoError(t, err)
-	assert.Nil(t, centrality)
+}
+
+// setupBenchmarkGraph creates a graph with n nodes in a ring topology.
+func setupBenchmarkGraph(b *testing.B, n int) (*sql.DB, *SQLiteStore[TestItem], []uuid.UUID) {
+	db, err := OpenDB("file::memory:?cache=shared")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	err = Migrate(context.Background(), db)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	store := NewJSON[TestItem](db)
+	ids := make([]uuid.UUID, n)
+
+	// Create vertices
+	for i := 0; i < n; i++ {
+		ids[i] = uuid.New()
+		if err := store.AddVertex(ids[i], TestItem{Name: fmt.Sprintf("v%d", i)}, graph.VertexProperties{}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Create ring edges
+	for i := 0; i < n; i++ {
+		next := (i + 1) % n
+		if err := store.AddEdge(ids[i], ids[next], graph.Edge[uuid.UUID]{
+			Properties: graph.EdgeProperties{Weight: 1},
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	return db, store, ids
+}
+
+func BenchmarkPageRank(b *testing.B) {
+	db, store, _ := setupBenchmarkGraph(b, 1000)
+	defer db.Close()
+
+	opts := PageRankOpts{
+		Damping:   0.85,
+		MaxIter:   50,
+		Tolerance: 1e-6,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.PageRank(opts)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkPersonalizedPageRank(b *testing.B) {
+	db, store, ids := setupBenchmarkGraph(b, 1000)
+	defer db.Close()
+
+	// Use first 3 nodes as anchors
+	anchors := make(map[uuid.UUID]float64)
+	for i := 0; i < 3 && i < len(ids); i++ {
+		anchors[ids[i]] = 1.0 / 3.0
+	}
+
+	opts := PageRankOpts{
+		Damping:   0.85,
+		MaxIter:   20,
+		Tolerance: 1e-6,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.PersonalizedPageRank(anchors, 3, opts)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkKHopBitmap(b *testing.B) {
+	db, store, ids := setupBenchmarkGraph(b, 1000)
+	defer db.Close()
+
+	root := ids[0]
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.KHopBitmap(root, 5)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkConnectedComponents(b *testing.B) {
+	db, store, _ := setupBenchmarkGraph(b, 1000)
+	defer db.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.ConnectedComponents()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

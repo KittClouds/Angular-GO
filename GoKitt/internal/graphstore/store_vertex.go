@@ -103,6 +103,25 @@ func (s *SQLiteStore[T]) Vertex(id uuid.UUID) (T, graph.VertexProperties, error)
 	return v.value, v.properties, nil
 }
 
+// BatchVertex retrieves values for multiple vertices in a single lock acquisition.
+// Missing vertices are silently omitted from the result.
+func (s *SQLiteStore[T]) BatchVertex(ids []uuid.UUID) map[uuid.UUID]T {
+	if err := s.warmCache(); err != nil {
+		return nil
+	}
+
+	s.cache.mu.RLock()
+	defer s.cache.mu.RUnlock()
+
+	result := make(map[uuid.UUID]T, len(ids))
+	for _, id := range ids {
+		if v, ok := s.cache.vertices[id]; ok {
+			result[id] = v.value
+		}
+	}
+	return result
+}
+
 func (s *SQLiteStore[T]) RemoveVertex(id uuid.UUID) error {
 	if err := s.warmCache(); err != nil {
 		return err
@@ -116,13 +135,10 @@ func (s *SQLiteStore[T]) RemoveVertex(id uuid.UUID) error {
 		return graph.ErrVertexNotFound
 	}
 
-	// Check for edges via Index
+	// Check for edges via Index (outEdges contains all neighbors for undirected graph)
 	idx, ok := s.registry.Get(id)
 	if ok {
 		if adj, hasOut := s.cache.outEdges[idx]; hasOut && !adj.neighbors.IsEmpty() {
-			return graph.ErrVertexHasEdges
-		}
-		if adj, hasIn := s.cache.inEdges[idx]; hasIn && !adj.neighbors.IsEmpty() {
 			return graph.ErrVertexHasEdges
 		}
 	}

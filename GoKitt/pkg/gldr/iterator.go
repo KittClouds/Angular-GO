@@ -17,19 +17,6 @@ func (idx *GLDRIndex) ForEachChunk(fn func(chunkID uint32, mentions []EntityMent
 	}
 }
 
-// ForEachEntityEdge iterates over entity edges without allocation.
-// Return false from the callback to stop iteration early.
-func (idx *GLDRIndex) ForEachEntityEdge(entityID string, fn func(edge GraphEdge) bool) {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-
-	for _, edge := range idx.GraphAdj[entityID] {
-		if !fn(edge) {
-			break
-		}
-	}
-}
-
 // GetEntityCount returns the number of unique entities in the index (O(1), no allocation).
 func (idx *GLDRIndex) GetEntityCount() int {
 	idx.mu.RLock()
@@ -37,14 +24,20 @@ func (idx *GLDRIndex) GetEntityCount() int {
 	return len(idx.EntityChunks)
 }
 
-// GetEdgeCount returns the total number of directed edges in the graph.
+// GetEdgeCount returns the total number of edges in the graph via GraphStore.
 func (idx *GLDRIndex) GetEdgeCount() int {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
+	count, err := idx.Store.EdgeCount()
+	if err != nil {
+		return 0
+	}
+	return count
+}
 
-	count := 0
-	for _, edges := range idx.GraphAdj {
-		count += len(edges)
+// GetVertexCount returns the total number of vertices in the graph via GraphStore.
+func (idx *GLDRIndex) GetVertexCount() int {
+	count, err := idx.Store.VertexCount()
+	if err != nil {
+		return 0
 	}
 	return count
 }

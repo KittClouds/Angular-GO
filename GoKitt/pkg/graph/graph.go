@@ -11,6 +11,7 @@ const (
 	KindSolarSystem = "SolarSystem" // Plain Folder
 	KindWorld       = "World"       // Note/Document
 	KindConcept     = "Concept"     // Generic concept node
+	KindEvent       = "Event"       // Narrative Action/Event
 )
 
 // Hierarchy edge relations
@@ -19,6 +20,12 @@ const (
 	RelWormhole      = "WORMHOLE"
 	RelContainsWorld = "CONTAINS_WORLD" // Folder -> World
 	RelWorldContains = "WORLD_CONTAINS" // World -> Entity
+
+	// Event/Causal relations
+	RelCauses     = "CAUSES"
+	RelPrecedes   = "PRECEDES"
+	RelHasSubject = "HAS_SUBJECT"
+	RelHasObject  = "HAS_OBJECT"
 )
 
 // ConceptNode represents an entity in the graph

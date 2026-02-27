@@ -8,10 +8,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// EdgeFilterFunc returns true if an edge should be traversed.
+// Parameters: sourceIdx, targetIdx (uint32 indices), edge (graph.Edge)
+type EdgeFilterFunc func(uint32, uint32, graph.Edge[uuid.UUID]) bool
+
 // KHopBitmap returns all node indices within k hops of the given vertex.
 // Does NOT include the root node itself.
 // Used internally by Search scoping, EgoNetwork, and Traverse.
 func (s *SQLiteStore[T]) KHopBitmap(id uuid.UUID, k int) (*roaring.Bitmap, error) {
+	return s.KHopBitmapFiltered(id, k, nil)
+}
+
+// KHopBitmapFiltered returns all node indices within k hops, with optional edge filtering.
+// If filter is nil, behaves identically to KHopBitmap.
+func (s *SQLiteStore[T]) KHopBitmapFiltered(id uuid.UUID, k int, filter EdgeFilterFunc) (*roaring.Bitmap, error) {
 	s.cache.mu.RLock()
 	defer s.cache.mu.RUnlock()
 
@@ -20,11 +30,12 @@ func (s *SQLiteStore[T]) KHopBitmap(id uuid.UUID, k int) (*roaring.Bitmap, error
 		return nil, graph.ErrVertexNotFound
 	}
 
+	// Don't use pool for visited/frontier - they're reassigned in loop
 	visited := roaring.New()
 	visited.Add(idx) // exclude root from result
 	frontier := roaring.New()
 	frontier.Add(idx)
-	result := roaring.New()
+	result := roaring.New() // returned to caller
 
 	for hop := 0; hop < k && !frontier.IsEmpty(); hop++ {
 		next := roaring.New()
@@ -32,7 +43,24 @@ func (s *SQLiteStore[T]) KHopBitmap(id uuid.UUID, k int) (*roaring.Bitmap, error
 		for it.HasNext() {
 			f := it.Next()
 			if adj, ok := s.cache.outEdges[f]; ok {
-				next.Or(roaring.AndNot(adj.neighbors, visited))
+				// If no filter, use fast path
+				if filter == nil {
+					next.Or(roaring.AndNot(adj.neighbors, visited))
+				} else {
+					// Filter each neighbor by edge validity
+					nit := adj.neighbors.Iterator()
+					for nit.HasNext() {
+						n := nit.Next()
+						if visited.Contains(n) {
+							continue
+						}
+						// Check edge filter
+						edge, edgeOK := s.cache.slab.Get(f, n)
+						if edgeOK && filter(f, n, edge) {
+							next.Add(n)
+						}
+					}
+				}
 			}
 		}
 		visited.Or(next)
@@ -45,6 +73,12 @@ func (s *SQLiteStore[T]) KHopBitmap(id uuid.UUID, k int) (*roaring.Bitmap, error
 // ShortestPathUnweighted returns the hop path between src and tgt using BFS.
 // For weighted shortest path, use dominikbraun/graph's Dijkstra implementation.
 func (s *SQLiteStore[T]) ShortestPathUnweighted(src, tgt uuid.UUID) ([]uuid.UUID, error) {
+	return s.ShortestPathUnweightedFiltered(src, tgt, nil)
+}
+
+// ShortestPathUnweightedFiltered returns the hop path with optional edge filtering.
+// If filter is nil, behaves identically to ShortestPathUnweighted.
+func (s *SQLiteStore[T]) ShortestPathUnweightedFiltered(src, tgt uuid.UUID, filter EdgeFilterFunc) ([]uuid.UUID, error) {
 	s.cache.mu.RLock()
 	defer s.cache.mu.RUnlock()
 
@@ -59,6 +93,7 @@ func (s *SQLiteStore[T]) ShortestPathUnweighted(src, tgt uuid.UUID) ([]uuid.UUID
 
 	// BFS with parent tracking for path reconstruction
 	parent := map[uint32]uint32{srcIdx: srcIdx}
+	// Don't use pool for visited/frontier - they're reassigned in loop
 	visited := roaring.New()
 	visited.Add(srcIdx)
 	frontier := roaring.New()
@@ -74,16 +109,38 @@ func (s *SQLiteStore[T]) ShortestPathUnweighted(src, tgt uuid.UUID) ([]uuid.UUID
 			if !ok {
 				continue
 			}
-			newNeighbors := roaring.AndNot(adj.neighbors, visited)
-			nit := newNeighbors.Iterator()
-			for nit.HasNext() {
-				n := nit.Next()
-				parent[n] = f
-				if n == tgtIdx {
-					found = true
-					break
+			// If no filter, use fast path
+			if filter == nil {
+				newNeighbors := roaring.AndNot(adj.neighbors, visited)
+				nit := newNeighbors.Iterator()
+				for nit.HasNext() {
+					n := nit.Next()
+					parent[n] = f
+					if n == tgtIdx {
+						found = true
+						break
+					}
+					next.Add(n)
 				}
-				next.Add(n)
+			} else {
+				// Filter each neighbor by edge validity
+				nit := adj.neighbors.Iterator()
+				for nit.HasNext() {
+					n := nit.Next()
+					if visited.Contains(n) {
+						continue
+					}
+					// Check edge filter
+					edge, edgeOK := s.cache.slab.Get(f, n)
+					if edgeOK && filter(f, n, edge) {
+						parent[n] = f
+						if n == tgtIdx {
+							found = true
+							break
+						}
+						next.Add(n)
+					}
+				}
 			}
 			if found {
 				break
@@ -128,7 +185,13 @@ type SubGraph struct {
 // EgoNetwork extracts the subgraph of all nodes within depth hops of id,
 // including all edges between those nodes.
 func (s *SQLiteStore[T]) EgoNetwork(id uuid.UUID, depth int) (*SubGraph, error) {
-	neighborhood, err := s.KHopBitmap(id, depth)
+	return s.EgoNetworkFiltered(id, depth, nil)
+}
+
+// EgoNetworkFiltered extracts the subgraph with optional edge filtering.
+// If filter is nil, behaves identically to EgoNetwork.
+func (s *SQLiteStore[T]) EgoNetworkFiltered(id uuid.UUID, depth int, filter EdgeFilterFunc) (*SubGraph, error) {
+	neighborhood, err := s.KHopBitmapFiltered(id, depth, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +221,13 @@ func (s *SQLiteStore[T]) EgoNetwork(id uuid.UUID, depth int) (*SubGraph, error) 
 			for mit.HasNext() {
 				nIdx := mit.Next()
 				if nIdx > idx { // canonical: only emit once per pair
+					// If filter provided, check edge validity
+					if filter != nil {
+						edge, edgeOK := s.cache.slab.Get(idx, nIdx)
+						if !edgeOK || !filter(idx, nIdx, edge) {
+							continue
+						}
+					}
 					nUID, ok := s.registry.ReverseLookup(nIdx)
 					if ok {
 						sg.Edges = append(sg.Edges, [2]uuid.UUID{uid, nUID})
