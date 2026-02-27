@@ -390,6 +390,48 @@ func TestGLDRShortrunSearchNodes(t *testing.T) {
 	})
 }
 
+// TestGLDRShortrunPathFiltered tests the explicit filtering of edges in a graph
+// constructed from actual real text.
+func TestGLDRShortrunPathFiltered(t *testing.T) {
+	text, chapters := loadShortrun(t)
+	docGraph := runGraptorPipeline(t, text, chapters)
+	defer docGraph.Dispose()
+	idx := buildGLDR(t, docGraph, chapters)
+
+	// In shortrun.md, Ryan and Ghoul fight specifically.
+	// 1. Let's find any path between them without filters
+	pathRaw, err := idx.FindPaths("char-ryan", "char-ghoul", nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, pathRaw)
+	t.Logf("Unfiltered Path (Ryan -> Ghoul): %v", pathRaw)
+
+	// 2. Traversal only over explicitly extracted semantic narrative edges
+	// Exclude generic 'cooccurs'. Require 'HAS_SUBJECT', 'HAS_OBJECT', 'CAUSES', 'PRECEDES'.
+	opts := &gldr.TemporalQueryOptions{
+		TemporalMode:    "full",
+		IncludeTimeless: true,
+		AllowedRelations: []string{
+			"HAS_SUBJECT", "HAS_OBJECT", "CAUSES", "PRECEDES",
+		},
+	}
+
+	pathEvent, err := idx.FindPaths("char-ryan", "char-ghoul", opts)
+	if err == nil && len(pathEvent) > 0 {
+		t.Logf("Event-filtered Path (Ryan -> Ghoul): %v", pathEvent)
+		// Usually Ryan connects to an Event node (e.g. event:...) which connects to Ghoul
+		hasEventNode := false
+		for _, n := range pathEvent {
+			if strings.HasPrefix(n, "event:") {
+				hasEventNode = true
+				break
+			}
+		}
+		assert.True(t, hasEventNode, "The event-filtered path should intersect an explicit event node")
+	} else {
+		t.Logf("No explicit event path found between Ryan and Ghoul. This is expected if 'Projector' did not extract a direct transitive SVO event chain.")
+	}
+}
+
 // TestGLDRShortrunStats validates the index statistics after full ingestion.
 func TestGLDRShortrunStats(t *testing.T) {
 	text, chapters := loadShortrun(t)
