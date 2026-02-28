@@ -239,6 +239,13 @@ type GoKittWorkerResponse =
     // Phase 8: Observational Memory responses
     | { type: 'OM_PROCESS_RESULT'; id: number; payload: { observed: boolean; reflected: boolean } }
     | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
+    // GLDR Responses
+    | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
+    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
+    | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({

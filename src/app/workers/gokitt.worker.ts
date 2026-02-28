@@ -282,6 +282,13 @@ type GoKittWorkerResponse =
     | { type: 'KNOWLEDGE_GET_ANCESTORS_RESULT'; id: number; payload: any[] }
     | { type: 'KNOWLEDGE_GET_DESCENDANTS_RESULT'; id: number; payload: any[] }
     | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT'; id: number; payload: any[] }
+    // GLDR Responses
+    | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
+    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
+    | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -1683,16 +1690,6 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
             // Store: Fact Sheets
             // =================================================================
 
-            case 'STORE_UPSERT_ENTITY_CARD': {
-                if (!wasmLoaded) {
-                    self.postMessage({ type: 'STORE_UPSERT_ENTITY_CARD_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
-                    return;
-                }
-                const res = GoKitt.storeUpsertEntityCard(msg.payload.cardJSON);
-                const parsed = JSON.parse(res);
-                self.postMessage({ type: 'STORE_UPSERT_ENTITY_CARD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
-                break;
-            }
 
             case 'STORE_GET_ENTITY_CARDS': {
                 if (!wasmLoaded) {
