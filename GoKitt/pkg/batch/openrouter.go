@@ -133,27 +133,33 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 	})
 
 	fetchThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		responseCh <- struct {
-			val js.Value
-			err error
-		}{args[0], nil}
+		result := args[0]
+		go func() {
+			responseCh <- struct {
+				val js.Value
+				err error
+			}{result, nil}
+		}()
 		return nil
 	})
-	defer fetchThen.Release()
 
 	fetchCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		errMsg := args[0].Get("message").String()
-		responseCh <- struct {
-			val js.Value
-			err error
-		}{js.Undefined(), fmt.Errorf("fetch: %s", errMsg)}
+		go func() {
+			responseCh <- struct {
+				val js.Value
+				err error
+			}{js.Undefined(), fmt.Errorf("fetch: %s", errMsg)}
+		}()
 		return nil
 	})
-	defer fetchCatch.Release()
 
 	promise.Call("then", fetchThen).Call("catch", fetchCatch)
 
 	fetchResult := <-responseCh
+	fetchThen.Release()
+	fetchCatch.Release()
+
 	if fetchResult.err != nil {
 		return "", fetchResult.err
 	}
@@ -168,27 +174,33 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 	})
 
 	textThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		textCh <- struct {
-			text string
-			err  error
-		}{args[0].String(), nil}
+		text := args[0].String()
+		go func() {
+			textCh <- struct {
+				text string
+				err  error
+			}{text, nil}
+		}()
 		return nil
 	})
-	defer textThen.Release()
 
 	textCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		errMsg := args[0].Get("message").String()
-		textCh <- struct {
-			text string
-			err  error
-		}{"", fmt.Errorf("text error: %s", errMsg)}
+		go func() {
+			textCh <- struct {
+				text string
+				err  error
+			}{"", fmt.Errorf("text error: %s", errMsg)}
+		}()
 		return nil
 	})
-	defer textCatch.Release()
 
 	textPromise.Call("then", textThen).Call("catch", textCatch)
 
 	textResult := <-textCh
+	textThen.Release()
+	textCatch.Release()
+
 	if textResult.err != nil {
 		return "", textResult.err
 	}

@@ -97,8 +97,8 @@ export class SqlitePersistenceService {
      */
     async saveSnapshot(data: Uint8Array): Promise<void> {
         console.log(`[SqlitePersistence] Saving snapshot (${data.byteLength} bytes)...`);
-        // Zero-copy transfer
-        await this.sendToWorker('SAVE_SNAPSHOT', data, [data.buffer]);
+        // Remove zero-copy transfer to prevent detaching the buffer in the UI thread
+        await this.sendToWorker('SAVE_SNAPSHOT', data);
         console.log('[SqlitePersistence] Snapshot saved.');
     }
 

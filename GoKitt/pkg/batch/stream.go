@@ -96,26 +96,33 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	}, 1)
 
 	fetchThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		responseCh <- struct {
-			val js.Value
-			err error
-		}{args[0], nil}
+		result := args[0]
+		go func() {
+			responseCh <- struct {
+				val js.Value
+				err error
+			}{result, nil}
+		}()
 		return nil
 	})
-	defer fetchThen.Release()
 
 	fetchCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		responseCh <- struct {
-			val js.Value
-			err error
-		}{js.Undefined(), fmt.Errorf("fetch: %s", args[0].Get("message").String())}
+		errMsg := args[0].Get("message").String()
+		go func() {
+			responseCh <- struct {
+				val js.Value
+				err error
+			}{js.Undefined(), fmt.Errorf("fetch: %s", errMsg)}
+		}()
 		return nil
 	})
-	defer fetchCatch.Release()
 
 	fetch.Invoke(url, options).Call("then", fetchThen).Call("catch", fetchCatch)
 
 	fetchResult := <-responseCh
+	fetchThen.Release()
+	fetchCatch.Release()
+
 	if fetchResult.err != nil {
 		return "", fetchResult.err
 	}
@@ -128,12 +135,15 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		// Read error body
 		errCh := make(chan string, 1)
 		errThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			errCh <- args[0].String()
+			errMsg := args[0].String()
+			go func() {
+				errCh <- errMsg
+			}()
 			return nil
 		})
-		defer errThen.Release()
 		response.Call("text").Call("then", errThen)
 		errText := <-errCh
+		errThen.Release()
 		return "", fmt.Errorf("HTTP %d: %s", status, errText)
 	}
 
@@ -157,28 +167,36 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 
 	readThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		result := args[0]
-		chunkCh <- struct {
-			done  bool
-			value js.Value
-			err   error
-		}{
-			done:  result.Get("done").Bool(),
-			value: result.Get("value"),
-			err:   nil,
-		}
+		done := result.Get("done").Bool()
+		value := result.Get("value")
+
+		go func() {
+			chunkCh <- struct {
+				done  bool
+				value js.Value
+				err   error
+			}{
+				done:  done,
+				value: value,
+				err:   nil,
+			}
+		}()
 		return nil
 	})
 	defer readThen.Release()
 
 	readCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		chunkCh <- struct {
-			done  bool
-			value js.Value
-			err   error
-		}{
-			done: true,
-			err:  fmt.Errorf("read error: %s", args[0].Get("message").String()),
-		}
+		errMsg := args[0].Get("message").String()
+		go func() {
+			chunkCh <- struct {
+				done  bool
+				value js.Value
+				err   error
+			}{
+				done: true,
+				err:  fmt.Errorf("read error: %s", errMsg),
+			}
+		}()
 		return nil
 	})
 	defer readCatch.Release()
