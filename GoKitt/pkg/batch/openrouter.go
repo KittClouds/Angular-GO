@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"syscall/js"
+	"time"
 )
 
 // openRouterRequest represents the request body for OpenRouter API.
@@ -157,8 +158,11 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 	promise.Call("then", fetchThen).Call("catch", fetchCatch)
 
 	fetchResult := <-responseCh
-	fetchThen.Release()
-	fetchCatch.Release()
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		fetchThen.Release()
+		fetchCatch.Release()
+	}()
 
 	if fetchResult.err != nil {
 		return "", fetchResult.err
@@ -198,8 +202,11 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 	textPromise.Call("then", textThen).Call("catch", textCatch)
 
 	textResult := <-textCh
-	textThen.Release()
-	textCatch.Release()
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		textThen.Release()
+		textCatch.Release()
+	}()
 
 	if textResult.err != nil {
 		return "", textResult.err

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"syscall/js"
+	"time"
 )
 
 // StreamChatMessage represents a message in the streaming chat request.
@@ -120,8 +121,11 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	fetch.Invoke(url, options).Call("then", fetchThen).Call("catch", fetchCatch)
 
 	fetchResult := <-responseCh
-	fetchThen.Release()
-	fetchCatch.Release()
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		fetchThen.Release()
+		fetchCatch.Release()
+	}()
 
 	if fetchResult.err != nil {
 		return "", fetchResult.err
@@ -143,7 +147,10 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		})
 		response.Call("text").Call("then", errThen)
 		errText := <-errCh
-		errThen.Release()
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			errThen.Release()
+		}()
 		return "", fmt.Errorf("HTTP %d: %s", status, errText)
 	}
 
@@ -183,7 +190,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		}()
 		return nil
 	})
-	defer readThen.Release()
 
 	readCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		errMsg := args[0].Get("message").String()
@@ -199,7 +205,15 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		}()
 		return nil
 	})
-	defer readCatch.Release()
+
+	// Defer cleanup of read functions
+	defer func() {
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			readThen.Release()
+			readCatch.Release()
+		}()
+	}()
 
 	for {
 		reader.Call("read").Call("then", readThen).Call("catch", readCatch)
