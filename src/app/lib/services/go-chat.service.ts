@@ -13,6 +13,8 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { GoKittService } from '../../services/gokitt.service';
 import { getSetting, setSetting } from '../dexie/settings.service';
 import { ScopeService } from './scope.service';
+import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { SqlitePersistenceService } from '../sqlite/persistence/SqlitePersistenceService';
 
 // =============================================================================
 // TypeScript Interfaces (matching Go structs)
@@ -76,6 +78,8 @@ export interface CreateThreadOptions {
 export class GoChatService {
     private goKittService = inject(GoKittService);
     private scopeService = inject(ScopeService);
+    private storeService = inject(GoKittStoreService);
+    private persistence = inject(SqlitePersistenceService);
 
     // Reactive State
     readonly ready = signal(false);
@@ -132,6 +136,17 @@ export class GoChatService {
         }
 
         try {
+            // First initialize the batch service for LLM calls (extraction, streaming A/B)
+            const batchResult = await this.goKittService.batchInit({
+                provider: 'openrouter',
+                openRouterApiKey: config.apiKey,
+                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free'
+            });
+            if (batchResult.error) {
+                console.warn('[GoChatService] Batch init failed:', batchResult.error);
+                // Continue anyway, chat might still work without batch
+            }
+
             // Initialize Go chat service via WASM
             // Include OM settings from GoOMService if available
             const configJSON = JSON.stringify({
@@ -198,6 +213,7 @@ export class GoChatService {
             setSetting('chat:activeThreadId', thread.id);
 
             console.log('[GoChatService] Created thread:', thread.id);
+            this.saveDbState();
             return thread;
 
         } catch (err) {
@@ -217,7 +233,9 @@ export class GoChatService {
             const thread = await this.goKittService.chatGetThread(threadId);
 
             if (!thread || thread.error) {
-                console.error('[GoChatService] Thread not found:', threadId);
+                // Not an error - this is a normal occurrence when databases are cleared
+                // but local storage still holds the active thread ID.
+                console.warn('[GoChatService] Thread not found (stale ID):', threadId);
                 this.loading.set(false);
                 return;
             }
@@ -294,6 +312,7 @@ export class GoChatService {
             }
 
             console.log('[GoChatService] Deleted thread:', threadId);
+            this.saveDbState();
             return true;
 
         } catch (err) {
@@ -357,6 +376,7 @@ export class GoChatService {
             // Update local state
             this.messages.update(msgs => [...msgs, message]);
 
+            this.saveDbState();
             return message;
 
         } catch (err) {
@@ -396,6 +416,7 @@ export class GoChatService {
                 msgs.map(m => m.id === messageId ? { ...m, content, updated_at: Date.now() } : m)
             );
 
+            this.saveDbState();
             return true;
 
         } catch (err) {
@@ -421,6 +442,9 @@ export class GoChatService {
                 msgs.map(m => m.id === messageId ? { ...m, content: m.content + chunk } : m)
             );
 
+            // Debounce or eventually save? For now just save on append, though might be heavy.
+            // A better way is to save when streaming is done, but for safety saving here.
+            this.saveDbState();
             return true;
 
         } catch (err) {
@@ -585,6 +609,37 @@ export class GoChatService {
         }
     }
 
+    // =========================================================================
+    // Go OpenRouter Streaming
+    // =========================================================================
+
+    /**
+     * Streams a chat response via the Go backend (OpenRouter).
+     * This bypasses the normal thread persistence in this method, and just handles
+     * the raw streaming logic for A/B testing against the TypeScript OpenRouter service.
+     */
+    async streamChat(
+        messages: any[],
+        callbacks: { onChunk: (chunk: string) => void, onComplete: (full: string) => void, onError: (err: Error) => void },
+        systemPrompt?: string
+    ): Promise<void> {
+        try {
+            const { response, error } = await this.goKittService.goStreamChat(
+                JSON.stringify(messages),
+                systemPrompt || '',
+                (chunk) => callbacks.onChunk(chunk)
+            );
+
+            if (error) {
+                callbacks.onError(new Error(error));
+            } else {
+                callbacks.onComplete(response);
+            }
+        } catch (err: any) {
+            callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+        }
+    }
+
     /**
      * Restore the last active thread from settings.
      * Clears the saved ID if the thread no longer exists.
@@ -607,5 +662,22 @@ export class GoChatService {
     async newSession(): Promise<Thread | null> {
         this.messages.set([]);
         return this.createThread();
+    }
+
+    // =========================================================================
+    // Persistence
+    // =========================================================================
+
+    /**
+     * Persist the SQLite DB to OPFS after chat changes.
+     */
+    private async saveDbState(): Promise<void> {
+        if (!this.storeService.isReady) return;
+        try {
+            const data = await this.storeService.exportDatabase();
+            await this.persistence.saveSnapshot(data);
+        } catch (e) {
+            console.error('[GoChatService] Failed to save DB state:', e);
+        }
     }
 }

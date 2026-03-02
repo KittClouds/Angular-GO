@@ -127,6 +127,14 @@ Keep responses concise but helpful. If you don't know something specific about t
                             (click)="activeProvider.set('openrouter')">
                             OpenRouter
                         </button>
+                        <button 
+                            class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                            [class.bg-teal-600]="activeProvider() === 'go-openrouter'"
+                            [class.text-white]="activeProvider() === 'go-openrouter'"
+                            [class.text-muted-foreground]="activeProvider() !== 'go-openrouter'"
+                            (click)="activeProvider.set('go-openrouter')">
+                            Go OpenRouter
+                        </button>
                     </div>
 
                     <!-- Google GenAI Settings -->
@@ -160,8 +168,8 @@ Keep responses concise but helpful. If you don't know something specific about t
                         }
                     }
 
-                    <!-- OpenRouter Settings -->
-                    @if (activeProvider() === 'openrouter') {
+                    <!-- OpenRouter & Go OpenRouter Settings -->
+                    @if (activeProvider() === 'openrouter' || activeProvider() === 'go-openrouter') {
                         <div class="space-y-1">
                             <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
                             <input 
@@ -188,6 +196,15 @@ Keep responses concise but helpful. If you don't know something specific about t
                             <p class="text-xs text-amber-400">
                                 ⚠️ Get your API key at <a href="https://openrouter.ai/keys" target="_blank" class="underline">openrouter.ai/keys</a>
                             </p>
+                        }
+
+                        @if (activeProvider() === 'go-openrouter') {
+                            <div class="space-y-1 p-2 bg-teal-900/20 border border-teal-500/20 rounded-md mt-2">
+                                <p class="text-[10px] text-teal-400">
+                                    <lucide-icon [img]="BrainIcon" class="inline-block h-3 w-3 mr-1"></lucide-icon>
+                                    <strong>A/B Test Mode:</strong> Chat streaming is routed through the Go backend WASM bridge.
+                                </p>
+                            </div>
                         }
                     }
 
@@ -658,7 +675,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     // Settings panel state
     showSettings = signal(false);
-    activeProvider = signal<'google' | 'openrouter'>('google');  // Default to Google
+    activeProvider = signal<'google' | 'openrouter' | 'go-openrouter'>('google');  // Default to Google
 
     // Custom Instructions
     showSystemPrompt = signal(false);
@@ -984,8 +1001,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     ): Promise<void> {
         let fullResponse = '';
 
-        // Determine which provider to use
-        const useGoogle = this.activeProvider() === 'google' && this.googleGenAI.isConfigured();
+        const provider = this.activeProvider();
+        const useGoogle = provider === 'google' && this.googleGenAI.isConfigured();
+        const useGoOpenRouter = provider === 'go-openrouter';
 
         if (useGoogle) {
             // Convert to Google GenAI message format
@@ -1011,8 +1029,25 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     this.currentBotMsgId = null;
                 },
             }, systemPrompt);
+        } else if (useGoOpenRouter) {
+            // Use Go OpenRouter via WASM Bridge
+            await this.goChatService.streamChat(history, {
+                onChunk: (chunk) => {
+                    fullResponse += chunk;
+                    instance.messageAppendContent(botMsgId, chunk);
+                },
+                onComplete: async (response) => {
+                    await this.goChatService.addAssistantMessage(response);
+                    this.currentBotMsgId = null;
+                },
+                onError: (error) => {
+                    console.error('[AiChatPanel] Go OpenRouter error:', error);
+                    instance.messageReplaceContent(botMsgId, `❌ Error from Go: ${error.message}`);
+                    this.currentBotMsgId = null;
+                },
+            }, systemPrompt);
         } else {
-            // Use OpenRouter
+            // Use TypeScript OpenRouter
             await this.openRouter.streamChat(history, {
                 onChunk: (chunk) => {
                     fullResponse += chunk;

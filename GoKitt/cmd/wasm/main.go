@@ -157,6 +157,7 @@ func main() {
 		"extractEntities":    js.FuncOf(jsExtractEntities),
 		"extractRelations":   js.FuncOf(jsExtractRelations),
 		"agentChatWithTools": js.FuncOf(jsAgentChatWithTools),
+		"goStreamChat":       js.FuncOf(jsGoStreamChat),
 		// Phase 7: Observational Memory + Chat Service
 		"chatInit":                 js.FuncOf(jsChatInit),
 		"chatCreateThread":         js.FuncOf(jsChatCreateThread),
@@ -2337,6 +2338,45 @@ func jsAgentChatWithTools(this js.Value, args []js.Value) interface{} {
 
 		jsonBytes, _ := json.Marshal(result)
 		resolve.Invoke(string(jsonBytes))
+	}()
+
+	return promise
+}
+
+// jsGoStreamChat performs a streaming OpenRouter chat call.
+// Args: messagesJSON (string), systemPrompt (string), onChunk (JS callback function)
+// Returns: Promise<string> with the full accumulated response
+func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("goStreamChat: messagesJSON, systemPrompt, and onChunk callback required")
+	}
+
+	messagesJSON := args[0].String()
+	systemPrompt := ""
+	if !args[1].IsUndefined() && !args[1].IsNull() {
+		systemPrompt = args[1].String()
+	}
+	onChunkJS := args[2]
+
+	promise, resolve, reject := makePromise()
+
+	go func() {
+		if batchSvc == nil {
+			reject.Invoke(js.Global().Get("Error").New("goStreamChat: batch service not initialized (call batchInit first)"))
+			return
+		}
+
+		fullResponse, err := batchSvc.StreamChat(messagesJSON, systemPrompt, func(chunk string) {
+			// Call the JS onChunk callback with each delta
+			onChunkJS.Invoke(chunk)
+		})
+
+		if err != nil {
+			reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("goStreamChat: %v", err)))
+			return
+		}
+
+		resolve.Invoke(fullResponse)
 	}()
 
 	return promise

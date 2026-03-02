@@ -124,7 +124,8 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
     | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
-    | { type: 'GLDR_STATS'; id: number };
+    | { type: 'GLDR_STATS'; id: number }
+    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string }; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -246,6 +247,8 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
     | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
+    | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 @Injectable({
@@ -1281,6 +1284,46 @@ export class GoKittService {
                     reject(new Error(`LLM request ${type} timed out after 120s`));
                 }
             }, 120000);
+        });
+    }
+
+    /**
+     * Start a streaming chat response via OpenRouter (Go WASM)
+     * @param messagesJSON JSON string of the message history
+     * @param systemPrompt Optional system override
+     * @param onChunk Callback for each generated chunk
+     */
+    async goStreamChat(messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void): Promise<{ response: string; error?: string }> {
+        if (!this.wasmLoaded) return { response: '', error: 'WASM not loaded' };
+
+        return new Promise((resolve, reject) => {
+            const id = this.nextRequestId++;
+
+            // Set up a custom long-lived pending request handler in pendingRequests map.
+            // When we receive chunks, we want to call onChunk but NOT resolve the promise yet.
+            const chunkHandler = (e: MessageEvent<GoKittWorkerResponse>) => {
+                const msg = e.data;
+                if ('id' in msg && msg.id === id) {
+                    if (msg.type === 'GO_STREAM_CHAT_CHUNK') {
+                        onChunk(msg.payload.chunk);
+                        return; // do not remove listener
+                    } else if (msg.type === 'GO_STREAM_CHAT_RESULT') {
+                        this._worker?.removeEventListener('message', chunkHandler);
+                        resolve(msg.payload);
+                    } else if (msg.type === 'ERROR') {
+                        this._worker?.removeEventListener('message', chunkHandler);
+                        reject(new Error(msg.payload.message));
+                    }
+                }
+            };
+
+            this._worker?.addEventListener('message', chunkHandler);
+
+            this._worker?.postMessage({
+                type: 'GO_STREAM_CHAT',
+                payload: { messagesJSON, systemPrompt },
+                id
+            } as GoKittWorkerMessage);
         });
     }
 

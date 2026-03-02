@@ -99,6 +99,7 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_UPDATE_MESSAGE'; payload: { messageId: string; content: string }; id: number }
     | { type: 'CHAT_APPEND_MESSAGE'; payload: { messageId: string; chunk: string }; id: number }
     | { type: 'CHAT_START_STREAMING'; payload: { threadId: string; narrativeId: string }; id: number }
+    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string }; id: number }
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
@@ -232,6 +233,8 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_UPDATE_MESSAGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_APPEND_MESSAGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_START_STREAMING_RESULT'; id: number; payload: any }
+    | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
     | { type: 'CHAT_GET_MEMORIES_RESULT'; id: number; payload: any }
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -441,6 +444,7 @@ declare const GoKitt: {
     extractEntities: (text: string) => Promise<string>;
     extractRelations: (text: string, knownEntitiesJSON?: string) => Promise<string>;
     agentChatWithTools: (messagesJSON: string, toolsJSON: string, systemPrompt?: string) => Promise<string>;
+    goStreamChat: (messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void) => Promise<string>;
     // Phase 7: Observational Memory + Chat Service
     chatInit: (configJSON: string) => string;
     chatCreateThread: (worldId: string, narrativeId: string) => string;
@@ -2750,6 +2754,25 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 const res = GoKitt.knowledgeAddNode(msg.payload.nodeJSON);
                 const parsed = JSON.parse(res);
                 self.postMessage({ type: 'KNOWLEDGE_ADD_NODE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+            case 'GO_STREAM_CHAT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GO_STREAM_CHAT_RESULT', id: msg.id, payload: { response: '', error: 'WASM not loaded' } });
+                    return;
+                }
+                try {
+                    const response = await GoKitt.goStreamChat(
+                        msg.payload.messagesJSON,
+                        msg.payload.systemPrompt || '',
+                        (chunk) => {
+                            self.postMessage({ type: 'GO_STREAM_CHAT_CHUNK', id: msg.id, payload: { chunk } });
+                        }
+                    );
+                    self.postMessage({ type: 'GO_STREAM_CHAT_RESULT', id: msg.id, payload: { response } });
+                } catch (e: any) {
+                    self.postMessage({ type: 'GO_STREAM_CHAT_RESULT', id: msg.id, payload: { response: '', error: e.toString() } });
+                }
                 break;
             }
 

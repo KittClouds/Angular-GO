@@ -5,6 +5,97 @@ import (
 	"time"
 )
 
+func TestChatThreadsCRUD(t *testing.T) {
+	s, err := NewSQLiteStore()
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	thread := &Thread{
+		ID:          "test-thread-1",
+		WorldID:     "world-1",
+		NarrativeID: "narrative-1",
+		Title:       "Test Thread",
+		CreatedAt:   time.Now().UnixMilli(),
+		UpdatedAt:   time.Now().UnixMilli(),
+	}
+
+	if err := s.CreateThread(thread); err != nil {
+		t.Fatalf("Failed to create thread: %v", err)
+	}
+
+	threads, err := s.ListThreads("world-1")
+	if err != nil {
+		t.Fatalf("Failed to list threads: %v", err)
+	}
+
+	if len(threads) != 1 {
+		t.Fatalf("Expected 1 thread, got %d", len(threads))
+	}
+
+	if threads[0].ID != thread.ID {
+		t.Errorf("Expected thread ID %s, got %s", thread.ID, threads[0].ID)
+	}
+
+	// Test without world filter
+	allThreads, err := s.ListThreads("")
+	if err != nil {
+		t.Fatalf("Failed to list all threads: %v", err)
+	}
+
+	if len(allThreads) != 1 {
+		t.Fatalf("Expected 1 thread overall, got %d", len(allThreads))
+	}
+}
+
+func TestChatMessageCRUD(t *testing.T) {
+	s, err := NewSQLiteStore()
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	threadID := "test-thread-msg-1"
+
+	// Create thread first due to foreign key constraints if any (SQLite store doesn't enforce strict FKs by default but good practice)
+	thread := &Thread{
+		ID:          threadID,
+		WorldID:     "world-1",
+		NarrativeID: "narrative-1",
+		Title:       "Test Thread",
+		CreatedAt:   time.Now().UnixMilli(),
+		UpdatedAt:   time.Now().UnixMilli(),
+	}
+	s.CreateThread(thread)
+
+	msg := &ThreadMessage{
+		ID:          "msg-1",
+		ThreadID:    threadID,
+		Role:        "user",
+		Content:     "Hello world",
+		NarrativeID: "narrative-1",
+		CreatedAt:   time.Now().UnixMilli(),
+		UpdatedAt:   time.Now().UnixMilli(),
+		IsStreaming: false,
+	}
+
+	if err := s.AddMessage(msg); err != nil {
+		t.Fatalf("Failed to add message: %v", err)
+	}
+
+	msgs, err := s.GetThreadMessages(threadID)
+	if err != nil {
+		t.Fatalf("Failed to get messages: %v", err)
+	}
+
+	if len(msgs) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(msgs))
+	}
+
+	if msgs[0].Content != "Hello world" {
+		t.Errorf("Expected content 'Hello world', got %s", msgs[0].Content)
+	}
+}
+
 // =============================================================================
 // Observational Memory Tests (Phase 8)
 // =============================================================================

@@ -107,8 +107,8 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 		return "", fmt.Errorf("batch: fetch not available")
 	}
 
-	// Get window.location.origin for HTTP-Referer header
-	origin := js.Global().Get("window").Get("location").Get("origin").String()
+	// Get location.origin for HTTP-Referer header
+	origin := js.Global().Get("location").Get("origin").String()
 
 	// Create headers object
 	headers := js.Global().Get("Object").New()
@@ -127,64 +127,77 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 	promise := fetch.Invoke(url, options)
 
 	// Wait for response using a channel
-	resultCh := make(chan struct {
-		response string
-		err      error
+	responseCh := make(chan struct {
+		val js.Value
+		err error
 	})
 
-	// Set up promise handlers
-	then := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		response := args[0]
-
-		// Check for HTTP errors
-		status := response.Get("status").Int()
-		if !response.Get("ok").Bool() {
-			// Get error text
-			textPromise := response.Call("text")
-			textThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-				errText := args[0].String()
-				resultCh <- struct {
-					response string
-					err      error
-				}{response: "", err: fmt.Errorf("HTTP %d: %s", status, errText)}
-				return nil
-			})
-			defer textThen.Release()
-			textPromise.Call("then", textThen)
-			return nil
-		}
-
-		// Get response text
-		textPromise := response.Call("text")
-
-		textThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			text := args[0].String()
-			resultCh <- struct {
-				response string
-				err      error
-			}{response: text, err: nil}
-			return nil
-		})
-		defer textThen.Release()
-
-		textPromise.Call("then", textThen)
+	fetchThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		responseCh <- struct {
+			val js.Value
+			err error
+		}{args[0], nil}
 		return nil
 	})
-	defer then.Release()
+	defer fetchThen.Release()
 
-	catch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	fetchCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		errMsg := args[0].Get("message").String()
-		resultCh <- struct {
-			response string
-			err      error
-		}{response: "", err: fmt.Errorf("%s", errMsg)}
+		responseCh <- struct {
+			val js.Value
+			err error
+		}{js.Undefined(), fmt.Errorf("fetch: %s", errMsg)}
 		return nil
 	})
-	defer catch.Release()
+	defer fetchCatch.Release()
 
-	promise.Call("then", then).Call("catch", catch)
+	promise.Call("then", fetchThen).Call("catch", fetchCatch)
 
-	// Wait for result
-	result := <-resultCh
-	return result.response, result.err
+	fetchResult := <-responseCh
+	if fetchResult.err != nil {
+		return "", fetchResult.err
+	}
+
+	response := fetchResult.val
+
+	// Read response text
+	textPromise := response.Call("text")
+	textCh := make(chan struct {
+		text string
+		err  error
+	})
+
+	textThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		textCh <- struct {
+			text string
+			err  error
+		}{args[0].String(), nil}
+		return nil
+	})
+	defer textThen.Release()
+
+	textCatch := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		errMsg := args[0].Get("message").String()
+		textCh <- struct {
+			text string
+			err  error
+		}{"", fmt.Errorf("text error: %s", errMsg)}
+		return nil
+	})
+	defer textCatch.Release()
+
+	textPromise.Call("then", textThen).Call("catch", textCatch)
+
+	textResult := <-textCh
+	if textResult.err != nil {
+		return "", textResult.err
+	}
+
+	// Check for HTTP errors
+	if !response.Get("ok").Bool() {
+		status := response.Get("status").Int()
+		return "", fmt.Errorf("HTTP %d: %s", status, textResult.text)
+	}
+
+	return textResult.text, nil
 }
