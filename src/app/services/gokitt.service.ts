@@ -1196,6 +1196,8 @@ export class GoKittService {
         googleModel?: string;
         openRouterApiKey?: string;
         openRouterModel?: string;
+        temperature?: number;
+        maxTokens?: number;
     }): Promise<{ success: boolean; provider?: string; model?: string; error?: string }> {
         if (!this.wasmLoaded) {
             return { success: false, error: 'WASM not loaded' };

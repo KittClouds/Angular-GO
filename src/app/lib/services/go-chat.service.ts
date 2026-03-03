@@ -62,12 +62,20 @@ export interface ChatConfig {
     omEnabled?: boolean;
     observeThreshold?: number;
     reflectThreshold?: number;
+    temperature?: number;
+    maxTokens?: number;
 }
 
 /** Thread creation options */
 export interface CreateThreadOptions {
     worldId?: string;
     narrativeId?: string;
+}
+
+/** Shared message format for OpenRouter-compatible streaming calls */
+export interface OpenRouterMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string | null;
 }
 
 // =============================================================================
@@ -140,7 +148,9 @@ export class GoChatService {
             const batchResult = await this.goKittService.batchInit({
                 provider: 'openrouter',
                 openRouterApiKey: config.apiKey,
-                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free'
+                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                temperature: config.temperature,
+                maxTokens: config.maxTokens
             });
             if (batchResult.error) {
                 console.warn('[GoChatService] Batch init failed:', batchResult.error);
@@ -172,10 +182,38 @@ export class GoChatService {
             await this.loadThreads();
 
             // Restore last active thread
-            await this.restoreLastThread();
+            this.restoreLastThread();
 
         } catch (err) {
             console.error('[GoChatService] Init error:', err);
+        }
+    }
+
+    /**
+     * Dynamically update the OpenRouter settings on the backend without re-initialization.
+     */
+    async updateConfig(config: ChatConfig): Promise<void> {
+        if (!this.goKittService.isReady) {
+            console.warn('[GoChatService] Cannot update config, WASM not ready');
+            return;
+        }
+
+        try {
+            const batchResult = await this.goKittService.batchInit({
+                provider: 'openrouter',
+                openRouterApiKey: config.apiKey,
+                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                temperature: config.temperature,
+                maxTokens: config.maxTokens
+            });
+
+            if (batchResult.error) {
+                console.warn('[GoChatService] Batch re-init failed:', batchResult.error);
+            } else {
+                console.log('[GoChatService] Backend LLM model updated to', config.model);
+            }
+        } catch (err) {
+            console.error('[GoChatService] Update config error:', err);
         }
     }
 

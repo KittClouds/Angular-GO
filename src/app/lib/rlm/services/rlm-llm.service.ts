@@ -1,13 +1,13 @@
 /**
  * RLM LLM Service
  *
- * Thin wrapper over OpenRouterService for RLM-internal reasoning calls
- * (plan and evaluate steps). Reuses the chat API key but allows a
- * separate model selection via the `rlm:model` Dexie setting.
+ * Thin wrapper over GoChatService for RLM-internal reasoning calls
+ * (plan and evaluate steps). Reuses the Go OpenRouter pipeline so
+ * there is a single LLM path in the application.
  */
 
 import { Injectable, inject, signal, computed } from '@angular/core';
-import { OpenRouterService, type OpenRouterMessage } from '../../services/openrouter.service';
+import { GoChatService } from '../../services/go-chat.service';
 import { getSetting, setSetting } from '../../dexie/settings.service';
 import type { ZodSchema, ZodError } from 'zod';
 
@@ -24,19 +24,18 @@ const DEFAULT_RLM_MODEL = 'z-ai/glm-4.5-air:free';
 
 @Injectable({ providedIn: 'root' })
 export class RlmLlmService {
-    private openRouter: OpenRouterService;
+    private goChatService = inject(GoChatService);
 
     /** Currently selected RLM model ID */
     private _model = signal<string>(getSetting<string>(RLM_MODEL_KEY, DEFAULT_RLM_MODEL));
 
     readonly model = this._model.asReadonly();
 
-    /** True when the underlying OpenRouter service has a valid API key */
-    readonly isConfigured = computed(() => !!this.openRouter.getApiKey());
-
-    constructor(openRouter?: OpenRouterService) {
-        this.openRouter = openRouter || inject(OpenRouterService);
-    }
+    /** True when the Go OpenRouter config has been saved (has an API key) */
+    readonly isConfigured = computed(() => {
+        const cfg = getSetting<{ apiKey?: string } | null>('openrouter:config', null);
+        return !!cfg?.apiKey;
+    });
 
     // -------------------------------------------------------------------------
     // Configuration
@@ -59,30 +58,28 @@ export class RlmLlmService {
 
     /**
      * Non-streaming completion for plan / evaluate steps.
-     *
-     * Constructs a user message and delegates to OpenRouterService.chat().
-     * The system prompt is prepended by OpenRouter internally.
+     * Collects all chunks from the Go stream and returns the full response.
      */
     async complete(systemPrompt: string, userPrompt: string): Promise<string> {
         if (!this.isConfigured()) {
-            throw new Error('[RlmLlm] OpenRouter API key not configured');
+            throw new Error('[RlmLlm] Go OpenRouter not configured — set API key in AI Chat settings');
         }
 
-        const messages: OpenRouterMessage[] = [
-            { role: 'user', content: userPrompt },
-        ];
-
-        // OpenRouterService.chat(messages, systemPrompt?) — 2 args
-        return this.openRouter.chat(messages, systemPrompt);
+        return new Promise<string>((resolve, reject) => {
+            this.goChatService.streamChat(
+                [{ role: 'user', content: userPrompt }],
+                {
+                    onChunk: () => { /* Streaming — we collect on complete */ },
+                    onComplete: (full) => resolve(full),
+                    onError: (err) => reject(err),
+                },
+                systemPrompt
+            );
+        });
     }
 
     /**
      * Structured JSON completion with Zod validation.
-     *
-     * Appends a JSON instruction to the system prompt, parses the
-     * response, and validates it against the given Zod schema.
-     *
-     * Handles models that wrap JSON in fenced code blocks (```json ... ```).
      */
     async completeJSON<T>(
         systemPrompt: string,
@@ -111,12 +108,8 @@ export class RlmLlmService {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /**
-     * Strip fenced code blocks and surrounding whitespace so we get pure JSON.
-     */
     private extractJSON(raw: string): string {
         let s = raw.trim();
-        // Strip ```json ... ``` wrappers
         const fenced = s.match(/^```(?:json)?\s*([\s\S]*?)```$/);
         if (fenced) {
             s = fenced[1].trim();

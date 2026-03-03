@@ -1,13 +1,12 @@
 /**
  * AI Chat Panel Component
- * 
+ *
  * Wraps quikchat vanilla JS library with Angular integration.
  * Uses GoChatService for Go/SQLite persistence + memory extraction.
- * Uses OpenRouter/GoogleGenAI for LLM streaming.
- * 
+ *
  * Architecture:
- * - GoChatService: Persistence, memory extraction, thread management (Go WASM)
- * - OpenRouterService/GoogleGenAIService: Live LLM streaming (TypeScript)
+ * - GoChatService (Go WASM) — persistence, thread management, OpenRouter streaming
+ * - GoogleGenAIService (TypeScript) — Google Gemini streaming fallback
  */
 
 import {
@@ -18,6 +17,7 @@ import {
     ElementRef,
     ViewChild,
     signal,
+    computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -25,8 +25,8 @@ import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, A
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
 import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/services/go-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
-import { OpenRouterService, OpenRouterMessage } from '../../../lib/services/openrouter.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
+import type { OpenRouterMessage } from '../../../lib/services/go-chat.service';
 
 // Import quikchat (vanilla JS lib)
 declare const quikchat: any;
@@ -97,8 +97,8 @@ Keep responses concise but helpful. If you don't know something specific about t
                     </button>
                     <button 
                         class="chat-action-btn ml-auto"
-                        [class.text-teal-400]="openRouter.isConfigured()"
-                        [class.text-amber-400]="!openRouter.isConfigured()"
+                        [class.text-teal-400]="isGoConfigured()"
+                        [class.text-amber-400]="!isGoConfigured()"
                         title="Settings"
                         (click)="toggleSettings()">
                         <lucide-icon [img]="SettingsIcon" class="h-4 w-4"></lucide-icon>
@@ -121,19 +121,11 @@ Keep responses concise but helpful. If you don't know something specific about t
                         </button>
                         <button 
                             class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-                            [class.bg-teal-600]="activeProvider() === 'openrouter'"
-                            [class.text-white]="activeProvider() === 'openrouter'"
-                            [class.text-muted-foreground]="activeProvider() !== 'openrouter'"
-                            (click)="activeProvider.set('openrouter')">
-                            OpenRouter
-                        </button>
-                        <button 
-                            class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
                             [class.bg-teal-600]="activeProvider() === 'go-openrouter'"
                             [class.text-white]="activeProvider() === 'go-openrouter'"
                             [class.text-muted-foreground]="activeProvider() !== 'go-openrouter'"
                             (click)="activeProvider.set('go-openrouter')">
-                            Go OpenRouter
+                            OpenRouter (Go)
                         </button>
                     </div>
 
@@ -168,8 +160,8 @@ Keep responses concise but helpful. If you don't know something specific about t
                         }
                     }
 
-                    <!-- OpenRouter & Go OpenRouter Settings -->
-                    @if (activeProvider() === 'openrouter' || activeProvider() === 'go-openrouter') {
+                    <!-- Go OpenRouter Settings -->
+                    @if (activeProvider() === 'go-openrouter') {
                         <div class="space-y-1">
                             <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
                             <input 
@@ -180,32 +172,84 @@ Keep responses concise but helpful. If you don't know something specific about t
                                 (input)="apiKeyInput.set($any($event.target).value)"
                             />
                         </div>
-                        <div class="space-y-1">
+                        <!-- Model Picker -->
+                        <div class="space-y-2">
                             <label class="text-xs font-medium text-muted-foreground">Model</label>
-                            <select 
-                                class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                [value]="selectedModel()"
-                                (change)="selectedModel.set($any($event.target).value)"
-                            >
-                                @for (model of openRouter.popularModels; track model.id) {
-                                    <option [value]="model.id">{{ model.name }} ({{ model.provider }})</option>
-                                }
-                            </select>
-                        </div>
-                        @if (!openRouter.isConfigured()) {
-                            <p class="text-xs text-amber-400">
-                                ⚠️ Get your API key at <a href="https://openrouter.ai/keys" target="_blank" class="underline">openrouter.ai/keys</a>
-                            </p>
-                        }
 
-                        @if (activeProvider() === 'go-openrouter') {
-                            <div class="space-y-1 p-2 bg-teal-900/20 border border-teal-500/20 rounded-md mt-2">
-                                <p class="text-[10px] text-teal-400">
-                                    <lucide-icon [img]="BrainIcon" class="inline-block h-3 w-3 mr-1"></lucide-icon>
-                                    <strong>A/B Test Mode:</strong> Chat streaming is routed through the Go backend WASM bridge.
-                                </p>
+                            <!-- Current selection badge -->
+                            <div class="px-2 py-1.5 bg-teal-900/30 border border-teal-500/30 rounded-md flex items-center justify-between">
+                                <span class="text-xs text-teal-300 font-mono truncate">{{ selectedModel() || 'None selected' }}</span>
                             </div>
-                        }
+
+                            <!-- Add custom model input -->
+                            <div class="flex gap-1">
+                                <input
+                                    type="text"
+                                    class="flex-1 px-2 py-1.5 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500 font-mono placeholder:text-muted-foreground/50"
+                                    placeholder="provider/model-id:free"
+                                    [value]="customModelInput()"
+                                    (input)="customModelInput.set($any($event.target).value)"
+                                    (keydown.enter)="addCustomModel()"
+                                />
+                                <button
+                                    class="shrink-0 px-2 py-1.5 text-xs bg-teal-600 hover:bg-teal-500 text-white rounded-md transition-colors disabled:opacity-40"
+                                    [disabled]="!customModelInput().trim()"
+                                    (click)="addCustomModel()"
+                                >Add</button>
+                            </div>
+
+                            <!-- Model pill list -->
+                            <div class="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                                @for (model of savedModels(); track model) {
+                                    <div
+                                        class="group flex items-center gap-0.5 pl-2 pr-1 py-0.5 rounded-full text-[10px] font-mono cursor-pointer border transition-colors"
+                                        [class.bg-teal-600]="selectedModel() === model"
+                                        [class.text-white]="selectedModel() === model"
+                                        [class.border-teal-500]="selectedModel() === model"
+                                        [class.bg-muted]="selectedModel() !== model"
+                                        [class.text-muted-foreground]="selectedModel() !== model"
+                                        [class.border-border]="selectedModel() !== model"
+                                        [class.hover:bg-muted-foreground/10]="selectedModel() !== model"
+                                        (click)="selectedModel.set(model)"
+                                    >
+                                        <span class="max-w-[140px] truncate">{{ model }}</span>
+                                        <button
+                                            class="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-inherit leading-none"
+                                            (click)="$event.stopPropagation(); removeModel(model)"
+                                            title="Remove"
+                                        >&times;</button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div class="space-y-1">
+                                <label class="text-xs font-medium text-muted-foreground flex justify-between">
+                                    <span>Temperature</span>
+                                    <span>{{ temperatureInput() }}</span>
+                                </label>
+                                <input 
+                                    type="range"
+                                    min="0" max="2" step="0.1"
+                                    class="w-full"
+                                    [value]="temperatureInput()"
+                                    (input)="temperatureInput.set(+$any($event.target).value)"
+                                />
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-xs font-medium text-muted-foreground flex justify-between">
+                                    <span>Max Tokens</span>
+                                    <span>{{ maxTokensInput() }}</span>
+                                </label>
+                                <input 
+                                    type="range"
+                                    min="256" max="131072" step="256"
+                                    class="w-full"
+                                    [value]="maxTokensInput()"
+                                    (input)="maxTokensInput.set(+$any($event.target).value)"
+                                />
+                            </div>
+                        </div>
                     }
 
                     <!-- Index Mode Toggle -->
@@ -283,7 +327,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                     </div>
 
                     <!-- Active Provider Indicator -->
-                    @if (googleGenAI.isConfigured() || openRouter.isConfigured()) {
+                    @if (googleGenAI.isConfigured() || isGoConfigured()) {
                         <div class="text-[10px] text-center text-muted-foreground">
                             Using: <span class="text-teal-400 font-medium">{{ getActiveProviderName() }}</span>
                         </div>
@@ -653,13 +697,11 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     @ViewChild('chatContainer', { static: true })
     chatContainer!: ElementRef<HTMLDivElement>;
 
-    // GoChatService for persistence + memory (Go WASM)
+    // GoChatService for persistence, memory, and Go OpenRouter streaming
     goChatService = inject(GoChatService);
-    // Streaming services (TypeScript)
-    openRouter = inject(OpenRouterService);
+    // Google GenAI fallback (TypeScript)
     googleGenAI = inject(GoogleGenAIService);
     private orchestrator = inject(OrchestratorService);
-    // Track Go chat init
     private goChatInitialized = false;
 
     // Icon references for template
@@ -675,7 +717,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     // Settings panel state
     showSettings = signal(false);
-    activeProvider = signal<'google' | 'openrouter' | 'go-openrouter'>('google');  // Default to Google
+    activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter'); // Go-first
 
     // Custom Instructions
     showSystemPrompt = signal(false);
@@ -684,6 +726,23 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // OpenRouter settings
     apiKeyInput = signal('');
     selectedModel = signal('nvidia/nemotron-3-nano-30b-a3b:free');
+    temperatureInput = signal(0.7);
+    maxTokensInput = signal(2048);
+
+    // Persisted model list — seed + user-added models
+    private readonly MODELS_KEY = 'openrouter:models';
+    private readonly MODEL_SEEDS = [
+        'nvidia/nemotron-3-nano-30b-a3b:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'google/gemini-3-flash-preview',
+        'deepseek/deepseek-r1:free',
+        'mistralai/mistral-nemo:free',
+        'z-ai/glm-4.5-air:free',
+        'stepfun/step-3.5-flash:free',
+        'arcee-ai/trinity-large-preview:free',
+    ];
+    savedModels = signal<string[]>(this.loadSavedModels());
+    customModelInput = signal('');
 
     // Google GenAI settings
     googleApiKeyInput = signal('');
@@ -691,6 +750,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     // Index toggle - enables tool calling
     indexEnabled = signal(false);
+
+    /** True when a Go OpenRouter API key has been entered/saved. */
+    readonly isGoConfigured = computed(() => !!this.apiKeyInput());
 
     // History panel state
     showHistory = signal(false);
@@ -704,11 +766,19 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     ngAfterViewInit(): void {
         this.loadQuikChat();
 
-        // Pre-fill settings from saved configs
-        const orConfig = this.openRouter.config();
-        if (orConfig) {
-            this.apiKeyInput.set(orConfig.apiKey || '');
-            this.selectedModel.set(orConfig.model || 'nvidia/nemotron-3-nano-30b-a3b:free');
+        // Pre-fill Go OpenRouter config from saved openrouter:config (shared key store)
+        const savedOrConfig = getSetting<{ apiKey?: string; model?: string; temperature?: number; maxTokens?: number } | null>('openrouter:config', null);
+        if (savedOrConfig) {
+            this.apiKeyInput.set(savedOrConfig.apiKey || '');
+            const restoredModel = savedOrConfig.model || 'nvidia/nemotron-3-nano-30b-a3b:free';
+            this.selectedModel.set(restoredModel);
+            // If the saved model isn't in the list yet, add it
+            if (!this.savedModels().includes(restoredModel)) {
+                this.savedModels.update(list => [restoredModel, ...list]);
+                setSetting(this.MODELS_KEY, this.savedModels());
+            }
+            this.temperatureInput.set(savedOrConfig.temperature ?? 0.7);
+            this.maxTokensInput.set(savedOrConfig.maxTokens ?? 2048);
         }
 
         const googleConfig = this.googleGenAI.config();
@@ -717,11 +787,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             this.googleModelInput.set(googleConfig.model || 'gemini-2.0-flash');
         }
 
-        // Set active provider based on which is configured
-        if (this.googleGenAI.isConfigured()) {
+        // Default to Go OpenRouter; fallback to Google if configured
+        if (this.googleGenAI.isConfigured() && !savedOrConfig?.apiKey) {
             this.activeProvider.set('google');
-        } else if (this.openRouter.isConfigured()) {
-            this.activeProvider.set('openrouter');
         }
 
         // Initialize Go chat service
@@ -740,16 +808,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
      */
     private async initGoChatService(): Promise<void> {
         if (this.goChatInitialized) return;
-
-        const orConfig = this.openRouter.config();
-        if (orConfig?.apiKey) {
-            await this.goChatService.init({
-                apiKey: orConfig.apiKey,
-                model: orConfig.model || 'meta-llama/llama-3.3-70b-instruct:free'
-            });
-            this.goChatInitialized = true;
-            console.log('[AiChatPanel] Go chat service initialized');
-        }
+        // init() reads openrouter:config from Dexie internally when no arg provided
+        await this.goChatService.init();
+        this.goChatInitialized = true;
+        console.log('[AiChatPanel] Go chat service initialized');
     }
 
     ngOnDestroy(): void {
@@ -765,14 +827,24 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     saveSettings(): void {
-        // Save OpenRouter config
+        // Persist Go OpenRouter config to the shared openrouter:config key
         if (this.apiKeyInput()) {
-            this.openRouter.saveConfig({
+            const orConfig = {
                 apiKey: this.apiKeyInput(),
                 model: this.selectedModel(),
-                temperature: 0.7,
-                maxTokens: 2048,
+                temperature: this.temperatureInput(),
+                maxTokens: this.maxTokensInput(),
                 systemPrompt: this.systemPromptInput(),
+            };
+            setSetting('openrouter:config', orConfig);
+
+            // Hot-reload Go backend with new credentials
+            this.goChatService.updateConfig({
+                apiKey: orConfig.apiKey,
+                model: orConfig.model,
+                temperature: orConfig.temperature,
+                maxTokens: orConfig.maxTokens,
+                omEnabled: true,
             });
         }
 
@@ -787,20 +859,17 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             });
         }
 
-        // Persist system prompt setting independently
         setSetting('chat:systemPrompt', this.systemPromptInput());
-
         console.log('[AiChatPanel] Settings saved, active provider:', this.activeProvider());
         this.showSettings.set(false);
     }
 
     getActiveProviderName(): string {
-        if (this.googleGenAI.isConfigured() && this.activeProvider() === 'google') {
+        if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
             return `Google Gemini (${this.googleGenAI.getModel()})`;
-        } else if (this.openRouter.isConfigured()) {
-            return `OpenRouter (${this.openRouter.getModel().split('/').pop()})`;
         }
-        return 'Not configured';
+        const model = this.selectedModel();
+        return model ? `Go OpenRouter (${model.split('/').pop()})` : 'Go OpenRouter';
     }
 
     toggleIndexMode(): void {
@@ -814,6 +883,45 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     resetSystemPrompt(): void {
         this.systemPromptInput.set(KAMMI_SYSTEM_PROMPT);
+    }
+
+    // -------------------------------------------------------------------------
+    // Model Management
+    // -------------------------------------------------------------------------
+
+    private loadSavedModels(): string[] {
+        const stored = getSetting<string[] | null>(this.MODELS_KEY, null);
+        if (stored && stored.length > 0) return stored;
+        // First run — persist seeds
+        setSetting(this.MODELS_KEY, this.MODEL_SEEDS);
+        return [...this.MODEL_SEEDS];
+    }
+
+    addCustomModel(): void {
+        const id = this.customModelInput().trim();
+        if (!id) return;
+        const current = this.savedModels();
+        if (current.includes(id)) {
+            // Just select it if already present
+            this.selectedModel.set(id);
+            this.customModelInput.set('');
+            return;
+        }
+        const updated = [id, ...current]; // Prepend so new models appear first
+        this.savedModels.set(updated);
+        setSetting(this.MODELS_KEY, updated);
+        this.selectedModel.set(id);
+        this.customModelInput.set('');
+    }
+
+    removeModel(id: string): void {
+        const updated = this.savedModels().filter(m => m !== id);
+        this.savedModels.set(updated);
+        setSetting(this.MODELS_KEY, updated);
+        // If the removed model was selected, fall back to first in list
+        if (this.selectedModel() === id) {
+            this.selectedModel.set(updated[0] ?? '');
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -949,7 +1057,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
         // Check if any provider is configured
         const googleConfigured = this.googleGenAI.isConfigured();
-        const openRouterConfigured = this.openRouter.isConfigured();
+        const openRouterConfigured = this.isGoConfigured();
 
         if (!googleConfigured && !openRouterConfigured) {
             instance.messageAddNew(
@@ -999,26 +1107,16 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         history: OpenRouterMessage[],
         systemPrompt: string
     ): Promise<void> {
-        let fullResponse = '';
-
-        const provider = this.activeProvider();
-        const useGoogle = provider === 'google' && this.googleGenAI.isConfigured();
-        const useGoOpenRouter = provider === 'go-openrouter';
-
-        if (useGoogle) {
-            // Convert to Google GenAI message format
+        if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
             const googleHistory: GoogleGenAIMessage[] = history
-                .filter(msg => msg.role !== 'system') // System handled separately
+                .filter(msg => msg.role !== 'system')
                 .map(msg => ({
                     role: msg.role === 'assistant' ? 'model' : 'user',
                     parts: [{ text: msg.content || '' }]
                 }));
 
             await this.googleGenAI.streamChat(googleHistory, {
-                onChunk: (chunk) => {
-                    fullResponse += chunk;
-                    instance.messageAppendContent(botMsgId, chunk);
-                },
+                onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
                 onComplete: async (response) => {
                     await this.goChatService.addAssistantMessage(response);
                     this.currentBotMsgId = null;
@@ -1029,37 +1127,17 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     this.currentBotMsgId = null;
                 },
             }, systemPrompt);
-        } else if (useGoOpenRouter) {
-            // Use Go OpenRouter via WASM Bridge
-            await this.goChatService.streamChat(history, {
-                onChunk: (chunk) => {
-                    fullResponse += chunk;
-                    instance.messageAppendContent(botMsgId, chunk);
-                },
-                onComplete: async (response) => {
-                    await this.goChatService.addAssistantMessage(response);
-                    this.currentBotMsgId = null;
-                },
-                onError: (error) => {
-                    console.error('[AiChatPanel] Go OpenRouter error:', error);
-                    instance.messageReplaceContent(botMsgId, `❌ Error from Go: ${error.message}`);
-                    this.currentBotMsgId = null;
-                },
-            }, systemPrompt);
         } else {
-            // Use TypeScript OpenRouter
-            await this.openRouter.streamChat(history, {
-                onChunk: (chunk) => {
-                    fullResponse += chunk;
-                    instance.messageAppendContent(botMsgId, chunk);
-                },
+            // Default: Go OpenRouter via WASM bridge
+            await this.goChatService.streamChat(history, {
+                onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
                 onComplete: async (response) => {
                     await this.goChatService.addAssistantMessage(response);
                     this.currentBotMsgId = null;
                 },
                 onError: (error) => {
-                    console.error('[AiChatPanel] OpenRouter error:', error);
-                    instance.messageReplaceContent(botMsgId, `❌ Error: ${error.message}`);
+                    console.error('[AiChatPanel] Go stream error:', error);
+                    instance.messageReplaceContent(botMsgId, `❌ Error from Go: ${error.message}`);
                     this.currentBotMsgId = null;
                 },
             }, systemPrompt);
@@ -1067,25 +1145,12 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     private buildConversationHistory(currentMessage: string): OpenRouterMessage[] {
-        const messages: OpenRouterMessage[] = [];
+        const messages: OpenRouterMessage[] = this.goChatService.messages()
+            .slice(-10)
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-        // Add recent conversation history (last 10 messages for context)
-        const history = this.goChatService.messages().slice(-10);
-        for (const msg of history) {
-            if (msg.role === 'user' || msg.role === 'assistant') {
-                messages.push({
-                    role: msg.role,
-                    content: msg.content,
-                });
-            }
-        }
-
-        // Add current message
-        messages.push({
-            role: 'user',
-            content: currentMessage,
-        });
-
+        messages.push({ role: 'user', content: currentMessage });
         return messages;
     }
 

@@ -78,7 +78,9 @@ export class LlmEntityExtractorService {
             googleApiKey: cfg.googleApiKey,
             googleModel: cfg.googleModel,
             openRouterApiKey: cfg.openRouterApiKey,
-            openRouterModel: cfg.openRouterModel
+            openRouterModel: cfg.openRouterModel,
+            temperature: cfg.temperature,
+            maxTokens: cfg.maxTokens
         });
 
         if (result.success) {

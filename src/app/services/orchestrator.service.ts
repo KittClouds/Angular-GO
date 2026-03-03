@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
 import { RlmOrchestratorService, type ActivationResult } from '../lib/rlm';
-import { RlmLlmService } from '../lib/rlm';
 import { GoKittService } from './gokitt.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { type AppContext, type EntitySnapshot } from '../lib/rlm/services/app-context';
@@ -18,7 +17,6 @@ import { type AppContext, type EntitySnapshot } from '../lib/rlm/services/app-co
 @Injectable({ providedIn: 'root' })
 export class OrchestratorService {
     private readonly orchestrator = inject(RlmOrchestratorService);
-    private readonly rlmLlm = inject(RlmLlmService);
     private readonly goKitt = inject(GoKittService);
     private readonly noteEditorStore = inject(NoteEditorStore);
 

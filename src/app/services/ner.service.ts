@@ -2,7 +2,6 @@ import { Injectable, inject, signal } from '@angular/core';
 import { GoKittService } from './gokitt.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { smartGraphRegistry } from '../lib/registry';
-import { OpenRouterService } from '../lib/services/openrouter.service';
 import { getSetting, setSetting } from '../lib/dexie/settings.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -16,21 +15,12 @@ export interface NerSuggestion {
     llmReasoning?: string;      // LLM explanation for the classification
 }
 
-interface LlmEntityResult {
-    label: string;
-    kind: string;
-    confidence: number;
-    reasoning: string;
-    isValid: boolean;
-}
-
 @Injectable({
     providedIn: 'root'
 })
 export class NerService {
     private goKitt = inject(GoKittService);
     private noteStore = inject(NoteEditorStore);
-    private openRouter = inject(OpenRouterService);
 
     constructor() {
         // Init from Dexie settings
@@ -40,18 +30,12 @@ export class NerService {
             this.fstEnabled.set(enabled);
             _globalFstEnabled = enabled;
         }
-        const llmStored = getSetting<string | null>('ner_llm_enabled', null);
-        if (llmStored !== null) {
-            this.llmEnabled.set(llmStored === 'true');
-        }
     }
 
     // State
     readonly suggestions = signal<NerSuggestion[]>([]);
     readonly fstEnabled = signal<boolean>(true);
-    readonly llmEnabled = signal<boolean>(true);  // LLM enhancement toggle
     readonly isAnalyzing = signal<boolean>(false);
-    readonly isLlmProcessing = signal<boolean>(false);
 
     private currentText = '';
 
@@ -100,135 +84,13 @@ export class NerService {
 
             console.log(`[NerService] Mapped ${mapped.length}, Filtered to ${filtered.length}`);
 
-            // Set initial suggestions
+            // Set suggestions — Go WASM pipeline is the source of truth
             this.suggestions.set(filtered);
             this.isAnalyzing.set(false);
-
-            // Step 2: LLM enhancement (async, non-blocking)
-            if (this.llmEnabled() && this.openRouter.isConfigured() && filtered.length > 0) {
-                this.enhanceWithLlm(filtered, text);
-            }
         } catch (e) {
             console.error('[NerService] Analysis failed', e);
             this.suggestions.set([]);
             this.isAnalyzing.set(false);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // LLM Enhancement
-    // -------------------------------------------------------------------------
-
-    private async enhanceWithLlm(candidates: NerSuggestion[], noteText: string) {
-        if (!this.openRouter.isConfigured()) return;
-
-        this.isLlmProcessing.set(true);
-        console.log('[NerService] Enhancing with LLM...');
-
-        try {
-            const prompt = this.buildLlmPrompt(candidates, noteText);
-
-            let result = '';
-            await this.openRouter.streamChat(
-                [{ role: 'user', content: prompt }],
-                {
-                    onChunk: (chunk) => { result += chunk; },
-                    onComplete: (fullResponse) => {
-                        const enhanced = this.parseLlmResponse(fullResponse, candidates);
-                        this.suggestions.set(enhanced);
-                        this.isLlmProcessing.set(false);
-                        console.log('[NerService] LLM enhancement complete');
-                    },
-                    onError: (error) => {
-                        console.error('[NerService] LLM enhancement failed:', error);
-                        this.isLlmProcessing.set(false);
-                    },
-                },
-                this.getLlmSystemPrompt()
-            );
-        } catch (e) {
-            console.error('[NerService] LLM enhancement error:', e);
-            this.isLlmProcessing.set(false);
-        }
-    }
-
-    private getLlmSystemPrompt(): string {
-        return `You are a Named Entity Recognition expert analyzing text for a world-building/fiction writing application.
-
-Your task is to evaluate entity candidates and:
-1. Confirm or reject each candidate as a valid named entity
-2. Suggest the most appropriate entity type
-3. Provide a confidence score (0.0 to 1.0)
-4. Brief reasoning for your decision
-
-Entity types: CHARACTER, LOCATION, FACTION, EVENT, CONCEPT, ITEM, CREATURE, NPC
-
-Respond in JSON format only:
-{
-  "entities": [
-    {"label": "...", "kind": "...", "confidence": 0.95, "reasoning": "...", "isValid": true/false}
-  ]
-}`;
-    }
-
-    private buildLlmPrompt(candidates: NerSuggestion[], noteText: string): string {
-        const candidateList = candidates.map(c => `- "${c.label}" (current guess: ${c.kind}, score: ${c.confidence.toFixed(2)})`).join('\n');
-
-        // Truncate note text if too long
-        const maxContext = 2000;
-        const context = noteText.length > maxContext
-            ? noteText.slice(0, maxContext) + '...[truncated]'
-            : noteText;
-
-        return `Analyze these entity candidates from a world-building document:
-
-CANDIDATES:
-${candidateList}
-
-DOCUMENT CONTEXT:
-${context}
-
-Evaluate each candidate. Return JSON with your analysis.`;
-    }
-
-    private parseLlmResponse(response: string, original: NerSuggestion[]): NerSuggestion[] {
-        try {
-            // Extract JSON from response (handle markdown code blocks)
-            let jsonStr = response;
-            const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (jsonMatch) {
-                jsonStr = jsonMatch[1];
-            }
-
-            const parsed = JSON.parse(jsonStr);
-            const llmEntities: LlmEntityResult[] = parsed.entities || [];
-
-            // Merge LLM results with original candidates
-            return original.map(candidate => {
-                const llmResult = llmEntities.find(e =>
-                    e.label.toLowerCase() === candidate.label.toLowerCase()
-                );
-
-                if (llmResult) {
-                    return {
-                        ...candidate,
-                        kind: llmResult.kind || candidate.kind,
-                        confidence: llmResult.confidence || candidate.confidence,
-                        llmEnhanced: true,
-                        llmReasoning: llmResult.reasoning,
-                    };
-                }
-                return candidate;
-            }).filter(c => {
-                // Remove candidates that LLM marked as invalid
-                const llmResult = llmEntities.find(e =>
-                    e.label.toLowerCase() === c.label.toLowerCase()
-                );
-                return !llmResult || llmResult.isValid !== false;
-            });
-        } catch (e) {
-            console.warn('[NerService] Failed to parse LLM response:', e);
-            return original;
         }
     }
 
@@ -273,11 +135,6 @@ Evaluate each candidate. Return JSON with your analysis.`;
         }
         _globalFstEnabled = enabled;
         window.dispatchEvent(new CustomEvent('fst-toggle', { detail: { enabled } }));
-    }
-
-    toggleLlm(enabled: boolean) {
-        this.llmEnabled.set(enabled);
-        setSetting('ner_llm_enabled', String(enabled));
     }
 }
 

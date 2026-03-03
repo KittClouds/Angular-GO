@@ -24,6 +24,8 @@ interface LlmBatchConfig {
     googleModel: string;
     openRouterApiKey: string;
     openRouterModel: string;
+    temperature?: number;
+    maxTokens?: number;
 }
 
 // Popular models for batch operations (good at structured output)
@@ -84,7 +86,9 @@ export class LlmBatchService {
             googleApiKey: '',
             googleModel: 'gemini-2.0-flash',
             openRouterApiKey: '',
-            openRouterModel: 'z-ai/glm-4.5-air:free'
+            openRouterModel: 'z-ai/glm-4.5-air:free',
+            temperature: 0.7,
+            maxTokens: 2048
         };
     }
 

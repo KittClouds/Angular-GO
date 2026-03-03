@@ -21,7 +21,7 @@ import { NoteEditorStore } from '../../../lib/store/note-editor.store';
           <span class="font-semibold">Entity Detection</span>
         </div>
         <p class="text-xs text-muted-foreground">
-          GoKitt NER + LLM Enhancement
+          GoKitt FST — WASM Unsupervised NER
         </p>
       </div>
 
@@ -49,35 +49,6 @@ import { NoteEditorStore } from '../../../lib/store/note-editor.store';
             <span 
               class="block w-4 h-4 rounded-full bg-white shadow transform transition-transform duration-200 ease-in-out mt-0.5 ml-0.5"
               [class.translate-x-5]="nerService.fstEnabled()"
-            ></span>
-          </button>
-        </div>
-
-        <!-- LLM Enhancement Toggle -->
-        <div class="flex items-center justify-between">
-          <div class="flex-1">
-            <div class="flex items-center gap-1.5">
-              <ng-icon name="lucideSparkles" class="w-3.5 h-3.5 text-teal-500"></ng-icon>
-              <span class="text-sm font-medium">LLM Enhance</span>
-              @if (nerService.isLlmProcessing()) {
-                <ng-icon name="lucideLoader2" class="w-3 h-3 text-teal-500 animate-spin"></ng-icon>
-              }
-            </div>
-            <p class="text-xs text-muted-foreground mt-0.5">
-              Refine with OpenRouter
-            </p>
-          </div>
-          <button 
-            role="switch"
-            [attr.aria-checked]="nerService.llmEnabled()"
-            (click)="toggleLlm()"
-            class="w-10 h-5 rounded-full relative transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2"
-            [class.bg-teal-500]="nerService.llmEnabled()"
-            [class.bg-muted]="!nerService.llmEnabled()"
-          >
-            <span 
-              class="block w-4 h-4 rounded-full bg-white shadow transform transition-transform duration-200 ease-in-out mt-0.5 ml-0.5"
-              [class.translate-x-5]="nerService.llmEnabled()"
             ></span>
           </button>
         </div>
@@ -130,7 +101,7 @@ import { NoteEditorStore } from '../../../lib/store/note-editor.store';
       <!-- Footer -->
       <div class="p-3 shrink-0 border-t border-border bg-muted/20">
         <p class="text-[10px] text-muted-foreground text-center">
-          GoKitt FST → LLM Filter → Accept/Reject
+          GoKitt FST → Accept / Reject
         </p>
       </div>
     </div>
@@ -142,10 +113,6 @@ export class NerPanelComponent {
 
   toggleFst() {
     this.nerService.toggleFst(!this.nerService.fstEnabled());
-  }
-
-  toggleLlm() {
-    this.nerService.toggleLlm(!this.nerService.llmEnabled());
   }
 
   runAnalysis() {
