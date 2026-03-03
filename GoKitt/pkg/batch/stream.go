@@ -47,12 +47,21 @@ func (s *Service) StreamChat(
 	}
 	fullMessages = append(fullMessages, messages...)
 
+	temperature := 0.7
+	if s.config.Temperature != 0 {
+		temperature = s.config.Temperature
+	}
+	maxTokens := 2048
+	if s.config.MaxTokens != 0 {
+		maxTokens = s.config.MaxTokens
+	}
+
 	// Build request body with stream: true
 	reqMap := map[string]interface{}{
 		"model":       s.config.OpenRouterModel,
 		"messages":    fullMessages,
-		"temperature": 0.7,
-		"max_tokens":  2048,
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
 		"stream":      true,
 	}
 	reqBody, err := json.Marshal(reqMap)
@@ -122,7 +131,9 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 
 	fetchResult := <-responseCh
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Wait long enough for the Promise resolution cycle to fully complete in JS land
+		// before releasing the callbacks, avoiding "call to released function" errors.
+		time.Sleep(50 * time.Millisecond)
 		fetchThen.Release()
 		fetchCatch.Release()
 	}()
@@ -148,7 +159,8 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		response.Call("text").Call("then", errThen)
 		errText := <-errCh
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			// Wait long enough for the Promise resolution cycle to fully complete in JS land
+			time.Sleep(50 * time.Millisecond)
 			errThen.Release()
 		}()
 		return "", fmt.Errorf("HTTP %d: %s", status, errText)
@@ -209,7 +221,8 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	// Defer cleanup of read functions
 	defer func() {
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			// Wait long enough for the Promise resolution cycle to fully complete in JS land
+			time.Sleep(50 * time.Millisecond)
 			readThen.Release()
 			readCatch.Release()
 		}()

@@ -55,12 +55,21 @@ func (s *Service) callOpenRouter(_ context.Context, userPrompt, systemPrompt str
 		Content: userPrompt,
 	})
 
+	temperature := 0.3
+	if s.config.Temperature != 0 {
+		temperature = s.config.Temperature
+	}
+	maxTokens := 4096
+	if s.config.MaxTokens != 0 {
+		maxTokens = s.config.MaxTokens
+	}
+
 	// Build request body
 	req := openRouterRequest{
 		Model:       s.config.OpenRouterModel,
 		Messages:    messages,
-		Temperature: 0.3,
-		MaxTokens:   4096,
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
 		Stream:      false, // EXPLICITLY NO STREAMING
 	}
 
@@ -159,7 +168,9 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 
 	fetchResult := <-responseCh
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Wait long enough for the Promise resolution cycle to fully complete in JS land
+		// before releasing the callbacks, avoiding "call to released function" errors.
+		time.Sleep(50 * time.Millisecond)
 		fetchThen.Release()
 		fetchCatch.Release()
 	}()
@@ -203,7 +214,8 @@ func (s *Service) jsFetchWithAuth(url, body, apiKey string) (string, error) {
 
 	textResult := <-textCh
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Wait long enough for the Promise resolution cycle to fully complete in JS land
+		time.Sleep(50 * time.Millisecond)
 		textThen.Release()
 		textCatch.Release()
 	}()

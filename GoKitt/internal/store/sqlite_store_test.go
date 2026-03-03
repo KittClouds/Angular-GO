@@ -291,6 +291,28 @@ func TestExportImport(t *testing.T) {
 		t.Fatalf("Failed to upsert folder: %v", err)
 	}
 
+	thread := &Thread{
+		ID:        "thread1",
+		WorldID:   "world1",
+		Title:     "Test Thread",
+		CreatedAt: time.Now().Unix(),
+		UpdatedAt: time.Now().Unix(),
+	}
+	if err := s.CreateThread(thread); err != nil {
+		t.Fatalf("Failed to create thread: %v", err)
+	}
+
+	msg := &ThreadMessage{
+		ID:        "msg1",
+		ThreadID:  "thread1",
+		Role:      "user",
+		Content:   "Hello",
+		CreatedAt: time.Now().Unix(),
+	}
+	if err := s.AddMessage(msg); err != nil {
+		t.Fatalf("Failed to add logic message: %v", err)
+	}
+
 	// Export
 	data, err := s.Export()
 	if err != nil {
@@ -329,6 +351,22 @@ func TestExportImport(t *testing.T) {
 	}
 	if folders[0].Name != folder.Name {
 		t.Errorf("Expected folder name %s, got %s", folder.Name, folders[0].Name)
+	}
+
+	restoredThread, err := s2.GetThread("thread1")
+	if err != nil {
+		t.Fatalf("Failed to get restored thread: %v", err)
+	}
+	if restoredThread == nil || restoredThread.Title != thread.Title {
+		t.Errorf("Expected thread title %s, got %v", thread.Title, restoredThread)
+	}
+
+	msgs, err := s2.GetThreadMessages("thread1")
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("Failed to get restored thread messages: %v", err)
+	}
+	if msgs[0].Content != msg.Content {
+		t.Errorf("Expected message content %s, got %s", msg.Content, msgs[0].Content)
 	}
 }
 

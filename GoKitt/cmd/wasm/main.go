@@ -1,4 +1,4 @@
-﻿//go:build js && wasm
+//go:build js && wasm
 
 package main
 
@@ -919,6 +919,13 @@ func storeInit(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return ErrorResult("failed to initialize SQLite store: " + err.Error())
 	}
+
+	// [BUG FIX] If ChatService or AgentService already initialized with an old pointer, rebind them!
+	if chatSvc != nil {
+		fmt.Println("[GoKitt] 🔄 Re-wiring ChatService to new SQLite store instance")
+		chatSvc = chat.NewChatService(sqlStore, agentSvc)
+	}
+
 	fmt.Println("[GoKitt] ✅ SQLite Store initialized")
 	return SuccessResult("store initialized")
 }

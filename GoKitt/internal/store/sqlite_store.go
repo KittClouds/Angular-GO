@@ -1921,12 +1921,13 @@ func (s *SQLiteStore) ListMemoriesByType(memoryType MemoryType) ([]*Memory, erro
 func (s *SQLiteStore) Export() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	type ExportData struct {
-		Notes    []*Note   `json:"notes"`
-		Entities []*Entity `json:"entities"`
-		Edges    []*Edge   `json:"edges"`
-		Folders  []*Folder `json:"folders"`
+		Notes          []*Note          `json:"notes"`
+		Entities       []*Entity        `json:"entities"`
+		Edges          []*Edge          `json:"edges"`
+		Folders        []*Folder        `json:"folders"`
+		Threads        []*Thread        `json:"threads"`
+		ThreadMessages []*ThreadMessage `json:"thread_messages"`
 	}
 
 	var data ExportData
@@ -2026,6 +2027,52 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 		data.Folders = append(data.Folders, &f)
 	}
 
+	// Export threads
+	threadRows, err := s.db.Query(`
+		SELECT id, world_id, narrative_id, title, created_at, updated_at
+		FROM threads
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export threads: %w", err)
+	}
+	defer threadRows.Close()
+	for threadRows.Next() {
+		var t Thread
+		if err := threadRows.Scan(
+			&t.ID, &t.WorldID, &t.NarrativeID, &t.Title,
+			&t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan thread: %w", err)
+		}
+		data.Threads = append(data.Threads, &t)
+	}
+
+	// Export thread messages
+	msgRows, err := s.db.Query(`
+		SELECT id, thread_id, role, content, narrative_id, created_at, updated_at, is_streaming
+		FROM thread_messages
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export thread messages: %w", err)
+	}
+	defer msgRows.Close()
+	for msgRows.Next() {
+		var m ThreadMessage
+		var updated sql.NullInt64
+		var isStreaming int
+		if err := msgRows.Scan(
+			&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.NarrativeID,
+			&m.CreatedAt, &updated, &isStreaming,
+		); err != nil {
+			return nil, fmt.Errorf("scan thread message: %w", err)
+		}
+		if updated.Valid {
+			m.UpdatedAt = updated.Int64
+		}
+		m.IsStreaming = isStreaming == 1
+		data.ThreadMessages = append(data.ThreadMessages, &m)
+	}
+
 	return json.Marshal(data)
 }
 
@@ -2040,10 +2087,12 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	type ExportData struct {
-		Notes    []*Note   `json:"notes"`
-		Entities []*Entity `json:"entities"`
-		Edges    []*Edge   `json:"edges"`
-		Folders  []*Folder `json:"folders"`
+		Notes          []*Note          `json:"notes"`
+		Entities       []*Entity        `json:"entities"`
+		Edges          []*Edge          `json:"edges"`
+		Folders        []*Folder        `json:"folders"`
+		Threads        []*Thread        `json:"threads"`
+		ThreadMessages []*ThreadMessage `json:"thread_messages"`
 	}
 
 	var importData ExportData
@@ -2052,7 +2101,7 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	// Clear all tables
-	for _, table := range []string{"edges", "entities", "folders", "notes"} {
+	for _, table := range []string{"edges", "entities", "folders", "notes", "threads", "thread_messages"} {
 		if _, err := s.db.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("clear %s: %w", table, err)
 		}
@@ -2116,6 +2165,32 @@ func (s *SQLiteStore) Import(data []byte) error {
 			f.FolderOrder, f.CreatedAt, f.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("import folder %s: %w", f.ID, err)
+		}
+	}
+
+	// Re-insert threads
+	for _, t := range importData.Threads {
+		_, err := s.db.Exec(`
+			INSERT INTO threads (id, world_id, narrative_id, title, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, t.ID, t.WorldID, t.NarrativeID, t.Title, t.CreatedAt, t.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import thread %s: %w", t.ID, err)
+		}
+	}
+
+	// Re-insert thread messages
+	for _, m := range importData.ThreadMessages {
+		var updated interface{}
+		if m.UpdatedAt > 0 {
+			updated = m.UpdatedAt
+		}
+		_, err := s.db.Exec(`
+			INSERT INTO thread_messages (id, thread_id, role, content, narrative_id, created_at, updated_at, is_streaming)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, m.ID, m.ThreadID, m.Role, m.Content, m.NarrativeID, m.CreatedAt, updated, boolToInt(m.IsStreaming))
+		if err != nil {
+			return fmt.Errorf("import thread message %s: %w", m.ID, err)
 		}
 	}
 

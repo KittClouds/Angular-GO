@@ -31,6 +31,8 @@ type Config struct {
 	GoogleModel      string   `json:"googleModel"`
 	OpenRouterAPIKey string   `json:"openRouterApiKey"`
 	OpenRouterModel  string   `json:"openRouterModel"`
+	Temperature      float64  `json:"temperature"`
+	MaxTokens        int      `json:"maxTokens"`
 }
 
 // Service handles non-streaming LLM completions.
@@ -108,12 +110,21 @@ func (s *Service) CompleteWithTools(ctx context.Context, messages interface{}, t
 		return "", errors.New("batch: tool calling only supported via OpenRouter")
 	}
 
+	temperature := 0.7
+	if s.config.Temperature != 0 {
+		temperature = s.config.Temperature
+	}
+	maxTokens := 2048
+	if s.config.MaxTokens != 0 {
+		maxTokens = s.config.MaxTokens
+	}
+
 	// Build full request body
 	reqMap := map[string]interface{}{
 		"model":       s.config.OpenRouterModel,
 		"messages":    messages,
-		"temperature": 0.7,
-		"max_tokens":  2048,
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
 		"stream":      false,
 	}
 	if tools != nil {
