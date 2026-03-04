@@ -41,6 +41,7 @@ type GoKittWorkerMessage =
     | { type: 'REMOVE_NOTE'; payload: { id: string }; id: number }
     | { type: 'SCAN_NOTE'; payload: { noteId: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'VALIDATE_RELATIONS'; payload: { noteId: string; relationsJSON: string }; id: number }
+    | { type: 'ANALYZE_TEXT'; payload: { text: string }; id: number }
     | { type: 'DOC_COUNT'; id: number }
     // SQLite Store API
     | { type: 'STORE_INIT'; id: number }
@@ -171,8 +172,10 @@ type GoKittWorkerResponse =
     | { type: 'UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'REMOVE_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'SCAN_NOTE_RESULT'; id: number; payload: any }
-    | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
     | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
+    | { type: 'ANALYZE_TEXT_RESULT'; id: number; payload: any }
+    | { type: 'ANALYTICS_UPDATE'; payload: any }
+    | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
     // SQLite Store responses
     | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_VERSION_RESULT'; id: number; payload: { version?: string; error?: string } }
@@ -373,6 +376,7 @@ declare const GoKitt: {
     docCount: () => number;
     // Phase 2: CST Validation
     validateRelations: (noteId: string, relationsJSON: string) => string;
+    analyzeText: (text: string) => string;
     // SQLite Store API
     storeInit: () => string;
     storeGetVersion: () => string;
@@ -618,6 +622,19 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: spans
                 } as GoKittWorkerResponse);
+
+                // Option C -> Option B Pipeline: Piggyback text analytics on the implicit scan!
+                // Zero additional boundary crossing, text is already in the worker.
+                try {
+                    const analyticsJson = GoKitt.analyzeText(msg.payload.text);
+                    self.postMessage({
+                        type: 'ANALYTICS_UPDATE',
+                        payload: JSON.parse(analyticsJson)
+                    });
+                } catch (e) {
+                    console.error('[GoKittWorker] Background analytics failed:', e);
+                }
+
                 break;
             }
 
@@ -897,6 +914,27 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
                 self.postMessage({
                     type: 'VALIDATE_RELATIONS_RESULT',
+                    id: msg.id,
+                    payload: result
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'ANALYZE_TEXT': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'ANALYZE_TEXT_RESULT',
+                        id: msg.id,
+                        payload: null
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const json = GoKitt.analyzeText(msg.payload.text);
+                const result = JSON.parse(json);
+
+                self.postMessage({
+                    type: 'ANALYZE_TEXT_RESULT',
                     id: msg.id,
                     payload: result
                 } as GoKittWorkerResponse);

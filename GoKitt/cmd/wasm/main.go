@@ -14,6 +14,7 @@ import (
 
 	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/agent"
+	"github.com/kittclouds/gokitt/pkg/analytics"
 	"github.com/kittclouds/gokitt/pkg/batch"
 	"github.com/kittclouds/gokitt/pkg/chat"
 	"github.com/kittclouds/gokitt/pkg/docstore"
@@ -83,6 +84,7 @@ func main() {
 		"scanNote":          js.FuncOf(scanNote),          // Scan from DocStore (not JS)
 		"docCount":          js.FuncOf(docCount),          // Get document count
 		"validateRelations": js.FuncOf(validateRelations), // Phase 2: CST validation
+		"analyzeText":       js.FuncOf(analyzeText),       // Text analytics
 		// SQLite Store API (Persistent Data Layer)
 		"storeInit":       js.FuncOf(storeInit),
 		"storeGetVersion": js.FuncOf(storeGetVersion),
@@ -642,6 +644,17 @@ func SuccessResult(msg string) interface{} {
 		"message": msg,
 	}
 	jsonBytes, _ := json.Marshal(result)
+	return string(jsonBytes)
+}
+
+// analyzeText calculates word counts, reading level, etc.
+func analyzeText(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("analyzeText requires 1 arg: text")
+	}
+	text := args[0].String()
+	res := analytics.AnalyzeText(text)
+	jsonBytes, _ := json.Marshal(res)
 	return string(jsonBytes)
 }
 

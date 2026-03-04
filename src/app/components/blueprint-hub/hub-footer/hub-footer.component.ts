@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { BlueprintHubService } from '../blueprint-hub.service';
 import { FooterStatsService } from '../../../services/footer-stats.service';
 import { TtsService } from '../../../services/tts.service';
+import { ScopeService } from '../../../lib/services/scope.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 import { ThemeService } from '../../../lib/services/theme.service';
 import { TtsSettingsPopupComponent } from './tts-settings-popup.component';
@@ -19,6 +20,7 @@ export class HubFooterComponent {
     hubService = inject(BlueprintHubService);
     statsService = inject(FooterStatsService);
     ttsService = inject(TtsService);
+    scopeService = inject(ScopeService);
     themeService = inject(ThemeService);
     private noteStore = inject(NoteEditorStore);
 

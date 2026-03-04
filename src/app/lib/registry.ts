@@ -1,11 +1,11 @@
 // src/lib/registry.ts
-// Entity Registry - Write-through Cache over Dexie (IndexedDB)
-// Synchronous reads from memory, async writes to Dexie for persistence.
-// Hydrates from BootCache (pre-loaded in main.ts) or falls back to Dexie.
+// Entity Registry - Write-through Cache over Dexie (IndexedDB) and SQLite
+// Synchronous reads from memory, async writes to both for persistence.
+// Hydrates directly from Dexie (which is populated by DataSyncService during boot).
 
 import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
-import { getBootCache, waitForBootCache } from './core/boot-cache';
+import { getBridge } from './operations';
 
 // =============================================================================
 // Types
@@ -78,23 +78,22 @@ export class CentralRegistry {
         const start = performance.now();
 
         try {
-            // Try to use pre-loaded boot cache first
-            let bootData = getBootCache();
+            // Load entities directly from Dexie
+            // (DataSyncService guaranteed this is identical to SQLite)
+            const [entities, edges] = await Promise.all([
+                db.entities.toArray(),
+                db.edges.toArray(),
+            ]);
 
-            if (!bootData) {
-                console.log('[CentralRegistry] Boot cache not ready, waiting...');
-                bootData = await waitForBootCache();
-            }
-
-            // Hydrate entities from boot cache
-            for (const e of bootData.entities) {
+            // Hydrate entities
+            for (const e of entities) {
                 const registered = this.dexieToRegisteredEntity(e);
                 this.entityCache.set(e.id, registered);
                 this.labelIndex.set(e.label.toLowerCase(), e.id);
             }
 
-            // Hydrate edges from boot cache
-            for (const edge of bootData.edges) {
+            // Hydrate edges
+            for (const edge of edges) {
                 this.edgeCache.set(edge.id, {
                     id: edge.id,
                     sourceId: edge.sourceId,
@@ -108,7 +107,14 @@ export class CentralRegistry {
             this.snapshot = Array.from(this.entityCache.values());
 
             const duration = Math.round(performance.now() - start);
-            console.log(`[CentralRegistry] ✓ Initialized: ${this.entityCache.size} entities, ${this.edgeCache.size} edges (${duration}ms, from cache)`);
+            console.log(`[CentralRegistry] ✓ Initialized: ${this.entityCache.size} entities, ${this.edgeCache.size} edges (${duration}ms, from Dexie)`);
+
+            // CRITICAL: Notify subscribers about hydrated data.
+            // Without this, ScopeService (and other subscribers) never learn
+            // that entities are available after boot cache hydration.
+            if (this.entityCache.size > 0) {
+                this.notify(true); // Entity change → triggers dictionary rebuild too
+            }
 
         } catch (err) {
             console.error('[CentralRegistry] Failed to hydrate:', err);
@@ -271,8 +277,8 @@ export class CentralRegistry {
         this.entityCache.set(id, entity);
         this.labelIndex.set(label.toLowerCase(), id);
 
-        // Write-through to Dexie (fire-and-forget)
-        this.persistEntityToDexie(entity);
+        // Write-through to SQLite + Dexie (fire-and-forget)
+        this.persistEntity(entity);
 
         this.notify(true); // Entity change - needs dictionary rebuild
 
@@ -280,13 +286,26 @@ export class CentralRegistry {
     }
 
     /**
-     * Persist entity to Dexie (fire-and-forget, non-blocking)
+     * Persist entity to SQLite (Truth) + Dexie (Shadow)
+     * Fire-and-forget, non-blocking
      */
-    private persistEntityToDexie(entity: RegisteredEntity): void {
+    private persistEntity(entity: RegisteredEntity): void {
         const dexieEntity = this.registeredToDexieEntity(entity);
+
+        // 1. Write to Dexie immediately (for synchronous reads)
         db.entities.put(dexieEntity).catch(err => {
             console.warn('[CentralRegistry] Failed to persist entity to Dexie:', entity.id, err);
         });
+
+        // 2. Write to SQLite (Source of Truth) via bridge
+        const bridge = getBridge();
+        if (bridge) {
+            bridge.syncEntity(dexieEntity).catch(err => {
+                console.error('[CentralRegistry] Failed to sync entity to SQLite:', err);
+            });
+        } else {
+            console.warn('[CentralRegistry] Cannot sync entity to SQLite: Bridge not initialized yet.');
+        }
     }
 
     registerEntityBatch(
@@ -387,8 +406,8 @@ export class CentralRegistry {
 
         this.entityCache.set(id, updated);
 
-        // Write-through to Dexie (fire-and-forget)
-        this.persistEntityToDexie(updated);
+        // Write-through to SQLite + Dexie (fire-and-forget)
+        this.persistEntity(updated);
 
         this.notify(true); // Entity updated
         return updated;
@@ -419,17 +438,26 @@ export class CentralRegistry {
         this.edgeCache.set(id, edge);
 
         // Write-through to Dexie (fire-and-forget)
-        db.edges.put({
+        const dexieEdge = {
             id,
             sourceId,
             targetId,
             relType: type,
             confidence: edge.confidence,
             bidirectional: false,
-            // Store provenance and attributes as JSON in Dexie if schema supports
-        }).catch(err => {
+        };
+
+        db.edges.put(dexieEdge).catch(err => {
             console.warn('[CentralRegistry] Failed to persist edge to Dexie:', id, err);
         });
+
+        // Write-through to SQLite
+        const bridge = getBridge();
+        if (bridge) {
+            bridge.syncEdge(dexieEdge).catch(err => {
+                console.error('[CentralRegistry] Failed to sync edge to SQLite:', err);
+            });
+        }
 
         this.notify(false); // Edge change - no dictionary rebuild needed
 

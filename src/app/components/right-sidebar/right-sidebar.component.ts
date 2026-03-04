@@ -4,14 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, BookOpen, Bot, Clock } from 'lucide-angular';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { ChapterService } from '../../lib/services/chapter.service';
-import { ScopeService, ActiveScope } from '../../lib/services/scope.service';
+import { ScopeService } from '../../lib/services/scope.service';
 import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-sheet-container/fact-sheet-container.component';
 import { FactSheetService } from '../fact-sheets/fact-sheet.service';
 import { AnalyticsPanelComponent } from '../analytics-panel';
 import { TimelineViewComponent } from './timeline-view/timeline-view.component';
 import { AiChatPanelComponent } from './ai-chat-panel/ai-chat-panel.component';
-import { smartGraphRegistry } from '../../lib/registry';
-import { db, Entity } from '../../lib/dexie';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 
 type SidebarView = 'entities' | 'analytics' | 'timeline' | 'ai';
@@ -85,8 +83,8 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
                             <div class="p-2 border-b border-border/50 shrink-0 space-y-2">
                                 <!-- Scope Indicator (READ-ONLY, shows current entity scope) -->
                                 <div class="flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground bg-muted/30 rounded">
-                                    <i class="pi text-[10px]" [ngClass]="scopeIcon()"></i>
-                                    <span class="truncate">{{ scopeLabel() }}</span>
+                                    <i class="pi text-[10px]" [ngClass]="scopeService.scopeIcon()"></i>
+                                    <span class="truncate">{{ scopeService.scopeLabel() }}</span>
                                     <span class="text-[10px] opacity-60 ml-auto">scope</span>
                                 </div>
 
@@ -233,23 +231,7 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 export class RightSidebarComponent implements OnInit, OnDestroy {
     service = inject(RightSidebarService);
     chapterService = inject(ChapterService);
-    private factSheetService = inject(FactSheetService);
-    private scopeService = inject(ScopeService);
-
-    // Expose scope for template
-    activeScope = this.scopeService.activeScope;
-
-    // Scope display helpers
-    scopeIcon = computed(() => {
-        const scope = this.activeScope();
-        if (scope.id === 'vault:global') return 'pi-globe';
-        if (scope.type === 'act') return 'pi-bookmark';  // ACT scope icon
-        if (scope.type === 'narrative') return 'pi-book';
-        if (scope.type === 'folder') return 'pi-folder';
-        return 'pi-file';
-    });
-
-    scopeLabel = signal<string>('Global');
+    scopeService = inject(ScopeService);
 
     readonly viewOptions = VIEW_OPTIONS;
 
@@ -260,10 +242,22 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
     isDropdownOpen = signal(false);
 
     /** Loading state */
-    loading = signal(true);
+    loading = signal(false);
 
-    /** All entities from registry + Dexie */
-    entities = signal<ParsedEntity[]>([]);
+    /**
+     * Entities derived from ScopeService's reactive signal.
+     * Maps RegisteredEntity → ParsedEntity for the template.
+     */
+    entities = computed<ParsedEntity[]>(() => {
+        const scoped = this.scopeService.scopedEntities();
+        return scoped.map(e => ({
+            id: e.id,
+            kind: e.kind,
+            label: e.label,
+            subtype: e.subtype,
+            noteId: e.firstNote,
+        }));
+    });
 
     /** Currently selected entity ID */
     selectedEntityId = signal<string>(getSetting<string>(ENTITY_STORAGE_KEY, ''));
@@ -293,73 +287,26 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
         return 'entities';
     }
 
-    private unsubscribeRegistry: (() => void) | null = null;
-
     constructor() {
-        // React to scope changes
+        // Auto-select first entity when scope changes and current selection is no longer in scope
         effect(() => {
-            const scope = this.activeScope();
-            this.updateScopeLabel(scope);
-            this.refreshEntitiesByScope(scope);
-        });
-    }
-
-    async ngOnInit() {
-        // Initial load handled by effect
-        this.loading.set(false);
-
-        // Subscribe to registry changes to refresh entities
-        this.unsubscribeRegistry = smartGraphRegistry.subscribe(() => {
-            this.refreshEntitiesByScope(this.activeScope());
-        });
-    }
-
-    ngOnDestroy() {
-        this.unsubscribeRegistry?.();
-    }
-
-    private async updateScopeLabel(scope: ActiveScope) {
-        if (scope.id === 'vault:global') {
-            this.scopeLabel.set('Global');
-        } else if (scope.type === 'act') {
-            // ACT scope: Get the ACT folder name
-            const actId = scope.actId || scope.id;
-            const folder = await db.folders.get(actId);
-            this.scopeLabel.set(folder?.name || 'Act');
-        } else if (scope.type === 'folder' || scope.type === 'narrative') {
-            const folder = await db.folders.get(scope.id);
-            this.scopeLabel.set(folder?.name || 'Folder');
-        } else if (scope.type === 'note') {
-            const note = await db.notes.get(scope.id);
-            this.scopeLabel.set(note?.title || 'Note');
-        }
-    }
-
-    /**
-     * Refresh entity list using ScopeService (respects active scope)
-     */
-    private async refreshEntitiesByScope(scope: ActiveScope): Promise<void> {
-        try {
-            const scopedEntities = await this.scopeService.getEntitiesInScope(scope);
-            const parsed: ParsedEntity[] = scopedEntities.map((e: Entity) => ({
-                id: e.id,
-                kind: e.kind,
-                label: e.label,
-                subtype: e.subtype,
-                noteId: e.firstNote,
-            }));
-            this.entities.set(parsed);
-
-            // Auto-select first if current selection is no longer in scope
+            const ents = this.entities();
             const currentId = this.selectedEntityId();
-            if (parsed.length > 0 && !parsed.find(e => e.id === currentId)) {
-                const newId = parsed[0].id;
+
+            if (ents.length > 0 && !ents.find(e => e.id === currentId)) {
+                const newId = ents[0].id;
                 this.selectedEntityId.set(newId);
                 setSetting(ENTITY_STORAGE_KEY, newId);
             }
-        } catch (err) {
-            console.error('[RightSidebar] Error loading scoped entities:', err);
-        }
+        });
+    }
+
+    ngOnInit() {
+        // No manual loading needed — entities are computed from scope signal
+    }
+
+    ngOnDestroy() {
+        // No cleanup needed — signals are garbage collected
     }
 
     onViewChange(view: SidebarView) {
@@ -374,18 +321,6 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     closeDropdown() {
         this.isDropdownOpen.set(false);
-    }
-
-    /**
-     * Load entities from Dexie (source of truth)
-     * FactSheetService already creates demo entity if none exist
-     */
-    /**
-     * Load entities is now handled by the scope effect.
-     * This method is kept for backwards compatibility but delegates to scope-based loading.
-     */
-    async loadEntities() {
-        await this.refreshEntitiesByScope(this.activeScope());
     }
 
     onEntitySelect(entityId: string) {

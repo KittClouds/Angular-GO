@@ -35,6 +35,18 @@ func Project(root *cst.Node, matcher *narrative.NarrativeMatcher, entities Entit
 		worldNode = g.EnsureNode(worldID, worldLabel, graph.KindWorld)
 	}
 
+	// 0.5. Unconditionally add all known entities to the graph
+	// This ensures that even if an entity doesn't participate in an event,
+	// it still gets recorded as "World Contains -> Entity"
+	for _, id := range entities {
+		// UI layer expects Kind to be populated from the registry when requested,
+		// but providing a fallback here is safe.
+		node := g.EnsureNode(id, id, "Concept")
+		if worldNode != nil {
+			ensureWorldLink(g, worldNode, node)
+		}
+	}
+
 	// Recursive walk looking for Sentences
 	var walk func(n *cst.Node)
 	walk = func(n *cst.Node) {
@@ -78,7 +90,7 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 
 			if match != nil {
 				// Find Subject (Left)
-				subj := findNearestNP(nodes, i, -1, source)
+				subj := findNearestNP(nodes, i, -1)
 
 				var targetID, recipientID string
 
@@ -102,7 +114,7 @@ func processSentence(sent *cst.Node, g *graph.ConceptGraph, matcher *narrative.N
 				}
 
 				if targetID == "" {
-					obj, _ := findNearestNPWithContainer(nodes, i, searchOffset, source)
+					obj, _ := findNearestNPWithContainer(nodes, i, searchOffset)
 					if obj != nil {
 						targetID = resolveID(obj, entities)
 					}
@@ -196,7 +208,7 @@ func findRecipient(nodes []*cst.Node, verbIdx int, source string) string {
 }
 
 // findNearestNPWithContainer looks for NP, checking PPs. Returns (NP, ContainerPP)
-func findNearestNPWithContainer(nodes []*cst.Node, startIdx int, direction int, source string) (*cst.Node, *cst.Node) {
+func findNearestNPWithContainer(nodes []*cst.Node, startIdx int, direction int) (*cst.Node, *cst.Node) {
 	curr := startIdx + direction
 	for curr >= 0 && curr < len(nodes) {
 		n := nodes[curr]
@@ -215,8 +227,8 @@ func findNearestNPWithContainer(nodes []*cst.Node, startIdx int, direction int, 
 }
 
 // Wrapper for existing signature
-func findNearestNP(nodes []*cst.Node, startIdx int, direction int, source string) *cst.Node {
-	np, _ := findNearestNPWithContainer(nodes, startIdx, direction, source)
+func findNearestNP(nodes []*cst.Node, startIdx int, direction int) *cst.Node {
+	np, _ := findNearestNPWithContainer(nodes, startIdx, direction)
 	return np
 }
 
@@ -265,7 +277,7 @@ func findToken(nodes []*cst.Node, startIdx int, tokenText string, source string,
 		n := nodes[i]
 		if n.Kind == rsyntax.KindWord {
 			text := n.Text(source)
-			if strings.ToLower(text) == strings.ToLower(tokenText) {
+			if strings.EqualFold(text, tokenText) {
 				return i
 			}
 		}

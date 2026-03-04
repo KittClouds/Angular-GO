@@ -12,7 +12,6 @@ import { flattenTree, toggleExpansion } from '../../../lib/arborist/flatten';
 import { FolderService } from '../../../lib/services/folder.service';
 import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
-import { ScopeService } from '../../../lib/services/scope.service';
 import { ReorderService } from '../../../lib/services/reorder.service';
 import { AppStateService } from '../../../lib/services/app-state.service';
 
@@ -155,7 +154,6 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
-    private scopeService = inject(ScopeService);
     reorderService = inject(ReorderService);
     private injector = inject(Injector);
     private destroyRef = inject(DestroyRef);
@@ -263,9 +261,6 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
 
     onSelect(node: FlatTreeNode): void {
         this.selectedId.set(node.id);
-
-        // Update active scope when selection changes
-        this.scopeService.setScopeFromNode(node);
 
         if (node.type === 'folder') {
             // Toggle folder expansion
@@ -465,10 +460,6 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
                     if (node) {
                         console.log(`[FileTree] Syncing selection to active note: ${node.name}`);
                         this.selectedId.set(activeNoteId);
-
-                        // CRITICAL: Ensure scope matches the active note
-                        // This fixes the issue where refreshing loses the "context" even if note is open
-                        this.scopeService.setScopeFromNode(node);
 
                         // Ensure parent folders are expanded so selection is visible
                         if (node.parentId) {

@@ -68,38 +68,36 @@ export class AppComponent implements OnInit, OnDestroy {
     console.log('[AppComponent] Starting orchestrated boot...');
 
     try {
-      // Phase 1: Seed (fast, sync schemas)
+      // Phase 1: Seed schemas (fast, sync)
       await seedDefaultSchemas();
       console.log('[AppComponent] ✓ Seed complete');
 
-      // Phase 2: Registry (from Dexie cache — ~1ms)
-      await smartGraphRegistry.init();
-      console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
-      this.orchestrator.completePhase('registry');
-
-      // Phase 3: WASM Load
-      // WASM load is the critical gate
+      // Phase 2: WASM Load & SQLite Init
       await this.goKitt.loadWasm();
       console.log('[AppComponent] ✓ WASM module loaded');
       this.orchestrator.completePhase('wasm_load');
 
-      // Phase 4: WASM Hydrate entities (fast — just entity names for Aho-Corasick)
+      await this.goKittStore.initialize();
+      console.log('[AppComponent] ✓ GoKitt Store (SQLite) initialized');
+
+      // Phase 3: Data Sync (SQLite → Dexie populate)
+      // This populates Dexie synchronously from SQLite so the registry can hydrate
+      await this.dataSync.init();
+      setGoSqliteBridge(this.dataSync);
+      console.log('[AppComponent] ✓ Data Sync (SQLite → Dexie) initialized');
+
+      // Phase 4: Registry Hydration
+      // Now Dexie is guaranteed to be fresh and matching SQLite
+      await smartGraphRegistry.init();
+      console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
+      this.orchestrator.completePhase('registry');
+
+      // Phase 5: WASM Entity Hydration (Aho-Corasick)
       await this.goKitt.hydrateWithEntities();
       console.log('[AppComponent] ✓ WASM hydrated with entities');
       this.orchestrator.completePhase('wasm_hydrate');
 
-      // Phase 4.1: Helper Services (must precede Knowledge Graph)
-      // Initialize GoKittStore (SQLite) explicitly
-      await this.goKittStore.initialize();
-      console.log('[AppComponent] ✓ GoKitt Store initialized');
-
-      // Phase 5: Data Sync (SQLite <-> Dexie)
-      // Enforce SQLite as Truth. Syncs to Dexie in background.
-      await this.dataSync.init();
-      setGoSqliteBridge(this.dataSync);
-      console.log('[AppComponent] ✓ Data Sync Service initialized');
-
-      // 🚀 APP IS INTERACTIVE — user can see + edit notes
+      // 🚀 APP IS INTERACTIVE
       this.orchestrator.completePhase('ready');
 
 

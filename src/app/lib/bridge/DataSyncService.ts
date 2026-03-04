@@ -3,7 +3,6 @@ import { Injectable, inject, signal, computed } from '@angular/core';
 import { GoKittStoreService, StoreNote, StoreEntity, StoreEdge, StoreFolder } from '../../services/gokitt-store.service';
 import { db } from '../dexie/db';
 import type { Note, Folder, Entity, Edge } from '../dexie/db';
-import { saveCozoBootCache, buildCozoBootCache } from '../storage/cozoBootCache';
 
 export type SyncStatus = 'uninitialized' | 'syncing' | 'idle' | 'error';
 
@@ -28,7 +27,7 @@ export interface SyncReport {
  * SYNC STRATEGY:
  * - Boot: Load SQLite.
  * - If SQLite Empty: Import from Dexie (One-time migration/Recovery).
- * - After Boot: OVERWRITE Dexie with SQLite data (Self-healing).
+ * - After Boot: POPULATE Dexie with SQLite data synchronously. Dexie is write-through cache.
  */
 @Injectable({ providedIn: 'root' })
 export class DataSyncService {
@@ -65,11 +64,9 @@ export class DataSyncService {
                 await this.recoverFromDexie();
             }
 
-            // 3. Enforce Truth (SQLite -> Dexie)
-            // We do this in background to not block UI, but it SHOULD happen quickly.
-            this.syncSqliteToDexie().catch(err => {
-                console.error('[DataSyncService] ❌ Background sync failed:', err);
-            });
+            // 3. Populate Dexie (Reactive Cache)
+            // We WAIT for this now, so the system doesn't query Dexie before it's populated
+            await this.syncSqliteToDexie();
 
             this._status.set('idle');
 
@@ -115,22 +112,6 @@ export class DataSyncService {
                 if (edges.length > 0) await db.edges.bulkPut(edges.map(e => this.toDexieEdge(e)));
                 if (folders.length > 0) await db.folders.bulkPut(folders.map(f => this.toDexieFolder(f)));
             });
-
-            // C. Update BootCache (Entities Metadata)
-            // This is used for synchronous registry hydration on next boot
-            const cacheEntities = entities.map(e => ({
-                id: e.id,
-                label: e.label,
-                kind: e.kind,
-                subtype: e.subtype,
-                aliases: e.aliases,
-                narrativeId: e.narrativeId
-            }));
-
-            // Re-import because we might be in a cycle if we import at top level with side effects
-            // (Assuming saveCozoBootCache is safe)
-            const cache = buildCozoBootCache(cacheEntities, edges.length);
-            saveCozoBootCache(cache);
 
             const report: SyncReport = {
                 notes: notes.length,

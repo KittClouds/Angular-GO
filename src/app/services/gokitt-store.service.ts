@@ -289,6 +289,33 @@ export class GoKittStoreService {
     }
 
     // =========================================================================
+    // Persistence Trigger (Snapshot Native)
+    // =========================================================================
+
+    private _snapshotTimeout: any = null;
+
+    /**
+     * Debounces and triggers an atomic binary snapshot of the SQLite database
+     * to the OPFS file system. Required because Snapshot Native has no WAL.
+     */
+    private scheduleSnapshot(): void {
+        if (this._snapshotTimeout) {
+            clearTimeout(this._snapshotTimeout);
+        }
+        this._snapshotTimeout = setTimeout(async () => {
+            try {
+                if (this.isReady) {
+                    console.log('[GoKittStoreService] 📸 Auto-triggering OPFS snapshot...');
+                    const dbBlob = await this.exportDatabase();
+                    await this.persistence.saveSnapshot(dbBlob);
+                }
+            } catch (err) {
+                console.error('[GoKittStoreService] Failed to auto-save snapshot:', err);
+            }
+        }, 1500); // Debounce to allow batches to finish
+    }
+
+    // =========================================================================
     // Note CRUD
     // =========================================================================
 
@@ -302,6 +329,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to upsert note: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -321,6 +349,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to delete note: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -346,6 +375,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to upsert entity: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -373,6 +403,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to delete entity: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -398,6 +429,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to upsert edge: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -417,6 +449,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to delete edge: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -453,6 +486,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to upsert folder: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**
@@ -472,6 +506,7 @@ export class GoKittStoreService {
         if (!result.success) {
             throw new Error(`Failed to delete folder: ${result.error}`);
         }
+        this.scheduleSnapshot();
     }
 
     /**

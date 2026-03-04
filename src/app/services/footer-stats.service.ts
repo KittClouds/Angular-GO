@@ -9,7 +9,8 @@ import { from } from 'rxjs';
 import { db, Mention } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
-import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
+import { parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
+import { GoKittService } from './gokitt.service';
 
 export interface FooterStats {
     backlinks: number;
@@ -26,6 +27,7 @@ export interface FooterStats {
 export class FooterStatsService {
     private noteEditorStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
+    private goKittService = inject(GoKittService);
 
     // ─────────────────────────────────────────────────────────────
     // Internal state
@@ -34,8 +36,50 @@ export class FooterStatsService {
     /** Current JSON content from editor (for analytics) */
     private currentContent = signal<string>('');
 
+    /** Fallback analytics computed via explicit analyzeText call */
+    private _fallbackAnalytics = signal<TextAnalytics>(getEmptyAnalytics());
+
     /** Save state tracking (derived from store) */
     readonly isSaved = computed(() => !this.noteEditorStore.isSaving());
+
+    constructor() {
+        // Listen to editor content changes for analytics
+        this.editorService.content$.subscribe(({ json }) => {
+            this.currentContent.set(JSON.stringify(json));
+        });
+
+        // Also load initial content when note changes
+        this.noteEditorStore.activeNote$.pipe(
+            distinctUntilChanged((a, b) => a?.id === b?.id)
+        ).subscribe(note => {
+            if (note) {
+                this.currentContent.set(note.content || '');
+            } else {
+                this.currentContent.set('');
+            }
+        });
+
+        // Kick off explicit analyzeText call on content changes (debounced)
+        // This ensures analytics show up even when SCAN_IMPLICIT hasn't piggybacked yet
+        toObservable(this.currentContent).pipe(
+            debounceTime(300),
+        ).subscribe(async (content) => {
+            if (!content) {
+                this._fallbackAnalytics.set(getEmptyAnalytics());
+                return;
+            }
+            const plainText = parseContentToPlainText(content);
+            if (!plainText.trim()) {
+                this._fallbackAnalytics.set(getEmptyAnalytics());
+                return;
+            }
+
+            const res = await this.goKittService.analyzeText(plainText);
+            if (res) {
+                this._fallbackAnalytics.set(res);
+            }
+        });
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Live Queries from Dexie
@@ -86,15 +130,14 @@ export class FooterStatsService {
     // Computed Stats from Editor Content (using text-analytics)
     // ─────────────────────────────────────────────────────────────
 
-    /** Full text analytics - same as Analytics Panel */
+    /** Full text analytics - piggybacked from scanner + explicit fallback */
     readonly analytics = computed<TextAnalytics>(() => {
-        const content = this.currentContent();
-        if (!content) return getEmptyAnalytics();
+        // Prefer piggybacked analytics from SCAN_IMPLICIT (zero-cost)
+        const piggybacked = this.goKittService.activeAnalytics();
+        if (piggybacked && piggybacked.wordCount > 0) return piggybacked;
 
-        const plainText = parseContentToPlainText(content);
-        if (!plainText.trim()) return getEmptyAnalytics();
-
-        return analyzeText(plainText);
+        // Fallback: explicit analyzeText call
+        return this._fallbackAnalytics();
     });
 
     /** Word count - from analytics */
@@ -102,30 +145,6 @@ export class FooterStatsService {
 
     /** Character count - from analytics */
     readonly charCount = computed(() => this.analytics().characterCount);
-
-    // ─────────────────────────────────────────────────────────────
-    // Constructor: Subscribe to editor content updates
-    // ─────────────────────────────────────────────────────────────
-
-    constructor() {
-        // Listen to editor content changes ONLY for analytics
-        this.editorService.content$.subscribe(({ json, markdown }) => {
-            // Use JSON content for analytics (same as Analytics Panel)
-            this.currentContent.set(JSON.stringify(json));
-        });
-
-        // Also load initial content when note changes
-        this.noteEditorStore.activeNote$.pipe(
-            distinctUntilChanged((a, b) => a?.id === b?.id)
-        ).subscribe(note => {
-            if (note) {
-                // Use JSON content (note.content) for consistency with analytics
-                this.currentContent.set(note.content || '');
-            } else {
-                this.currentContent.set('');
-            }
-        });
-    }
 
     // ─────────────────────────────────────────────────────────────
     // Aggregated stats object for convenience

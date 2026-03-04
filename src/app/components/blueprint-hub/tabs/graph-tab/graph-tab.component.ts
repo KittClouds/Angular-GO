@@ -69,16 +69,16 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     googleModels = BATCH_GOOGLE_MODELS;
     openRouterModels = BATCH_OPENROUTER_MODELS;
 
-    // State
-    entities = signal<RegisteredEntity[]>([]);
+    // State — entities now derived from ScopeService signal
+    entities = computed(() => this.scopeService.scopedEntities());
     selectedEntity = signal<RegisteredEntity | null>(null);
     expandedKinds = signal<Set<string>>(new Set());
     isCreatorOpen = signal(false);
     editingEntity = signal<EntityCreatorData | undefined>(undefined);
 
-    // Scope state
+    // Scope state — driven by ScopeService
     activeScope = this.scopeService.activeScope;
-    scopeLabel = signal<string>('Global');
+    scopeLabel = this.scopeService.scopeLabel;
 
     // Dropdown state
     isScopeMenuOpen = signal(false);
@@ -98,34 +98,29 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     scopeIcon = computed(() => {
         const scope = this.activeScope();
-        if (scope.id === 'vault:global') return this.GlobeIcon;
+        if (scope.type === 'global') return this.GlobeIcon;
         if (scope.type === 'narrative') return this.BookIcon;
+        if (scope.type === 'act') return this.BookIcon;
         if (scope.type === 'folder') return this.FolderIcon;
         return this.FileIcon;
     });
 
     constructor() {
-        // React to scope changes
+        // React to scope changes — calculate hierarchy for dropdown
         effect(() => {
             const scope = this.activeScope();
-            this.updateScopeLabel(scope);
-            this.calculateScopeHierarchy(scope); // Calculate parent scopes
+            this.calculateScopeHierarchy(scope);
+        });
+
+        // Auto-expand new entity kinds
+        effect(() => {
+            const ents = this.entities();
+            const newKinds = new Set(ents.map(e => e.kind));
+            this.expandedKinds.update(current => new Set([...current, ...newKinds]));
         });
     }
 
-    private async updateScopeLabel(scope: ActiveScope) {
-        if (scope.id === 'vault:global') {
-            this.scopeLabel.set('Global');
-        } else if (scope.type === 'folder' || scope.type === 'narrative') {
-            const folder = await db.folders.get(scope.id);
-            this.scopeLabel.set(folder?.name || 'Folder');
-        } else if (scope.type === 'note') {
-            const note = await db.notes.get(scope.id);
-            this.scopeLabel.set(note?.title || 'Note');
-        }
-        // Refresh entities when scope changes
-        this.refreshEntities();
-    }
+    // Scope label is now a reactive signal from ScopeService — no updateScopeLabel needed
 
     /**
      * Build the hierarchy options for the dropdown
@@ -212,54 +207,18 @@ export class GraphTabComponent implements OnInit, OnDestroy {
             }));
     });
 
-    totalEntities = computed(() => this.entities().length);
+    totalEntities = this.scopeService.scopedEntityCount;
 
-    private unsubscribeRegistry: (() => void) | null = null;
+    // No manual registry subscription needed — entities are a computed signal
 
     ngOnInit() {
-        this.refreshEntities();
-        // Expand all groups by default
+        // Expand all groups by default on init
         const allKinds = new Set(this.entities().map(e => e.kind));
         this.expandedKinds.set(allKinds);
-
-        // Subscribe to registry changes
-        this.unsubscribeRegistry = smartGraphRegistry.subscribe(() => {
-            this.refreshEntities();
-        });
-
-        if (typeof window !== 'undefined') {
-            window.addEventListener('entities-changed', () => this.refreshEntities());
-        }
     }
 
     ngOnDestroy() {
-        this.unsubscribeRegistry?.();
-    }
-
-    async refreshEntities() {
-        const scope = this.activeScope();
-        let allEntities: RegisteredEntity[];
-
-        if (scope.id === 'vault:global') {
-            // Global: show all entities from the registry
-            allEntities = smartGraphRegistry.getAllEntities();
-        } else {
-            // Scoped: get entities that are MENTIONED in notes within this scope
-            // This uses the mentions table, not just firstNote
-            const scopedDbEntities = await this.scopeService.getEntitiesInScope(scope);
-            const scopedEntityIds = new Set(scopedDbEntities.map(e => e.id));
-
-            // Filter registry entities by the scoped IDs
-            allEntities = smartGraphRegistry.getAllEntities().filter(e =>
-                scopedEntityIds.has(e.id)
-            );
-        }
-
-        this.entities.set(allEntities);
-
-        // Expand any new kinds
-        const newKinds = new Set(allEntities.map(e => e.kind));
-        this.expandedKinds.update(current => new Set([...current, ...newKinds]));
+        // No cleanup needed — signals are garbage collected
     }
 
     resetToGlobal() {
@@ -301,7 +260,7 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     async deleteEntity(entity: RegisteredEntity, event: MouseEvent) {
         event.stopPropagation();
         await smartGraphRegistry.deleteEntity(entity.id);
-        this.refreshEntities();
+        // Entities auto-refresh via computed signal
         if (this.selectedEntity()?.id === entity.id) {
             this.selectedEntity.set(null);
         }
@@ -324,13 +283,12 @@ export class GraphTabComponent implements OnInit, OnDestroy {
                 { source: 'user', aliases: data.aliases }
             );
         }
-        this.refreshEntities();
+        // Entities auto-refresh via computed signal
     }
 
     async flushRegistry() {
         if (confirm(`Delete all ${this.totalEntities()} entities? This cannot be undone.`)) {
             await smartGraphRegistry.clearAll();
-            this.refreshEntities();
             this.selectedEntity.set(null);
         }
     }
@@ -435,7 +393,7 @@ export class GraphTabComponent implements OnInit, OnDestroy {
                 `• ${commitResult.skipped} already registered (skipped)`
             );
 
-            this.refreshEntities();
+            // Entities auto-refresh via computed signal
 
         } catch (err) {
             console.error('[GraphTab] Extraction failed:', err);

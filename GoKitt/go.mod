@@ -22,7 +22,6 @@ require (
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/revrost/go-openrouter v1.1.7 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

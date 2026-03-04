@@ -91,7 +91,7 @@ async function waitForBridge(): Promise<DataSyncService> {
     return _bridge!;
 }
 
-function getBridge(): DataSyncService | null {
+export function getBridge(): DataSyncService | null {
     return _bridge?.isReadySync() ? _bridge : null;
 }
 

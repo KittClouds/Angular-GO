@@ -6,9 +6,9 @@ import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, Trending
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
 
 import { FlowScoreComponent } from './flow-score/flow-score.component';
-import { analyzeText, parseContentToPlainText, getEmptyAnalytics, TextAnalytics } from '../../lib/analytics';
+import { TextAnalytics } from '../../lib/analytics';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
-import { EditorService } from '../../services/editor.service';
+import { FooterStatsService } from '../../services/footer-stats.service';
 import { GoKittService } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 
@@ -456,7 +456,7 @@ export class AnalyticsPanelComponent {
     private goKitt = inject(GoKittService);
     private notesService = inject(NotesService);
     private noteStore = inject(NoteEditorStore);
-    private editorService = inject(EditorService);
+    private footerStatsService = inject(FooterStatsService);
     private router = inject(Router);
 
     // Search State
@@ -471,9 +471,6 @@ export class AnalyticsPanelComponent {
     minCount = signal(1);
     isKeywordsExpanded = signal(false);
 
-    // Real-time content from editor (immediate updates on typing/paste)
-    private liveContent = signal<string>('');
-
     // ... Icons ...
     readonly FileText = FileText;
     readonly Clock = Clock;
@@ -487,12 +484,6 @@ export class AnalyticsPanelComponent {
     readonly Target = Target;
 
     constructor() {
-        // Subscribe to real-time editor content changes
-        // Use liveContent signal
-        this.editorService.content$.subscribe(({ json }) => {
-            this.liveContent.set(JSON.stringify(json));
-        });
-
         // Build note title map
         this.notesService.getAllNotes$().subscribe(notes => {
             this.noteTitleMap.clear();
@@ -500,25 +491,8 @@ export class AnalyticsPanelComponent {
         });
     }
 
-    // Prefer live content if available, fallback to saved note content
-    private currentContent = computed(() => {
-        const live = this.liveContent();
-        if (live) return live;
-
-        const note = this.noteStore.currentNote();
-        return note?.content ?? '';
-    });
-
     // Parse and analyze content
-    analytics = computed<TextAnalytics>(() => {
-        const content = this.currentContent();
-        if (!content) return getEmptyAnalytics();
-
-        const plainText = parseContentToPlainText(content);
-        if (!plainText.trim()) return getEmptyAnalytics();
-
-        return analyzeText(plainText);
-    });
+    analytics = computed<TextAnalytics>(() => this.footerStatsService.analytics());
 
     hasContent = computed(() => this.analytics().wordCount > 0);
 

@@ -9,158 +9,158 @@ INDEX STATISTICS:
 
 CHUNK → ENTITY MAPPING:
 ----------------------------------------
-  chapter-10: 188 mentions
-    - char-zanbato ×28
-    - org-meta-gang ×9
-    - org-migliore ×3
-    - loc-new-rome ×1
-    - char-vulcan ×25
-    - char-len ×7
-    - char-pluto ×5
-    - char-augustus ×2
-    - loc-rust-town ×1
-    - char-ryan ×58
-    - char-wyvern ×6
-    - loc-bakuto ×1
-    - org-augusti ×1
-    - loc-dynamis ×2
-    - char-ki-jung ×13
-    - char-lanka ×24
-    - entity_Location_62c3e80ca4a1eea2 ×2
   chapter-1: 99 mentions
+    - loc-rust-town ×1
+    - org-augusti ×2
+    - char-ghoul ×1
+    - char-ryan ×59
     - loc-new-rome ×6
+    - loc-dynamis ×3
     - org-meta-gang ×4
     - char-wyvern ×2
-    - char-renesco ×14
-    - loc-rust-town ×1
-    - org-augusti ×2
-    - char-ryan ×59
-    - loc-dynamis ×3
     - char-len ×6
+    - char-renesco ×14
     - entity_Location_62c3e80ca4a1eea2 ×1
-    - char-ghoul ×1
-  chapter-2: 88 mentions
-    - loc-rust-town ×1
-    - char-wyvern ×10
-    - loc-bakuto ×1
-    - char-ghoul ×4
-    - char-renesco ×2
-    - org-migliore ×2
-    - loc-dynamis ×3
-    - org-augusti ×3
-    - org-meta-gang ×4
-    - char-augustus ×1
-    - char-vulcan ×4
-    - char-ryan ×36
-    - char-len ×8
-    - loc-new-rome ×7
-    - entity_Location_62c3e80ca4a1eea2 ×2
   chapter-4: 180 mentions
-    - org-augusti ×1
-    - entity_Location_62c3e80ca4a1eea2 ×6
-    - org-migliore ×1
     - char-len ×5
-    - char-ryan ×73
-    - loc-dynamis ×2
-    - char-lanka ×6
-    - char-sarin ×7
-    - org-meta-gang ×4
-    - char-luigi ×21
-    - char-ki-jung ×1
-    - char-ghoul ×15
+    - org-augusti ×1
     - char-zanbato ×33
     - loc-rust-town ×4
+    - char-lanka ×6
+    - char-ki-jung ×1
+    - org-migliore ×1
+    - char-ghoul ×15
+    - entity_Location_62c3e80ca4a1eea2 ×6
+    - loc-dynamis ×2
     - char-vulcan ×1
-  chapter-5: 115 mentions
-    - char-sarin ×13
-    - char-zanbato ×29
+    - org-meta-gang ×4
+    - char-sarin ×7
+    - char-ryan ×73
+    - char-luigi ×21
+  chapter-9: 189 mentions
+    - char-luigi ×9
+    - char-ki-jung ×10
+    - org-meta-gang ×4
+    - char-vulcan ×7
+    - char-zanbato ×45
+    - char-lanka ×8
+    - loc-new-rome ×1
+    - char-ryan ×68
+    - char-renesco ×1
+    - org-augusti ×5
+    - char-sarin ×5
+    - char-augustus ×1
+    - char-wyvern ×2
     - loc-dynamis ×1
+    - entity_Location_62c3e80ca4a1eea2 ×2
+    - loc-rust-town ×1
+    - char-ghoul ×7
+    - char-len ×11
+    - loc-bakuto ×1
+  chapter-2: 88 mentions
+    - char-renesco ×2
+    - loc-dynamis ×3
+    - org-augusti ×3
+    - char-augustus ×1
+    - entity_Location_62c3e80ca4a1eea2 ×2
+    - loc-rust-town ×1
+    - org-migliore ×2
+    - char-vulcan ×4
+    - char-len ×8
+    - char-wyvern ×10
+    - org-meta-gang ×4
+    - char-ryan ×36
+    - loc-new-rome ×7
+    - char-ghoul ×4
+    - loc-bakuto ×1
+  chapter-3: 95 mentions
+    - loc-dynamis ×3
+    - char-zanbato ×28
+    - org-migliore ×1
+    - char-ryan ×41
+    - org-augusti ×1
+    - char-wyvern ×2
+    - char-ghoul ×3
+    - char-augustus ×2
+    - char-renesco ×1
+    - loc-bakuto ×1
+    - org-meta-gang ×4
+    - char-lanka ×1
+    - char-len ×4
+    - loc-new-rome ×3
+  chapter-5: 115 mentions
     - char-luigi ×1
-    - entity_Location_62c3e80ca4a1eea2 ×5
-    - org-meta-gang ×1
-    - org-augusti ×2
     - char-vulcan ×1
     - char-len ×2
+    - entity_Location_62c3e80ca4a1eea2 ×5
+    - char-zanbato ×29
+    - org-augusti ×2
     - char-renesco ×1
     - char-ryan ×42
     - char-ghoul ×17
-  chapter-7: 166 mentions
-    - char-lanka ×3
-    - char-zanbato ×2
-    - entity_Location_62c3e80ca4a1eea2 ×10
-    - loc-rust-town ×8
-    - loc-new-rome ×4
+    - char-sarin ×13
+    - org-meta-gang ×1
+    - loc-dynamis ×1
+  chapter-6: 97 mentions
+    - char-lanka ×2
+    - org-augusti ×8
+    - char-wyvern ×10
     - char-augustus ×1
-    - char-vulcan ×4
-    - org-migliore ×2
-    - char-wyvern ×7
-    - org-augusti ×7
-    - org-meta-gang ×13
+    - loc-bakuto ×2
+    - char-luigi ×1
+    - entity_Location_62c3e80ca4a1eea2 ×1
+    - loc-rust-town ×1
+    - org-meta-gang ×3
+    - char-zanbato ×4
+    - loc-dynamis ×3
+    - char-len ×4
+    - org-migliore ×1
+    - char-vulcan ×2
+    - char-ryan ×43
+    - char-renesco ×2
+    - char-ghoul ×9
+  chapter-7: 166 mentions
     - char-ryan ×59
+    - loc-new-rome ×4
+    - char-paulie ×26
+    - loc-rust-town ×8
     - loc-dynamis ×8
     - char-ghoul ×2
+    - org-meta-gang ×13
+    - char-augustus ×1
+    - char-zanbato ×2
+    - entity_Location_62c3e80ca4a1eea2 ×10
+    - char-wyvern ×7
+    - char-vulcan ×4
+    - org-migliore ×2
     - char-len ×10
-    - char-paulie ×26
+    - char-lanka ×3
+    - org-augusti ×7
   chapter-8: 122 mentions
+    - char-augustus ×2
+    - org-meta-gang ×3
     - loc-dynamis ×1
     - char-bloodstream ×16
     - char-len ×56
     - char-ryan ×44
-    - char-augustus ×2
-    - org-meta-gang ×3
-  chapter-3: 95 mentions
-    - char-lanka ×1
-    - char-len ×4
-    - loc-dynamis ×3
-    - char-zanbato ×28
-    - org-augusti ×1
-    - loc-new-rome ×3
-    - char-wyvern ×2
-    - char-ghoul ×3
-    - org-migliore ×1
-    - char-augustus ×2
-    - char-renesco ×1
-    - loc-bakuto ×1
-    - char-ryan ×41
-    - org-meta-gang ×4
-  chapter-6: 97 mentions
-    - char-luigi ×1
-    - char-ryan ×43
-    - char-renesco ×2
-    - char-ghoul ×9
-    - char-len ×4
-    - org-augusti ×8
-    - loc-bakuto ×2
-    - entity_Location_62c3e80ca4a1eea2 ×1
-    - loc-dynamis ×3
-    - char-wyvern ×10
-    - org-migliore ×1
-    - org-meta-gang ×3
-    - char-augustus ×1
-    - char-zanbato ×4
-    - loc-rust-town ×1
-    - char-lanka ×2
-    - char-vulcan ×2
-  chapter-9: 189 mentions
-    - org-augusti ×5
-    - char-zanbato ×45
-    - char-luigi ×9
+  chapter-10: 188 mentions
     - loc-new-rome ×1
-    - char-lanka ×8
-    - loc-dynamis ×1
-    - char-ryan ×68
-    - char-wyvern ×2
-    - char-vulcan ×7
-    - loc-bakuto ×1
-    - char-len ×11
-    - char-augustus ×1
-    - char-ki-jung ×10
     - entity_Location_62c3e80ca4a1eea2 ×2
-    - char-ghoul ×7
-    - char-renesco ×1
-    - org-meta-gang ×4
-    - char-sarin ×5
+    - char-pluto ×5
+    - org-augusti ×1
+    - char-ki-jung ×13
+    - char-lanka ×24
+    - char-vulcan ×25
+    - org-meta-gang ×9
+    - org-migliore ×3
+    - char-augustus ×2
+    - char-wyvern ×6
+    - char-len ×7
     - loc-rust-town ×1
+    - loc-bakuto ×1
+    - loc-dynamis ×2
+    - char-ryan ×58
+    - char-zanbato ×28
 
 SEARCH: "Ryan"
 ----------------------------------------

@@ -50,6 +50,7 @@ type GoKittWorkerMessage =
     | { type: 'REMOVE_NOTE'; payload: { id: string }; id: number }
     | { type: 'SCAN_NOTE'; payload: { noteId: string; provenance?: ProvenanceContext }; id: number }
     | { type: 'VALIDATE_RELATIONS'; payload: { noteId: string; relationsJSON: string }; id: number }
+    | { type: 'ANALYZE_TEXT'; payload: { text: string }; id: number }
     | { type: 'DOC_COUNT'; id: number }
     // Phase 6: LLM Batch + Extraction + Agent
     | { type: 'BATCH_INIT'; payload: { configJSON: string }; id: number }
@@ -145,6 +146,8 @@ type GoKittWorkerResponse =
     | { type: 'SCAN_NOTE_RESULT'; id: number; payload: any }
     | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
     | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
+    | { type: 'ANALYZE_TEXT_RESULT'; id: number; payload: any }
+    | { type: 'ANALYTICS_UPDATE'; payload: any }
     // SQLite Store responses
     | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -269,6 +272,10 @@ export class GoKittService {
     // Last graph data from GoKitt scan - PRIMARY source for graph visualization
     private _lastGraphData = signal<GoKittGraphData | null>(null);
     readonly lastGraphData = this._lastGraphData.asReadonly();
+
+    // Piggybacked analytics from background implicit scans
+    private _activeAnalytics = signal<any>(null);
+    readonly activeAnalytics = this._activeAnalytics.asReadonly();
 
     /** Get the worker instance for external services (like GoKittStoreService) */
     get worker(): Worker | null {
@@ -680,6 +687,25 @@ export class GoKittService {
         }
     }
 
+    /**
+     * Compute Text Analytics using Go logic
+     * @param text The text to analyze
+     */
+    async analyzeText(text: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return null;
+        }
+
+        try {
+            const result = await this.sendRequest<any>('ANALYZE_TEXT', { text });
+            return result;
+        } catch (e) {
+            console.error('[GoKittService] Analyze text error:', e);
+            return null;
+        }
+    }
+
+
     // ==========================================================================
     // Phase 3: Graph Merger API
     // ==========================================================================
@@ -931,6 +957,12 @@ export class GoKittService {
     // ============ Worker Communication ============
 
     private handleWorkerMessage(msg: GoKittWorkerResponse): void {
+        // Intercept background pushes
+        if (msg.type === 'ANALYTICS_UPDATE') {
+            this._activeAnalytics.set(msg.payload);
+            return;
+        }
+
         // Handle responses with IDs
         if ('id' in msg && msg.id !== undefined) {
             const pending = this.pendingRequests.get(msg.id);

@@ -1,7 +1,6 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { appConfig } from './app/app.config';
 import { AppComponent } from './app/app.component';
-import { preloadBootCache } from './app/lib/core/boot-cache';
 
 // =============================================================================
 // Phase 0: Global Polyfills (SYNC - before any async)
@@ -50,21 +49,13 @@ import { preloadBootCache } from './app/lib/core/boot-cache';
 };
 
 // =============================================================================
-// Phase 1: Boot Cache + Angular Bootstrap (PARALLEL)
+// Phase 1: Angular Bootstrap
 // =============================================================================
 
 console.log('[Main] Starting application boot...');
 
-// Start Dexie load in background — don't block Angular bootstrap
-// Boot cache will be ready by the time GoSqliteBridge.tryBootCache() reads it
-const bootCachePromise = preloadBootCache();
-
-// Bootstrap Angular immediately (overlaps with Dexie I/O)
 bootstrapApplication(AppComponent, appConfig)
   .then(async (appRef) => {
-    // Ensure boot cache is settled (should already be done by now)
-    await bootCachePromise;
-
     // Expose injector globally for non-DI contexts (e.g., registry dictionary rebuild)
     (window as any).__angularInjector = appRef.injector;
     console.log('[Main] Angular bootstrapped, injector exposed');
