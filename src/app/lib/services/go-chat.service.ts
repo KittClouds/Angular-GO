@@ -136,35 +136,36 @@ export class GoChatService {
         }
 
         if (!config?.apiKey) {
-            console.warn('[GoChatService] No API key configured - chat will not persist memories');
-            // Still mark as ready for basic operations
-            this.ready.set(true);
-            this.initialized.set(true);
-            return;
+            console.warn('[GoChatService] No API key configured - chat will not generate replies or persist memories');
+            // We must still initialize the Go WASM chat system for local history
         }
 
         try {
             // First initialize the batch service for LLM calls (extraction, streaming A/B)
-            const batchResult = await this.goKittService.batchInit({
-                provider: 'openrouter',
-                openRouterApiKey: config.apiKey,
-                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
-                temperature: config.temperature,
-                maxTokens: config.maxTokens
-            });
-            if (batchResult.error) {
-                console.warn('[GoChatService] Batch init failed:', batchResult.error);
-                // Continue anyway, chat might still work without batch
+            // Skip if no API key
+            if (config?.apiKey) {
+                const batchResult = await this.goKittService.batchInit({
+                    provider: 'openrouter',
+                    openRouterApiKey: config.apiKey,
+                    openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                    temperature: config.temperature,
+                    maxTokens: config.maxTokens
+                });
+                if (batchResult.error) {
+                    console.warn('[GoChatService] Batch init failed:', batchResult.error);
+                    // Continue anyway, chat might still work without batch
+                }
             }
 
             // Initialize Go chat service via WASM
             // Include OM settings from GoOMService if available
+            // THIS MUST RUN EVEN WITHOUT AN API KEY TO ATTACH THE DB
             const configJSON = JSON.stringify({
-                apiKey: config.apiKey,
-                model: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
-                omEnabled: config.omEnabled ?? true,
-                observeThreshold: config.observeThreshold ?? 1000,
-                reflectThreshold: config.reflectThreshold ?? 4000
+                apiKey: config?.apiKey || '',
+                model: config?.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                omEnabled: config?.omEnabled ?? true,
+                observeThreshold: config?.observeThreshold ?? 1000,
+                reflectThreshold: config?.reflectThreshold ?? 4000
             });
 
             const result = await this.goKittService.chatInit(configJSON);
@@ -183,6 +184,7 @@ export class GoChatService {
 
             // Restore last active thread
             this.restoreLastThread();
+
 
         } catch (err) {
             console.error('[GoChatService] Init error:', err);

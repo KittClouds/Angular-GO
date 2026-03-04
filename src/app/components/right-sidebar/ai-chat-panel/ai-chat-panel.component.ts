@@ -860,7 +860,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         }
 
         setSetting('chat:systemPrompt', this.systemPromptInput());
-        console.log('[AiChatPanel] Settings saved, active provider:', this.activeProvider());
+        // console.log('[AiChatPanel] Settings saved, active provider:', this.activeProvider());
         this.showSettings.set(false);
     }
 

@@ -540,7 +540,7 @@ async function loadWasm(): Promise<void> {
 
 self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
     const msg = e.data;
-    console.log('[GoKittWorker] Received:', msg.type);
+    // console.log('[GoKittWorker] Received:', msg.type);
 
     try {
         switch (msg.type) {

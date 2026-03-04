@@ -9,3 +9,10 @@ export * from './EntityEventBus';
 export * from './DeltaScanner';
 // export * from './ScanCoordinator';
 export * from './scanCoordinatorInstance';
+
+// ── Modular Scanner Pipeline ──
+export * from './prosemirror-bridge';
+export * from './highlight-scanner';
+export * from './discovery-scanner';
+export * from './graph-scanner';
+export * from './scan-pipeline';
