@@ -1,27 +1,35 @@
-// src/app/lib/operations.ts
-// CRUD operations using GoSQLite as primary store
-// NO COZODB. NO DEXIE (except model cache).
+/**
+ * Operations Module — Pure SQLite CRUD
+ * 
+ * Architecture (Pure OPFS + Go Memory):
+ * - GoKittStoreService is the ONLY source of truth
+ * - Dexie is an ephemeral, in-memory state cache for Angular UI
+ * - DataSyncService is ELIMINATED
+ * - All CRUD goes directly to Go SQLite via the WASM worker
+ */
+import { db } from './dexie/db';
+import { GoKittStoreService, StoreNote, StoreFolder, StoreEntity, StoreEdge } from '../services/gokitt-store.service';
 
-import type { DataSyncService } from './bridge/DataSyncService';
-import type { GoKittStoreService, StoreNote, StoreEntity, StoreFolder } from '../services/gokitt-store.service';
+// =============================================================================
+// INTERFACES
+// =============================================================================
 
-// Re-export types for consumers
 export interface Note {
     id: string;
     worldId: string;
     title: string;
-    content: string;
+    content: any;
     markdownContent: string;
     folderId: string;
-    entityKind: string;
-    entitySubtype: string;
-    isEntity: boolean;
-    isPinned: boolean;
-    favorite: boolean;
+    entityKind?: string;
+    entitySubtype?: string;
+    isEntity?: boolean;
+    isPinned?: boolean;
+    favorite?: boolean;
     ownerId: string;
     createdAt: number;
     updatedAt: number;
-    narrativeId: string;
+    narrativeId?: string;
     order: number;
 }
 
@@ -55,57 +63,78 @@ export interface Entity {
     label: string;
     kind: string;
     subtype?: string;
-    aliases: string[];
-    firstNote: string;
-    totalMentions: number;
+    aliases?: string[];
+    firstNote?: string;
+    totalMentions?: number;
     createdAt: number;
     updatedAt: number;
-    createdBy: 'user' | 'extraction' | 'auto';
+    createdBy?: 'user' | 'extraction' | 'auto';
     narrativeId?: string;
 }
 
-// =============================================================================
-// BRIDGE ACCESS
-// =============================================================================
-
-let _bridge: DataSyncService | null = null;
-let _bridgeResolve: (() => void) | null = null;
-const _bridgeReady = new Promise<void>(resolve => { _bridgeResolve = resolve; });
-
-export function setGoSqliteBridge(bridge: DataSyncService): void {
-    _bridge = bridge;
-    console.log('[Operations] DataSyncService connected');
-    _bridgeResolve?.();
+export interface Edge {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    relType: string;
+    confidence?: number;
+    bidirectional?: boolean;
 }
 
-function requireBridge(): DataSyncService {
-    if (!_bridge || !_bridge.isReadySync()) {
-        throw new Error('[Operations] Sync Service not ready - called too early');
+// =============================================================================
+// STORE ACCESS (Direct to GoKittStoreService — NO DataSyncService)
+// =============================================================================
+
+let _store: GoKittStoreService | null = null;
+let _storeResolve: (() => void) | null = null;
+const _storeReady = new Promise<void>(resolve => { _storeResolve = resolve; });
+
+export function setGoSqliteBridge(store: GoKittStoreService): void {
+    _store = store;
+    console.log('[Operations] GoKittStoreService connected (Direct Mode)');
+    _storeResolve?.();
+}
+
+function requireStore(): GoKittStoreService {
+    if (!_store || !_store.isReady) {
+        throw new Error('[Operations] GoKittStoreService not ready - called too early');
     }
-    return _bridge;
+    return _store;
 }
 
-/** Wait for bridge to be ready (for writes that arrive before boot completes) */
-async function waitForBridge(): Promise<DataSyncService> {
-    await _bridgeReady;
-    return _bridge!;
+async function waitForStore(): Promise<GoKittStoreService> {
+    await _storeReady;
+    return _store!;
 }
 
-export function getBridge(): DataSyncService | null {
-    return _bridge?.isReadySync() ? _bridge : null;
+export function getBridge(): GoKittStoreService | null {
+    return _store?.isReady ? _store : null;
 }
 
+// =============================================================================
+// DEXIE WARMING (Best-effort ephemeral state cache)
+// =============================================================================
+
+function warmDexieNote(note: Note): void {
+    db.notes.put(note as any).catch(() => { });
+}
+
+function warmDexieFolder(folder: Folder): void {
+    db.folders.put(folder as any).catch(() => { });
+}
+
+function warmDexieEntity(entity: Entity): void {
+    db.entities.put(entity as any).catch(() => { });
+}
 
 // =============================================================================
 // NOTE OPERATIONS
 // =============================================================================
 
 export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
-    const bridge = requireBridge();
+    const store = requireStore();
     const id = crypto.randomUUID();
     const now = Date.now();
-
-    // Get next order for this folder
     const order = await getNextNoteOrder(note.folderId);
 
     const fullNote: Note = {
@@ -116,37 +145,28 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         updatedAt: now,
     } as Note;
 
-    // Write to GoSQLite
-    await bridge.syncNote(fullNote as any);
-
+    await store.upsertNote(GoKittStoreService.fromDexieNote(fullNote));
+    warmDexieNote(fullNote);
     return id;
 }
 
 export async function updateNote(id: string, updates: Partial<Note>): Promise<void> {
-    const bridge = await waitForBridge();
-
-    // Get existing from GoSQLite
-    const existing = await bridge.getNote(id);
+    const store = await waitForStore();
+    const existing = await store.getNote(id);
     if (!existing) {
         console.warn(`[Operations] Note ${id} not found`);
         return;
     }
 
-    const updatedNote = {
-        ...existing,
-        ...updates,
-        updatedAt: Date.now(),
-    };
+    const merged = { ...existing, ...updates, updatedAt: Date.now() };
+    await store.upsertNote(merged as StoreNote);
+    warmDexieNote(storeNoteToNote(merged as StoreNote));
 
-    await bridge.syncNote(updatedNote as any);
-
-    // Sync content to GoKitt DocStore (if content was updated)
     if (updates.content !== undefined) {
-        syncNoteToDocStore(id, updates.content, updatedNote.updatedAt);
+        syncNoteToDocStore(id, updates.content, merged.updatedAt);
     }
 }
 
-// Lazy sync to GoKitt DocStore (fire-and-forget)
 function syncNoteToDocStore(id: string, content: any, version: number): void {
     import('../api/pretty-text-api').then((api) => {
         const goKitt = (api as any).getGoKittService?.();
@@ -156,52 +176,45 @@ function syncNoteToDocStore(id: string, content: any, version: number): void {
                 console.warn('[Operations] DocStore sync failed:', e)
             );
         }
-    }).catch(() => {
-        // Module not loaded - skip silently
-    });
+    }).catch(() => { });
 }
 
 export async function deleteNote(id: string): Promise<void> {
-    const bridge = requireBridge();
-    await bridge.deleteNote(id);
+    const store = requireStore();
+    await store.deleteNote(id);
+    db.notes.delete(id).catch(() => { });
 }
 
 export async function getNote(id: string): Promise<Note | undefined> {
-    const bridge = getBridge();
-    if (!bridge) return undefined;
-
-    const note = await bridge.getNote(id);
+    const store = getBridge();
+    if (!store) return undefined;
+    const note = await store.getNote(id);
     return note ? storeNoteToNote(note) : undefined;
 }
 
 export async function getAllNotes(): Promise<Note[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const notes = await bridge.getAllNotes();
+    const store = getBridge();
+    if (!store) return [];
+    const notes = await store.listNotes();
     return notes.map(storeNoteToNote);
 }
 
 export async function getNotesByFolder(folderId: string): Promise<Note[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const notes = await bridge.getNotesByFolder(folderId);
+    const store = getBridge();
+    if (!store) return [];
+    const notes = await store.listNotes(folderId);
     return notes.map(storeNoteToNote);
 }
 
 export async function getNotesByNarrative(narrativeId: string): Promise<Note[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    // Query notes by narrativeId from GoSQLite via bridge
-    const allNotes = await bridge.getAllNotes();
+    const store = getBridge();
+    if (!store) return [];
+    const allNotes = await store.listNotes();
     return allNotes
         .filter(n => n.narrativeId === narrativeId)
         .map(storeNoteToNote);
 }
 
-// Convert StoreNote to Note interface
 function storeNoteToNote(sn: StoreNote): Note {
     return {
         id: sn.id,
@@ -224,14 +237,13 @@ function storeNoteToNote(sn: StoreNote): Note {
 }
 
 // =============================================================================
-// FOLDER OPERATIONS (folders now in GoSQLite, not CozoDB)
+// FOLDER OPERATIONS
 // =============================================================================
 
 export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
-    const bridge = requireBridge();
+    const store = requireStore();
     const id = crypto.randomUUID();
     const now = Date.now();
-
     const order = await getNextFolderOrder(folder.parentId);
 
     const fullFolder: Folder = {
@@ -242,134 +254,128 @@ export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'up
         updatedAt: now,
     } as Folder;
 
-    await bridge.syncFolder(fullFolder as any);
+    await store.upsertFolder(GoKittStoreService.fromDexieFolder(fullFolder));
+    warmDexieFolder(fullFolder);
     return id;
 }
 
 export async function updateFolder(id: string, updates: Partial<Folder>): Promise<void> {
-    const bridge = requireBridge();
-
-    // Get folder from GoSQLite
-    const existing = await bridge.getFolder(id);
+    const store = requireStore();
+    const existing = await store.getFolder(id);
     if (!existing) {
         console.warn(`[Operations] Folder ${id} not found`);
         return;
     }
 
-    const updatedFolder = {
-        ...existing,
-        ...updates,
-        updatedAt: Date.now(),
-    };
-
-    await bridge.syncFolder(updatedFolder as any);
+    const merged = { ...existing, ...updates, updatedAt: Date.now() };
+    await store.upsertFolder(merged as StoreFolder);
+    warmDexieFolder(storeFolderToFolder(merged as StoreFolder));
 }
 
 export async function deleteFolder(id: string): Promise<void> {
-    const bridge = requireBridge();
-    await bridge.deleteFolder(id);
+    const store = requireStore();
+    await store.deleteFolder(id);
+    db.folders.delete(id).catch(() => { });
 }
 
 export async function getFolder(id: string): Promise<Folder | undefined> {
-    const bridge = getBridge();
-    if (!bridge) return undefined;
-
-    const folder = await bridge.getFolder(id);
+    const store = getBridge();
+    if (!store) return undefined;
+    const folder = await store.getFolder(id);
     return folder ? storeFolderToFolder(folder) : undefined;
 }
 
 export async function getAllFolders(): Promise<Folder[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const folders = await bridge.getAllFolders();
+    const store = getBridge();
+    if (!store) return [];
+    const folders = await store.listFolders();
     return folders.map(storeFolderToFolder);
 }
 
 export async function getFolderChildren(parentId: string): Promise<Folder[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const allFolders = await bridge.getAllFolders();
+    const store = getBridge();
+    if (!store) return [];
+    const allFolders = await store.listFolders();
     return allFolders
         .filter(f => f.parentId === parentId)
         .map(storeFolderToFolder);
 }
 
 function storeFolderToFolder(sf: StoreFolder): Folder {
+    let attributes: Record<string, any> | undefined;
+    if (sf.attributes) {
+        try { attributes = typeof sf.attributes === 'string' ? JSON.parse(sf.attributes) : sf.attributes; } catch { /* ignore */ }
+    }
     return {
         id: sf.id,
         worldId: sf.worldId,
         name: sf.name,
         parentId: sf.parentId || '',
-        entityKind: '',      // Not in StoreFolder - use default
-        entitySubtype: '',   // Not in StoreFolder - use default
-        entityLabel: '',     // Not in StoreFolder - use default
-        color: '',           // Not in StoreFolder - use default
-        isTypedRoot: false,  // Not in StoreFolder - use default
-        isSubtypeRoot: false, // Not in StoreFolder - use default
-        collapsed: false,    // Not in StoreFolder - use default
-        ownerId: '',         // Not in StoreFolder - use default
+        entityKind: sf.entityKind || '',
+        entitySubtype: sf.entitySubtype || '',
+        entityLabel: sf.entityLabel || '',
+        color: sf.color || '',
+        isTypedRoot: sf.isTypedRoot || false,
+        isSubtypeRoot: sf.isSubtypeRoot || false,
+        collapsed: sf.collapsed || false,
+        ownerId: sf.ownerId || '',
         createdAt: sf.createdAt,
         updatedAt: sf.updatedAt,
         narrativeId: sf.narrativeId || '',
-        isNarrativeRoot: false, // Not in StoreFolder - use default
-        networkId: undefined,   // Not in StoreFolder
-        metadata: undefined,    // Not in StoreFolder
+        isNarrativeRoot: sf.isNarrativeRoot || false,
+        networkId: undefined,
+        metadata: undefined,
+        attributes,
         order: sf.folderOrder,
     };
 }
 
 // =============================================================================
-// ENTITY OPERATIONS (GraphRegistry is the source of truth, this is secondary)
+// ENTITY OPERATIONS
 // =============================================================================
 
 export async function upsertEntity(entity: Entity): Promise<void> {
-    const bridge = getBridge();
-    if (!bridge) {
-        console.warn('[Operations] Bridge not ready for entity upsert');
+    const store = getBridge();
+    if (!store) {
+        console.warn('[Operations] Store not ready for entity upsert');
         return;
     }
-
-    await bridge.syncEntity(entity as any);
+    await store.upsertEntity(GoKittStoreService.fromDexieEntity(entity));
+    warmDexieEntity(entity);
 }
 
 export async function deleteEntity(id: string): Promise<void> {
-    const bridge = getBridge();
-    if (!bridge) return;
-
-    await bridge.deleteEntity(id);
+    const store = getBridge();
+    if (!store) return;
+    await store.deleteEntity(id);
+    db.entities.delete(id).catch(() => { });
 }
 
 export async function getEntity(id: string): Promise<Entity | undefined> {
-    const bridge = getBridge();
-    if (!bridge) return undefined;
-
-    const entity = await bridge.getEntity(id);
+    const store = getBridge();
+    if (!store) return undefined;
+    const entity = await store.getEntity(id);
     return entity ? storeEntityToEntity(entity) : undefined;
 }
 
 export async function getAllEntities(): Promise<Entity[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const entities = await bridge.getAllEntities();
+    const store = getBridge();
+    if (!store) return [];
+    const entities = await store.listEntities();
     return entities.map(storeEntityToEntity);
 }
 
 export async function getEntitiesByKind(kind: string): Promise<Entity[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const entities = await bridge.getAllEntities();
+    const store = getBridge();
+    if (!store) return [];
+    const entities = await store.listEntities();
     return entities.filter(e => e.kind === kind).map(storeEntityToEntity);
 }
 
 export async function getEntitiesByNarrative(narrativeId: string): Promise<Entity[]> {
-    const bridge = getBridge();
-    if (!bridge) return [];
-
-    const entities = await bridge.getAllEntities();
+    const store = getBridge();
+    if (!store) return [];
+    const entities = await store.listEntities();
     return entities.filter(e => e.narrativeId === narrativeId).map(storeEntityToEntity);
 }
 
@@ -379,7 +385,7 @@ function storeEntityToEntity(se: StoreEntity): Entity {
         label: se.label,
         kind: se.kind,
         subtype: se.subtype,
-        aliases: se.aliases,
+        aliases: se.aliases || [],
         firstNote: se.firstNote,
         totalMentions: se.totalMentions,
         createdAt: se.createdAt,
@@ -414,123 +420,90 @@ export async function getNextFolderOrder(parentId: string): Promise<number> {
 // REORDER OPERATIONS
 // =============================================================================
 
-/**
- * Calculate a new order value for insertion at a specific position.
- */
 function calculateNewOrder(prevOrder: number, nextOrder: number): number {
-    if (prevOrder === 0 && nextOrder === 0) {
-        return DEFAULT_ORDER_STEP;
-    }
-    if (nextOrder === 0) {
-        return prevOrder + DEFAULT_ORDER_STEP;
-    }
+    if (prevOrder === 0 && nextOrder === 0) return DEFAULT_ORDER_STEP;
+    if (nextOrder === 0) return prevOrder + DEFAULT_ORDER_STEP;
     return (prevOrder + nextOrder) / 2;
 }
 
-/**
- * Check if orders need rebalancing (gaps too small).
- */
 function needsRebalancing(orders: number[]): boolean {
     for (let i = 1; i < orders.length; i++) {
-        if (orders[i] - orders[i - 1] < MIN_ORDER_GAP) {
-            return true;
-        }
+        if (orders[i] - orders[i - 1] < MIN_ORDER_GAP) return true;
     }
     return false;
 }
 
-/**
- * Rebalance orders for notes in a folder.
- */
 async function rebalanceNoteOrders(folderId: string): Promise<void> {
-    const bridge = getBridge();
-    if (!bridge) return;
-
+    const store = getBridge();
+    if (!store) return;
     const notes = await getNotesByFolder(folderId);
     notes.sort((a, b) => a.order - b.order);
-
     for (let i = 0; i < notes.length; i++) {
-        await bridge.syncNote({ ...notes[i], order: (i + 1) * DEFAULT_ORDER_STEP } as any);
+        const updated = { ...notes[i], order: (i + 1) * DEFAULT_ORDER_STEP };
+        await store.upsertNote(GoKittStoreService.fromDexieNote(updated));
     }
     console.log(`[Operations] Rebalanced ${notes.length} note orders in folder ${folderId || 'root'}`);
 }
 
-/**
- * Rebalance orders for folders in a parent.
- */
 async function rebalanceFolderOrders(parentId: string): Promise<void> {
-    const bridge = getBridge();
-    if (!bridge) return;
-
+    const store = getBridge();
+    if (!store) return;
     const folders = await getFolderChildren(parentId);
     folders.sort((a, b) => a.order - b.order);
-
     for (let i = 0; i < folders.length; i++) {
-        await bridge.syncFolder({ ...folders[i], order: (i + 1) * DEFAULT_ORDER_STEP } as any);
+        const updated = { ...folders[i], order: (i + 1) * DEFAULT_ORDER_STEP };
+        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updated));
     }
     console.log(`[Operations] Rebalanced ${folders.length} folder orders in parent ${parentId || 'root'}`);
 }
 
-/**
- * Reorder a note among its siblings.
- */
 export async function reorderNote(noteId: string, targetIndex: number): Promise<void> {
-    const bridge = requireBridge();
-    const note = await bridge.getNote(noteId);
+    const store = requireStore();
+    const note = await store.getNote(noteId);
     if (!note) throw new Error(`Note ${noteId} not found`);
 
     const siblings = await getNotesByFolder(note.folderId);
     siblings.sort((a, b) => a.order - b.order);
-
     const filteredSiblings = siblings.filter(n => n.id !== noteId);
 
     const prevOrder = filteredSiblings[targetIndex - 1]?.order ?? 0;
     const nextOrder = filteredSiblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await bridge.syncNote({ ...note, order: newOrder, updatedAt: Date.now() } as any);
+    await store.upsertNote({ ...note, order: newOrder, updatedAt: Date.now() } as StoreNote);
 
     const allOrders = [...filteredSiblings.map(n => n.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceNoteOrders(note.folderId);
     }
-
     console.log(`[Operations] Reordered note ${noteId} to position ${targetIndex}`);
 }
 
-/**
- * Reorder a folder among its siblings.
- */
 export async function reorderFolder(folderId: string, targetIndex: number): Promise<void> {
     const folder = await getFolder(folderId);
     if (!folder) throw new Error(`Folder ${folderId} not found`);
 
-    const bridge = requireBridge();
+    const store = requireStore();
     const siblings = await getFolderChildren(folder.parentId);
     siblings.sort((a, b) => a.order - b.order);
-
     const filteredSiblings = siblings.filter(f => f.id !== folderId);
 
     const prevOrder = filteredSiblings[targetIndex - 1]?.order ?? 0;
     const nextOrder = filteredSiblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await bridge.syncFolder({ ...folder, order: newOrder, updatedAt: Date.now() } as any);
+    await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...folder, order: newOrder, updatedAt: Date.now() }));
 
     const allOrders = [...filteredSiblings.map(f => f.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceFolderOrders(folder.parentId);
     }
-
     console.log(`[Operations] Reordered folder ${folderId} to position ${targetIndex}`);
 }
 
-/**
- * Move a note to a different folder.
- */
 export async function moveNoteToFolder(noteId: string, targetFolderId: string, targetIndex: number): Promise<void> {
-    const bridge = requireBridge();
-    const note = await bridge.getNote(noteId);
+    const store = requireStore();
+    const note = await store.getNote(noteId);
     if (!note) throw new Error(`Note ${noteId} not found`);
 
     const siblings = await getNotesByFolder(targetFolderId);
@@ -540,29 +513,25 @@ export async function moveNoteToFolder(noteId: string, targetFolderId: string, t
     const nextOrder = siblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await bridge.syncNote({
+    await store.upsertNote({
         ...note,
         folderId: targetFolderId,
         order: newOrder,
         updatedAt: Date.now()
-    } as any);
+    } as StoreNote);
 
     const allOrders = [...siblings.map(n => n.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceNoteOrders(targetFolderId);
     }
-
     console.log(`[Operations] Moved note ${noteId} to folder ${targetFolderId}`);
 }
 
-/**
- * Move a folder to a different parent.
- */
 export async function moveFolderToParent(folderId: string, targetParentId: string, targetIndex: number): Promise<void> {
     const folder = await getFolder(folderId);
     if (!folder) throw new Error(`Folder ${folderId} not found`);
 
-    const bridge = requireBridge();
+    const store = requireStore();
     const siblings = await getFolderChildren(targetParentId);
     siblings.sort((a, b) => a.order - b.order);
 
@@ -570,41 +539,37 @@ export async function moveFolderToParent(folderId: string, targetParentId: strin
     const nextOrder = siblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await bridge.syncFolder({
+    await store.upsertFolder(GoKittStoreService.fromDexieFolder({
         ...folder,
         parentId: targetParentId,
         order: newOrder,
         updatedAt: Date.now()
-    } as any);
+    }));
 
     const allOrders = [...siblings.map(f => f.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceFolderOrders(targetParentId);
     }
-
     console.log(`[Operations] Moved folder ${folderId} to parent ${targetParentId}`);
 }
 
-/**
- * Swap two items by ID.
- */
 export async function swapItems(sourceId: string, targetId: string, type: 'folder' | 'note'): Promise<void> {
-    const bridge = requireBridge();
+    const store = requireStore();
 
     if (type === 'folder') {
         const source = await getFolder(sourceId);
         const target = await getFolder(targetId);
         if (!source || !target) throw new Error('Folder not found');
 
-        await bridge.syncFolder({ ...source, order: target.order, updatedAt: Date.now() } as any);
-        await bridge.syncFolder({ ...target, order: source.order, updatedAt: Date.now() } as any);
+        await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...source, order: target.order, updatedAt: Date.now() }));
+        await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...target, order: source.order, updatedAt: Date.now() }));
     } else {
-        const source = await bridge.getNote(sourceId);
-        const target = await bridge.getNote(targetId);
+        const source = await store.getNote(sourceId);
+        const target = await store.getNote(targetId);
         if (!source || !target) throw new Error('Note not found');
 
-        await bridge.syncNote({ ...source, order: target.order, updatedAt: Date.now() } as any);
-        await bridge.syncNote({ ...target, order: source.order, updatedAt: Date.now() } as any);
+        await store.upsertNote({ ...source, order: target.order, updatedAt: Date.now() } as StoreNote);
+        await store.upsertNote({ ...target, order: source.order, updatedAt: Date.now() } as StoreNote);
     }
 
     console.log(`[Operations] Swapped ${type}s: ${sourceId} <-> ${targetId}`);

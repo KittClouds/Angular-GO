@@ -86,6 +86,16 @@ export interface StoreFolder {
     worldId: string;
     narrativeId?: string;
     folderOrder: number;
+    entityKind: string;
+    entitySubtype: string;
+    entityLabel: string;
+    color: string;
+    isTypedRoot: boolean;
+    isSubtypeRoot: boolean;
+    collapsed: boolean;
+    ownerId: string;
+    isNarrativeRoot: boolean;
+    attributes?: string; // JSON blob for worldbuilding data, metadata, etc.
     createdAt: number;
     updatedAt: number;
 }
@@ -293,18 +303,54 @@ export class GoKittStoreService {
     // =========================================================================
 
     private _snapshotTimeout: any = null;
+    private isSnapshottingPaused = false;
+
+    /**
+     * Pause OPFS snapshots. Crucial during boot/recovery to prevent death spirals.
+     */
+    pauseSnapshots(): void {
+        this.isSnapshottingPaused = true;
+        if (this._snapshotTimeout) {
+            clearTimeout(this._snapshotTimeout);
+            this._snapshotTimeout = null;
+        }
+    }
+
+    /**
+     * Resume OPFS snapshots after boot/recovery finishes.
+     */
+    resumeSnapshots(): void {
+        this.isSnapshottingPaused = false;
+    }
+
+    /**
+     * Immediately force a snapshot (bypassing debounce but still respecting pause).
+     * Used by DataSyncService after a successful recovery.
+     */
+    async triggerSnapshot(): Promise<void> {
+        if (!this.isReady || this.isSnapshottingPaused) return;
+        try {
+            console.log('[GoKittStoreService] 📸 Manual OPFS snapshot triggered...');
+            const dbBlob = await this.exportDatabase();
+            await this.persistence.saveSnapshot(dbBlob);
+        } catch (err) {
+            console.error('[GoKittStoreService] Failed manual snapshot:', err);
+        }
+    }
 
     /**
      * Debounces and triggers an atomic binary snapshot of the SQLite database
      * to the OPFS file system. Required because Snapshot Native has no WAL.
      */
     private scheduleSnapshot(): void {
+        if (this.isSnapshottingPaused) return;
+
         if (this._snapshotTimeout) {
             clearTimeout(this._snapshotTimeout);
         }
         this._snapshotTimeout = setTimeout(async () => {
             try {
-                if (this.isReady) {
+                if (this.isReady && !this.isSnapshottingPaused) {
                     console.log('[GoKittStoreService] 📸 Auto-triggering OPFS snapshot...');
                     const dbBlob = await this.exportDatabase();
                     await this.persistence.saveSnapshot(dbBlob);
@@ -650,6 +696,16 @@ export class GoKittStoreService {
             worldId: dexieFolder.worldId || '',
             narrativeId: dexieFolder.narrativeId,
             folderOrder: dexieFolder.folderOrder ?? dexieFolder.order ?? 0,
+            entityKind: dexieFolder.entityKind || '',
+            entitySubtype: dexieFolder.entitySubtype || '',
+            entityLabel: dexieFolder.entityLabel || '',
+            color: dexieFolder.color || '',
+            isTypedRoot: dexieFolder.isTypedRoot || false,
+            isSubtypeRoot: dexieFolder.isSubtypeRoot || false,
+            collapsed: dexieFolder.collapsed || false,
+            ownerId: dexieFolder.ownerId || '',
+            isNarrativeRoot: dexieFolder.isNarrativeRoot || false,
+            attributes: dexieFolder.attributes ? (typeof dexieFolder.attributes === 'string' ? dexieFolder.attributes : JSON.stringify(dexieFolder.attributes)) : undefined,
             createdAt: dexieFolder.createdAt || Date.now(),
             updatedAt: dexieFolder.updatedAt || Date.now()
         };

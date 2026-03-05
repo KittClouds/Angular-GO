@@ -107,6 +107,16 @@ CREATE TABLE IF NOT EXISTS folders (
     world_id TEXT NOT NULL,
     narrative_id TEXT,
     folder_order REAL DEFAULT 0,
+    entity_kind TEXT,
+    entity_subtype TEXT,
+    entity_label TEXT,
+    color TEXT,
+    is_typed_root BOOLEAN DEFAULT 0,
+    is_subtype_root BOOLEAN DEFAULT 0,
+    collapsed BOOLEAN DEFAULT 0,
+    owner_id TEXT,
+    is_narrative_root BOOLEAN DEFAULT 0,
+    attributes TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -1457,17 +1467,30 @@ func (s *SQLiteStore) UpsertFolder(folder *Folder) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		INSERT INTO folders (id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO folders (id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			parent_id = excluded.parent_id,
 			world_id = excluded.world_id,
 			narrative_id = excluded.narrative_id,
 			folder_order = excluded.folder_order,
+			entity_kind = excluded.entity_kind,
+			entity_subtype = excluded.entity_subtype,
+			entity_label = excluded.entity_label,
+			color = excluded.color,
+			is_typed_root = excluded.is_typed_root,
+			is_subtype_root = excluded.is_subtype_root,
+			collapsed = excluded.collapsed,
+			owner_id = excluded.owner_id,
+			is_narrative_root = excluded.is_narrative_root,
+			attributes = excluded.attributes,
 			updated_at = excluded.updated_at
 	`, folder.ID, folder.Name, folder.ParentID, folder.WorldID,
-		folder.NarrativeID, folder.FolderOrder, folder.CreatedAt, folder.UpdatedAt)
+		folder.NarrativeID, folder.FolderOrder, folder.EntityKind, folder.EntitySubtype,
+		folder.EntityLabel, folder.Color, boolToInt(folder.IsTypedRoot), boolToInt(folder.IsSubtypeRoot),
+		boolToInt(folder.Collapsed), folder.OwnerID, boolToInt(folder.IsNarrativeRoot),
+		folder.Attributes, folder.CreatedAt, folder.UpdatedAt)
 
 	return err
 }
@@ -1478,12 +1501,15 @@ func (s *SQLiteStore) GetFolder(id string) (*Folder, error) {
 	defer s.mu.RUnlock()
 
 	var folder Folder
+	var isTypedRoot, isSubtypeRoot, collapsed, isNarrativeRoot int
 	err := s.db.QueryRow(`
-		SELECT id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at
+		SELECT id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at
 		FROM folders WHERE id = ?
 	`, id).Scan(
 		&folder.ID, &folder.Name, &folder.ParentID, &folder.WorldID,
-		&folder.NarrativeID, &folder.FolderOrder, &folder.CreatedAt, &folder.UpdatedAt,
+		&folder.NarrativeID, &folder.FolderOrder, &folder.EntityKind, &folder.EntitySubtype,
+		&folder.EntityLabel, &folder.Color, &isTypedRoot, &isSubtypeRoot, &collapsed,
+		&folder.OwnerID, &isNarrativeRoot, &folder.Attributes, &folder.CreatedAt, &folder.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1492,6 +1518,11 @@ func (s *SQLiteStore) GetFolder(id string) (*Folder, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	folder.IsTypedRoot = isTypedRoot == 1
+	folder.IsSubtypeRoot = isSubtypeRoot == 1
+	folder.Collapsed = collapsed == 1
+	folder.IsNarrativeRoot = isNarrativeRoot == 1
 
 	return &folder, nil
 }
@@ -1515,12 +1546,12 @@ func (s *SQLiteStore) ListFolders(parentID string) ([]*Folder, error) {
 
 	if parentID != "" {
 		rows, err = s.db.Query(`
-			SELECT id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at
+			SELECT id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at
 			FROM folders WHERE parent_id = ? ORDER BY folder_order
 		`, parentID)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at
+			SELECT id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at
 			FROM folders ORDER BY folder_order
 		`)
 	}
@@ -1534,12 +1565,19 @@ func (s *SQLiteStore) ListFolders(parentID string) ([]*Folder, error) {
 	folders := make([]*Folder, 0)
 	for rows.Next() {
 		var folder Folder
+		var isTypedRoot, isSubtypeRoot, collapsed, isNarrativeRoot int
 		if err := rows.Scan(
 			&folder.ID, &folder.Name, &folder.ParentID, &folder.WorldID,
-			&folder.NarrativeID, &folder.FolderOrder, &folder.CreatedAt, &folder.UpdatedAt,
+			&folder.NarrativeID, &folder.FolderOrder, &folder.EntityKind, &folder.EntitySubtype,
+			&folder.EntityLabel, &folder.Color, &isTypedRoot, &isSubtypeRoot, &collapsed,
+			&folder.OwnerID, &isNarrativeRoot, &folder.Attributes, &folder.CreatedAt, &folder.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
+		folder.IsTypedRoot = isTypedRoot == 1
+		folder.IsSubtypeRoot = isSubtypeRoot == 1
+		folder.Collapsed = collapsed == 1
+		folder.IsNarrativeRoot = isNarrativeRoot == 1
 		folders = append(folders, &folder)
 	}
 
@@ -2009,7 +2047,7 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 
 	// Export folders
 	folderRows, err := s.db.Query(`
-		SELECT id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at
+		SELECT id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at
 		FROM folders
 	`)
 	if err != nil {
@@ -2018,12 +2056,19 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 	defer folderRows.Close()
 	for folderRows.Next() {
 		var f Folder
+		var isTypedRoot, isSubtypeRoot, collapsed, isNarrativeRoot int
 		if err := folderRows.Scan(
 			&f.ID, &f.Name, &f.ParentID, &f.WorldID, &f.NarrativeID,
-			&f.FolderOrder, &f.CreatedAt, &f.UpdatedAt,
+			&f.FolderOrder, &f.EntityKind, &f.EntitySubtype, &f.EntityLabel, &f.Color,
+			&isTypedRoot, &isSubtypeRoot, &collapsed, &f.OwnerID, &isNarrativeRoot,
+			&f.Attributes, &f.CreatedAt, &f.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan folder: %w", err)
 		}
+		f.IsTypedRoot = isTypedRoot == 1
+		f.IsSubtypeRoot = isSubtypeRoot == 1
+		f.Collapsed = collapsed == 1
+		f.IsNarrativeRoot = isNarrativeRoot == 1
 		data.Folders = append(data.Folders, &f)
 	}
 
@@ -2159,10 +2204,12 @@ func (s *SQLiteStore) Import(data []byte) error {
 	// Re-insert folders
 	for _, f := range importData.Folders {
 		_, err := s.db.Exec(`
-			INSERT INTO folders (id, name, parent_id, world_id, narrative_id, folder_order, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO folders (id, name, parent_id, world_id, narrative_id, folder_order, entity_kind, entity_subtype, entity_label, color, is_typed_root, is_subtype_root, collapsed, owner_id, is_narrative_root, attributes, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, f.ID, f.Name, f.ParentID, f.WorldID, f.NarrativeID,
-			f.FolderOrder, f.CreatedAt, f.UpdatedAt)
+			f.FolderOrder, f.EntityKind, f.EntitySubtype, f.EntityLabel, f.Color,
+			boolToInt(f.IsTypedRoot), boolToInt(f.IsSubtypeRoot), boolToInt(f.Collapsed),
+			f.OwnerID, boolToInt(f.IsNarrativeRoot), f.Attributes, f.CreatedAt, f.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("import folder %s: %w", f.ID, err)
 		}

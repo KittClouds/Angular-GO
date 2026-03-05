@@ -12,22 +12,23 @@ import { TooltipModule } from 'primeng/tooltip';
 import { ScopeService } from '../../../../../lib/services/scope.service';
 import { WorldBuildingService, LoreThread, ThreadStatus } from '../../../../../lib/services/world-building.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
-import { switchMap, of } from 'rxjs';
+import { db } from '../../../../../lib/dexie/db';
+import { switchMap, of, from } from 'rxjs';
 
 @Component({
-    selector: 'app-mystery',
-    standalone: true,
-    imports: [
-        CommonModule,
-        FormsModule,
-        ButtonModule,
-        TagModule,
-        DialogModule,
-        InputTextModule,
-        TextareaModule,
-        TooltipModule
-    ],
-    template: `
+  selector: 'app-mystery',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    ButtonModule,
+    TagModule,
+    DialogModule,
+    InputTextModule,
+    TextareaModule,
+    TooltipModule
+  ],
+  template: `
     <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 font-sans">
       
       <!-- HEADER -->
@@ -185,7 +186,7 @@ import { switchMap, of } from 'rxjs';
       </ng-template>
     </p-dialog>
   `,
-    styles: [`
+  styles: [`
     :host ::ng-deep .lore-thread-dialog .p-dialog-content {
       padding: 1.5rem;
     }
@@ -195,130 +196,149 @@ import { switchMap, of } from 'rxjs';
   `]
 })
 export class MysteryComponent {
-    private scopeService = inject(ScopeService);
-    private worldService = inject(WorldBuildingService);
+  private scopeService = inject(ScopeService);
+  private worldService = inject(WorldBuildingService);
 
-    // State
-    narrativeId = this.scopeService.activeNarrativeId;
-    filterStatus = signal<ThreadStatus | null>(null);
-    showDialog = false;
-    isCreating = false;
-    tempThread: LoreThread | null = null;
-    entityInputText = '';
+  // State
+  private rawNarrativeId = this.scopeService.activeNarrativeId;
 
-    isValidNarrative = computed(() => {
-        const nid = this.narrativeId();
-        return nid && nid !== 'vault:global';
-    });
-
-    // Data
-    threads = toSignal(
-        toObservable(this.narrativeId).pipe(
-            switchMap(nid => (nid && nid !== 'vault:global') ? this.worldService.getLoreThreads$(nid) : of([]))
-        ),
-        { initialValue: [] }
-    );
-
-    filteredThreads = computed(() => {
-        const status = this.filterStatus();
-        const all = this.threads();
-        if (!status) return all;
-        return all.filter(t => t.status === status);
-    });
-
-    // Status config
-    statuses: { value: ThreadStatus; label: string; dot: string; bgActive: string }[] = [
-        { value: 'open', label: 'Open', dot: 'bg-blue-500', bgActive: 'bg-blue-500' },
-        { value: 'hinted', label: 'Hinted', dot: 'bg-amber-500', bgActive: 'bg-amber-500' },
-        { value: 'revealed', label: 'Revealed', dot: 'bg-green-500', bgActive: 'bg-green-500' },
-        { value: 'dropped', label: 'Dropped', dot: 'bg-zinc-400', bgActive: 'bg-zinc-500' }
-    ];
-
-    getCountByStatus(status: ThreadStatus): number {
-        return this.threads().filter(t => t.status === status).length;
-    }
-
-    getStatusDot(status: ThreadStatus): string {
-        return this.statuses.find(s => s.value === status)?.dot || 'bg-zinc-400';
-    }
-
-    getStatusBadgeClass(status: ThreadStatus): string {
-        switch (status) {
-            case 'open': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
-            case 'hinted': return 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400';
-            case 'revealed': return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
-            case 'dropped': return 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400';
-            default: return 'bg-zinc-100 text-zinc-500';
+  // Resolved narrative ID: fallback to first real narrative when global
+  narrativeId = toSignal(
+    toObservable(this.rawNarrativeId).pipe(
+      switchMap(nid => {
+        if (!nid || nid === 'vault:global') {
+          return from(
+            db.folders
+              .where('entityKind')
+              .equals('NARRATIVE')
+              .first()
+              .then(folder => folder?.id ?? null)
+          );
         }
+        return of(nid);
+      })
+    ),
+    { initialValue: null as string | null }
+  );
+  filterStatus = signal<ThreadStatus | null>(null);
+  showDialog = false;
+  isCreating = false;
+  tempThread: LoreThread | null = null;
+  entityInputText = '';
+
+  isValidNarrative = computed(() => {
+    const nid = this.narrativeId();
+    return !!nid && nid !== 'vault:global';
+  });
+
+  // Data
+  threads = toSignal(
+    toObservable(this.narrativeId).pipe(
+      switchMap(nid => (nid && nid !== 'vault:global') ? this.worldService.getLoreThreads$(nid) : of([]))
+    ),
+    { initialValue: [] }
+  );
+
+  filteredThreads = computed(() => {
+    const status = this.filterStatus();
+    const all = this.threads();
+    if (!status) return all;
+    return all.filter(t => t.status === status);
+  });
+
+  // Status config
+  statuses: { value: ThreadStatus; label: string; dot: string; bgActive: string }[] = [
+    { value: 'open', label: 'Open', dot: 'bg-blue-500', bgActive: 'bg-blue-500' },
+    { value: 'hinted', label: 'Hinted', dot: 'bg-amber-500', bgActive: 'bg-amber-500' },
+    { value: 'revealed', label: 'Revealed', dot: 'bg-green-500', bgActive: 'bg-green-500' },
+    { value: 'dropped', label: 'Dropped', dot: 'bg-zinc-400', bgActive: 'bg-zinc-500' }
+  ];
+
+  getCountByStatus(status: ThreadStatus): number {
+    return this.threads().filter(t => t.status === status).length;
+  }
+
+  getStatusDot(status: ThreadStatus): string {
+    return this.statuses.find(s => s.value === status)?.dot || 'bg-zinc-400';
+  }
+
+  getStatusBadgeClass(status: ThreadStatus): string {
+    switch (status) {
+      case 'open': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+      case 'hinted': return 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400';
+      case 'revealed': return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+      case 'dropped': return 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400';
+      default: return 'bg-zinc-100 text-zinc-500';
+    }
+  }
+
+  trackById(index: number, thread: LoreThread): string {
+    return thread.id;
+  }
+
+  // CRUD
+  getEmptyThread(): LoreThread {
+    const now = Date.now();
+    return {
+      id: '',
+      question: '',
+      status: 'open',
+      plantedIn: undefined,
+      answer: undefined,
+      connectedEntities: [],
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  createThread(): void {
+    this.isCreating = true;
+    this.tempThread = this.getEmptyThread();
+    this.entityInputText = '';
+    this.showDialog = true;
+  }
+
+  editThread(thread: LoreThread): void {
+    this.isCreating = false;
+    this.tempThread = JSON.parse(JSON.stringify(thread));
+    this.entityInputText = thread.connectedEntities.join(', ');
+    this.showDialog = true;
+  }
+
+  async saveThread(): Promise<void> {
+    if (!this.tempThread) return;
+    const nid = this.narrativeId();
+    if (!nid) return;
+
+    // Parse entities from input
+    this.tempThread.connectedEntities = this.entityInputText
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    this.tempThread.updatedAt = Date.now();
+
+    let list = [...this.threads()];
+    if (this.isCreating) {
+      this.tempThread.id = this.worldService.generateId();
+      list.push(this.tempThread);
+    } else {
+      const idx = list.findIndex(t => t.id === this.tempThread!.id);
+      if (idx > -1) list[idx] = this.tempThread;
     }
 
-    trackById(index: number, thread: LoreThread): string {
-        return thread.id;
-    }
+    await this.worldService.updateLoreThreads(nid, list);
+    this.showDialog = false;
+  }
 
-    // CRUD
-    getEmptyThread(): LoreThread {
-        const now = Date.now();
-        return {
-            id: '',
-            question: '',
-            status: 'open',
-            plantedIn: undefined,
-            answer: undefined,
-            connectedEntities: [],
-            createdAt: now,
-            updatedAt: now
-        };
-    }
+  async deleteThread(): Promise<void> {
+    if (!this.tempThread) return;
+    if (!confirm('Delete this thread?')) return;
 
-    createThread(): void {
-        this.isCreating = true;
-        this.tempThread = this.getEmptyThread();
-        this.entityInputText = '';
-        this.showDialog = true;
-    }
+    const nid = this.narrativeId();
+    if (!nid) return;
 
-    editThread(thread: LoreThread): void {
-        this.isCreating = false;
-        this.tempThread = JSON.parse(JSON.stringify(thread));
-        this.entityInputText = thread.connectedEntities.join(', ');
-        this.showDialog = true;
-    }
-
-    async saveThread(): Promise<void> {
-        if (!this.tempThread) return;
-        const nid = this.narrativeId();
-        if (!nid) return;
-
-        // Parse entities from input
-        this.tempThread.connectedEntities = this.entityInputText
-            .split(',')
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
-        this.tempThread.updatedAt = Date.now();
-
-        let list = [...this.threads()];
-        if (this.isCreating) {
-            this.tempThread.id = this.worldService.generateId();
-            list.push(this.tempThread);
-        } else {
-            const idx = list.findIndex(t => t.id === this.tempThread!.id);
-            if (idx > -1) list[idx] = this.tempThread;
-        }
-
-        await this.worldService.updateLoreThreads(nid, list);
-        this.showDialog = false;
-    }
-
-    async deleteThread(): Promise<void> {
-        if (!this.tempThread) return;
-        if (!confirm('Delete this thread?')) return;
-
-        const nid = this.narrativeId();
-        if (!nid) return;
-
-        const list = this.threads().filter(t => t.id !== this.tempThread!.id);
-        await this.worldService.updateLoreThreads(nid, list);
-        this.showDialog = false;
-    }
+    const list = this.threads().filter(t => t.id !== this.tempThread!.id);
+    await this.worldService.updateLoreThreads(nid, list);
+    this.showDialog = false;
+  }
 }

@@ -84,20 +84,17 @@ export class NoteEditorStore {
         this.isBrowser = isPlatformBrowser(platformId);
         console.log('[NoteEditorStore] Constructor called');
 
-        // Restore active note from storage on init
-        this.restoreActiveNote();
+        // NOTE: restoreActiveNote() is NOT called here.
+        // It must be called AFTER Dexie hydration completes (by app.component).
 
         // Debounce saves by 300ms to avoid hammering IndexedDB
-        // IMPORTANT: Use noteId from payload, NOT activeNoteId() - to avoid race conditions
         this.saveSubject.pipe(
             debounceTime(300)
         ).subscribe(async ({ noteId, json, markdown }) => {
-            // Verify the note is still the active one to avoid saving stale content
             if (this.activeNoteId() !== noteId) {
                 console.log(`[NoteEditorStore] Skipped save for ${noteId} (no longer active)`);
                 return;
             }
-
             try {
                 await ops.updateNote(noteId, {
                     content: JSON.stringify(json),
@@ -112,12 +109,10 @@ export class NoteEditorStore {
         // Persist active note ID whenever it changes
         effect(() => {
             const noteId = this.activeNoteId();
-            // Don't wipe storage if we are in the middle of restoring
             if (noteId === null && this.isRestoring) {
                 console.log('[NoteEditorStore] Skipping persistence wipe during restoration');
                 return;
             }
-            console.log(`[NoteEditorStore] Persistence effect triggered. ID: ${noteId}`);
             this.persistActiveNote(noteId);
         });
     }
@@ -126,44 +121,45 @@ export class NoteEditorStore {
     // Persistence Methods
     // ─────────────────────────────────────────────────────────────
 
-    private async restoreActiveNote(): Promise<void> {
+    /**
+     * Restore the previously-active note from Dexie settings.
+     * MUST be called AFTER Dexie hydration from SQLite is complete.
+     * Verifies note existence against Go SQLite (the truth), not Dexie.
+     */
+    async restoreActiveNote(): Promise<void> {
         if (!this.isBrowser) return;
 
-        console.log('[NoteEditorStore] restoreActiveNote: Checking Dexie directly...');
+        console.log('[NoteEditorStore] restoreActiveNote: checking settings...');
 
         try {
-            // Bypass synchronous cache (which might be empty due to race condition) and read from DB
             const setting = await db.settings.get(ACTIVE_NOTE_KEY);
             const storedNoteId = setting?.value as string | undefined;
-            console.log(`[NoteEditorStore] restoreActiveNote: Found in Dexie: "${storedNoteId}"`);
+            console.log(`[NoteEditorStore] restoreActiveNote: stored ID = "${storedNoteId}"`);
 
             if (storedNoteId) {
-                // Restore position too
+                // Restore editor position
                 const posSetting = await db.settings.get(EDITOR_POSITION_KEY);
                 const position = posSetting?.value as EditorPosition | undefined;
-
                 if (position && position.noteId === storedNoteId) {
                     this.pendingPosition = position;
-                    console.log(`[NoteEditorStore] Loaded editor position:`, position);
                 }
 
-                // Verify note exists
-                const note = await db.notes.get(storedNoteId);
+                // Verify note exists via Go SQLite (NOT Dexie)
+                const note = await ops.getNote(storedNoteId);
                 if (note) {
                     this.activeNoteId.set(storedNoteId);
-                    console.log(`[NoteEditorStore] Restoring active note: ${storedNoteId}`);
+                    console.log(`[NoteEditorStore] Restored active note: ${storedNoteId}`);
                 } else {
-                    console.log(`[NoteEditorStore] Note ${storedNoteId} not found in DB`);
-                    // Explicitly clear here since effect won't fire if signal is null
+                    console.log(`[NoteEditorStore] Note ${storedNoteId} no longer exists — clearing`);
                     removeSetting(ACTIVE_NOTE_KEY);
                     removeSetting(EDITOR_POSITION_KEY);
                 }
             }
         } catch (e) {
-            console.error('[NoteEditorStore] Restoration failed', e);
+            console.error('[NoteEditorStore] Restoration failed:', e);
         } finally {
             this.isRestoring = false;
-            console.log('[NoteEditorStore] Restoration check complete. isRestoring = false');
+            console.log('[NoteEditorStore] Restoration complete. isRestoring = false');
         }
     }
 

@@ -1,45 +1,60 @@
 /**
- * Sqlite Persistence Service (Snapshot Native)
- * 
- * Orchestrator for SQLite persistence using the "Snapshot Native" architecture:
- * - Snapshot (Binary): Atomic full-database saves to OPFS.
- * - WAL REMOVED: No incremental writes, no replay, no compaction.
- * 
- * This service manages the worker thread and ensures data durability.
+ * SQLite Persistence Service — From Scratch
+ *
+ * Angular service that orchestrates the OPFS snapshot worker.
+ * Three public methods: load(), saveSnapshot(), clear().
+ *
+ * NO Dexie imports. NO WAL. NO sync logic.
+ * This service talks exclusively to the OPFS worker.
  */
 
 import { Injectable } from '@angular/core';
 
-
-type PendingRequest = {
+interface PendingRequest {
     resolve: (val?: any) => void;
     reject: (err: any) => void;
-};
+}
 
-
-export type LoadResult = {
-    snapshot: Uint8Array | null;
-    // WAL removed - Snapshot Native
-};
-
-@Injectable({
-    providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class SqlitePersistenceService {
-
     private worker: Worker | null = null;
     private nextId = 1;
     private pending = new Map<number, PendingRequest>();
 
-    // WAL Buffer & Compaction removed - Snapshot Native
+    constructor() {
+        // Expose dev-mode reset commands on window
+        if (typeof window !== 'undefined') {
+            (window as any).kittClearOPFS = async () => {
+                await this.clear();
+                console.log(
+                    '%c[DEV] OPFS cleared. Hard refresh now.',
+                    'color: red; font-size: 16px; font-weight: bold;'
+                );
+            };
 
+            (window as any).kittFactoryReset = async () => {
+                console.warn(
+                    '%c[DEV] Factory Reset...',
+                    'color: red; font-size: 18px; font-weight: bold;'
+                );
+                try {
+                    await this.clear();
+                    console.log(
+                        '%c[DEV] Factory Reset complete. Reloading...',
+                        'color: lime; font-size: 16px; font-weight: bold;'
+                    );
+                    setTimeout(() => window.location.reload(), 500);
+                } catch (e) {
+                    console.error('[DEV] Factory Reset failed:', e);
+                }
+            };
+        }
+    }
 
+    // -----------------------------------------------------------------------
+    // Worker lifecycle
+    // -----------------------------------------------------------------------
 
-    constructor() { }
-
-    /**
-     * Initialize the persistence worker
-     */
     async init(): Promise<void> {
         if (this.worker) return;
 
@@ -50,63 +65,55 @@ export class SqlitePersistenceService {
         );
 
         this.worker.onmessage = (e) => this.handleMessage(e.data);
-        this.worker.onerror = (e) => {
-            console.error('[SqlitePersistence] Worker error:', e);
-        };
+        this.worker.onerror = (e) => console.error('[SqlitePersistence] Worker error:', e);
     }
 
-    private handleMessage(data: any) {
+    private handleMessage(data: any): void {
         const { id, success, error, data: resultData } = data;
-        const pending = this.pending.get(id);
-        if (!pending) return;
+        const p = this.pending.get(id);
+        if (!p) return;
 
         this.pending.delete(id);
         if (success) {
-            pending.resolve(resultData);
+            p.resolve(resultData);
         } else {
-            pending.reject(new Error(error || 'Unknown worker error'));
+            p.reject(new Error(error || 'Unknown worker error'));
         }
     }
 
-    private sendToWorker<T>(type: string, payload?: any, transfer?: Transferable[]): Promise<T> {
+    private send<T>(type: string, payload?: any, transfer?: Transferable[]): Promise<T> {
         return new Promise((resolve, reject) => {
             if (!this.worker) {
                 reject(new Error('[SqlitePersistence] Worker not initialized'));
                 return;
             }
-
             const id = this.nextId++;
             this.pending.set(id, { resolve, reject });
             this.worker.postMessage({ id, type, payload }, transfer || []);
         });
     }
 
-    /**
-     * Load Snapshot from OPFS (Legacy support for LoadResult type for now)
-     */
+    // -----------------------------------------------------------------------
+    // Public API — the only three methods anything should ever call
+    // -----------------------------------------------------------------------
+
+    /** Load the snapshot from OPFS. Returns { snapshot: Uint8Array | null }. */
     async load(): Promise<{ snapshot: Uint8Array | null }> {
         await this.init();
-        // We only care about the snapshot now.
-        const result = await this.sendToWorker<any>('LOAD');
+        const result = await this.send<any>('LOAD');
         return { snapshot: result.snapshot };
     }
 
-    /**
-     * Save a full binary snapshot
-     * @param data The full SQLite database as Uint8Array
-     */
+    /** Save a full binary snapshot to OPFS. */
     async saveSnapshot(data: Uint8Array): Promise<void> {
         console.log(`[SqlitePersistence] Saving snapshot (${data.byteLength} bytes)...`);
-        // Remove zero-copy transfer to prevent detaching the buffer in the UI thread
-        await this.sendToWorker('SAVE_SNAPSHOT', data);
+        await this.send('SAVE_SNAPSHOT', data);
         console.log('[SqlitePersistence] Snapshot saved.');
     }
 
-    /**
-     * Clear all persistence (Factory Reset)
-     */
+    /** Factory reset — delete all OPFS data. */
     async clear(): Promise<void> {
         await this.init();
-        await this.sendToWorker('CLEAR_ALL');
+        await this.send('CLEAR_ALL');
     }
 }

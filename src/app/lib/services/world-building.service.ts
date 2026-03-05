@@ -1,8 +1,9 @@
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable, switchMap, map, of } from 'rxjs';
 import { db, Folder } from '../dexie/db';
+import { GoKittStoreService } from '../../services/gokitt-store.service';
 
 export interface WorldSnapshot {
     logline: string;
@@ -288,6 +289,7 @@ export interface WorldScopeData {
     providedIn: 'root'
 })
 export class WorldBuildingService {
+    private goKittStore = inject(GoKittStoreService);
 
     constructor() { }
 
@@ -354,7 +356,27 @@ export class WorldBuildingService {
     }
 
     // =========================================================================================
-    // UPDATE METHODS (Persist to IndexedDB)
+    // WRITE-THROUGH HELPER
+    // =========================================================================================
+
+    /**
+     * After updating folder attributes in Dexie, sync the full folder to SQLite.
+     * This ensures worldbuilding data survives refresh.
+     */
+    private async syncFolderToSqlite(folderId: string): Promise<void> {
+        try {
+            if (!this.goKittStore.isReady) return;
+            const updated = await db.folders.get(folderId);
+            if (updated) {
+                await this.goKittStore.upsertFolder(GoKittStoreService.fromDexieFolder(updated));
+            }
+        } catch (err) {
+            console.warn('[WorldBuildingService] SQLite sync failed (non-fatal):', err);
+        }
+    }
+
+    // =========================================================================================
+    // UPDATE METHODS (Persist to IndexedDB + write-through to SQLite)
     // =========================================================================================
 
     /**
@@ -389,6 +411,9 @@ export class WorldBuildingService {
             attributes,
             updatedAt: Date.now()
         });
+
+        // Write-through to SQLite
+        await this.syncFolderToSqlite(narrativeId);
     }
 
     /**
@@ -419,6 +444,9 @@ export class WorldBuildingService {
             attributes,
             updatedAt: Date.now()
         });
+
+        // Write-through to SQLite
+        await this.syncFolderToSqlite(actFolderId);
     }
 
     async updateCultures(narrativeId: string, cultures: Culture[]): Promise<void> {
@@ -500,6 +528,9 @@ export class WorldBuildingService {
             attributes,
             updatedAt: Date.now()
         });
+
+        // Write-through to SQLite
+        await this.syncFolderToSqlite(narrativeId);
     }
 
     /*

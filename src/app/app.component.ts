@@ -11,7 +11,6 @@ import { GoKittService } from './services/gokitt.service';
 import { GoKittStoreService } from './services/gokitt-store.service';
 import { setGoKittService, setDiscoveryStore } from './api/pretty-text-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
-import { DataSyncService } from './lib/bridge/DataSyncService';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { KnowledgeService } from './services/knowledge.service';
 import { getNavigationApi } from './api/navigation-api';
@@ -21,6 +20,7 @@ import { DiscoveryStore } from './lib/store/discoveryStore';
 import { setGoSqliteBridge } from './lib/operations';
 import * as ops from './lib/operations';
 import { FactSheetService } from './components/fact-sheets/fact-sheet.service';
+import { db } from './lib/dexie/db';
 
 @Component({
   selector: 'app-root',
@@ -35,7 +35,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private goKitt = inject(GoKittService);
   private goKittStore = inject(GoKittStoreService);
   private orchestrator = inject(AppOrchestrator);
-  private dataSync = inject(DataSyncService);
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
   private noteEditorStore = inject(NoteEditorStore);
@@ -80,14 +79,21 @@ export class AppComponent implements OnInit, OnDestroy {
       await this.goKittStore.initialize();
       console.log('[AppComponent] ✓ GoKitt Store (SQLite) initialized');
 
-      // Phase 3: Data Sync (SQLite → Dexie populate)
-      // This populates Dexie synchronously from SQLite so the registry can hydrate
-      await this.dataSync.init();
-      setGoSqliteBridge(this.dataSync);
-      console.log('[AppComponent] ✓ Data Sync (SQLite → Dexie) initialized');
+      // Phase 3: Hydrate Dexie from SQLite (One-Way Push)
+      // SQLite is the SOLE source of truth. Dexie gets wiped and rebuilt.
+      await this.hydrateDexieFromSqlite();
+
+      // Connect operations module to GoKittStoreService directly
+      setGoSqliteBridge(this.goKittStore);
+      console.log('[AppComponent] ✓ Dexie hydrated from SQLite (Pure OPFS Mode)');
+
+      // Phase 3.5: Restore active note AFTER Dexie is populated and bridge is wired.
+      // Previously this ran in NoteEditorStore's constructor (too early — Dexie was empty).
+      await this.noteEditorStore.restoreActiveNote();
+      console.log('[AppComponent] ✓ Active note restored');
 
       // Phase 4: Registry Hydration
-      // Now Dexie is guaranteed to be fresh and matching SQLite
+      // Dexie is now guaranteed to mirror SQLite exactly
       await smartGraphRegistry.init();
       console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
       this.orchestrator.completePhase('registry');
@@ -99,10 +105,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
       // 🚀 APP IS INTERACTIVE
       this.orchestrator.completePhase('ready');
-
-
-      // Note restoration is handled by NoteEditorStore.restoreActiveNote() in constructor
-      // No need to duplicate here - the store already loads from 'kittclouds-active-note'
 
       // ======================================================================
       // Background tasks (non-blocking, after first paint)
@@ -121,26 +123,22 @@ export class AppComponent implements OnInit, OnDestroy {
       // DocStore hydrate (search index) — doesn't block editing
       const docStorePromise = (async () => {
         try {
-          // [CHANGE] Hydraote Search from SQLite (Truth) not Dexie (Shadow)
           const allNotes = await this.goKittStore.listNotes();
 
           const noteData = allNotes.map((n) => {
-            // Extract plain text from Prosemirror JSON for search indexing
             let text = '';
             if (typeof n.content === 'string') {
-              // If it's already a string, check if it's JSON stringified
               if (n.content.trim().startsWith('{')) {
                 try {
                   const json = JSON.parse(n.content);
                   text = extractTextFromContent(json);
                 } catch (e) {
-                  text = n.content; // Fallback to raw string
+                  text = n.content;
                 }
               } else {
                 text = n.content;
               }
             } else {
-              // It's an object (Prosemirror JSON)
               text = extractTextFromContent(n.content);
             }
 
@@ -183,37 +181,115 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * One-way hydration: SQLite → Dexie.
+   * Dexie is wiped clean and rebuilt from SQLite's data.
+   * This replaces what DataSyncService.init() used to do.
+   */
+  private async hydrateDexieFromSqlite(): Promise<void> {
+    console.log('[AppComponent] 🔄 Hydrating Dexie from SQLite...');
+    const start = Date.now();
+
+    // Pause snapshots during hydration to prevent pointless OPFS writes
+    this.goKittStore.pauseSnapshots();
+
+    try {
+      // Fetch all data from SQLite (The Truth)
+      const [notes, entities, edges, folders] = await Promise.all([
+        this.goKittStore.listNotes(),
+        this.goKittStore.listEntities(),
+        this.goKittStore.listAllEdges(),
+        this.goKittStore.listFolders()
+      ]);
+
+      // Wipe Dexie clean and repopulate
+      await db.transaction('rw', db.notes, db.entities, db.edges, db.folders, async () => {
+        await Promise.all([
+          db.notes.clear(),
+          db.entities.clear(),
+          db.edges.clear(),
+          db.folders.clear()
+        ]);
+
+        if (notes.length > 0) await db.notes.bulkPut(notes.map(n => this.toNote(n)));
+        if (entities.length > 0) await db.entities.bulkPut(entities.map(e => this.toEntity(e)));
+        if (edges.length > 0) await db.edges.bulkPut(edges.map(e => this.toEdge(e)));
+        if (folders.length > 0) await db.folders.bulkPut(folders.map(f => this.toFolder(f)));
+      });
+
+      console.log(`[AppComponent] ✅ Dexie hydrated in ${Date.now() - start}ms: ${notes.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
+    } finally {
+      this.goKittStore.resumeSnapshots();
+    }
+  }
+
+  // =========================================================================
+  // Mappers (Store → Dexie)
+  // =========================================================================
+
+  private toNote(n: any): any {
+    return {
+      id: n.id, worldId: n.worldId, title: n.title, content: n.content,
+      markdownContent: n.markdownContent, folderId: n.folderId,
+      entityKind: n.entityKind, entitySubtype: n.entitySubtype,
+      isEntity: n.isEntity, isPinned: n.isPinned, favorite: n.favorite,
+      ownerId: n.ownerId, narrativeId: n.narrativeId, order: n.order,
+      createdAt: n.createdAt, updatedAt: n.updatedAt
+    };
+  }
+
+  private toEntity(e: any): any {
+    return {
+      id: e.id, label: e.label, kind: e.kind, subtype: e.subtype,
+      aliases: e.aliases, firstNote: e.firstNote, totalMentions: e.totalMentions,
+      narrativeId: e.narrativeId, createdBy: e.createdBy,
+      createdAt: e.createdAt, updatedAt: e.updatedAt
+    };
+  }
+
+  private toFolder(f: any): any {
+    let attributes: Record<string, any> | undefined;
+    if (f.attributes) {
+      try { attributes = typeof f.attributes === 'string' ? JSON.parse(f.attributes) : f.attributes; } catch { attributes = undefined; }
+    }
+    return {
+      id: f.id, name: f.name, parentId: f.parentId || '', worldId: f.worldId,
+      narrativeId: f.narrativeId || '', order: f.folderOrder,
+      createdAt: f.createdAt, updatedAt: f.updatedAt,
+      entityKind: f.entityKind || '', entitySubtype: f.entitySubtype || '',
+      entityLabel: f.entityLabel || '', color: f.color || '',
+      isTypedRoot: f.isTypedRoot || false, isSubtypeRoot: f.isSubtypeRoot || false,
+      collapsed: f.collapsed || false, ownerId: f.ownerId || '',
+      isNarrativeRoot: f.isNarrativeRoot || false, attributes
+    };
+  }
+
+  private toEdge(e: any): any {
+    return {
+      id: e.id, sourceId: e.sourceId, targetId: e.targetId,
+      relType: e.relType, confidence: e.confidence,
+      bidirectional: e.bidirectional,
+    };
+  }
+
   ngOnDestroy(): void {
-    // Clean up Navigation API subscriptions
-    if (this.notesSub) {
-      this.notesSub.unsubscribe();
-    }
-    if (this.navUnsubscribe) {
-      this.navUnsubscribe();
-    }
+    if (this.notesSub) this.notesSub.unsubscribe();
+    if (this.navUnsubscribe) this.navUnsubscribe();
   }
 
   /**
    * Wire up Navigation API for cross-note navigation from entity clicks.
-   * - Syncs notes list to NavigationApi.setNotes()
-   * - Registers handler to open notes via NoteEditorStore
    */
   private wireUpNavigationApi(): void {
     const navigationApi = getNavigationApi();
-
-    // Sync notes to Navigation API whenever they change
     this.notesSub = this.notesService.getAllNotes$().subscribe(notes => {
-      // Map Dexie Note to API Note type (they're compatible)
       navigationApi.setNotes(notes as any);
       console.log(`[AppComponent] NavigationApi synced with ${notes.length} notes`);
     });
-
-    // Register navigation handler
     this.navUnsubscribe = navigationApi.onNavigate((noteId) => {
       console.log('[AppComponent] Navigation handler triggered:', noteId);
       this.noteEditorStore.openNote(noteId);
     });
-
     console.log('[AppComponent] ✓ Navigation API wired up');
   }
 }
@@ -226,22 +302,15 @@ function extractTextFromContent(content: any): string {
   if (typeof content === 'string') return content;
 
   let text = '';
+  if (content.type === 'text' && content.text) return content.text;
 
-  // If it's a text node, return its text
-  if (content.type === 'text' && content.text) {
-    return content.text;
-  }
-
-  // If it has content (array), recurse
   if (content.content && Array.isArray(content.content)) {
     for (const child of content.content) {
       text += extractTextFromContent(child);
-      // Add newline for block nodes to avoid smashing text together
       if (child.type === 'paragraph' || child.type === 'heading' || child.type === 'listItem') {
         text += '\n';
       }
     }
   }
-
   return text;
 }

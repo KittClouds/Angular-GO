@@ -124,7 +124,7 @@ export class NotesService {
     }
 
     async upsertEntity(entity: Entity): Promise<void> {
-        return ops.upsertEntity(entity);
+        return ops.upsertEntity(entity as any);
     }
 
     async deleteEntity(id: string): Promise<void> {

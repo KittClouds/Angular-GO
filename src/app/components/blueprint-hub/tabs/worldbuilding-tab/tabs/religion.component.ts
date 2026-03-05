@@ -15,7 +15,8 @@ import { ScopeService } from '../../../../../lib/services/scope.service';
 import { WorldBuildingService, Religion, ReligionOverride, Deity, MythBlock, Sect } from '../../../../../lib/services/world-building.service';
 import { FolderService } from '../../../../../lib/services/folder.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
-import { map, switchMap, of } from 'rxjs';
+import { map, switchMap, of, from } from 'rxjs';
+import { db } from '../../../../../lib/dexie/db';
 
 /**
  * ReligionComponent
@@ -565,11 +566,30 @@ export class ReligionComponent {
   // ======================
   // DATA SOURCE
   // ======================
-  narrativeId = this.scopeService.activeNarrativeId;
+  private rawNarrativeId = this.scopeService.activeNarrativeId;
+
+  // Resolved narrative ID: fallback to first real narrative when global
+  narrativeId = toSignal(
+    toObservable(this.rawNarrativeId).pipe(
+      switchMap(nid => {
+        if (!nid || nid === 'vault:global') {
+          return from(
+            db.folders
+              .where('entityKind')
+              .equals('NARRATIVE')
+              .first()
+              .then(folder => folder?.id ?? null)
+          );
+        }
+        return of(nid);
+      })
+    ),
+    { initialValue: null as string | null }
+  );
 
   isValidNarrative = computed(() => {
     const nid = this.narrativeId();
-    return nid && nid !== 'vault:global';
+    return !!nid && nid !== 'vault:global';
   });
 
   // Act Context

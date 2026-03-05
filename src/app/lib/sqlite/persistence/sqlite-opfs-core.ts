@@ -1,251 +1,129 @@
 /**
- * Sqlite OPFS Core Adapter (Binary + JSONL)
- * 
- * Provides atomic binary snapshot + append-only JSONL WAL persistence for SQLite.
- * File Layout (under OPFS root):
- *   /gokitt/sqlite.db       - Full binary SQLite export
- *   /gokitt/sqlite.db.bak   - Backup
- *   /gokitt/sqlite_wal.jsonl - Append-only log
+ * OPFS Core Adapter — Pure Snapshot Persistence
+ *
+ * Single responsibility: read/write a binary SQLite snapshot to OPFS.
+ * No WAL. No incremental writes. No Dexie.
+ *
+ * File layout (under OPFS root):
+ *   /gokitt/sqlite.db     — Current snapshot
+ *   /gokitt/sqlite.db.bak — Previous snapshot (crash recovery)
  */
 
-// ==========================================
-// Types
-// ==========================================
+// Hard cap to prevent runaway writes
+const MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024; // 100 MB
 
-export const MAX_SNAPSHOT_SIZE_BYTES = 100 * 1024 * 1024; // 100MB limit
+// ---------------------------------------------------------------------------
+// IO Helpers (short-lived handles — no long-held locks)
+// ---------------------------------------------------------------------------
 
-export type WalEntry = {
-    ts: number;           // Timestamp
-    op: string;           // Operation: 'upsertNote', 'deleteNote', etc.
-    data: any;            // The payload (Note, Entity, Edge, etc.)
-};
-
-export type LoadResult = {
-    snapshot: Uint8Array | null;
-    wal: WalEntry[];
-    recoveryMode: boolean;
-};
-
-// ==========================================
-// IO Utilities (Short-Lived Handles)
-// ==========================================
-
-/**
- * Write binary blob to file (exclusive lock implicit via createWritable)
- */
-async function writeBinaryFile(handle: FileSystemFileHandle, data: Uint8Array): Promise<void> {
-    let writable: FileSystemWritableFileStream | null = null;
+async function writeBinary(handle: FileSystemFileHandle, data: Uint8Array): Promise<void> {
+    if (data.byteLength > MAX_SNAPSHOT_BYTES) {
+        throw new Error(`[OPFS] Snapshot too large: ${data.byteLength} bytes (limit ${MAX_SNAPSHOT_BYTES})`);
+    }
+    const w = await handle.createWritable();
     try {
-        writable = await (handle as any).createWritable({ mode: "exclusive" });
-        if (!writable) throw new Error("Failed to create writable stream");
-
-        // Convert to ArrayBuffer for compatibility
-        const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-        await writable.write(buffer);
-    } catch (e: any) {
-        if (e?.name === "NoModificationAllowedError") {
-            throw new Error("File locked by another writer");
-        }
-        throw e;
-    } finally {
-        if (writable) await writable.close();
+        await w.write(data as any);
+        await w.close();
+    } catch (err) {
+        try { await w.abort(); } catch { /* swallow */ }
+        throw err;
     }
 }
 
-
-/**
- * Append text line to file
- */
-async function appendTextFile(handle: FileSystemFileHandle, text: string): Promise<void> {
-    let writable: FileSystemWritableFileStream | null = null;
-    try {
-        writable = await (handle as any).createWritable({ keepExistingData: true });
-        if (!writable) throw new Error("Failed to create writable stream");
-
-        const file = await handle.getFile();
-        await writable.seek(file.size);
-        await writable.write(text);
-
-    } catch (e: any) {
-        throw new Error("Failed to append WAL: " + e.message);
-    } finally {
-        if (writable) await writable.close();
-    }
-}
-
-/**
- * Read full binary file
- */
-async function readBinaryFile(handle: FileSystemFileHandle): Promise<Uint8Array | null> {
+async function readBinary(handle: FileSystemFileHandle): Promise<Uint8Array | null> {
     try {
         const file = await handle.getFile();
         if (file.size === 0) return null;
-        const arrayBuffer = await file.arrayBuffer();
-        return new Uint8Array(arrayBuffer);
-    } catch (e: any) {
-        if (e.name === 'NotFoundError') return null;
-        throw e;
+        return new Uint8Array(await file.arrayBuffer());
+    } catch {
+        return null;
     }
 }
 
-/**
- * Read text file (WAL)
- */
-async function readTextFile(handle: FileSystemFileHandle): Promise<string | null> {
-    try {
-        const file = await handle.getFile();
-        if (file.size === 0) return null;
-        return await file.text();
-    } catch (e: any) {
-        if (e.name === 'NotFoundError') return null;
-        throw e;
-    }
-}
-
-// ==========================================
-// Core Adapter Logic
-// ==========================================
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
 
 export class SqliteOpfsAdapter {
-    private readonly snapshotName = "sqlite.db";
-    private readonly walName = "sqlite_wal.jsonl";
+    private readonly FILE = 'sqlite.db';
+    private readonly BAK = 'sqlite.db.bak';
 
-    private async getDirectory(): Promise<FileSystemDirectoryHandle> {
+    /** Get (or create) the /gokitt/ directory in OPFS */
+    private async dir(): Promise<FileSystemDirectoryHandle> {
         const root = await navigator.storage.getDirectory();
-        return await root.getDirectoryHandle('gokitt', { create: true });
-    }
-
-    private bakName() {
-        return `${this.snapshotName}.bak`;
+        return root.getDirectoryHandle('gokitt', { create: true });
     }
 
     /**
-     * Load Snapshot (Binary) + WAL (JSONL)
+     * Load the latest snapshot from OPFS.
+     * Falls back to .bak if the primary file is missing/empty.
      */
-    async load(): Promise<LoadResult> {
-        const dir = await this.getDirectory();
-        let recoveryMode = false;
-        let snapshot: Uint8Array | null = null;
-
-        // Try primary snapshot
+    async load(): Promise<Uint8Array | null> {
         try {
-            const handle = await dir.getFileHandle(this.snapshotName, { create: true });
-            snapshot = await readBinaryFile(handle);
-        } catch (e) {
-            console.warn("[SqliteOpfs] Primary load failed, trying backup", e);
-            recoveryMode = true;
-        }
+            const d = await this.dir();
 
-        // Try backup if needed
-        if (!snapshot && recoveryMode) {
+            // Try primary
             try {
-                const handle = await dir.getFileHandle(this.bakName(), { create: true });
-                snapshot = await readBinaryFile(handle);
-                if (snapshot) console.warn("[SqliteOpfs] Recovered from backup");
-            } catch (e) {
-                // No backup available
-            }
-        }
-
-        // Load WAL
-        const wal: WalEntry[] = [];
-        try {
-            const handle = await dir.getFileHandle(this.walName, { create: true });
-            const text = await readTextFile(handle);
-            if (text) {
-                const lines = text.trim().split('\n');
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        wal.push(JSON.parse(line));
-                    } catch (e) {
-                        console.warn("[SqliteOpfs] Corrupt WAL line skipped");
-                    }
+                const h = await d.getFileHandle(this.FILE, { create: false });
+                const data = await readBinary(h);
+                if (data) {
+                    console.log(`[OPFS] Loaded snapshot: ${data.byteLength} bytes`);
+                    return data;
                 }
-            }
-        } catch (e) {
-            console.warn("[SqliteOpfs] WAL read failed", e);
-        }
+            } catch { /* no primary */ }
 
-        return { snapshot, wal, recoveryMode };
+            // Try backup
+            try {
+                const bh = await d.getFileHandle(this.BAK, { create: false });
+                const bak = await readBinary(bh);
+                if (bak) {
+                    console.warn('[OPFS] Primary missing — recovered from backup');
+                    return bak;
+                }
+            } catch { /* no backup */ }
+
+            console.log('[OPFS] No snapshot found. Starting fresh.');
+            return null;
+        } catch (err) {
+            console.error('[OPFS] Load failed:', err);
+            return null;
+        }
     }
 
     /**
-     * Save Snapshot (Binary) with Backup Rotation
+     * Save a snapshot with backup rotation.
+     * 1. Copy current .db → .bak
+     * 2. Write new data → .db
      */
     async saveSnapshot(data: Uint8Array): Promise<void> {
-        const dir = await this.getDirectory();
+        const d = await this.dir();
 
-        if (data.byteLength > MAX_SNAPSHOT_SIZE_BYTES) {
-            throw new Error(`Snapshot too large: ${data.byteLength}`);
-        }
-
-        // temp file
-        const tmpName = `${this.snapshotName}.tmp-${Date.now()}`;
-        const tmp = await dir.getFileHandle(tmpName, { create: true });
-        await writeBinaryFile(tmp, data);
-
-        // Rotate current -> .bak
+        // Rotate current → backup
         try {
-            try {
-                const cur = await dir.getFileHandle(this.snapshotName);
-                await (cur as any).move(dir, this.bakName());
-            } catch (e: any) {
-                if (e.name !== 'NotFoundError') throw e;
+            const cur = await d.getFileHandle(this.FILE, { create: false });
+            const curData = await readBinary(cur);
+            if (curData && curData.byteLength > 0) {
+                const bh = await d.getFileHandle(this.BAK, { create: true });
+                await writeBinary(bh, curData);
             }
-        } catch (e) {
-            console.warn("[SqliteOpfs] Rotation failed", e);
-        }
+        } catch { /* nothing to rotate */ }
 
-        // Commit tmp -> current
-        try {
-            await (tmp as any).move(dir, this.snapshotName);
-        } catch (e: any) {
-            try { await dir.removeEntry(tmpName); } catch { }
-            throw new Error("Failed to commit snapshot: " + (e.message || String(e)));
-        }
-
+        // Write new snapshot
+        const h = await d.getFileHandle(this.FILE, { create: true });
+        await writeBinary(h, data);
+        console.log(`[OPFS] Snapshot saved: ${data.byteLength} bytes`);
     }
 
     /**
-     * Append Batch to WAL
-     */
-    async appendWalBatch(entries: WalEntry[]): Promise<void> {
-        const dir = await this.getDirectory();
-
-        // Convert to newlines
-        const chunk = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
-
-        const handle = await dir.getFileHandle(this.walName, { create: true });
-        await appendTextFile(handle, chunk);
-    }
-
-    /**
-     * Truncate WAL
-     */
-    async truncateWal(): Promise<void> {
-        const dir = await this.getDirectory();
-        let writable: FileSystemWritableFileStream | null = null;
-        try {
-            const handle = await dir.getFileHandle(this.walName, { create: true });
-            writable = await (handle as any).createWritable();
-            if (writable) await writable.truncate(0);
-
-        } catch (e) {
-            console.warn("[SqliteOpfs] WAL truncate failed", e);
-        } finally {
-            if (writable) await writable.close();
-        }
-    }
-
-    /**
-     * Factory Reset
+     * Factory reset — delete the entire /gokitt/ directory.
      */
     async clearAll(): Promise<void> {
-        const dir = await this.getDirectory();
-        // Best effort removal
-        try { await dir.removeEntry(this.snapshotName); } catch { }
-        try { await dir.removeEntry(this.bakName()); } catch { }
-        try { await dir.removeEntry(this.walName); } catch { }
+        try {
+            const root = await navigator.storage.getDirectory();
+            await root.removeEntry('gokitt', { recursive: true });
+            console.log('[OPFS] Factory reset: all data deleted.');
+        } catch (err) {
+            console.warn('[OPFS] clearAll — directory may not exist:', err);
+        }
     }
 }

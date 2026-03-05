@@ -61,14 +61,24 @@ type Edge struct {
 
 // Folder represents a folder in the document hierarchy.
 type Folder struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	ParentID    string  `json:"parentId,omitempty"`
-	WorldID     string  `json:"worldId"`
-	NarrativeID string  `json:"narrativeId,omitempty"`
-	FolderOrder float64 `json:"folderOrder"`
-	CreatedAt   int64   `json:"createdAt"`
-	UpdatedAt   int64   `json:"updatedAt"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	ParentID        string  `json:"parentId,omitempty"`
+	WorldID         string  `json:"worldId"`
+	NarrativeID     string  `json:"narrativeId,omitempty"`
+	FolderOrder     float64 `json:"folderOrder"`
+	EntityKind      string  `json:"entityKind"`
+	EntitySubtype   string  `json:"entitySubtype"`
+	EntityLabel     string  `json:"entityLabel"`
+	Color           string  `json:"color"`
+	IsTypedRoot     bool    `json:"isTypedRoot"`
+	IsSubtypeRoot   bool    `json:"isSubtypeRoot"`
+	Collapsed       bool    `json:"collapsed"`
+	OwnerID         string  `json:"ownerId"`
+	IsNarrativeRoot bool    `json:"isNarrativeRoot"`
+	Attributes      string  `json:"attributes,omitempty"` // JSON blob for worldbuilding data, metadata, etc.
+	CreatedAt       int64   `json:"createdAt"`
+	UpdatedAt       int64   `json:"updatedAt"`
 }
 
 // =============================================================================

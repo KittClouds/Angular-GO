@@ -1,11 +1,12 @@
 // src/lib/registry.ts
-// Entity Registry - Write-through Cache over Dexie (IndexedDB) and SQLite
+// Entity Registry - Write-through Cache over Go SQLite (SSoT) + Dexie (ephemeral)
 // Synchronous reads from memory, async writes to both for persistence.
-// Hydrates directly from Dexie (which is populated by DataSyncService during boot).
+// Hydrates from Dexie (populated during boot from Go SQLite).
 
 import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
 import { getBridge } from './operations';
+import { GoKittStoreService } from '../services/gokitt-store.service';
 
 // =============================================================================
 // Types
@@ -78,8 +79,7 @@ export class CentralRegistry {
         const start = performance.now();
 
         try {
-            // Load entities directly from Dexie
-            // (DataSyncService guaranteed this is identical to SQLite)
+            // Load entities from Dexie (ephemeral cache, populated from SQLite during boot)
             const [entities, edges] = await Promise.all([
                 db.entities.toArray(),
                 db.edges.toArray(),
@@ -297,14 +297,14 @@ export class CentralRegistry {
             console.warn('[CentralRegistry] Failed to persist entity to Dexie:', entity.id, err);
         });
 
-        // 2. Write to SQLite (Source of Truth) via bridge
-        const bridge = getBridge();
-        if (bridge) {
-            bridge.syncEntity(dexieEntity).catch(err => {
+        // 2. Write to SQLite (Source of Truth) via GoKittStoreService
+        const store = getBridge();
+        if (store) {
+            store.upsertEntity(GoKittStoreService.fromDexieEntity(dexieEntity)).catch(err => {
                 console.error('[CentralRegistry] Failed to sync entity to SQLite:', err);
             });
         } else {
-            console.warn('[CentralRegistry] Cannot sync entity to SQLite: Bridge not initialized yet.');
+            console.warn('[CentralRegistry] Cannot sync entity to SQLite: Store not initialized yet.');
         }
     }
 
@@ -452,9 +452,9 @@ export class CentralRegistry {
         });
 
         // Write-through to SQLite
-        const bridge = getBridge();
-        if (bridge) {
-            bridge.syncEdge(dexieEdge).catch(err => {
+        const store = getBridge();
+        if (store) {
+            store.upsertEdge(GoKittStoreService.fromDexieEdge(dexieEdge)).catch(err => {
                 console.error('[CentralRegistry] Failed to sync edge to SQLite:', err);
             });
         }

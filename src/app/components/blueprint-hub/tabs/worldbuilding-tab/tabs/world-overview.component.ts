@@ -11,7 +11,8 @@ import { ScopeService } from '../../../../../lib/services/scope.service';
 import { WorldBuildingService, WorldSnapshot, CanonConstraint, WorldPillar, ActDelta, DEFAULT_SNAPSHOT } from '../../../../../lib/services/world-building.service';
 import { FolderService } from '../../../../../lib/services/folder.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
-import { map, switchMap, of } from 'rxjs';
+import { map, switchMap, of, from } from 'rxjs';
+import { db } from '../../../../../lib/dexie/db';
 
 @Component({
     selector: 'app-world-overview',
@@ -386,13 +387,33 @@ export class WorldOverviewComponent {
     // DATA SOURCE
     // ===================================
 
-    // 1. Current Narrative ID
-    narrativeId = this.scopeService.activeNarrativeId;
+    // 1. Current Narrative ID — with fallback for global scope
+    private rawNarrativeId = this.scopeService.activeNarrativeId;
+
+    // Resolved narrative ID: when scope returns 'vault:global', resolve to first real narrative
+    narrativeId = toSignal(
+        toObservable(this.rawNarrativeId).pipe(
+            switchMap(nid => {
+                if (!nid || nid === 'vault:global') {
+                    // Fallback: find the first NARRATIVE folder in Dexie
+                    return from(
+                        db.folders
+                            .where('entityKind')
+                            .equals('NARRATIVE')
+                            .first()
+                            .then(folder => folder?.id ?? null)
+                    );
+                }
+                return of(nid);
+            })
+        ),
+        { initialValue: null as string | null }
+    );
 
     // 2. Available Acts
     actFolders = toSignal(
         toObservable(this.narrativeId).pipe(
-            switchMap(nid => nid ? this.folderService.getFoldersByNarrative$(nid) : of([])),
+            switchMap(nid => (nid && nid !== 'vault:global') ? this.folderService.getFoldersByNarrative$(nid) : of([])),
             map(folders => (folders || []).filter(f => f.entityKind === 'ACT'))
         ),
         { initialValue: [] }
@@ -421,7 +442,7 @@ export class WorldOverviewComponent {
     // 4. World Data (Global)
     worldData = toSignal(
         toObservable(this.narrativeId).pipe(
-            switchMap(nid => nid ? this.worldService.getWorldData$(nid) : of(null))
+            switchMap(nid => (nid && nid !== 'vault:global') ? this.worldService.getWorldData$(nid) : of(null))
         ),
         { initialValue: { snapshot: DEFAULT_SNAPSHOT, constraints: [], pillars: [], cultures: [], powerSystems: [], religions: [], mysteries: [], loreThreads: [] } }
     );
@@ -478,10 +499,13 @@ export class WorldOverviewComponent {
 
     async saveSnapshot() {
         const nid = this.narrativeId();
-        if (nid) {
-            await this.worldService.updateWorldData(nid, { snapshot: this.editSnapshot });
+        if (!nid) {
+            console.warn('[Worldbuilding] Cannot save snapshot — no narrative folder found. Create a Narrative vault first.');
             this.showSnapshotDialog = false;
+            return;
         }
+        await this.worldService.updateWorldData(nid, { snapshot: this.editSnapshot });
+        this.showSnapshotDialog = false;
     }
 
     // Constraints
@@ -496,15 +520,18 @@ export class WorldOverviewComponent {
     async saveConstraint() {
         if (!this.newConstraintText.trim()) return;
         const nid = this.narrativeId();
-        if (nid) {
-            const newConstraints = [...this.constraints(), {
-                id: this.worldService.generateId(),
-                text: this.newConstraintText,
-                isActive: true
-            }];
-            await this.worldService.updateWorldData(nid, { constraints: newConstraints });
+        if (!nid) {
+            console.warn('[Worldbuilding] Cannot save constraint — no narrative folder found.');
             this.showConstraintDialog = false;
+            return;
         }
+        const newConstraints = [...this.constraints(), {
+            id: this.worldService.generateId(),
+            text: this.newConstraintText,
+            isActive: true
+        }];
+        await this.worldService.updateWorldData(nid, { constraints: newConstraints });
+        this.showConstraintDialog = false;
     }
 
     async deleteConstraint(id: string) {
@@ -526,10 +553,13 @@ export class WorldOverviewComponent {
 
     async saveStatusQuo() {
         const aid = this.selectedActId();
-        if (aid) {
-            await this.worldService.updateActData(aid, { statusQuo: this.editStatusQuo });
+        if (!aid) {
+            console.warn('[Worldbuilding] Cannot save status quo — no ACT folder found. Create an Act inside your Narrative vault.');
             this.showStatusQuoDialog = false;
+            return;
         }
+        await this.worldService.updateActData(aid, { statusQuo: this.editStatusQuo });
+        this.showStatusQuoDialog = false;
     }
 
     // Deltas
@@ -543,15 +573,19 @@ export class WorldOverviewComponent {
 
     async saveDelta() {
         const aid = this.selectedActId();
-        if (aid && this.newDelta.title) {
-            const delta: ActDelta = {
-                id: this.worldService.generateId(),
-                ...this.newDelta
-            } as ActDelta;
-            const newDeltas = [delta, ...this.deltas()]; // Prepend
-            await this.worldService.updateActData(aid, { deltas: newDeltas });
+        if (!aid) {
+            console.warn('[Worldbuilding] Cannot save delta — no ACT folder found.');
             this.showDeltaDialog = false;
+            return;
         }
+        if (!this.newDelta.title) return;
+        const delta: ActDelta = {
+            id: this.worldService.generateId(),
+            ...this.newDelta
+        } as ActDelta;
+        const newDeltas = [delta, ...this.deltas()]; // Prepend
+        await this.worldService.updateActData(aid, { deltas: newDeltas });
+        this.showDeltaDialog = false;
     }
 
     async deleteDelta(id: string) {
@@ -573,15 +607,19 @@ export class WorldOverviewComponent {
 
     async savePillar() {
         const nid = this.narrativeId();
-        if (nid && this.newPillar.title) {
-            const pillar: WorldPillar = {
-                id: this.worldService.generateId(),
-                ...this.newPillar
-            } as WorldPillar;
-            const newPillars = [...this.pillars(), pillar];
-            await this.worldService.updateWorldData(nid, { pillars: newPillars });
+        if (!nid) {
+            console.warn('[Worldbuilding] Cannot save pillar — no narrative folder found.');
             this.showPillarDialog = false;
+            return;
         }
+        if (!this.newPillar.title) return;
+        const pillar: WorldPillar = {
+            id: this.worldService.generateId(),
+            ...this.newPillar
+        } as WorldPillar;
+        const newPillars = [...this.pillars(), pillar];
+        await this.worldService.updateWorldData(nid, { pillars: newPillars });
+        this.showPillarDialog = false;
     }
 
     async deletePillar(id: string) {

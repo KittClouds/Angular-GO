@@ -1,17 +1,42 @@
 // src/app/lib/services/folder.service.ts
 // Angular service for folder CRUD with liveQuery
-// TODO: This still uses Dexie directly - needs full migration to GoSQLite
+// Writes through to SQLite via GoKittStoreService (Direct Mode)
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Folder, FolderSchema, AllowedSubfolderDef, AllowedNoteTypeDef } from '../dexie/db';
 import { getNextFolderOrder } from '../operations';
+import { GoKittStoreService } from '../../services/gokitt-store.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class FolderService {
+    private goKittStore = inject(GoKittStoreService);
+
+    /**
+     * Write-through to SQLite directly via GoKittStoreService.
+     */
+    private async syncToSqlite(folder: Folder): Promise<void> {
+        try {
+            if (this.goKittStore.isReady) {
+                await this.goKittStore.upsertFolder(GoKittStoreService.fromDexieFolder(folder));
+            }
+        } catch (err) {
+            console.warn('[FolderService] SQLite sync failed (non-fatal):', err);
+        }
+    }
+
+    private async deleteFromSqlite(id: string): Promise<void> {
+        try {
+            if (this.goKittStore.isReady) {
+                await this.goKittStore.deleteFolder(id);
+            }
+        } catch (err) {
+            console.warn('[FolderService] SQLite delete failed (non-fatal):', err);
+        }
+    }
     // ==========================================================================
     // REACTIVE QUERIES (liveQuery wrapped as RxJS Observable)
     // ==========================================================================
@@ -115,13 +140,16 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder(folder.parentId);
 
-        await db.folders.add({
+        const fullFolder = {
             ...folder,
             id,
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        } as Folder;
+
+        await db.folders.add(fullFolder);
+        await this.syncToSqlite(fullFolder);
 
         return id;
     }
@@ -135,7 +163,7 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder('');
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: '',
             name,
@@ -153,7 +181,10 @@ export class FolderService {
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -166,7 +197,7 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder('');
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: '',
             name,
@@ -184,7 +215,10 @@ export class FolderService {
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -197,7 +231,7 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder('');
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: '',
             name,
@@ -215,7 +249,10 @@ export class FolderService {
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -250,7 +287,7 @@ export class FolderService {
             narrativeId = id;
         }
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: parent.worldId,
             name,
@@ -268,7 +305,10 @@ export class FolderService {
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -292,7 +332,7 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder(parentId);
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: parent.worldId,
             name,
@@ -311,7 +351,10 @@ export class FolderService {
             createdAt: now,
             updatedAt: now,
             metadata: { date }
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -346,7 +389,7 @@ export class FolderService {
         const now = Date.now();
         const order = await getNextFolderOrder(parentId);
 
-        await db.folders.add({
+        const folder: Folder = {
             id,
             worldId: parent.worldId,
             name,
@@ -364,7 +407,10 @@ export class FolderService {
             order,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+
+        await db.folders.add(folder);
+        await this.syncToSqlite(folder);
 
         return id;
     }
@@ -377,6 +423,9 @@ export class FolderService {
             ...updates,
             updatedAt: Date.now(),
         });
+        // Re-read full folder and sync to SQLite
+        const updated = await db.folders.get(id);
+        if (updated) await this.syncToSqlite(updated);
     }
 
     /**
@@ -393,6 +442,7 @@ export class FolderService {
             await db.notes.where('folderId').equals(id).delete();
         }
         await db.folders.delete(id);
+        await this.deleteFromSqlite(id);
     }
 
     /**
@@ -412,6 +462,10 @@ export class FolderService {
             updatedAt: Date.now(),
         });
 
+        // Sync the moved folder to SQLite
+        const updated = await db.folders.get(id);
+        if (updated) await this.syncToSqlite(updated);
+
         // Propagate new narrativeId if changed
         if (folder.narrativeId !== newParent.narrativeId && !folder.isNarrativeRoot) {
             await this.propagateNarrativeId(id, newParent.narrativeId);
@@ -424,6 +478,10 @@ export class FolderService {
     async propagateNarrativeId(folderId: string, narrativeId: string): Promise<void> {
         // Update this folder
         await db.folders.update(folderId, { narrativeId, updatedAt: Date.now() });
+
+        // Sync updated folder to SQLite
+        const updatedFolder = await db.folders.get(folderId);
+        if (updatedFolder) await this.syncToSqlite(updatedFolder);
 
         // Update all notes in this folder
         const notes = await db.notes.where('folderId').equals(folderId).toArray();
