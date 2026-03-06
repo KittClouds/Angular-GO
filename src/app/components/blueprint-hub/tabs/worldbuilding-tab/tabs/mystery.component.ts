@@ -9,7 +9,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { TooltipModule } from 'primeng/tooltip';
 
-import { ScopeService } from '../../../../../lib/services/scope.service';
+import { ScopeService, ActiveScope } from '../../../../../lib/services/scope.service';
 import { WorldBuildingService, LoreThread, ThreadStatus } from '../../../../../lib/services/world-building.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
 import { db } from '../../../../../lib/dexie/db';
@@ -200,26 +200,34 @@ export class MysteryComponent {
   private worldService = inject(WorldBuildingService);
 
   // State
-  private rawNarrativeId = this.scopeService.activeNarrativeId;
+  private async resolveNarrativeIdFromScope(scope: ActiveScope): Promise<string | null> {
+    if (scope.narrativeId) return scope.narrativeId;
 
-  // Resolved narrative ID: fallback to first real narrative when global
+    if (scope.type === 'narrative' && scope.id && scope.id !== 'vault:global') {
+      return scope.id;
+    }
+
+    if (scope.id && scope.id !== 'vault:global') {
+      const scopedFolder = await db.folders.get(scope.id);
+      if (scopedFolder?.isNarrativeRoot) return scopedFolder.id;
+      if (scopedFolder?.narrativeId) return scopedFolder.narrativeId;
+    }
+
+    const firstNarrative = await db.folders
+      .where('entityKind')
+      .equals('NARRATIVE')
+      .first();
+
+    return firstNarrative?.id ?? null;
+  }
+
   narrativeId = toSignal(
-    toObservable(this.rawNarrativeId).pipe(
-      switchMap(nid => {
-        if (!nid || nid === 'vault:global') {
-          return from(
-            db.folders
-              .where('entityKind')
-              .equals('NARRATIVE')
-              .first()
-              .then(folder => folder?.id ?? null)
-          );
-        }
-        return of(nid);
-      })
+    toObservable(this.scopeService.activeScope).pipe(
+      switchMap(scope => from(this.resolveNarrativeIdFromScope(scope)))
     ),
     { initialValue: null as string | null }
   );
+
   filterStatus = signal<ThreadStatus | null>(null);
   showDialog = false;
   isCreating = false;

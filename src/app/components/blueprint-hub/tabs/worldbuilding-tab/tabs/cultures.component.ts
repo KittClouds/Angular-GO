@@ -12,7 +12,7 @@ import { AccordionModule } from 'primeng/accordion';
 import { AvatarModule } from 'primeng/avatar';
 import { ChipModule } from 'primeng/chip';
 
-import { ScopeService } from '../../../../../lib/services/scope.service';
+import { ScopeService, ActiveScope } from '../../../../../lib/services/scope.service';
 import { WorldBuildingService, Culture, CultureOverride } from '../../../../../lib/services/world-building.service';
 import { FolderService } from '../../../../../lib/services/folder.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
@@ -448,23 +448,30 @@ export class CulturesComponent {
     // =============================
     // DATA SOURCE
     // =============================
-    private rawNarrativeId = this.scopeService.activeNarrativeId;
+    private async resolveNarrativeIdFromScope(scope: ActiveScope): Promise<string | null> {
+        if (scope.narrativeId) return scope.narrativeId;
 
-    // Resolved narrative ID: fallback to first real narrative when global
+        if (scope.type === 'narrative' && scope.id && scope.id !== 'vault:global') {
+            return scope.id;
+        }
+
+        if (scope.id && scope.id !== 'vault:global') {
+            const scopedFolder = await db.folders.get(scope.id);
+            if (scopedFolder?.isNarrativeRoot) return scopedFolder.id;
+            if (scopedFolder?.narrativeId) return scopedFolder.narrativeId;
+        }
+
+        const firstNarrative = await db.folders
+            .where('entityKind')
+            .equals('NARRATIVE')
+            .first();
+
+        return firstNarrative?.id ?? null;
+    }
+
     narrativeId = toSignal(
-        toObservable(this.rawNarrativeId).pipe(
-            switchMap(nid => {
-                if (!nid || nid === 'vault:global') {
-                    return from(
-                        db.folders
-                            .where('entityKind')
-                            .equals('NARRATIVE')
-                            .first()
-                            .then(folder => folder?.id ?? null)
-                    );
-                }
-                return of(nid);
-            })
+        toObservable(this.scopeService.activeScope).pipe(
+            switchMap(scope => from(this.resolveNarrativeIdFromScope(scope)))
         ),
         { initialValue: null as string | null }
     );
@@ -484,17 +491,36 @@ export class CulturesComponent {
         ),
         { initialValue: [] }
     );
-    // Auto-select first act
+
+    selectedActId = signal<string | null>(null);
+
     constructor() {
         effect(() => {
-            const acts = this.actFolders();
-            if (acts && acts.length > 0 && !this.selectedActId()) {
+            const acts = this.actFolders() || [];
+            const scope = this.scopeService.activeScope();
+            const scopedActId = scope.type === 'act' ? (scope.actId || scope.id) : null;
+
+            if (scopedActId && acts.some(a => a.id === scopedActId)) {
+                if (this.selectedActId() !== scopedActId) {
+                    this.selectedActId.set(scopedActId);
+                }
+                return;
+            }
+
+            if (acts.length === 0) {
+                if (this.selectedActId() !== null) {
+                    this.selectedActId.set(null);
+                }
+                return;
+            }
+
+            const current = this.selectedActId();
+            if (!current || !acts.some(a => a.id === current)) {
                 this.selectedActId.set(acts[0].id);
             }
         });
     }
 
-    selectedActId = signal<string | null>(null);
     currentActName = computed(() => {
         const id = this.selectedActId();
         const acts = this.actFolders();

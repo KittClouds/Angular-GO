@@ -1,11 +1,28 @@
-import { Injectable, inject } from '@angular/core';
-import { RlmOrchestratorService, type ActivationResult } from '../lib/rlm';
+﻿import { Injectable, inject } from '@angular/core';
+import { RlmOrchestratorService } from '../lib/rlm';
 import { GoKittService } from './gokitt.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
-import { type AppContext, type EntitySnapshot } from '../lib/rlm/services/app-context';
+
+interface EntitySnapshot {
+    id: string;
+    label: string;
+    kind: string;
+    subtype: string | null;
+}
+
+interface AppContext {
+    activeNoteId: string | null;
+    activeNoteTitle: string | null;
+    activeNoteSnippet: string | null;
+    worldId: string;
+    narrativeId: string | null;
+    folderId: string | null;
+    folderPath: string[];
+    nearbyEntities: EntitySnapshot[];
+}
 
 /**
- * OrchestratorService — workspace-aware context gathering for chat.
+ * OrchestratorService - workspace-aware context gathering for chat.
  *
  * The CozoDB-based RLM loop is gone. This service now:
  * 1. Gathers live app context (active note, folder path, entities).
@@ -48,7 +65,7 @@ export class OrchestratorService {
 
             if (result.triggered && result.new_observation) {
                 console.log(
-                    `[Orchestrator] Workspace activated — injecting ${result.new_observation.length} chars of context`
+                    `[Orchestrator] Workspace activated - injecting ${result.new_observation.length} chars of context`
                 );
                 return result.new_observation;
             }
@@ -103,3 +120,4 @@ export class OrchestratorService {
         };
     }
 }
+

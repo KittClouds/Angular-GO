@@ -201,6 +201,40 @@ export class ScopeService {
         this.persistScope(scope);
     }
 
+    /**
+     * Set scope from a selected folder in the tree.
+     * If the folder is inside a narrative, this resolves to ACT or NARRATIVE scope.
+     * Otherwise it scopes to the folder subtree.
+     */
+    async setScopeFromFolder(folderId: string): Promise<void> {
+        if (!folderId) {
+            this.resetToGlobal();
+            return;
+        }
+
+        try {
+            const folder = await db.folders.get(folderId);
+            if (!folder) {
+                this.resetToGlobal();
+                return;
+            }
+
+            if (!folder.narrativeId) {
+                this.setScope({
+                    type: 'folder',
+                    id: folder.id,
+                    label: folder.name || 'Folder',
+                });
+                return;
+            }
+
+            const scope = await this.computeScopeFromFolder(folder.id, folder.narrativeId);
+            this.setScope(scope);
+        } catch (err) {
+            console.error('[ScopeService] Failed to set scope from folder:', folderId, err);
+        }
+    }
+
     /** Reset to global scope */
     resetToGlobal(): void {
         this._activeScope.set(GLOBAL_SCOPE);

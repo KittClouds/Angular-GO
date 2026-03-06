@@ -7,8 +7,8 @@ import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 
-import { ScopeService } from '../../../../../lib/services/scope.service';
-import { WorldBuildingService, WorldSnapshot, CanonConstraint, WorldPillar, ActDelta, DEFAULT_SNAPSHOT } from '../../../../../lib/services/world-building.service';
+import { ScopeService, ActiveScope } from '../../../../../lib/services/scope.service';
+import { WorldBuildingService, WorldSnapshot, CanonConstraint, WorldPillar, ActDelta, ActStake, StakePressure, DEFAULT_SNAPSHOT } from '../../../../../lib/services/world-building.service';
 import { FolderService } from '../../../../../lib/services/folder.service';
 import { toSignal, toObservable } from '@angular/core/rxjs-interop';
 import { map, switchMap, of, from } from 'rxjs';
@@ -121,27 +121,47 @@ import { db } from '../../../../../lib/dexie/db';
                         </div>
                     </div>
 
-                    <!-- Stakes Card (Static Mock for now) -->
-                    <div class="p-6 rounded-xl border border-red-500/20 dark:border-red-500/10 bg-gradient-to-b from-red-500/5 to-transparent shadow-lg relative overflow-hidden">
-                         <!-- Background noise/pattern (using CSS pattern instead of external URL for COEP compliance) -->
-                        <div class="absolute inset-0 opacity-[0.03]" style="background-image: repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px);"></div>
-                        
-                        <h3 class="text-xs font-bold text-red-600 dark:text-red-500/80 uppercase tracking-widest mb-5 flex items-center gap-2">
-                            <i class="pi pi-bolt"></i> Stakes & Pressure
-                        </h3>
-                        
-                        <div class="space-y-5 relative z-10">
-                            <!-- Clock 1 -->
-                            <div class="flex gap-4 items-start">
-                                <div class="w-1 bg-red-500/20 rounded-full h-12 flex flex-col justify-end overflow-hidden">
-                                    <div class="bg-red-500 h-3/4 w-full shadow-[0_0_10px_#ef4444]"></div>
+                    <!-- Stakes Card -->
+                    <div class="p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-lg relative overflow-hidden">
+                        <div class="flex items-center justify-between mb-5">
+                            <h3 class="text-xs font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                                <i class="pi pi-bolt text-[10px]"></i> Stakes & Pressure
+                            </h3>
+                            <button
+                                (click)="openStakeDialog()"
+                                [disabled]="!selectedActId()"
+                                class="text-[11px] px-2.5 py-1 rounded border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-teal-600 dark:hover:text-teal-400 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                Add
+                            </button>
+                        </div>
+
+                        <div class="space-y-3">
+                            <div *ngFor="let stake of stakes()" class="group/item flex gap-3 items-stretch p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/30">
+                                <div class="w-1.5 rounded-full" [ngClass]="getStakeBarClass(stake.pressure)"></div>
+
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <h4 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{{ stake.title }}</h4>
+                                        <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border"
+                                              [ngClass]="getStakeBadgeClass(stake.pressure)">
+                                            {{ getStakePressureLabel(stake.pressure) }}
+                                        </span>
+                                    </div>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed whitespace-pre-wrap">{{ stake.details || 'No pressure notes yet.' }}</p>
                                 </div>
-                                <div>
-                                    <h4 class="text-sm font-bold text-zinc-900 dark:text-red-100">The Eclipse Clock</h4>
-                                    <p class="text-xs text-zinc-500 dark:text-red-200/50 mt-1 font-light">
-                                        4 days until the barrier fails. Magic becomes volatile.
-                                    </p>
+
+                                <div class="flex items-start gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                    <button (click)="openStakeDialog(stake)" class="w-6 h-6 rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-teal-500 hover:border-teal-400 transition-colors">
+                                        <i class="pi pi-pencil text-[10px]"></i>
+                                    </button>
+                                    <button (click)="deleteStake(stake.id)" class="w-6 h-6 rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-red-500 hover:border-red-400 transition-colors">
+                                        <i class="pi pi-trash text-[10px]"></i>
+                                    </button>
                                 </div>
+                            </div>
+
+                            <div *ngIf="stakes().length === 0" class="text-sm text-zinc-400 italic p-3 rounded border border-dashed border-zinc-200 dark:border-zinc-800">
+                                No stakes logged for this act yet.
                             </div>
                         </div>
                     </div>
@@ -368,6 +388,39 @@ import { db } from '../../../../../lib/dexie/db';
             </ng-template>
         </p-dialog>
 
+        <!-- Stake Dialog -->
+        <p-dialog [header]="editingStakeId ? 'Edit Stake Pressure' : 'Add Stake Pressure'" [(visible)]="showStakeDialog" [modal]="true" [style]="{width: '36vw'}">
+            <div class="flex flex-col gap-4 py-2">
+                <div class="flex flex-col gap-2">
+                    <label class="text-sm font-bold">Stake / Clock</label>
+                    <input pInputText [(ngModel)]="tempStake.title" placeholder="e.g. Border Treaty Stability" class="w-full" />
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <label class="text-sm font-bold">Pressure Level</label>
+                    <div class="flex gap-2">
+                        <button
+                            *ngFor="let level of stakePressureLevels"
+                            type="button"
+                            (click)="tempStake.pressure = level"
+                            class="px-3 py-1 rounded border text-xs font-bold uppercase tracking-wider transition-colors"
+                            [ngClass]="tempStake.pressure === level ? getStakeBadgeClass(level) : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'">
+                            {{ getStakePressureLabel(level) }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <label class="text-sm font-bold">Pressure Notes</label>
+                    <textarea pInputTextarea [(ngModel)]="tempStake.details" rows="5" placeholder="Describe what this pressure means right now..." class="w-full"></textarea>
+                </div>
+            </div>
+            <ng-template pTemplate="footer">
+                <button pButton label="Cancel" (click)="showStakeDialog = false" class="p-button-text"></button>
+                <button pButton label="Save" (click)="saveStake()" class="p-button-primary"></button>
+            </ng-template>
+        </p-dialog>
+
     </div>
     `,
     styles: [`
@@ -387,25 +440,31 @@ export class WorldOverviewComponent {
     // DATA SOURCE
     // ===================================
 
-    // 1. Current Narrative ID — with fallback for global scope
-    private rawNarrativeId = this.scopeService.activeNarrativeId;
+    // 1. Current Narrative ID - resolve from active scope, with narrative fallback
+    private async resolveNarrativeIdFromScope(scope: ActiveScope): Promise<string | null> {
+        if (scope.narrativeId) return scope.narrativeId;
 
-    // Resolved narrative ID: when scope returns 'vault:global', resolve to first real narrative
+        if (scope.type === 'narrative' && scope.id && scope.id !== 'vault:global') {
+            return scope.id;
+        }
+
+        if (scope.id && scope.id !== 'vault:global') {
+            const scopedFolder = await db.folders.get(scope.id);
+            if (scopedFolder?.isNarrativeRoot) return scopedFolder.id;
+            if (scopedFolder?.narrativeId) return scopedFolder.narrativeId;
+        }
+
+        const firstNarrative = await db.folders
+            .where('entityKind')
+            .equals('NARRATIVE')
+            .first();
+
+        return firstNarrative?.id ?? null;
+    }
+
     narrativeId = toSignal(
-        toObservable(this.rawNarrativeId).pipe(
-            switchMap(nid => {
-                if (!nid || nid === 'vault:global') {
-                    // Fallback: find the first NARRATIVE folder in Dexie
-                    return from(
-                        db.folders
-                            .where('entityKind')
-                            .equals('NARRATIVE')
-                            .first()
-                            .then(folder => folder?.id ?? null)
-                    );
-                }
-                return of(nid);
-            })
+        toObservable(this.scopeService.activeScope).pipe(
+            switchMap(scope => from(this.resolveNarrativeIdFromScope(scope)))
         ),
         { initialValue: null as string | null }
     );
@@ -419,14 +478,31 @@ export class WorldOverviewComponent {
         { initialValue: [] }
     );
 
-    // 3. Selected Act ID (default to first one found)
+    // 3. Selected Act ID (driven by shared scope when available)
     selectedActId = signal<string | null>(null);
 
-    // Effect to select first act by default
     constructor() {
         effect(() => {
-            const acts = this.actFolders();
-            if (acts && acts.length > 0 && !this.selectedActId()) {
+            const acts = this.actFolders() || [];
+            const scope = this.scopeService.activeScope();
+            const scopedActId = scope.type === 'act' ? (scope.actId || scope.id) : null;
+
+            if (scopedActId && acts.some(a => a.id === scopedActId)) {
+                if (this.selectedActId() !== scopedActId) {
+                    this.selectedActId.set(scopedActId);
+                }
+                return;
+            }
+
+            if (acts.length === 0) {
+                if (this.selectedActId() !== null) {
+                    this.selectedActId.set(null);
+                }
+                return;
+            }
+
+            const current = this.selectedActId();
+            if (!current || !acts.some(a => a.id === current)) {
                 this.selectedActId.set(acts[0].id);
             }
         });
@@ -452,7 +528,7 @@ export class WorldOverviewComponent {
         toObservable(this.selectedActId).pipe(
             switchMap(aid => aid ? this.worldService.getActData$(aid) : of(null))
         ),
-        { initialValue: { statusQuo: '', deltas: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} } }
+        { initialValue: { statusQuo: '', deltas: [], stakes: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} } }
     );
 
     // ===================================
@@ -463,6 +539,7 @@ export class WorldOverviewComponent {
     pillars = computed(() => this.worldData()?.pillars || []);
     statusQuo = computed(() => this.actData()?.statusQuo || '');
     deltas = computed(() => this.actData()?.deltas || []);
+    stakes = computed(() => this.actData()?.stakes || []);
 
     activeConstraintsCount = computed(() => this.constraints().filter(c => c.isActive).length);
 
@@ -596,6 +673,89 @@ export class WorldOverviewComponent {
         }
     }
 
+    // Stakes
+    showStakeDialog = false;
+    editingStakeId: string | null = null;
+    stakePressureLevels: StakePressure[] = ['safe', 'warning', 'critical'];
+    tempStake: Omit<ActStake, 'id'> = { title: '', details: '', pressure: 'safe' };
+
+    openStakeDialog(stake?: ActStake) {
+        if (stake) {
+            this.editingStakeId = stake.id;
+            this.tempStake = {
+                title: stake.title,
+                details: stake.details,
+                pressure: stake.pressure,
+            };
+        } else {
+            this.editingStakeId = null;
+            this.tempStake = { title: '', details: '', pressure: 'safe' };
+        }
+        this.showStakeDialog = true;
+    }
+
+    async saveStake() {
+        const aid = this.selectedActId();
+        if (!aid) {
+            console.warn('[Worldbuilding] Cannot save stake - no ACT folder found.');
+            this.showStakeDialog = false;
+            return;
+        }
+
+        if (!this.tempStake.title.trim()) return;
+
+        const next = [...this.stakes()];
+
+        if (this.editingStakeId) {
+            const idx = next.findIndex(s => s.id === this.editingStakeId);
+            if (idx > -1) {
+                next[idx] = { id: this.editingStakeId, ...this.tempStake };
+            }
+        } else {
+            next.unshift({
+                id: this.worldService.generateId(),
+                ...this.tempStake,
+            });
+        }
+
+        await this.worldService.updateActData(aid, { stakes: next });
+        this.showStakeDialog = false;
+    }
+
+    async deleteStake(id: string) {
+        const aid = this.selectedActId();
+        if (!aid) return;
+
+        const next = this.stakes().filter(s => s.id !== id);
+        await this.worldService.updateActData(aid, { stakes: next });
+    }
+
+    getStakePressureLabel(level: StakePressure): string {
+        if (level === 'safe') return 'Safe';
+        if (level === 'warning') return 'Warning';
+        return 'Critical';
+    }
+
+    getStakeBadgeClass(level: StakePressure): string {
+        if (level === 'safe') {
+            return 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20';
+        }
+        if (level === 'warning') {
+            return 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20';
+        }
+        return 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20';
+    }
+
+    getStakeBarClass(level: StakePressure): string {
+        if (level === 'safe') {
+            return 'bg-gradient-to-b from-teal-400 to-blue-500 shadow-[0_0_10px_rgba(14,165,233,0.45)]';
+        }
+        if (level === 'warning') {
+            return 'bg-gradient-to-b from-amber-400 to-orange-500 shadow-[0_0_10px_rgba(245,158,11,0.45)]';
+        }
+        return 'bg-gradient-to-b from-red-500 to-rose-600 shadow-[0_0_10px_rgba(239,68,68,0.5)]';
+    }
+
     // Pillars
     showPillarDialog = false;
     newPillar: Omit<WorldPillar, 'id'> = { title: '', description: '', icon: '' };
@@ -638,6 +798,14 @@ export class WorldOverviewComponent {
 
         const idx = acts.findIndex(a => a.id === current);
         const nextIdx = (idx + 1) % acts.length;
-        this.selectedActId.set(acts[nextIdx].id);
+        const nextAct = acts[nextIdx];
+
+        this.scopeService.setScope({
+            type: 'act',
+            id: nextAct.id,
+            actId: nextAct.id,
+            narrativeId: this.narrativeId() || nextAct.narrativeId,
+            label: nextAct.name,
+        });
     }
 }

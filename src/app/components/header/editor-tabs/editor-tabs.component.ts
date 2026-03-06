@@ -1,4 +1,4 @@
-import { Component, inject, signal, effect, computed, ViewChild, ElementRef } from '@angular/core';
+﻿import { Component, inject, signal, effect, computed, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TabsModule } from 'primeng/tabs';
 import { ButtonModule } from 'primeng/button';
@@ -81,10 +81,10 @@ import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
             background: transparent !important;
         }
         
-        /* ══════════════════════════════════════════════════════════════
+        /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
            AGGRESSIVE PrimeNG Tabs transparency overrides
            Make EVERYTHING transparent so header gradient shows through
-           ══════════════════════════════════════════════════════════════ */
+           â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
         
         /* Root tabs container */
         ::ng-deep .custom-tabs,
@@ -135,8 +135,7 @@ import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
 })
 export class EditorTabsComponent {
     tabStore = inject(TabStore);
-    noteEditorStore = inject(NoteEditorStore); // Needed for rename logic usually, but here just updating TabStore title? 
-    // Actually, renaming a tab should rename the note. TabStore should handle calling db update or NoteEditorStore.rename
+    noteEditorStore = inject(NoteEditorStore);
 
     readonly X = X;
     readonly FileText = FileText;
@@ -176,16 +175,16 @@ export class EditorTabsComponent {
         });
     }
 
-    finishRenaming() {
+    async finishRenaming() {
         const id = this.renamingId();
-        const title = this.renamingTitle();
-        if (id && title.trim()) {
-            this.noteEditorStore.renameNote(id, title);
-            // TabStore will update title via effect or manual sync?
-            // NoteEditorStore.renameNote should update DB. 
-            // We need to ensure TabStore updates the title in its list.
-            this.tabStore.updateTabTitle(id, title);
+        const normalizedTitle = this.renamingTitle().trim();
+
+        if (id && normalizedTitle) {
+            // Optimistic tab update for instant feedback.
+            this.tabStore.updateTabTitle(id, normalizedTitle);
+            await this.noteEditorStore.renameNote(id, normalizedTitle);
         }
+
         this.renamingId.set(null);
     }
 

@@ -1,4 +1,4 @@
-// src/app/components/sidebar/file-tree/file-tree.component.ts
+﻿// src/app/components/sidebar/file-tree/file-tree.component.ts
 // Main file tree component with virtual scroll and context menu - WIRED to Dexie
 
 import { Component, signal, computed, Input, inject, ViewChild, ElementRef, AfterViewInit, OnDestroy, effect, Injector, runInInjectionContext, DestroyRef } from '@angular/core';
@@ -12,8 +12,10 @@ import { flattenTree, toggleExpansion } from '../../../lib/arborist/flatten';
 import { FolderService } from '../../../lib/services/folder.service';
 import { NotesService } from '../../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../../lib/store/note-editor.store';
+import { TabStore } from '../../../lib/store/tab.store';
 import { ReorderService } from '../../../lib/services/reorder.service';
 import { AppStateService } from '../../../lib/services/app-state.service';
+import { ScopeService } from '../../../lib/services/scope.service';
 
 @Component({
     selector: 'app-file-tree',
@@ -154,10 +156,12 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
+    private tabStore = inject(TabStore);
     reorderService = inject(ReorderService);
     private injector = inject(Injector);
     private destroyRef = inject(DestroyRef);
     private appStateService = inject(AppStateService);
+    private scopeService = inject(ScopeService);
 
     // ViewChild for Swapy container
     @ViewChild('treeContainer') treeContainer!: ElementRef<HTMLDivElement>;
@@ -265,6 +269,8 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         if (node.type === 'folder') {
             // Toggle folder expansion
             this.onToggle(node.id);
+            // Folder selection drives scope for worldbuilding/fact sheets.
+            void this.scopeService.setScopeFromFolder(node.id);
         } else if (node.type === 'note') {
             // Open note in editor
             this.noteEditorStore.openNote(node.id);
@@ -284,10 +290,12 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
             try {
                 if (node.type === 'folder') {
                     await this.folderService.updateFolder(node.id, { name: newName });
-                    console.log(`[FileTree] Renamed folder "${node.name}" → "${newName}"`);
+                    console.log(`[FileTree] Renamed folder "${node.name}" â†’ "${newName}"`);
                 } else {
+                    // Optimistic tab title sync for immediate sidebar <-> tab feedback.
+                    this.tabStore.updateTabTitle(node.id, newName);
                     await this.notesService.updateNote(node.id, { title: newName });
-                    console.log(`[FileTree] Renamed note "${node.name}" → "${newName}"`);
+                    console.log(`[FileTree] Renamed note "${node.name}" â†’ "${newName}"`);
                 }
             } catch (e) {
                 console.error('[FileTree] Rename failed:', e);
@@ -319,9 +327,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.menuNode.set(null);
     }
 
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // WIRED ACTIONS - Now actually do things!
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async handleAction(type: 'new-note' | 'new-subfolder' | 'rename' | 'delete'): Promise<void> {
         const node = this.menuNode();
@@ -392,9 +400,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.closeMenu();
     }
 
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Private helpers
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private async createNoteInFolder(folder: FlatTreeNode): Promise<void> {
         console.log(`[FileTree] Creating note in folder: ${folder.name}`);
@@ -441,11 +449,12 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
     private async deleteNote(note: FlatTreeNode): Promise<void> {
         console.log(`[FileTree] Deleting note: ${note.name}`);
         await this.notesService.deleteNote(note.id);
+        this.tabStore.closeTab(note.id);
     }
 
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Lifecycle Hooks for Swapy Integration & Selection Sync
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     constructor() {
         // Effect: Sync active note from store to tree selection & scope
@@ -502,9 +511,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.reorderService.disableReorderMode();
     }
 
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Tree Helpers
-    // ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private findNodeRecursive(nodes: TreeNode[], id: string): TreeNode | null {
         for (const node of nodes) {

@@ -27,6 +27,7 @@ import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/ser
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import type { OpenRouterMessage } from '../../../lib/services/go-chat.service';
+import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
 
 // Import quikchat (vanilla JS lib)
 declare const quikchat: any;
@@ -702,6 +703,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // Google GenAI fallback (TypeScript)
     googleGenAI = inject(GoogleGenAIService);
     private orchestrator = inject(OrchestratorService);
+    private readonly chatContextClipStore = inject(ChatContextClipStore);
     private goChatInitialized = false;
 
     // Icon references for template
@@ -1094,8 +1096,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         // Build conversation history for context
         const history = this.buildConversationHistory(text);
 
-        // Inject Context Block into the system prompt for THIS turn
-        const effectiveSystemPrompt = this.systemPromptInput() + (contextBlock ? `\n\n${contextBlock}` : '');
+        const highlightedClips = this.chatContextClipStore.consumeAll();
+        const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
+
+        // Inject orchestrator context and highlighted-text clips for THIS turn
+        const effectiveSystemPrompt = this.systemPromptInput()
+            + (contextBlock ? '\n\n' + contextBlock : '')
+            + (highlightedContext ? '\n\n' + highlightedContext : '');
 
         // Always use streaming chat - RLM context already injected into effectiveSystemPrompt
         await this.handleStreamingChat(instance, botMsgId, history, effectiveSystemPrompt);
@@ -1186,3 +1193,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         URL.revokeObjectURL(url);
     }
 }
+
+
+

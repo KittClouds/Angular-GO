@@ -27,6 +27,7 @@ import { setTextAlignCommand, indentCommand, outdentCommand } from '../nodes';
 
 // Registry for entity creation
 import { smartGraphRegistry } from '../../../../lib/registry';
+import { ChatContextClipStore } from '../../../../lib/store/chat-context-clip.store';
 import { FONT_FAMILIES, FONT_SIZES } from '../../../../lib/constants/fonts';
 import type { EntityKind } from '../../../../lib/Scanner/types';
 
@@ -189,6 +190,7 @@ export class EditorToolbarComponent {
         { id: 'shorten', label: 'Shorten' },
         { id: 'fix', label: 'Fix Grammar' },
         { id: 'continue', label: 'Continue' },
+        { id: 'add_to_chat', label: 'Add to Chat' },
     ];
 
     alignItems: DropdownItem[] = [
@@ -219,7 +221,7 @@ export class EditorToolbarComponent {
         { id: 'CUSTOM', label: 'Custom...', icon: Plus },
     ];
 
-    constructor(private cdr: ChangeDetectorRef) { }
+    constructor(private cdr: ChangeDetectorRef, private readonly chatContextClipStore: ChatContextClipStore) { }
 
     update(state: EditorState) {
         this.editorState = state;
@@ -274,6 +276,18 @@ export class EditorToolbarComponent {
 
             const selectedText = doc.textBetween(from, to, ' ');
             if (!selectedText.trim()) return;
+
+            if (item.id === 'add_to_chat') {
+                const clip = this.chatContextClipStore.addSelectionClip({
+                    noteId: this.noteId ?? null,
+                    from,
+                    to,
+                    text: selectedText.trim(),
+                });
+                console.log(`[AI] Added highlighted text to chat context (${clip.id})`);
+                this.hide.emit();
+                return;
+            }
 
             // Lazily import GoKittService to avoid circular deps
             const { GoKittService } = await import('../../../../services/gokitt.service');
@@ -385,6 +399,7 @@ export class EditorToolbarComponent {
             const selectedText = doc.textBetween(from, to, ' ');
             if (!selectedText.trim()) return;
 
+
             // Get the entity mark type from schema
             const entityMarkType = schema.marks['entity'];
             if (!entityMarkType) {
@@ -423,4 +438,8 @@ export class EditorToolbarComponent {
         }
     }
 }
+
+
+
+
 

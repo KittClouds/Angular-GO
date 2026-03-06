@@ -1,15 +1,18 @@
-// src/app/lib/store/tab.store.ts
-// Manages the state of open tabs in the editor header
+﻿// src/app/lib/store/tab.store.ts
+// Manages open editor tabs and keeps them in sync with note lifecycle.
 
-import { Injectable, signal, computed, effect, Inject, PLATFORM_ID, inject, untracked } from '@angular/core';
+import { Injectable, signal, effect, Inject, PLATFORM_ID, inject, untracked } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { NoteEditorStore } from './note-editor.store';
-import { db } from '../dexie/db';
-import { getSetting, setSetting } from '../dexie/settings.service';
+import { db, type Note } from '../dexie/db';
+import { setSetting } from '../dexie/settings.service';
+import { NotesService } from '../dexie/notes.service';
+import { AppOrchestrator } from '../core/app-orchestrator';
 import * as ops from '../operations';
 
 export interface EditorTab {
-    id: string;      // Usually same as noteId
+    id: string;
     noteId: string;
     title: string;
     active: boolean;
@@ -21,187 +24,197 @@ const TABS_STORAGE_KEY = 'kittclouds-open-tabs';
     providedIn: 'root'
 })
 export class TabStore {
-    private isBrowser: boolean;
-    private noteEditorStore = inject(NoteEditorStore);
+    private readonly isBrowser: boolean;
+    private readonly noteEditorStore = inject(NoteEditorStore);
+    private readonly notesService = inject(NotesService);
+    private readonly orchestrator = inject(AppOrchestrator);
 
-    // ─────────────────────────────────────────────────────────────
-    // State
-    // ─────────────────────────────────────────────────────────────
-
-    // List of open tabs
     readonly tabs = signal<EditorTab[]>([]);
 
-    // Prevent persistence while restoring
     private isRestoring = true;
-
-    // ─────────────────────────────────────────────────────────────
-    // Constructor
-    // ─────────────────────────────────────────────────────────────
+    private readonly allNotes = toSignal(this.notesService.getAllNotes$(), { initialValue: [] as Note[] });
 
     constructor(@Inject(PLATFORM_ID) platformId: Object) {
         this.isBrowser = isPlatformBrowser(platformId);
 
-        // Restore tabs from storage
+        // Restore tabs from persisted UI state.
         this.restoreTabs();
 
-        // Persist tabs whenever they change
+        // Persist tabs whenever they change (except while restoring).
         effect(() => {
             const currentTabs = this.tabs();
-
-            // CRITICAL: Don't persist empty list while restoring!
             if (this.isRestoring) return;
-
             this.persistTabs(currentTabs);
         });
 
-        // ─────────────────────────────────────────────────────────────
-        // Sync with NoteEditorStore
-        // ─────────────────────────────────────────────────────────────
-
-        // When the active note changes in the editor store, update our tabs
+        // Active note drives tab activation/opening.
         effect(() => {
             const activeNoteId = this.noteEditorStore.activeNoteId();
-
             if (activeNoteId) {
-                // If we are still restoring, maybe we shouldn't act yet?
-                // actually ensureTabOpen handles checking existing tabs.
-                // But if restoreTabs is async, tabs() might be empty.
-                // However, restoreTabs calls set() which triggers effects.
                 this.ensureTabOpen(activeNoteId);
             }
         });
 
-        // ─────────────────────────────────────────────────────────────
-        // Reactive Title Sync
-        // When the current note's title changes in Dexie (via liveQuery),
-        // update the corresponding tab title to stay in sync.
-        // This fixes the issue where tabs show "Untitled Note" but
-        // the sidebar shows the actual note name like "girls".
-        // ─────────────────────────────────────────────────────────────
+        // Reconcile tab list against live notes once boot is interactive.
+        // Ensures deleted notes cannot leave ghost tabs.
         effect(() => {
-            const currentNote = this.noteEditorStore.currentNote();
-            if (!currentNote) return;
+            const phase = this.orchestrator.currentPhase();
+            const bootReady = phase === 'ready' || phase === 'background';
+            if (!bootReady || this.isRestoring) return;
 
-            // Find the tab for this note and update its title if different
-            const currentTabs = untracked(() => this.tabs());
-            const existingTab = currentTabs.find(t => t.noteId === currentNote.id);
-
-            if (existingTab && existingTab.title !== currentNote.title) {
-                console.log(`[TabStore] Syncing tab title: "${existingTab.title}" → "${currentNote.title}"`);
-                this.updateTabTitle(currentNote.id, currentNote.title || 'Untitled');
-            }
+            const notes = this.allNotes();
+            const activeNoteId = this.noteEditorStore.activeNoteId();
+            this.reconcileTabsWithNotes(notes, activeNoteId);
         });
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Actions
-    // ─────────────────────────────────────────────────────────────
-
     /**
-     * Ensure a tab exists for the given note ID and select it.
-     * Fetches title from DB if needed.
-     * IMPORTANT: Uses untracked() to avoid creating signal dependency loops.
+     * Ensure a tab exists for the given note ID and mark it active.
      */
-    async ensureTabOpen(noteId: string) {
-        // Use untracked to prevent the effect from tracking the tabs signal
+    async ensureTabOpen(noteId: string): Promise<void> {
         const currentTabs = untracked(() => this.tabs());
         const existingTab = currentTabs.find(t => t.noteId === noteId);
 
         if (existingTab) {
-            // Tab exists, just make sure it's marked active (visual only)
-            // The actual activation logic happens via updating NoteEditorStore
             this.setActiveTabVisuals(noteId);
-        } else {
-            // Fetch note title to create new tab (using GoSQLite via operations)
-            // Fallback to db.notes if ops is slow/not ready
-            let title = 'Untitled Note';
-            try {
-                const note = await ops.getNote(noteId);
-                if (note) title = note.title || 'Untitled';
-            } catch (e) {
-                console.warn('[TabStore] Failed to fetch note title for tab:', e);
-            }
-
-            const newTab: EditorTab = {
-                id: noteId,
-                noteId: noteId,
-                title: title,
-                active: true
-            };
-
-            // Deactivate other tabs and add new one
-            this.tabs.update(tabs => [
-                ...tabs.map(t => ({ ...t, active: false })),
-                newTab
-            ]);
+            return;
         }
+
+        // Only create tabs for existing notes.
+        let note: ops.Note | undefined;
+        try {
+            note = await ops.getNote(noteId);
+        } catch (e) {
+            console.warn('[TabStore] Failed to fetch note for tab open:', e);
+            return;
+        }
+
+        if (!note) {
+            console.warn(`[TabStore] Skipping tab open for missing note: ${noteId}`);
+            if (this.noteEditorStore.activeNoteId() === noteId) {
+                this.noteEditorStore.closeNote();
+            }
+            return;
+        }
+
+        const title = (note.title || 'Untitled Note').trim() || 'Untitled Note';
+        const newTab: EditorTab = {
+            id: noteId,
+            noteId,
+            title,
+            active: true,
+        };
+
+        this.tabs.update(tabs => [
+            ...tabs.map(t => ({ ...t, active: false })),
+            newTab,
+        ]);
     }
 
     /**
      * Close a specific tab.
-     * If it was active, switch to the nearest neighbor.
+     * Closing a tab does not delete the note.
      */
-    closeTab(noteId: string) {
+    closeTab(noteId: string): void {
         const currentTabs = this.tabs();
         const tabIndex = currentTabs.findIndex(t => t.noteId === noteId);
         if (tabIndex === -1) return;
 
         const isClosingActive = currentTabs[tabIndex].active;
         const newTabs = currentTabs.filter(t => t.noteId !== noteId);
-
         this.tabs.set(newTabs);
 
-        if (isClosingActive) {
-            if (newTabs.length > 0) {
-                // Determine new active note (try right, then left)
-                const newActiveIndex = Math.min(tabIndex, newTabs.length - 1);
-                const newActiveTab = newTabs[newActiveIndex];
-                this.activateTab(newActiveTab.noteId);
-            } else {
-                // No tabs left
-                this.noteEditorStore.closeNote();
-            }
+        if (!isClosingActive) return;
+
+        if (newTabs.length > 0) {
+            const newActiveIndex = Math.min(tabIndex, newTabs.length - 1);
+            const newActiveTab = newTabs[newActiveIndex];
+            this.activateTab(newActiveTab.noteId);
+        } else {
+            this.noteEditorStore.closeNote();
         }
     }
 
     /**
-     * Activate a tab (clicks).
-     * This drives the NoteEditorStore.
+     * Activate a tab (click) -> open matching note.
      */
-    activateTab(noteId: string) {
+    activateTab(noteId: string): void {
         this.noteEditorStore.openNote(noteId);
     }
 
     /**
-     * Update a tab's title (e.g. on rename)
+     * Update a tab title (optimistic/local sync).
      */
-    updateTabTitle(noteId: string, newTitle: string) {
+    updateTabTitle(noteId: string, newTitle: string): void {
+        const normalized = newTitle.trim() || 'Untitled Note';
         this.tabs.update(tabs =>
-            tabs.map(t => t.noteId === noteId ? { ...t, title: newTitle } : t)
+            tabs.map(t => (t.noteId === noteId ? { ...t, title: normalized } : t))
         );
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────
+    private reconcileTabsWithNotes(notes: Note[], activeNoteId: string | null): void {
+        const noteById = new Map(notes.map(note => [note.id, note] as const));
+        const existingTabs = untracked(() => this.tabs());
 
-    private setActiveTabVisuals(activeNoteId: string) {
+        let removedActiveIndex = -1;
+        let changed = false;
+
+        const reconciledTabs: EditorTab[] = existingTabs.flatMap((tab, index) => {
+            const note = noteById.get(tab.noteId);
+            if (!note) {
+                changed = true;
+                if (activeNoteId && tab.noteId === activeNoteId) {
+                    removedActiveIndex = index;
+                }
+                return [];
+            }
+
+            const resolvedTitle = (note.title || 'Untitled Note').trim() || 'Untitled Note';
+            const shouldBeActive = !!activeNoteId && tab.noteId === activeNoteId;
+
+            if (tab.title !== resolvedTitle || tab.active !== shouldBeActive) {
+                changed = true;
+                return [{ ...tab, title: resolvedTitle, active: shouldBeActive }];
+            }
+
+            return [tab];
+        });
+
+        if (changed) {
+            this.tabs.set(reconciledTabs);
+        }
+
+        if (!activeNoteId || noteById.has(activeNoteId)) {
+            return;
+        }
+
+        if (reconciledTabs.length === 0) {
+            this.noteEditorStore.closeNote();
+            return;
+        }
+
+        const fallbackIndex = removedActiveIndex >= 0
+            ? Math.min(removedActiveIndex, reconciledTabs.length - 1)
+            : 0;
+        const fallbackTab = reconciledTabs[fallbackIndex];
+        this.noteEditorStore.openNote(fallbackTab.noteId);
+    }
+
+    private setActiveTabVisuals(activeNoteId: string): void {
         this.tabs.update(tabs =>
             tabs.map(t => ({
                 ...t,
-                active: t.noteId === activeNoteId
+                active: t.noteId === activeNoteId,
             }))
         );
     }
 
-    private async restoreTabs() {
+    private async restoreTabs(): Promise<void> {
         if (!this.isBrowser) return;
+
         try {
-            // Bypass sync cache and read from DB directly to avoid race conditions
-            // getSetting returns value or default, but we want direct DB access here
-            // because settings cache might not be hydrated yet.
-            const s = await db.settings.get(TABS_STORAGE_KEY);
-            const tabs = s?.value as EditorTab[] | null;
+            const setting = await db.settings.get(TABS_STORAGE_KEY);
+            const tabs = setting?.value as EditorTab[] | null;
 
             if (tabs && Array.isArray(tabs) && tabs.length > 0) {
                 console.log(`[TabStore] Restoring ${tabs.length} tabs from DB`);
@@ -216,7 +229,7 @@ export class TabStore {
         }
     }
 
-    private persistTabs(tabs: EditorTab[]) {
+    private persistTabs(tabs: EditorTab[]): void {
         if (!this.isBrowser) return;
         setSetting(TABS_STORAGE_KEY, tabs);
     }

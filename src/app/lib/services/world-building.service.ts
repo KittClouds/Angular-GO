@@ -31,6 +31,15 @@ export interface ActDelta {
     type: 'new' | 'changed' | 'removed';
 }
 
+export type StakePressure = 'safe' | 'warning' | 'critical';
+
+export interface ActStake {
+    id: string;
+    title: string;
+    details: string;
+    pressure: StakePressure;
+}
+
 export const DEFAULT_SNAPSHOT: WorldSnapshot = {
     logline: '',
     tone: [],
@@ -280,6 +289,7 @@ export interface WorldScopeData {
     // Act Data (stored on Act Folder)
     statusQuo: string;
     deltas: ActDelta[];
+    stakes: ActStake[];
     cultureOverrides: Record<string, CultureOverride>;
     powerProgression: Record<string, PowerProgression>;
     religionOverrides: Record<string, ReligionOverride>; // Added Religion Overrides
@@ -327,16 +337,17 @@ export class WorldBuildingService {
     }
 
     /**
-     * Get Act Data (Status Quo, Deltas, Culture Overrides, Power Progression, Religion Overrides) from an Act Folder.
+     * Get Act Data (Status Quo, Deltas, Stakes, Culture Overrides, Power Progression, Religion Overrides) from an Act Folder.
      */
     getActData$(actFolderId: string): Observable<{
         statusQuo: string;
         deltas: ActDelta[];
+        stakes: ActStake[];
         cultureOverrides: Record<string, CultureOverride>;
         powerProgression: Record<string, PowerProgression>;
         religionOverrides: Record<string, ReligionOverride>;
     }> {
-        const DEFAULT: any = { statusQuo: '', deltas: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} };
+        const DEFAULT: any = { statusQuo: '', deltas: [], stakes: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} };
 
         if (!actFolderId) return of(DEFAULT);
 
@@ -348,6 +359,7 @@ export class WorldBuildingService {
             return {
                 statusQuo: act.statusQuo || '',
                 deltas: act.deltas || [],
+                stakes: act.stakes || [],
                 cultureOverrides: act.cultureOverrides || {},
                 powerProgression: act.powerProgression || {},
                 religionOverrides: act.religionOverrides || {}
@@ -422,6 +434,7 @@ export class WorldBuildingService {
     async updateActData(actFolderId: string, data: Partial<{
         statusQuo: string;
         deltas: ActDelta[];
+        stakes: ActStake[];
         cultureOverrides: Record<string, CultureOverride>;
         powerProgression: Record<string, PowerProgression>;
         religionOverrides: Record<string, ReligionOverride>;
@@ -434,6 +447,7 @@ export class WorldBuildingService {
 
         if (data.statusQuo !== undefined) act.statusQuo = data.statusQuo;
         if (data.deltas) act.deltas = data.deltas;
+        if (data.stakes) act.stakes = data.stakes;
         if (data.cultureOverrides) act.cultureOverrides = data.cultureOverrides;
         if (data.powerProgression) act.powerProgression = data.powerProgression;
         if (data.religionOverrides) act.religionOverrides = data.religionOverrides;

@@ -1,4 +1,4 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject, HostListener } from '@angular/core';
+﻿import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LucideAngularModule, FileText, Plus } from 'lucide-angular';
 import { Subscription, skip, filter } from 'rxjs';
@@ -32,6 +32,7 @@ import { prettyTextPlugin } from './plugins/prettyTextPlugin';
 import { detailsNodes, detailsInteractivePlugin } from './plugins/details';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
+import { TextSelection } from '@milkdown/kit/prose/state';
 import { EditorService } from '../../services/editor.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { getPrettyTextApi } from '../../api/pretty-text-api';
@@ -99,21 +100,21 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             .config(indentPlugin)
             .use(indentCommand)
             .use(outdentCommand)
-            // ─────────────────────────────────────────────────────────────
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // PRETTY TEXT PLUGIN (Unified Highlighting System)
-            // ─────────────────────────────────────────────────────────────
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             .use(entitySchema)
             .use(prettyTextPlugin)
-            // ─────────────────────────────────────────────────────────────
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             .use(detailsNodes)
             .use(detailsInteractivePlugin);
 
         await this.crepe.create();
         this.editorService.registerEditor(this.crepe);
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Subscribe to active note changes from NoteEditorStore
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         this.noteSubscription = this.noteEditorStore.activeNote$.subscribe(note => {
             // If we're switching away from a valid note to another note (or null), save the old one first
             if (this.currentNoteId && (!note || note.id !== this.currentNoteId)) {
@@ -128,12 +129,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             }
         });
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // On editor content change:
         // 1. Broadcast to other components (EditorService)
         // 2. Save position
         // 3. DO NOT AUTOSAVE to DB (Manual save only)
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         this.crepe.on((listener) => {
             listener.updated((ctx, doc, prevDoc) => {
                 // Skip processing if we're currently loading content
@@ -155,17 +156,17 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             });
         });
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Save position before page unload (refresh/close)
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         window.addEventListener('beforeunload', () => {
             this.saveCurrentContent();
             this.saveEditorPosition();
         });
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Listen for Manual Save Requests (Header Button)
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         this.editorService.saveRequest$.subscribe(() => {
             this.saveCurrentContent();
         });
@@ -293,18 +294,26 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                     scrollContainer.scrollTop = pendingPosition.scrollTop;
                 }
 
-                // Restore cursor position
-                const docSize = editorView.state.doc.content.size;
-                const from = Math.min(pendingPosition.cursorFrom, docSize);
-                const to = Math.min(pendingPosition.cursorTo, docSize);
+                // Restore cursor position only if doc has inline content space.
+                const doc = editorView.state.doc;
+                const docSize = doc.content.size;
+
+                if (docSize < 2) {
+                    return;
+                }
+
+                const minPos = 1;
+                const maxPos = Math.max(minPos, docSize - 1);
+                const anchor = Math.max(minPos, Math.min(pendingPosition.cursorFrom, maxPos));
+                const head = Math.max(minPos, Math.min(pendingPosition.cursorTo, maxPos));
 
                 const tr = editorView.state.tr.setSelection(
-                    editorView.state.selection.constructor.create(editorView.state.doc, from, to)
+                    TextSelection.create(doc, anchor, head)
                 );
                 editorView.dispatch(tr);
                 editorView.focus();
 
-                console.log(`[EditorComponent] Restored position: scroll=${pendingPosition.scrollTop}, cursor=${from}-${to}`);
+                console.log(`[EditorComponent] Restored position: scroll=${pendingPosition.scrollTop}, cursor=${anchor}-${head}`);
             } catch (e) {
                 console.warn('[EditorComponent] Failed to restore position:', e);
             }
@@ -384,3 +393,4 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         await this.noteEditorStore.createAndOpenNote('', '');
     }
 }
+
