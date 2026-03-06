@@ -251,6 +251,7 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
     | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
     | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
@@ -1230,6 +1231,10 @@ export class GoKittService {
         openRouterModel?: string;
         temperature?: number;
         maxTokens?: number;
+        reasoningEnabled?: boolean;
+        reasoningEffort?: 'low' | 'medium' | 'high';
+        reasoningMaxTokens?: number;
+        includeReasoning?: boolean;
     }): Promise<{ success: boolean; provider?: string; model?: string; error?: string }> {
         if (!this.wasmLoaded) {
             return { success: false, error: 'WASM not loaded' };
@@ -1327,7 +1332,12 @@ export class GoKittService {
      * @param systemPrompt Optional system override
      * @param onChunk Callback for each generated chunk
      */
-    async goStreamChat(messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void): Promise<{ response: string; error?: string }> {
+    async goStreamChat(
+        messagesJSON: string,
+        systemPrompt: string,
+        onChunk: (chunk: string) => void,
+        onReasoning?: (chunk: string) => void
+    ): Promise<{ response: string; error?: string }> {
         if (!this.wasmLoaded) return { response: '', error: 'WASM not loaded' };
 
         return new Promise((resolve, reject) => {
@@ -1340,6 +1350,9 @@ export class GoKittService {
                 if ('id' in msg && msg.id === id) {
                     if (msg.type === 'GO_STREAM_CHAT_CHUNK') {
                         onChunk(msg.payload.chunk);
+                        return; // do not remove listener
+                    } else if (msg.type === 'GO_STREAM_CHAT_REASONING_CHUNK') {
+                        onReasoning?.(msg.payload.chunk);
                         return; // do not remove listener
                     } else if (msg.type === 'GO_STREAM_CHAT_RESULT') {
                         this._worker?.removeEventListener('message', chunkHandler);
@@ -1788,3 +1801,5 @@ export class GoKittService {
         return this.sendRequest('GLDR_STATS', {});
     }
 }
+
+

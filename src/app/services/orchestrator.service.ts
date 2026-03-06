@@ -1,5 +1,5 @@
-﻿import { Injectable, inject } from '@angular/core';
-import { RlmOrchestratorService } from '../lib/rlm';
+﻿import { Injectable, inject, signal } from '@angular/core';
+import { RlmOrchestratorService, type ActivationResult } from '../lib/rlm';
 import { GoKittService } from './gokitt.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 
@@ -23,13 +23,6 @@ interface AppContext {
 
 /**
  * OrchestratorService - workspace-aware context gathering for chat.
- *
- * The CozoDB-based RLM loop is gone. This service now:
- * 1. Gathers live app context (active note, folder path, entities).
- * 2. Delegates to RlmOrchestratorService.processWithWorkspace which
- *    runs the OM miss-signal check and, if fired, resurfaces context
- *    from notes/episodes via Go WASM tools.
- * 3. Returns the new observation string for injection into the LLM prompt.
  */
 @Injectable({ providedIn: 'root' })
 export class OrchestratorService {
@@ -37,14 +30,12 @@ export class OrchestratorService {
     private readonly goKitt = inject(GoKittService);
     private readonly noteEditorStore = inject(NoteEditorStore);
 
+    // Exposed for UI traces (thinking/tool timeline)
+    readonly lastActivation = signal<ActivationResult | null>(null);
+
     /**
      * Orchestrates context gathering for a chat message using the
      * Go workspace sandbox. Miss signal drives workspace activation.
-     *
-     * @param userPrompt  The user's full chat message text
-     * @param threadId    Active chat thread ID
-     * @param narrativeId Narrative/world scope for episode search
-     * @returns New observation string injected into OM (empty if no miss)
      */
     async orchestrate(userPrompt: string, threadId: string, narrativeId = ''): Promise<string> {
         if (!userPrompt.trim()) return '';
@@ -57,6 +48,8 @@ export class OrchestratorService {
                 scopeId,
                 userPrompt
             );
+
+            this.lastActivation.set(result);
 
             if (result.error) {
                 console.warn('[Orchestrator] Workspace error:', result.error);
@@ -72,6 +65,7 @@ export class OrchestratorService {
 
             return '';
         } catch (err) {
+            this.lastActivation.set({ triggered: false, error: err instanceof Error ? err.message : String(err) });
             console.error('[Orchestrator] orchestrate error:', err);
             return '';
         }
@@ -79,19 +73,13 @@ export class OrchestratorService {
 
     /**
      * Get the OM context block for the current thread (for system prompts).
-     * Returns empty string if no context or service not ready.
      */
     async getContext(threadId: string): Promise<string> {
         return this.orchestrator.getContext(threadId);
     }
 
-    // =========================================================================
-    // App context helpers (previously RetrievalService)
-    // =========================================================================
-
     /**
      * Derive a scope ID from the active note's narrative context.
-     * Falls back to an empty string (world-level scope).
      */
     private deriveScopeId(): string {
         const note = this.noteEditorStore.currentNote();
@@ -99,8 +87,7 @@ export class OrchestratorService {
     }
 
     /**
-     * Build a lightweight app context snapshot for display purposes
-     * (no longer used in the core RLM path, kept for UI grounding).
+     * Build a lightweight app context snapshot for display purposes.
      */
     async getAppContext(): Promise<AppContext | undefined> {
         const note = this.noteEditorStore.currentNote();
@@ -113,11 +100,8 @@ export class OrchestratorService {
             worldId: note.worldId ?? '',
             narrativeId: note.narrativeId ?? null,
             folderId: note.folderId ?? null,
-            // Folder ancestors and nearby entities require store queries;
-            // return empty until a dedicated GoKitt store API is wired.
             folderPath: [],
             nearbyEntities: [],
         };
     }
 }
-

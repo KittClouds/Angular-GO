@@ -237,6 +237,7 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_APPEND_MESSAGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_START_STREAMING_RESULT'; id: number; payload: any }
     | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
     | { type: 'CHAT_GET_MEMORIES_RESULT'; id: number; payload: any }
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
@@ -448,7 +449,7 @@ declare const GoKitt: {
     extractEntities: (text: string) => Promise<string>;
     extractRelations: (text: string, knownEntitiesJSON?: string) => Promise<string>;
     agentChatWithTools: (messagesJSON: string, toolsJSON: string, systemPrompt?: string) => Promise<string>;
-    goStreamChat: (messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void) => Promise<string>;
+    goStreamChat: (messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void, onReasoning?: (chunk: string) => void) => Promise<string>;
     // Phase 7: Observational Memory + Chat Service
     chatInit: (configJSON: string) => string;
     chatCreateThread: (worldId: string, narrativeId: string) => string;
@@ -2803,8 +2804,11 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     const response = await GoKitt.goStreamChat(
                         msg.payload.messagesJSON,
                         msg.payload.systemPrompt || '',
-                        (chunk) => {
+                        (chunk: string) => {
                             self.postMessage({ type: 'GO_STREAM_CHAT_CHUNK', id: msg.id, payload: { chunk } });
+                        },
+                        (chunk: string) => {
+                            self.postMessage({ type: 'GO_STREAM_CHAT_REASONING_CHUNK', id: msg.id, payload: { chunk } });
                         }
                     );
                     self.postMessage({ type: 'GO_STREAM_CHAT_RESULT', id: msg.id, payload: { response } });
@@ -2914,3 +2918,4 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 };
 
 console.log('[GoKittWorker] Worker loaded - waiting for INIT');
+

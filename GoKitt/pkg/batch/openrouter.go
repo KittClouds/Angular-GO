@@ -13,11 +13,12 @@ import (
 
 // openRouterRequest represents the request body for OpenRouter API.
 type openRouterRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openRouterMsg `json:"messages"`
-	Temperature float64         `json:"temperature"`
-	MaxTokens   int             `json:"max_tokens"`
-	Stream      bool            `json:"stream"`
+	Model       string                 `json:"model"`
+	Messages    []openRouterMsg        `json:"messages"`
+	Temperature float64                `json:"temperature"`
+	MaxTokens   int                    `json:"max_tokens"`
+	Stream      bool                   `json:"stream"`
+	Reasoning   map[string]interface{} `json:"reasoning,omitempty"`
 }
 
 type openRouterMsg struct {
@@ -29,7 +30,9 @@ type openRouterMsg struct {
 type openRouterResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
@@ -70,7 +73,8 @@ func (s *Service) callOpenRouter(_ context.Context, userPrompt, systemPrompt str
 		Messages:    messages,
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
-		Stream:      false, // EXPLICITLY NO STREAMING
+		Stream:      false,
+		Reasoning:   s.buildReasoningConfig(),
 	}
 
 	reqBody, err := json.Marshal(req)

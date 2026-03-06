@@ -23,11 +23,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw } from 'lucide-angular';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
-import { GoChatService, type Thread, type ThreadMessage } from '../../../lib/services/go-chat.service';
+import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage } from '../../../lib/services/go-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
-import type { OpenRouterMessage } from '../../../lib/services/go-chat.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
+import type { ActivationResult } from '../../../lib/rlm';
 
 // Import quikchat (vanilla JS lib)
 declare const quikchat: any;
@@ -39,6 +39,14 @@ interface SessionInfo {
     preview?: string;
 }
 
+interface ActivityTraceStep {
+    id: string;
+    kind: 'reasoning' | 'tool' | 'stream' | 'status';
+    label: string;
+    detail?: string;
+    status: 'running' | 'done' | 'error';
+    latencyMs?: number;
+}
 const KAMMI_SYSTEM_PROMPT = `You are Kammi, a spunky and helpful AI assistant for KittClouds, a world-building and narrative design application.
 
 Your personality:
@@ -251,6 +259,55 @@ Keep responses concise but helpful. If you don't know something specific about t
                                 />
                             </div>
                         </div>
+
+                        <!-- OpenRouter Reasoning Controls -->
+                        <div class="mt-2 p-2 rounded-md border border-teal-500/20 bg-teal-950/20 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="text-xs font-medium">Reasoning</label>
+                                    <p class="text-[10px] text-muted-foreground">Show model reasoning summaries and richer thought flow.</p>
+                                </div>
+                                <button
+                                    class="relative w-11 h-6 rounded-full transition-colors"
+                                    [class.bg-teal-600]="reasoningEnabledInput()"
+                                    [class.bg-muted]="!reasoningEnabledInput()"
+                                    (click)="reasoningEnabledInput.set(!reasoningEnabledInput())"
+                                >
+                                    <span
+                                        class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm"
+                                        [class.translate-x-5]="reasoningEnabledInput()"
+                                    ></span>
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="space-y-1">
+                                    <label class="text-[10px] text-muted-foreground">Reasoning Effort</label>
+                                    <select
+                                        class="w-full px-2 py-1.5 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                        [value]="reasoningEffortInput()"
+                                        (change)="reasoningEffortInput.set($any($event.target).value)"
+                                    >
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                </div>
+                                <div class="space-y-1">
+                                    <label class="text-[10px] text-muted-foreground flex justify-between">
+                                        <span>Reasoning Tokens</span>
+                                        <span>{{ reasoningMaxTokensInput() }}</span>
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="0" max="8192" step="128"
+                                        class="w-full"
+                                        [value]="reasoningMaxTokensInput()"
+                                        (input)="reasoningMaxTokensInput.set(+$any($event.target).value)"
+                                    />
+                                </div>
+                            </div>
+                        </div>
                     }
 
                     <!-- Index Mode Toggle -->
@@ -458,6 +515,104 @@ Keep responses concise but helpful. If you don't know something specific about t
             flex-direction: column !important;
             overflow: hidden !important;
         }
+
+        :host ::ng-deep .inline-trace {
+            display: grid;
+            gap: 10px;
+        }
+
+        :host ::ng-deep .inline-trace-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        :host ::ng-deep .inline-trace-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #67e8f9;
+        }
+
+        :host ::ng-deep .inline-trace-title .brain-mark {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 9999px;
+            background: rgba(20, 184, 166, 0.14);
+            border: 1px solid rgba(45, 212, 191, 0.2);
+            color: #5eead4;
+            font-size: 12px;
+        }
+
+        :host ::ng-deep .inline-trace-status {
+            font-size: 11px;
+            color: hsl(var(--muted-foreground));
+        }
+
+        :host ::ng-deep .inline-trace-steps {
+            display: grid;
+            gap: 8px;
+        }
+
+        :host ::ng-deep .inline-trace-step {
+            display: grid;
+            grid-template-columns: 10px 1fr auto;
+            gap: 8px;
+            align-items: start;
+            padding: 8px 10px;
+            border: 1px solid rgba(39, 39, 42, 0.9);
+            border-radius: 12px;
+            background: rgba(9, 9, 11, 0.52);
+        }
+
+        :host ::ng-deep .inline-trace-dot {
+            width: 8px;
+            height: 8px;
+            margin-top: 4px;
+            border-radius: 9999px;
+            background: rgba(20, 184, 166, 0.55);
+            box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+        }
+
+        :host ::ng-deep .inline-trace-step.running .inline-trace-dot {
+            background: rgb(45, 212, 191);
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15), 0 0 12px rgba(45, 212, 191, 0.35);
+        }
+
+        :host ::ng-deep .inline-trace-step.error .inline-trace-dot {
+            background: rgb(248, 113, 113);
+            box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.15);
+        }
+
+        :host ::ng-deep .inline-trace-step-title {
+            font-size: 15px;
+            line-height: 1.25;
+            color: hsl(var(--foreground));
+        }
+
+        :host ::ng-deep .inline-trace-step-detail {
+            margin-top: 2px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: hsl(var(--muted-foreground));
+            word-break: break-word;
+        }
+
+        :host ::ng-deep .inline-trace-step-latency {
+            font-size: 11px;
+            color: hsl(var(--muted-foreground));
+            white-space: nowrap;
+        }
+
+
 
         /* ============================================
            QUIKCHAT OVERRIDES - Premium Teal Theme
@@ -730,6 +885,16 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     selectedModel = signal('nvidia/nemotron-3-nano-30b-a3b:free');
     temperatureInput = signal(0.7);
     maxTokensInput = signal(2048);
+    reasoningEnabledInput = signal(true);
+    reasoningEffortInput = signal<'low' | 'medium' | 'high'>('medium');
+    reasoningMaxTokensInput = signal(1024);
+
+    // Per-message activity/timeline state (inline chat trace)
+    activitySteps = signal<ActivityTraceStep[]>([]);
+    private traceCounter = 0;
+    private readonly traceStartedAt = new Map<string, number>();
+    private currentTraceMsgId: number | null = null;
+
 
     // Persisted model list — seed + user-added models
     private readonly MODELS_KEY = 'openrouter:models';
@@ -769,7 +934,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         this.loadQuikChat();
 
         // Pre-fill Go OpenRouter config from saved openrouter:config (shared key store)
-        const savedOrConfig = getSetting<{ apiKey?: string; model?: string; temperature?: number; maxTokens?: number } | null>('openrouter:config', null);
+        const savedOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
         if (savedOrConfig) {
             this.apiKeyInput.set(savedOrConfig.apiKey || '');
             const restoredModel = savedOrConfig.model || 'nvidia/nemotron-3-nano-30b-a3b:free';
@@ -781,6 +946,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             }
             this.temperatureInput.set(savedOrConfig.temperature ?? 0.7);
             this.maxTokensInput.set(savedOrConfig.maxTokens ?? 2048);
+            this.reasoningEnabledInput.set(savedOrConfig.reasoningEnabled ?? true);
+            this.reasoningEffortInput.set(savedOrConfig.reasoningEffort ?? 'medium');
+            this.reasoningMaxTokensInput.set(savedOrConfig.reasoningMaxTokens ?? 1024);
         }
 
         const googleConfig = this.googleGenAI.config();
@@ -802,6 +970,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (savedPrompt) {
             this.systemPromptInput.set(savedPrompt);
         }
+
+        const savedIndexMode = getSetting<boolean>('chat:indexMode', false);
+        this.indexEnabled.set(savedIndexMode);
     }
 
     /**
@@ -831,12 +1002,15 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     saveSettings(): void {
         // Persist Go OpenRouter config to the shared openrouter:config key
         if (this.apiKeyInput()) {
-            const orConfig = {
+            const orConfig: ChatConfig = {
                 apiKey: this.apiKeyInput(),
                 model: this.selectedModel(),
                 temperature: this.temperatureInput(),
                 maxTokens: this.maxTokensInput(),
-                systemPrompt: this.systemPromptInput(),
+                reasoningEnabled: this.reasoningEnabledInput(),
+                reasoningEffort: this.reasoningEffortInput(),
+                reasoningMaxTokens: this.reasoningMaxTokensInput(),
+                includeReasoning: this.reasoningEnabledInput(),
             };
             setSetting('openrouter:config', orConfig);
 
@@ -846,6 +1020,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 model: orConfig.model,
                 temperature: orConfig.temperature,
                 maxTokens: orConfig.maxTokens,
+                reasoningEnabled: orConfig.reasoningEnabled,
+                reasoningEffort: orConfig.reasoningEffort,
+                reasoningMaxTokens: orConfig.reasoningMaxTokens,
+                includeReasoning: orConfig.includeReasoning,
                 omEnabled: true,
             });
         }
@@ -876,6 +1054,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     toggleIndexMode(): void {
         this.indexEnabled.update(v => !v);
+        setSetting('chat:indexMode', this.indexEnabled());
         console.log('[AiChatPanel] Index mode:', this.indexEnabled() ? 'ON' : 'OFF');
     }
 
@@ -955,6 +1134,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     async selectSession(sessionId: string): Promise<void> {
         await this.goChatService.loadThread(sessionId);
         this.showHistory.set(false);
+        this.currentTraceMsgId = null;
+        this.activitySteps.set([]);
 
         // Reload chat with new session messages
         this.reloadChatFromService();
@@ -1024,6 +1205,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             sendButtonText: '→',
         });
 
+        this.applyChatInputAccessibilityFix(container);
+
         // Restore history
         this.restoreHistory();
 
@@ -1035,6 +1218,41 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 'left'
             );
         }
+    }
+
+    private applyChatInputAccessibilityFix(container: HTMLElement): void {
+        requestAnimationFrame(() => {
+            const input = container.querySelector<HTMLInputElement>('input.input-area');
+            if (!input) return;
+
+            if (!input.id) {
+                input.id = 'kammi-chat-input';
+            }
+            if (!input.name) {
+                input.name = 'kammi-chat-input';
+            }
+            if (!input.getAttribute('aria-label')) {
+                input.setAttribute('aria-label', 'Ask Kammi anything');
+            }
+
+            const existingLabel = container.querySelector(`label[for="${input.id}"][data-kammi-chat-label="true"]`);
+            if (existingLabel) return;
+
+            const label = document.createElement('label');
+            label.htmlFor = input.id;
+            label.textContent = 'Ask Kammi anything';
+            label.setAttribute('data-kammi-chat-label', 'true');
+            label.style.position = 'absolute';
+            label.style.width = '1px';
+            label.style.height = '1px';
+            label.style.padding = '0';
+            label.style.margin = '-1px';
+            label.style.overflow = 'hidden';
+            label.style.clip = 'rect(0, 0, 0, 0)';
+            label.style.whiteSpace = 'nowrap';
+            label.style.border = '0';
+            input.parentElement?.insertBefore(label, input);
+        });
     }
 
     private restoreHistory(): void {
@@ -1053,66 +1271,86 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private async onUserMessage(instance: any, text: string): Promise<void> {
         if (!text.trim()) return;
 
-        // Add user message to UI and persist via Go
         instance.messageAddNew(text, 'You', 'right');
         await this.goChatService.addUserMessage(text);
 
-        // Check if any provider is configured
+        const thinkingStepId = this.startActivityTrace(instance);
+
         const googleConfigured = this.googleGenAI.isConfigured();
         const openRouterConfigured = this.isGoConfigured();
 
         if (!googleConfigured && !openRouterConfigured) {
+            this.finishActivityStep(thinkingStepId, 'error', 'AI provider is not configured.');
             instance.messageAddNew(
-                '⚠️ Please configure an API key in settings (gear icon) to enable AI responses.',
+                '[Warning] Please configure an API key in settings (gear icon) to enable AI responses.',
                 'Kammi',
                 'left'
             );
             return;
         }
 
-        // Create empty bot message for streaming
-        const botMsgId = instance.messageAddNew('', 'Kammi', 'left');
-        this.currentBotMsgId = botMsgId;
-
-        // --- ORCHESTRATOR LAYER ---
         let contextBlock = '';
-        if (this.indexEnabled()) {
-            try {
-                // Show thinking indicator
-                instance.messageReplaceContent(botMsgId, '🧠 Thinking...');
+        let activation: ActivationResult | null = null;
 
+        if (this.indexEnabled()) {
+            const indexStepId = this.addActivityStep('tool', 'Reading notes', 'Searching the workspace for note context...');
+            try {
                 const threadId = this.goChatService.currentThread()?.id || 'default';
                 contextBlock = await this.orchestrator.orchestrate(text, threadId);
-
-                // Clear thinking indicator
-                instance.messageReplaceContent(botMsgId, '');
+                activation = this.orchestrator.lastActivation();
+                this.mapActivationToActivity(indexStepId, activation, contextBlock);
             } catch (err) {
                 console.error('[AiChatPanel] Orchestrator error:', err);
-                // Clear on error to proceed with normal chat
-                instance.messageReplaceContent(botMsgId, '');
+                this.finishActivityStep(indexStepId, 'error', this.toErrorMessage(err));
             }
         }
 
-        // Build conversation history for context
-        const history = this.buildConversationHistory(text);
-
         const highlightedClips = this.chatContextClipStore.consumeAll();
         const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
+        if (highlightedClips.length > 0) {
+            this.addCompletedStep(
+                'tool',
+                highlightedClips.length === 1 ? 'Using highlighted text' : `Using ${highlightedClips.length} highlighted passages`,
+                'Injected highlighted note snippets into this turn.'
+            );
+        }
 
-        // Inject orchestrator context and highlighted-text clips for THIS turn
+        const history = this.buildConversationHistory();
         const effectiveSystemPrompt = this.systemPromptInput()
             + (contextBlock ? '\n\n' + contextBlock : '')
             + (highlightedContext ? '\n\n' + highlightedContext : '');
+        const thinkingSummary = this.buildThinkingSummary(contextBlock, highlightedClips.length, activation);
+        const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
+            ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
+            : null;
+        this.finishActivityStep(thinkingStepId, 'done', thinkingSummary);
 
-        // Always use streaming chat - RLM context already injected into effectiveSystemPrompt
-        await this.handleStreamingChat(instance, botMsgId, history, effectiveSystemPrompt);
+        const botMsgId = instance.messageAddNew('', 'Kammi', 'left');
+        this.currentBotMsgId = botMsgId;
+
+        const streamStepId = this.addActivityStep('stream', 'Responding', 'Writing the answer...');
+        await this.handleStreamingChat(
+            instance,
+            botMsgId,
+            history,
+            effectiveSystemPrompt,
+            (event) => {
+                this.applyProgressEvent(streamStepId, event);
+            },
+            reasoningStepId ? (chunk) => this.appendActivityStepDetail(reasoningStepId, chunk) : undefined
+        );
+        if (reasoningStepId) {
+            this.finalizeReasoningStep(reasoningStepId);
+        }
     }
 
     private async handleStreamingChat(
         instance: any,
         botMsgId: string,
         history: OpenRouterMessage[],
-        systemPrompt: string
+        systemPrompt: string,
+        onEvent?: (event: ChatProgressEvent) => void,
+        onReasoningChunk?: (chunk: string) => void
     ): Promise<void> {
         if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
             const googleHistory: GoogleGenAIMessage[] = history
@@ -1122,43 +1360,277 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     parts: [{ text: msg.content || '' }]
                 }));
 
+            onEvent?.({ stage: 'stream', status: 'running', detail: 'Generating answer...' });
             await this.googleGenAI.streamChat(googleHistory, {
                 onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
                 onComplete: async (response) => {
                     await this.goChatService.addAssistantMessage(response);
                     this.currentBotMsgId = null;
+                    onEvent?.({ stage: 'stream', status: 'done', detail: 'Answer complete.' });
                 },
                 onError: (error) => {
                     console.error('[AiChatPanel] Google GenAI error:', error);
-                    instance.messageReplaceContent(botMsgId, `❌ Error: ${error.message}`);
+                    instance.messageReplaceContent(botMsgId, `Error: ${error.message}`);
                     this.currentBotMsgId = null;
+                    onEvent?.({ stage: 'stream', status: 'error', detail: error.message });
                 },
             }, systemPrompt);
         } else {
-            // Default: Go OpenRouter via WASM bridge
             await this.goChatService.streamChat(history, {
                 onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
+                onReasoningChunk,
                 onComplete: async (response) => {
                     await this.goChatService.addAssistantMessage(response);
                     this.currentBotMsgId = null;
                 },
                 onError: (error) => {
                     console.error('[AiChatPanel] Go stream error:', error);
-                    instance.messageReplaceContent(botMsgId, `❌ Error from Go: ${error.message}`);
+                    instance.messageReplaceContent(botMsgId, `Error from Go: ${error.message}`);
                     this.currentBotMsgId = null;
                 },
+                onEvent,
             }, systemPrompt);
         }
     }
 
-    private buildConversationHistory(currentMessage: string): OpenRouterMessage[] {
-        const messages: OpenRouterMessage[] = this.goChatService.messages()
+    private buildConversationHistory(): OpenRouterMessage[] {
+        return this.goChatService.messages()
             .slice(-10)
             .filter(m => m.role === 'user' || m.role === 'assistant')
             .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+    }
 
-        messages.push({ role: 'user', content: currentMessage });
-        return messages;
+    private startActivityTrace(instance: any): string {
+        this.traceCounter = 0;
+        this.traceStartedAt.clear();
+        this.activitySteps.set([]);
+        this.currentTraceMsgId = instance.messageAddNew(this.renderActivityTraceMarkup(), 'Kammi', 'left');
+        return this.addActivityStep(
+            'reasoning',
+            'Thinking',
+            this.reasoningEnabledInput() && this.activeProvider() === 'go-openrouter'
+                ? 'Reasoning through your request...'
+                : 'Reading your request...'
+        );
+    }
+
+    private addActivityStep(
+        kind: ActivityTraceStep['kind'],
+        label: string,
+        detail?: string
+    ): string {
+        const id = `step-${++this.traceCounter}`;
+        this.traceStartedAt.set(id, Date.now());
+        this.activitySteps.update((steps) => [...steps, { id, kind, label, detail, status: 'running' }]);
+        this.syncActivityTrace();
+        return id;
+    }
+
+    private addCompletedStep(
+        kind: ActivityTraceStep['kind'],
+        label: string,
+        detail?: string,
+        status: 'done' | 'error' = 'done',
+        latencyMs?: number
+    ): void {
+        const id = `step-${++this.traceCounter}`;
+        this.activitySteps.update((steps) => [...steps, { id, kind, label, detail, status, latencyMs }]);
+        this.syncActivityTrace();
+    }
+    private finishActivityStep(
+        id: string,
+        status: ActivityTraceStep['status'],
+        detail?: string,
+        latencyMs?: number
+    ): void {
+        const startedAt = this.traceStartedAt.get(id);
+        const measuredLatency = latencyMs ?? (startedAt ? Date.now() - startedAt : undefined);
+        this.traceStartedAt.delete(id);
+
+        this.activitySteps.update((steps) =>
+            steps.map((step) => {
+                if (step.id !== id) return step;
+                return {
+                    ...step,
+                    status,
+                    detail: detail ?? step.detail,
+                    latencyMs: measuredLatency,
+                };
+            })
+        );
+        this.syncActivityTrace();
+    }
+
+    private appendActivityStepDetail(stepId: string, chunk: string): void {
+        this.activitySteps.update((steps) =>
+            steps.map((step) => {
+                if (step.id !== stepId) return step;
+                const nextDetail = step.detail === 'Waiting for model reasoning...'
+                    ? chunk
+                    : `${step.detail || ''}${chunk}`;
+                return {
+                    ...step,
+                    detail: nextDetail,
+                };
+            })
+        );
+        this.syncActivityTrace();
+    }
+    private finalizeReasoningStep(stepId: string): void {
+        const step = this.activitySteps().find((item) => item.id === stepId);
+        if (!step) return;
+        const detail = step.detail === 'Waiting for model reasoning...'
+            ? 'Reasoning was enabled, but the model did not return reasoning tokens.'
+            : step.detail;
+        this.finishActivityStep(stepId, 'done', detail);
+    }
+    private applyProgressEvent(stepId: string, event: ChatProgressEvent): void {
+        if (event.status === 'running') {
+            this.activitySteps.update((steps) =>
+                steps.map((step) => {
+                    if (step.id !== stepId) return step;
+                    return {
+                        ...step,
+                        detail: event.detail ?? step.detail,
+                    };
+                })
+            );
+            this.syncActivityTrace();
+            return;
+        }
+
+        this.finishActivityStep(stepId, event.status, event.detail);
+    }
+
+    private mapActivationToActivity(
+        indexStepId: string,
+        activation: ActivationResult | null,
+        contextBlock: string
+    ): void {
+        if (!activation) {
+            this.finishActivityStep(indexStepId, 'done', contextBlock ? 'Relevant note context was found.' : 'Workspace check complete.');
+            return;
+        }
+
+        if (activation.error) {
+            this.finishActivityStep(indexStepId, 'error', activation.error);
+            return;
+        }
+
+        if (!activation.triggered) {
+            this.finishActivityStep(indexStepId, 'done', activation.miss_reason || 'No extra note context was needed.');
+            return;
+        }
+
+        const summary = activation.summary
+            || activation.miss_reason
+            || (contextBlock ? 'Relevant note context was injected.' : 'Context was injected from index mode.');
+
+        this.finishActivityStep(indexStepId, 'done', summary);
+
+        for (const call of activation.tool_calls || []) {
+            this.addCompletedStep(
+                'tool',
+                `Tool: ${this.prettyToolName(call.tool)}` ,
+                call.ok ? 'Completed successfully.' : (call.error || 'Tool failed.'),
+                call.ok ? 'done' : 'error',
+                call.lat_ms
+            );
+        }
+    }
+
+    private buildThinkingSummary(
+        contextBlock: string,
+        highlightedCount: number,
+        activation: ActivationResult | null
+    ): string {
+        const parts: string[] = [];
+
+        if (contextBlock || activation?.triggered) {
+            parts.push('used note context');
+        }
+
+        if (highlightedCount > 0) {
+            parts.push(highlightedCount === 1 ? 'included highlighted text' : `included ${highlightedCount} highlighted passages`);
+        }
+
+        const toolCount = activation?.tool_calls?.length ?? 0;
+        if (toolCount > 0) {
+            parts.push(toolCount === 1 ? 'ran 1 tool' : `ran ${toolCount} tools`);
+        }
+
+        if (parts.length === 0) {
+            return 'Ready to answer.';
+        }
+
+        const sentence = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+        return parts.length === 1 ? `${sentence}.` : `${sentence} and ${parts.slice(1).join(' and ')}.`;
+    }
+
+    private syncActivityTrace(): void {
+        if (!this.chat || this.currentTraceMsgId === null) return;
+        this.chat.messageReplaceContent(this.currentTraceMsgId, this.renderActivityTraceMarkup());
+    }
+
+    private renderActivityTraceMarkup(): string {
+        const steps = this.activitySteps();
+        const statusText = this.getActivityStatusText();
+        const stepMarkup = steps.map((step) => {
+            const detail = step.detail ? `<div class="inline-trace-step-detail">${this.escapeHtml(step.detail)}</div>` : '';
+            const latency = step.latencyMs !== undefined ? `<span class="inline-trace-step-latency">${step.latencyMs}ms</span>` : '';
+            return [
+                `<div class="inline-trace-step ${step.status}">`,
+                '<div class="inline-trace-dot"></div>',
+                '<div>',
+                `<div class="inline-trace-step-title">${this.escapeHtml(step.label)}</div>`,
+                detail,
+                '</div>',
+                latency,
+                '</div>'
+            ].join('');
+        }).join('');
+
+        return [
+            '<div class="inline-trace">',
+            '<div class="inline-trace-header">',
+            '<div class="inline-trace-title"><span class="brain-mark">*</span><span>Thinking</span></div>',
+            `<div class="inline-trace-status">${this.escapeHtml(statusText)}</div>`,
+            '</div>',
+            `<div class="inline-trace-steps">${stepMarkup}</div>`,
+            '</div>'
+        ].join('');
+    }
+
+    private getActivityStatusText(): string {
+        const steps = this.activitySteps();
+        if (steps.length === 0) return 'Starting';
+
+        for (let i = steps.length - 1; i >= 0; i--) {
+            if (steps[i].status === 'running') return steps[i].label;
+        }
+
+        return steps.some((step) => step.status === 'error') ? 'Completed with issues' : 'Done';
+    }
+
+    private prettyToolName(name: string): string {
+        return name
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\b\w/g, (m) => m.toUpperCase());
+    }
+
+    private escapeHtml(value: string): string {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    private toErrorMessage(err: unknown): string {
+        return err instanceof Error ? err.message : String(err);
     }
 
     // -------------------------------------------------------------------------
@@ -1167,6 +1639,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     async newSession(): Promise<void> {
         await this.goChatService.newSession();
+        this.currentTraceMsgId = null;
+        this.activitySteps.set([]);
         if (this.chat) {
             this.chatContainer.nativeElement.innerHTML = '';
             this.initializeChat();
@@ -1175,6 +1649,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     async clearChat(): Promise<void> {
         await this.goChatService.clearThread();
+        this.currentTraceMsgId = null;
+        this.activitySteps.set([]);
         if (this.chat) {
             this.chatContainer.nativeElement.innerHTML = '';
             this.initializeChat();
@@ -1193,6 +1669,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         URL.revokeObjectURL(url);
     }
 }
+
+
 
 
 

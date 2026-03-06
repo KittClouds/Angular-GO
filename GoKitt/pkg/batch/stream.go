@@ -18,11 +18,12 @@ type StreamChatMessage struct {
 }
 
 // StreamChat performs a streaming OpenRouter API call.
-// It calls onChunk(chunk string) for each SSE delta, and returns the full response.
+// It calls onChunk for answer deltas and onReasoning for reasoning deltas.
 func (s *Service) StreamChat(
 	messagesJSON string,
 	systemPrompt string,
 	onChunk func(chunk string),
+	onReasoning func(chunk string),
 ) (string, error) {
 	if !s.IsConfigured() {
 		return "", fmt.Errorf("batch: provider not configured")
@@ -31,13 +32,11 @@ func (s *Service) StreamChat(
 		return "", fmt.Errorf("batch: streaming chat only supported via OpenRouter")
 	}
 
-	// Parse messages
 	var messages []StreamChatMessage
 	if err := json.Unmarshal([]byte(messagesJSON), &messages); err != nil {
 		return "", fmt.Errorf("batch: invalid messages JSON: %w", err)
 	}
 
-	// Prepend system prompt
 	fullMessages := make([]StreamChatMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
 		fullMessages = append(fullMessages, StreamChatMessage{
@@ -56,7 +55,6 @@ func (s *Service) StreamChat(
 		maxTokens = s.config.MaxTokens
 	}
 
-	// Build request body with stream: true
 	reqMap := map[string]interface{}{
 		"model":       s.config.OpenRouterModel,
 		"messages":    fullMessages,
@@ -64,6 +62,10 @@ func (s *Service) StreamChat(
 		"max_tokens":  maxTokens,
 		"stream":      true,
 	}
+	if reasoning := s.buildReasoningConfig(); reasoning != nil {
+		reqMap["reasoning"] = reasoning
+	}
+
 	reqBody, err := json.Marshal(reqMap)
 	if err != nil {
 		return "", fmt.Errorf("batch: failed to marshal stream request: %w", err)
@@ -74,12 +76,18 @@ func (s *Service) StreamChat(
 		string(reqBody),
 		s.config.OpenRouterAPIKey,
 		onChunk,
+		onReasoning,
 	)
 }
 
 // jsFetchStreaming performs a fetch with streaming SSE response parsing.
-// Uses a channel-per-chunk pattern to flatten JS promise chains into Go control flow.
-func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string)) (string, error) {
+func (s *Service) jsFetchStreaming(
+	url string,
+	body string,
+	apiKey string,
+	onChunk func(string),
+	onReasoning func(string),
+) (string, error) {
 	fetch := js.Global().Get("fetch")
 	if fetch.IsUndefined() {
 		return "", fmt.Errorf("batch: fetch not available")
@@ -87,7 +95,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 
 	origin := js.Global().Get("location").Get("origin").String()
 
-	// Build request options
 	headers := js.Global().Get("Object").New()
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
@@ -99,7 +106,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	options.Set("headers", headers)
 	options.Set("body", body)
 
-	// Step 1: Await the fetch() promise to get the Response object
 	responseCh := make(chan struct {
 		val js.Value
 		err error
@@ -131,8 +137,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 
 	fetchResult := <-responseCh
 	go func() {
-		// Wait long enough for the Promise resolution cycle to fully complete in JS land
-		// before releasing the callbacks, avoiding "call to released function" errors.
 		time.Sleep(50 * time.Millisecond)
 		fetchThen.Release()
 		fetchCatch.Release()
@@ -143,11 +147,8 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	}
 
 	response := fetchResult.val
-
-	// Check HTTP status
 	if !response.Get("ok").Bool() {
 		status := response.Get("status").Int()
-		// Read error body
 		errCh := make(chan string, 1)
 		errThen := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 			errMsg := args[0].String()
@@ -159,14 +160,12 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		response.Call("text").Call("then", errThen)
 		errText := <-errCh
 		go func() {
-			// Wait long enough for the Promise resolution cycle to fully complete in JS land
 			time.Sleep(50 * time.Millisecond)
 			errThen.Release()
 		}()
 		return "", fmt.Errorf("HTTP %d: %s", status, errText)
 	}
 
-	// Step 2: Get the ReadableStream reader
 	bodyStream := response.Get("body")
 	if bodyStream.IsNull() || bodyStream.IsUndefined() {
 		return "", fmt.Errorf("batch: no response body for streaming")
@@ -174,7 +173,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 	reader := bodyStream.Call("getReader")
 	decoder := js.Global().Get("TextDecoder").New("utf-8")
 
-	// Step 3: Read chunks in a loop using channels
 	var fullResponse strings.Builder
 	var lineBuffer string
 
@@ -218,10 +216,8 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		return nil
 	})
 
-	// Defer cleanup of read functions
 	defer func() {
 		go func() {
-			// Wait long enough for the Promise resolution cycle to fully complete in JS land
 			time.Sleep(50 * time.Millisecond)
 			readThen.Release()
 			readCatch.Release()
@@ -232,7 +228,6 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 		reader.Call("read").Call("then", readThen).Call("catch", readCatch)
 
 		chunkResult := <-chunkCh
-
 		if chunkResult.err != nil {
 			return fullResponse.String(), chunkResult.err
 		}
@@ -240,47 +235,91 @@ func (s *Service) jsFetchStreaming(url, body, apiKey string, onChunk func(string
 			break
 		}
 
-		// Decode the Uint8Array to string
 		decoded := decoder.Call("decode", chunkResult.value, map[string]interface{}{"stream": true}).String()
-
-		// Buffer lines and process complete ones
 		lineBuffer += decoded
 		lines := strings.Split(lineBuffer, "\n")
-		lineBuffer = lines[len(lines)-1] // Keep incomplete last line
+		lineBuffer = lines[len(lines)-1]
 
 		for _, line := range lines[:len(lines)-1] {
 			line = strings.TrimSpace(line)
-			if line == "" {
+			if line == "" || !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
+
 			data := strings.TrimPrefix(line, "data: ")
 			if data == "[DONE]" {
 				return fullResponse.String(), nil
 			}
 
-			// Parse SSE JSON chunk
 			var sseData struct {
 				Choices []struct {
 					Delta struct {
-						Content string `json:"content"`
+						Content          string                   `json:"content"`
+						Reasoning        string                   `json:"reasoning"`
+						ReasoningContent string                   `json:"reasoning_content"`
+						ReasoningDetails []map[string]interface{} `json:"reasoning_details"`
 					} `json:"delta"`
 				} `json:"choices"`
 			}
 			if err := json.Unmarshal([]byte(data), &sseData); err != nil {
 				continue
 			}
-			if len(sseData.Choices) > 0 {
-				content := sseData.Choices[0].Delta.Content
-				if content != "" {
-					fullResponse.WriteString(content)
-					onChunk(content)
-				}
+			if len(sseData.Choices) == 0 {
+				continue
+			}
+
+			delta := sseData.Choices[0].Delta
+			if content := delta.Content; content != "" {
+				fullResponse.WriteString(content)
+				onChunk(content)
+			}
+			if reasoning := extractReasoningDelta(delta.Reasoning, delta.ReasoningContent, delta.ReasoningDetails); reasoning != "" && onReasoning != nil {
+				onReasoning(reasoning)
 			}
 		}
 	}
 
 	return fullResponse.String(), nil
+}
+
+func extractReasoningDelta(reasoning string, reasoningContent string, details []map[string]interface{}) string {
+	if strings.TrimSpace(reasoning) != "" {
+		return reasoning
+	}
+	if strings.TrimSpace(reasoningContent) != "" {
+		return reasoningContent
+	}
+
+	parts := make([]string, 0, len(details))
+	for _, detail := range details {
+		parts = append(parts, collectReasoningStrings(detail["text"])...)
+		parts = append(parts, collectReasoningStrings(detail["summary"])...)
+		parts = append(parts, collectReasoningStrings(detail["content"])...)
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func collectReasoningStrings(value interface{}) []string {
+	switch typed := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		return []string{trimmed}
+	case []interface{}:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			parts = append(parts, collectReasoningStrings(item)...)
+		}
+		return parts
+	case map[string]interface{}:
+		parts := collectReasoningStrings(typed["text"])
+		parts = append(parts, collectReasoningStrings(typed["summary"])...)
+		parts = append(parts, collectReasoningStrings(typed["content"])...)
+		return parts
+	default:
+		return nil
+	}
 }

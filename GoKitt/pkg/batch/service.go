@@ -26,13 +26,17 @@ const (
 
 // Config holds batch LLM settings passed from TypeScript.
 type Config struct {
-	Provider         Provider `json:"provider"`
-	GoogleAPIKey     string   `json:"googleApiKey"`
-	GoogleModel      string   `json:"googleModel"`
-	OpenRouterAPIKey string   `json:"openRouterApiKey"`
-	OpenRouterModel  string   `json:"openRouterModel"`
-	Temperature      float64  `json:"temperature"`
-	MaxTokens        int      `json:"maxTokens"`
+	Provider           Provider `json:"provider"`
+	GoogleAPIKey       string   `json:"googleApiKey"`
+	GoogleModel        string   `json:"googleModel"`
+	OpenRouterAPIKey   string   `json:"openRouterApiKey"`
+	OpenRouterModel    string   `json:"openRouterModel"`
+	Temperature        float64  `json:"temperature"`
+	MaxTokens          int      `json:"maxTokens"`
+	ReasoningEnabled   bool     `json:"reasoningEnabled"`
+	ReasoningEffort    string   `json:"reasoningEffort"`
+	ReasoningMaxTokens int      `json:"reasoningMaxTokens"`
+	IncludeReasoning   bool     `json:"includeReasoning"`
 }
 
 // Service handles non-streaming LLM completions.

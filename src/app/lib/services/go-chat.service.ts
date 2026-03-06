@@ -64,6 +64,10 @@ export interface ChatConfig {
     reflectThreshold?: number;
     temperature?: number;
     maxTokens?: number;
+    reasoningEnabled?: boolean;
+    reasoningEffort?: 'low' | 'medium' | 'high';
+    reasoningMaxTokens?: number;
+    includeReasoning?: boolean;
 }
 
 /** Thread creation options */
@@ -76,6 +80,12 @@ export interface CreateThreadOptions {
 export interface OpenRouterMessage {
     role: 'system' | 'user' | 'assistant';
     content: string | null;
+}
+
+export interface ChatProgressEvent {
+    stage: 'reasoning' | 'stream';
+    status: 'running' | 'done' | 'error';
+    detail?: string;
 }
 
 // =============================================================================
@@ -149,7 +159,11 @@ export class GoChatService {
                     openRouterApiKey: config.apiKey,
                     openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
                     temperature: config.temperature,
-                    maxTokens: config.maxTokens
+                    maxTokens: config.maxTokens,
+                    reasoningEnabled: config.reasoningEnabled,
+                    reasoningEffort: config.reasoningEffort,
+                    reasoningMaxTokens: config.reasoningMaxTokens,
+                    includeReasoning: config.includeReasoning
                 });
                 if (batchResult.error) {
                     console.warn('[GoChatService] Batch init failed:', batchResult.error);
@@ -165,7 +179,11 @@ export class GoChatService {
                 model: config?.model || 'meta-llama/llama-3.3-70b-instruct:free',
                 omEnabled: config?.omEnabled ?? true,
                 observeThreshold: config?.observeThreshold ?? 1000,
-                reflectThreshold: config?.reflectThreshold ?? 4000
+                reflectThreshold: config?.reflectThreshold ?? 4000,
+                reasoningEnabled: config?.reasoningEnabled ?? false,
+                reasoningEffort: config?.reasoningEffort ?? 'medium',
+                reasoningMaxTokens: config?.reasoningMaxTokens ?? 0,
+                includeReasoning: config?.includeReasoning ?? false
             });
 
             const result = await this.goKittService.chatInit(configJSON);
@@ -206,13 +224,34 @@ export class GoChatService {
                 openRouterApiKey: config.apiKey,
                 openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
                 temperature: config.temperature,
-                maxTokens: config.maxTokens
+                maxTokens: config.maxTokens,
+                reasoningEnabled: config.reasoningEnabled,
+                reasoningEffort: config.reasoningEffort,
+                reasoningMaxTokens: config.reasoningMaxTokens,
+                includeReasoning: config.includeReasoning
             });
 
             if (batchResult.error) {
                 console.warn('[GoChatService] Batch re-init failed:', batchResult.error);
             } else {
                 console.log('[GoChatService] Backend LLM model updated to', config.model);
+            }
+
+            // Re-apply chat runtime config (including reasoning controls).
+            const chatConfigJSON = JSON.stringify({
+                apiKey: config.apiKey || '',
+                model: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                omEnabled: config.omEnabled ?? true,
+                observeThreshold: config.observeThreshold ?? 1000,
+                reflectThreshold: config.reflectThreshold ?? 4000,
+                reasoningEnabled: config.reasoningEnabled ?? false,
+                reasoningEffort: config.reasoningEffort ?? 'medium',
+                reasoningMaxTokens: config.reasoningMaxTokens ?? 0,
+                includeReasoning: config.includeReasoning ?? false
+            });
+            const chatResult = await this.goKittService.chatInit(chatConfigJSON);
+            if (chatResult.error) {
+                console.warn('[GoChatService] Chat re-init failed:', chatResult.error);
             }
         } catch (err) {
             console.error('[GoChatService] Update config error:', err);
@@ -660,22 +699,33 @@ export class GoChatService {
      */
     async streamChat(
         messages: any[],
-        callbacks: { onChunk: (chunk: string) => void, onComplete: (full: string) => void, onError: (err: Error) => void },
+        callbacks: {
+            onChunk: (chunk: string) => void,
+            onComplete: (full: string) => void,
+            onError: (err: Error) => void,
+            onReasoningChunk?: (chunk: string) => void,
+            onEvent?: (event: ChatProgressEvent) => void
+        },
         systemPrompt?: string
     ): Promise<void> {
         try {
+            callbacks.onEvent?.({ stage: 'stream', status: 'running', detail: 'Contacting OpenRouter...' });
             const { response, error } = await this.goKittService.goStreamChat(
                 JSON.stringify(messages),
                 systemPrompt || '',
-                (chunk) => callbacks.onChunk(chunk)
+                (chunk) => callbacks.onChunk(chunk),
+                (chunk) => callbacks.onReasoningChunk?.(chunk)
             );
 
             if (error) {
+                callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: error });
                 callbacks.onError(new Error(error));
             } else {
+                callbacks.onEvent?.({ stage: 'stream', status: 'done' });
                 callbacks.onComplete(response);
             }
         } catch (err: any) {
+            callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: String(err) });
             callbacks.onError(err instanceof Error ? err : new Error(String(err)));
         }
     }
@@ -721,3 +771,4 @@ export class GoChatService {
         }
     }
 }
+

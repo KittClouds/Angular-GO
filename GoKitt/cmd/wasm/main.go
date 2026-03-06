@@ -2377,6 +2377,10 @@ func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 		systemPrompt = args[1].String()
 	}
 	onChunkJS := args[2]
+	onReasoningJS := js.Undefined()
+	if len(args) > 3 && args[3].Type() == js.TypeFunction {
+		onReasoningJS = args[3]
+	}
 
 	promise, resolve, reject := makePromise()
 
@@ -2389,6 +2393,10 @@ func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 		fullResponse, err := batchSvc.StreamChat(messagesJSON, systemPrompt, func(chunk string) {
 			// Call the JS onChunk callback with each delta
 			onChunkJS.Invoke(chunk)
+		}, func(reasoning string) {
+			if onReasoningJS.Truthy() {
+				onReasoningJS.Invoke(reasoning)
+			}
 		})
 
 		if err != nil {
