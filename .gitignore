@@ -44,3 +44,7 @@ __screenshots__/
 Thumbs.db
 
 reference_impl/
+
+# Go tools cache
+GoKitt/.codex-go-cache
+GoKitt/.codex-go-tmp
