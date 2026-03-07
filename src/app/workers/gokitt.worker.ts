@@ -153,7 +153,16 @@ type GoKittWorkerMessage =
     | { type: 'KNOWLEDGE_GET_ANCESTORS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
     | { type: 'KNOWLEDGE_GET_DESCENDANTS'; payload: { id: string; relation?: string; maxDepth?: number }; id: number }
     | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD'; payload: { id: string }; id: number }
-    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number };
+    | { type: 'KNOWLEDGE_GET_GRAPH'; id: number }
+    // GLDR API
+    | { type: 'GLDR_INIT'; id: number }
+    | { type: 'GLDR_REGISTER_ENTITY'; payload: { name: string; entityId: string }; id: number }
+    | { type: 'GLDR_INDEX_CHUNK'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string }; id: number }
+    | { type: 'GLDR_ADD_GRAPH_EDGE'; payload: { sourceId: string; edgeJSON: string }; id: number }
+    | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
+    | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_STATS'; id: number }; 
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -291,7 +300,9 @@ type GoKittWorkerResponse =
     | { type: 'KNOWLEDGE_GET_NEIGHBORHOOD_RESULT'; id: number; payload: any[] }
     // GLDR Responses
     | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_REGISTER_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_ADD_GRAPH_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
@@ -490,6 +501,15 @@ declare const GoKitt: {
     knowledgeGetDescendants: (id: string, relation?: string, maxDepth?: number) => string;
     knowledgeGetNeighborhood: (id: string) => string;
     knowledgeGetGraph: () => string;
+    // GLDR API
+    gldrInit: (configJSON?: string) => string;
+    gldrRegisterEntity: (name: string, entityId: string) => string;
+    gldrIndexChunk: (chunkId: string, fieldsJSON: string, mentionsJSON: string) => string;
+    gldrAddGraphEdge: (sourceId: string, edgeJSON: string) => string;
+    gldrLoadCooccurrences: (minCount: number) => string;
+    gldrSearch: (query: string, configJSON?: string) => string;
+    gldrSearchNodes: (query: string, configJSON?: string) => string;
+    gldrStats: () => string;
 };
 
 /**
@@ -2906,6 +2926,97 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 break;
             }
 
+            // =================================================================
+            // GLDR API Handlers
+            // =================================================================
+
+            case 'GLDR_INIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_INIT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.gldrInit();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_INIT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'GLDR_REGISTER_ENTITY': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_REGISTER_ENTITY_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.gldrRegisterEntity(msg.payload.name, msg.payload.entityId);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_REGISTER_ENTITY_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'GLDR_INDEX_CHUNK': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_INDEX_CHUNK_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.gldrIndexChunk(msg.payload.chunkId, msg.payload.fieldsJSON, msg.payload.mentionsJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_INDEX_CHUNK_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'GLDR_ADD_GRAPH_EDGE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_ADD_GRAPH_EDGE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.gldrAddGraphEdge(msg.payload.sourceId, msg.payload.edgeJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_ADD_GRAPH_EDGE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'GLDR_LOAD_COOCCURRENCES': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_LOAD_COOCCURRENCES_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.gldrLoadCooccurrences(msg.payload.minCount);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_LOAD_COOCCURRENCES_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'GLDR_SEARCH': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.gldrSearch(msg.payload.query, msg.payload.configJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'GLDR_SEARCH_NODES': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.gldrSearchNodes(msg.payload.query, msg.payload.configJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'GLDR_STATS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: { entities: 0, chunks: 0, edges: 0 } });
+                    return;
+                }
+                const res = GoKitt.gldrStats();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
         }
     } catch (err) {
         console.error('[GoKittWorker] Error:', err);
@@ -2918,4 +3029,7 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 };
 
 console.log('[GoKittWorker] Worker loaded - waiting for INIT');
+
+
+
 

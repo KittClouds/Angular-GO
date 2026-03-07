@@ -16,18 +16,35 @@ import {
   lucideSearch,
   lucideSparkles,
   lucideZap,
+  lucideSettings2,
 } from '@ng-icons/lucide';
+import { SelectButtonModule } from 'primeng/selectbutton';
+import { InputTextModule } from 'primeng/inputtext';
+import { SelectModule } from 'primeng/select';
+import { ButtonModule } from 'primeng/button';
+import { MultiSelectModule } from 'primeng/multiselect';
+import { TooltipModule } from 'primeng/tooltip';
+import { SelectButtonChangeEvent } from 'primeng/selectbutton';
 
 import { GoKittService, SearchScope } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { SemanticSearchService } from '../../lib/services/semantic-search.service';
+import type { Entity } from '../../lib/dexie/db';
+import { buildScopedCanonicalEntityMap, collectScopedRegistrationNames } from './search-panel.graptor';
 
 type SearchMode = 'notes' | 'vector' | 'graptor';
 type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
 type GraptorStatus = 'idle' | 'building' | 'ready' | 'searching' | 'error';
 type ModelId = 'mdbr-leaf' | 'bge-small' | 'modernbert-base';
 type TruncateDim = 'full' | '256' | '128' | '64';
+
+interface SearchPanelEntity {
+  id: string;
+  label: string;
+  aliases: string[];
+  narrativeId?: string;
+}
 
 interface SearchPanelNote {
   id: string;
@@ -59,7 +76,17 @@ interface GraptorStats {
 @Component({
   selector: 'app-search-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, NgIcon],
+  imports: [
+    CommonModule,
+    FormsModule,
+    NgIcon,
+    SelectButtonModule,
+    InputTextModule,
+    SelectModule,
+    ButtonModule,
+    MultiSelectModule,
+    TooltipModule
+  ],
   providers: [provideIcons({
     lucideAlertCircle,
     lucideChevronDown,
@@ -101,11 +128,19 @@ export class SearchPanelComponent implements OnInit {
   readonly truncateDim = signal<TruncateDim>('full');
   readonly folders = signal<Array<{ id: string; name: string }>>([]);
   readonly notes = signal<SearchPanelNote[]>([]);
+  readonly entities = signal<SearchPanelEntity[]>([]);
 
   readonly modes: Array<{ id: SearchMode; label: string; icon: string }> = [
     { id: 'notes', label: 'Notes', icon: 'lucideSparkles' },
     { id: 'vector', label: 'Vector', icon: 'lucideZap' },
     { id: 'graptor', label: 'Graptor', icon: 'lucideLayers' },
+  ];
+
+  // For PrimeNG SelectButton usage:
+  readonly modeOptions = [
+    { label: 'Notes', value: 'notes' as SearchMode },
+    { label: 'Vector', value: 'vector' as SearchMode },
+    { label: 'Graptor', value: 'graptor' as SearchMode }
   ];
 
   readonly models: Array<{ id: ModelId; label: string; dims: number; desc: string }> = [
@@ -136,6 +171,17 @@ export class SearchPanelComponent implements OnInit {
           content: note.markdownContent || note.content || '',
           narrativeId: note.narrativeId || '',
           folderId: note.folderId || '',
+        })));
+      });
+
+    this.notesService.getAllEntities$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((entities: Entity[]) => {
+        this.entities.set(entities.map((entity) => ({
+          id: entity.id,
+          label: entity.label || '',
+          aliases: entity.aliases || [],
+          narrativeId: entity.narrativeId || '',
         })));
       });
 
@@ -180,6 +226,12 @@ export class SearchPanelComponent implements OnInit {
     }
   }
 
+  onModeChange(event: any): void {
+    if (event.value) {
+      this.activeMode.set(event.value);
+    }
+  }
+
   async loadVectorModel(): Promise<void> {
     this.vectorStatus.set('loading');
     this.error.set(null);
@@ -192,6 +244,7 @@ export class SearchPanelComponent implements OnInit {
       this.error.set(this.toErrorMessage(err));
     }
   }
+
   async indexVectorNotes(): Promise<void> {
     if (this.vectorStatus() !== 'ready' && this.vectorStatus() !== 'error') return;
 
@@ -226,18 +279,26 @@ export class SearchPanelComponent implements OnInit {
 
       const notes = this.scopedNotes();
       for (const note of notes) {
+        const scanText = this.buildGraptorScanText(note);
+        const scanResult = scanText ? await this.goKitt.scan(scanText) : null;
+        const mentions = this.extractGraptorMentions(scanResult);
+
+        await this.registerGraptorEntities(scanResult, mentions);
+
         const indexRes = await this.goKitt.gldrIndexChunk(note.id, {
           title: note.title,
           content: note.content,
-        }, []);
+        }, mentions);
         if (!indexRes.success) {
           throw new Error(indexRes.error || `Failed to index note ${note.title}`);
         }
+
+        await this.ingestGraptorEdges(scanResult);
       }
 
       await this.refreshGraptorStats();
       this.graptorStatus.set('ready');
-      this.notice.set(`Built Graptor index for ${notes.length} notes in the current scope.`);
+      this.notice.set(`Built Graptor index for ${notes.length} notes with canonical entity mentions in the current scope.`);
     } catch (err) {
       this.graptorStatus.set('error');
       this.error.set(this.toErrorMessage(err));
@@ -342,6 +403,60 @@ export class SearchPanelComponent implements OnInit {
     this.graptorStatus.set('ready');
   }
 
+  private buildGraptorScanText(note: SearchPanelNote): string {
+    const content = note.content.trim();
+    const title = note.title.trim();
+    if (!content) return title;
+    if (!title || content.startsWith(title)) return content;
+    return `${title}\n\n${content}`;
+  }
+
+  private extractGraptorMentions(scanResult: any): Array<{ entityId: string; count: number }> {
+    const items = Array.isArray(scanResult?.mentions) ? scanResult.mentions : [];
+    return items
+      .map((item: any) => ({
+        entityId: typeof item?.entityId === 'string' ? item.entityId : '',
+        count: Number(item?.count || 0),
+      }))
+      .filter((item: { entityId: string; count: number }) => item.entityId && item.count > 0);
+  }
+
+  private async registerGraptorEntities(
+    scanResult: any,
+    mentions: Array<{ entityId: string; count: number }>
+  ): Promise<void> {
+    if (!mentions.length) return;
+
+    const graphNodes = scanResult?.graph?.nodes || scanResult?.graph?.Nodes || {};
+    const entityStore = buildScopedCanonicalEntityMap(this.entities(), this.scopedNotes());
+
+    for (const mention of mentions) {
+      const canonical = entityStore.get(mention.entityId);
+      const node = graphNodes[mention.entityId];
+      const names = collectScopedRegistrationNames(mention.entityId, canonical, node);
+
+      for (const name of names) {
+        await this.goKitt.gldrRegisterEntity(name, mention.entityId);
+      }
+    }
+  }
+
+  private async ingestGraptorEdges(scanResult: any): Promise<void> {
+    const edges = scanResult?.graph?.edges || scanResult?.graph?.Edges || [];
+    for (const edge of edges) {
+      const sourceId = edge?.source || edge?.Source;
+      const targetId = edge?.target || edge?.Target;
+      if (!sourceId || !targetId) continue;
+
+      await this.goKitt.gldrAddGraphEdge(sourceId, {
+        targetId,
+        relType: edge?.type || edge?.Type || edge?.relation || 'related_to',
+        confidence: Number(edge?.confidence || edge?.Confidence || edge?.weight || 1),
+        source: 'scanner',
+      });
+    }
+  }
+
   private mapGoResults(rawResults: any[], source: 'notes' | 'vector'): SearchResultView[] {
     const noteMap = new Map(this.notes().map((note) => [note.id, note]));
     const allowedNoteIds = new Set(this.scopedNotes().map((note) => note.id));
@@ -362,6 +477,7 @@ export class SearchPanelComponent implements OnInit {
       .filter((result) => allowedNoteIds.has(result.noteId))
       .slice(0, 12);
   }
+
   private async refreshGraptorStats(): Promise<void> {
     const raw = await this.goKitt.gldrStats();
     this.graptorStats.set(JSON.parse(raw) as GraptorStats);
@@ -393,4 +509,7 @@ export class SearchPanelComponent implements OnInit {
     return err instanceof Error ? err.message : String(err);
   }
 }
+
+
+
 

@@ -1,0 +1,6 @@
+./ahocorasick.go
+./automaton.go
+./builder.go
+./byteclasses.go
+./match.go
+./nfa.go

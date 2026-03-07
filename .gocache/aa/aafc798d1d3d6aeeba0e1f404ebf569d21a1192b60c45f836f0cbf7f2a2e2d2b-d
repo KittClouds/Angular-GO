@@ -1,0 +1,11 @@
+./candidates.go
+./compressed_postings.go
+./indexer.go
+./payload_store.go
+./posting_list.go
+./query.go
+./query_verifier.go
+./scorer.go
+./uint32_pipeline.go
+./verify.go
+./wand.go

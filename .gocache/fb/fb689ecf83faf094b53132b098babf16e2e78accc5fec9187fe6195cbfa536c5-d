@@ -1,0 +1,14 @@
+./automaton.go
+./builder.go
+./common.go
+./decoder_v1.go
+./encoder_v1.go
+./encoding.go
+./fst.go
+./fst_iterator.go
+./merge_iterator.go
+./pack.go
+./registry.go
+./vellum.go
+./wrapper.go
+./writer.go

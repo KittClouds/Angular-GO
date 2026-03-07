@@ -121,7 +121,9 @@ type GoKittWorkerMessage =
     | { type: 'KNOWLEDGE_GET_GRAPH'; id: number }
     // GLDR requests
     | { type: 'GLDR_INIT'; id: number }
+    | { type: 'GLDR_REGISTER_ENTITY'; payload: { name: string; entityId: string }; id: number }
     | { type: 'GLDR_INDEX_CHUNK'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string }; id: number }
+    | { type: 'GLDR_ADD_GRAPH_EDGE'; payload: { sourceId: string; edgeJSON: string }; id: number }
     | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
     | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
@@ -245,7 +247,9 @@ type GoKittWorkerResponse =
     | { type: 'OM_GET_RECORD_RESULT'; id: number; payload: any | null }
     // GLDR Responses
     | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_REGISTER_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_ADD_GRAPH_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
@@ -1084,7 +1088,9 @@ export class GoKittService {
                         case 'KNOWLEDGE_GET_GRAPH_RESULT':
                         // GLDR responses
                         case 'GLDR_INIT_RESULT':
+                        case 'GLDR_REGISTER_ENTITY_RESULT':
                         case 'GLDR_INDEX_CHUNK_RESULT':
+                        case 'GLDR_ADD_GRAPH_EDGE_RESULT':
                         case 'GLDR_LOAD_COOCCURRENCES_RESULT':
                         case 'GLDR_SEARCH_RESULT':
                         case 'GLDR_SEARCH_NODES_RESULT':
@@ -1742,6 +1748,12 @@ export class GoKittService {
         return this.sendRequest('GLDR_INIT', {});
     }
 
+    /** Register a canonical display name for direct GLDR entity anchoring. */
+    async gldrRegisterEntity(name: string, entityId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('GLDR_REGISTER_ENTITY', { name, entityId });
+    }
+
     /**
      * Index a single chunk into GLDR.
      * @param chunkId  Stable chunk identifier (e.g. chapter-3)
@@ -1757,6 +1769,16 @@ export class GoKittService {
         const fieldsJSON = JSON.stringify(fields);
         const mentionsJSON = JSON.stringify(mentions);
         return this.sendRequest('GLDR_INDEX_CHUNK', { chunkId, fieldsJSON, mentionsJSON });
+    }
+
+    /** Add a semantic graph edge between two entities in GLDR. */
+    async gldrAddGraphEdge(
+        sourceId: string,
+        edge: { targetId: string; relType: string; confidence?: number; source?: string }
+    ): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        const edgeJSON = JSON.stringify(edge);
+        return this.sendRequest('GLDR_ADD_GRAPH_EDGE', { sourceId, edgeJSON });
     }
 
     /**
@@ -1801,5 +1823,6 @@ export class GoKittService {
         return this.sendRequest('GLDR_STATS', {});
     }
 }
+
 
 

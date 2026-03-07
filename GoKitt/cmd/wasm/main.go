@@ -200,6 +200,15 @@ func main() {
 		"knowledgeGetDescendants":  js.FuncOf(knowledgeGetDescendants),
 		"knowledgeGetNeighborhood": js.FuncOf(knowledgeGetNeighborhood),
 		"knowledgeGetGraph":        js.FuncOf(knowledgeGetGraph),
+		// GLDR: Graph-Based Lexical Document Retrieval
+		"gldrInit":              js.FuncOf(gldrInit),
+		"gldrRegisterEntity":    js.FuncOf(gldrRegisterEntity),
+		"gldrIndexChunk":        js.FuncOf(gldrIndexChunk),
+		"gldrAddGraphEdge":      js.FuncOf(gldrAddGraphEdge),
+		"gldrLoadCooccurrences": js.FuncOf(gldrLoadCooccurrences),
+		"gldrSearch":            js.FuncOf(gldrSearch),
+		"gldrSearchNodes":       js.FuncOf(gldrSearchNodes),
+		"gldrStats":             js.FuncOf(gldrStats),
 	}))
 
 	select {}
@@ -599,6 +608,7 @@ func scan(this js.Value, args []js.Value) interface{} {
 			"edges": slimEdges,
 		},
 		"timing_us": duration,
+		"mentions":  buildMentionSummaries(&result),
 	}
 
 	jsonBytes, err := json.Marshal(response)
@@ -849,6 +859,7 @@ func scanNote(this js.Value, args []js.Value) interface{} {
 			"edges": slimEdges,
 		},
 		"timing_us": duration,
+		"mentions":  buildMentionSummaries(&result),
 	}
 
 	jsonBytes, err := json.Marshal(response)

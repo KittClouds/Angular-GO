@@ -1,205 +1,329 @@
-<div class="search-panel-shell">
-  <section class="search-panel-hero">
-    <div class="hero-row">
-      <div class="hero-icon">
-        <ng-icon name="lucideSparkles" class="h-5 w-5 text-teal-300"></ng-icon>
+<div class="flex flex-col h-full overflow-hidden p-3 gap-3 bg-sidebar-background w-full">
+
+  <!-- Header Section -->
+  <section
+    class="flex-shrink-0 p-3.5 rounded-xl border border-zinc-700/60 bg-gradient-to-br from-zinc-800/80 to-zinc-900/95 shadow-lg relative overflow-hidden">
+    <!-- background effect -->
+    <div class="absolute -top-12 -left-12 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="flex items-start justify-between gap-2 relative z-10 w-full">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <div
+          class="flex items-center justify-center w-9 h-9 rounded-lg border border-teal-500/20 bg-teal-500/10 shrink-0">
+          <ng-icon name="lucideSparkles" class="h-4 w-4 text-teal-400"></ng-icon>
+        </div>
+        <div class="min-w-0 flex-1 pt-0.5">
+          <h2 class="text-zinc-100 font-semibold text-sm leading-tight truncate">Semantic Search</h2>
+          <p class="text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mt-0.5 line-clamp-1">Live Go qgram
+          </p>
+        </div>
       </div>
-      <div class="hero-copy">
-        <h2>Semantic Search</h2>
-        <p>Notes uses the live Go qgram path. Vector and Graptor layer on top of that workspace.</p>
+      <div class="shrink-0 mt-0.5">
+        <span
+          class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border whitespace-nowrap shadow-sm bg-black/30"
+          [ngClass]="{
+                'text-teal-400 border-teal-500/30': activeMode() === 'notes',
+                'text-cyan-400 border-cyan-500/30': activeMode() === 'vector',
+                'text-amber-400 border-amber-500/30': activeMode() === 'graptor'
+              }">
+          {{ modeLabel() }}
+        </span>
       </div>
-      <div class="hero-mode-pill" [attr.data-mode]="activeMode()">{{ modeLabel() }}</div>
     </div>
 
-    <div class="hero-stats">
-      <div class="hero-stat">
-        <span class="hero-stat-label">Notes</span>
-        <span class="hero-stat-value">{{ scopedNotes().length }}</span>
+    <!-- Stats List -->
+    <div class="flex flex-col gap-1.5 mt-4 relative z-10 w-full">
+      <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
+        <div class="flex items-center gap-1.5 text-zinc-400 font-medium">
+          <ng-icon name="lucideSparkles" class="h-3.5 w-3.5 text-teal-400"></ng-icon>
+          <span>Notes</span>
+        </div>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
+          scopedNotes().length }}</span>
       </div>
-      <div class="hero-stat">
-        <span class="hero-stat-label">Vector</span>
-        <span class="hero-stat-value">{{ vectorStatusLabel() }}</span>
+
+      <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
+        <div class="flex items-center gap-1.5 text-zinc-400 font-medium">
+          <ng-icon name="lucideZap" class="h-3.5 w-3.5 text-cyan-400"></ng-icon>
+          <span>Vector</span>
+        </div>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
+          vectorStatusLabel() }}</span>
       </div>
-      <div class="hero-stat">
-        <span class="hero-stat-label">Graptor</span>
-        <span class="hero-stat-value">{{ graptorStats().chunks }} chunks</span>
+
+      <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
+        <div class="flex items-center gap-1.5 text-zinc-400 font-medium">
+          <ng-icon name="lucideLayers" class="h-3.5 w-3.5 text-amber-400"></ng-icon>
+          <span>Graptor chunks</span>
+        </div>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
+          graptorStats().chunks }}</span>
       </div>
     </div>
   </section>
 
-  <section class="search-panel-controls">
-    <div class="mode-switcher">
-      <button
-        *ngFor="let mode of modes"
-        type="button"
-        (click)="activeMode.set(mode.id)"
-        class="mode-switcher-btn"
-        [class.active]="activeMode() === mode.id">
-        <ng-icon [name]="mode.icon" class="h-3.5 w-3.5"></ng-icon>
-        <span>{{ mode.label }}</span>
-      </button>
+  <!-- Controls Section -->
+  <section class="flex-shrink-0 p-3 rounded-xl border border-zinc-800/80 bg-black/20 flex flex-col gap-3">
+
+    <!-- Mode Switcher -->
+    <div class="w-full flex justify-center">
+      <p-selectbutton [options]="modeOptions" [ngModel]="activeMode()" (onChange)="onModeChange($event)"
+        styleClass="w-full flex mode-switcher-icons">
+        <ng-template #item let-item>
+          <div class="flex items-center justify-center w-full py-1.5" [pTooltip]="item.label" tooltipPosition="bottom"
+            [showDelay]="400">
+            <ng-icon
+              [name]="item.value === 'notes' ? 'lucideSparkles' : item.value === 'vector' ? 'lucideZap' : 'lucideLayers'"
+              class="h-4 w-4 shrink-0"></ng-icon>
+          </div>
+        </ng-template>
+      </p-selectbutton>
     </div>
 
-    <div class="query-row">
-      <ng-icon name="lucideSearch" class="query-icon h-4 w-4"></ng-icon>
-      <input
-        type="text"
-        placeholder="Search your notes..."
-        [ngModel]="query()"
-        (ngModelChange)="query.set($event)"
+    <!-- Search Input Row -->
+    <div class="relative w-full">
+      <ng-icon name="lucideSearch"
+        class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 z-10 pointer-events-none"></ng-icon>
+      <input pInputText type="text"
+        class="w-full !pl-9 !pr-3 !py-2 bg-black/40 border border-zinc-700/60 text-zinc-200 rounded-lg text-sm focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/30 outline-none transition-all shadow-inner block"
+        placeholder="Search your notes..." [ngModel]="query()" (ngModelChange)="query.set($event)"
         (keydown.enter)="handleSearch()" />
     </div>
 
-    <div class="scope-row">
-      <div class="scope-select-wrap">
-        <ng-icon name="lucideGlobe" *ngIf="indexScope() === 'global'" class="scope-icon h-3.5 w-3.5 text-teal-400"></ng-icon>
-        <ng-icon name="lucideFolder" *ngIf="indexScope() !== 'global'" class="scope-icon h-3.5 w-3.5 text-amber-400"></ng-icon>
-        <select [ngModel]="indexScope()" (ngModelChange)="indexScope.set($event)">
-          <option value="global">Global (All Notes)</option>
-          <option *ngFor="let folder of folders()" [value]="folder.id">{{ folder.name }}</option>
-        </select>
-        <ng-icon name="lucideChevronDown" class="scope-chevron h-3.5 w-3.5"></ng-icon>
+    <!-- Scope Row -->
+    <div class="flex items-center gap-2 w-full">
+      <div class="flex-1 min-w-0">
+        <p-select [options]="[{id: 'global', name: 'Global (All Notes)'}, ...folders()]" [ngModel]="indexScope()"
+          (ngModelChange)="indexScope.set($event)" optionLabel="name" optionValue="id"
+          [style]="{ width: '100%', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: '0.5rem', border: '1px solid rgba(63, 63, 70, 0.6)' }"
+          styleClass="text-sm h-[36px] flex items-center w-full min-w-0"
+          panelStyleClass="text-sm bg-zinc-900 border-zinc-700 text-zinc-300 shadow-xl max-w-[200px]">
+          <ng-template #selectedItem let-selectedOption>
+            <div class="flex items-center gap-2 min-w-0" *ngIf="selectedOption">
+              <ng-icon [name]="indexScope() === 'global' ? 'lucideGlobe' : 'lucideFolder'"
+                [class]="indexScope() === 'global' ? 'text-teal-400 h-3.5 w-3.5 shrink-0' : 'text-amber-400 h-3.5 w-3.5 shrink-0'">
+              </ng-icon>
+              <span class="truncate">{{ selectedOption.name }}</span>
+            </div>
+          </ng-template>
+          <ng-template #item let-item>
+            <div class="flex items-center gap-2 min-w-0">
+              <ng-icon [name]="item.id === 'global' ? 'lucideGlobe' : 'lucideFolder'"
+                [class]="item.id === 'global' ? 'text-teal-400 h-3.5 w-3.5 shrink-0' : 'text-amber-400 h-3.5 w-3.5 shrink-0'">
+              </ng-icon>
+              <span class="truncate">{{ item.name }}</span>
+            </div>
+          </ng-template>
+        </p-select>
       </div>
 
-      <button type="button" class="search-button" (click)="handleSearch()" [disabled]="isSearching()">
-        <ng-icon [name]="isSearching() ? 'lucideLoader2' : modeIcon()"
-          class="h-3.5 w-3.5"
-          [class.animate-spin]="isSearching()"></ng-icon>
-        <span>{{ isSearching() ? 'Searching' : 'Search' }}</span>
-      </button>
+      <p-button [ngStyle]="{'flex-shrink': '0', 'width': '85px'}" (click)="handleSearch()" [disabled]="isSearching()"
+        styleClass="h-[36px] bg-teal-500/10 text-teal-300 border border-teal-500/30 hover:bg-teal-500/20 text-xs px-0 font-medium rounded-lg shadow-sm transition-all focus:ring-2 focus:ring-teal-500/40 outline-none w-full flex items-center justify-center p-0">
+        <div class="flex items-center justify-center w-full gap-1.5 px-1 py-0">
+          <ng-icon [name]="isSearching() ? 'lucideLoader2' : modeIcon()" class="h-3.5 w-3.5 shrink-0"
+            [class.animate-spin]="isSearching()">
+          </ng-icon>
+          <span>{{ isSearching() ? 'Search' : 'Search' }}</span>
+        </div>
+      </p-button>
     </div>
 
-    <div class="mode-panel" *ngIf="activeMode() === 'notes'">
-      <div class="mode-panel-header">
-        <span>Live note retrieval</span>
-        <span class="mode-badge notes">Go qgram</span>
+    <!-- Notes Context -->
+    <div *ngIf="activeMode() === 'notes'"
+      class="mt-1 p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-zinc-200 font-medium">Live note retrieval</span>
+        <span
+          class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">Go
+          qgram</span>
       </div>
-      <p>This mode uses the same Go search path that already works in the right analytics sidebar, including scope filtering.</p>
+      <p class="leading-relaxed">This mode uses the same Go search path that works in the analytics sidebar.</p>
     </div>
 
-    <div class="mode-panel" *ngIf="activeMode() === 'vector'">
-      <div class="mode-panel-header">
-        <span>Vector workspace</span>
-        <span class="mode-badge vector">Embeddings</span>
+    <!-- Vector Context -->
+    <div *ngIf="activeMode() === 'vector'" class="mt-1 flex flex-col gap-3">
+      <div class="p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-zinc-200 font-medium">Vector workspace</span>
+          <span
+            class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">Embeddings</span>
+        </div>
+        <p class="leading-relaxed text-zinc-500">Fallback to live search path until vector layer is rebuilt. Use
+          controls to load/index local models.</p>
       </div>
-      <p>Model loading and indexing stay here. Search results fall back to the live note search path until the removed Cozo-era retrieval layer is replaced.</p>
 
-      <div class="subsection-label">Embedding model</div>
-      <div class="model-list">
-        <button
-          *ngFor="let model of models"
-          type="button"
-          class="model-card"
-          [class.active]="selectedModel() === model.id"
-          (click)="selectedModel.set(model.id)">
-          <div class="model-card-row">
-            <span>{{ model.label }}</span>
-            <span class="model-dims">{{ model.dims }}d</span>
+      <div>
+        <div class="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Embedding model</div>
+        <div class="flex flex-col gap-2">
+          <button *ngFor="let model of models" (click)="selectedModel.set(model.id)"
+            class="w-full p-2.5 rounded-lg border text-left transition-all text-xs outline-none focus:ring-1 focus:ring-cyan-500/30"
+            [ngClass]="selectedModel() === model.id ? 'bg-cyan-500/10 border-cyan-500/30 text-zinc-100 shadow-[0_0_12px_rgba(6,182,212,0.1)]' : 'bg-black/20 border-white/5 text-zinc-400 hover:border-white/10'">
+            <div class="flex justify-between items-center mb-1 text-sm font-medium">
+              <span>{{ model.label }}</span>
+              <span class="px-2 py-0.5 rounded-full border border-white/10 text-[10px] bg-black/40">{{ model.dims
+                }}d</span>
+            </div>
+            <div class="text-[10px] leading-relaxed"
+              [ngClass]="selectedModel() === model.id ? 'text-cyan-300' : 'text-zinc-500'">{{ model.desc }}</div>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Dimension Truncation</div>
+        <div class="grid grid-cols-4 gap-2">
+          <button *ngFor="let dim of truncateDims" (click)="truncateDim.set(dim)"
+            class="p-1.5 rounded-lg border text-xs font-medium transition-colors outline-none focus:ring-1 focus:ring-cyan-500/30"
+            [ngClass]="truncateDim() === dim ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 shadow-sm' : 'bg-black/20 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/30'">
+            {{ dim === 'full' ? 'Full' : dim + 'd' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 mt-1">
+        <p-button (click)="loadVectorModel()" [disabled]="vectorStatus() === 'loading'"
+          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-xs px-2 py-0 transition-colors rounded-lg font-medium shadow-sm outline-none w-full flex items-center justify-center">
+          <div class="flex items-center justify-center w-full gap-2">
+            <ng-icon [name]="vectorStatus() === 'loading' ? 'lucideLoader2' : 'lucideMicrochip'"
+              class="h-3.5 w-3.5 shrink-0" [class.animate-spin]="vectorStatus() === 'loading'"></ng-icon>
+            <span class="whitespace-nowrap">Load model</span>
           </div>
-          <div class="model-desc">{{ model.desc }}</div>
-        </button>
-      </div>
-
-      <div class="subsection-label">Dimension truncation</div>
-      <div class="truncate-grid">
-        <button
-          *ngFor="let dim of truncateDims"
-          type="button"
-          class="truncate-btn"
-          [class.active]="truncateDim() === dim"
-          (click)="truncateDim.set(dim)">
-          {{ dim === 'full' ? 'Full' : dim + 'd' }}
-        </button>
-      </div>
-      <div class="action-grid">
-        <button type="button" class="action-btn" (click)="loadVectorModel()" [disabled]="vectorStatus() === 'loading'">
-          <ng-icon [name]="vectorStatus() === 'loading' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5" [class.animate-spin]="vectorStatus() === 'loading'"></ng-icon>
-          <span>Load model</span>
-        </button>
-        <button type="button" class="action-btn" (click)="indexVectorNotes()" [disabled]="vectorStatus() !== 'ready' && vectorStatus() !== 'error'">
-          <ng-icon [name]="vectorStatus() === 'indexing' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5" [class.animate-spin]="vectorStatus() === 'indexing'"></ng-icon>
-          <span>Index {{ scopedNotes().length }} notes</span>
-        </button>
+        </p-button>
+        <p-button (click)="indexVectorNotes()" [disabled]="vectorStatus() !== 'ready' && vectorStatus() !== 'error'"
+          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-xs px-2 py-0 transition-colors rounded-lg font-medium shadow-sm outline-none w-full flex items-center justify-center">
+          <div class="flex items-center justify-center w-full gap-2">
+            <ng-icon [name]="vectorStatus() === 'indexing' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5 shrink-0"
+              [class.animate-spin]="vectorStatus() === 'indexing'"></ng-icon>
+            <span class="whitespace-nowrap">Index notes</span>
+          </div>
+        </p-button>
       </div>
     </div>
 
-    <div class="mode-panel" *ngIf="activeMode() === 'graptor'">
-      <div class="mode-panel-header">
-        <span>Graptor retrieval</span>
-        <span class="mode-badge graptor">GLDR</span>
-      </div>
-      <p>Graptor mode uses GLDR chunk ranking. It indexes note titles and content into the Graptor retriever workspace so the left sidebar can use the same retrieval interface exposed in evals.</p>
-
-      <div class="graptor-stats">
-        <div class="hero-stat">
-          <span class="hero-stat-label">Entities</span>
-          <span class="hero-stat-value">{{ graptorStats().entities }}</span>
+    <!-- Graptor Context -->
+    <div *ngIf="activeMode() === 'graptor'" class="mt-1 flex flex-col gap-3">
+      <div class="p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-zinc-200 font-medium">Graptor retrieval</span>
+          <span
+            class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">GLDR</span>
         </div>
-        <div class="hero-stat">
-          <span class="hero-stat-label">Chunks</span>
-          <span class="hero-stat-value">{{ graptorStats().chunks }}</span>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat-label">Edges</span>
-          <span class="hero-stat-value">{{ graptorStats().edges }}</span>
-        </div>
+        <p class="leading-relaxed text-zinc-500">Graptor mode uses GLDR chunk ranking, giving the left sidebar access to
+          graph evaluations workspace.</p>
       </div>
 
-      <button type="button" class="action-btn action-btn-full" (click)="rebuildGraptorIndex()" [disabled]="graptorStatus() === 'building'">
-        <ng-icon [name]="graptorStatus() === 'building' ? 'lucideLoader2' : 'lucideLayers'" class="h-3.5 w-3.5" [class.animate-spin]="graptorStatus() === 'building'"></ng-icon>
-        <span>Build Graptor index for {{ scopedNotes().length }} notes</span>
-      </button>
+      <div class="flex flex-col gap-1.5 mt-2 w-full">
+        <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
+          <span class="text-zinc-400 font-medium">Entities registered</span>
+          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
+            graptorStats().entities }}</span>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
+          <span class="text-zinc-400 font-medium">Edges scanned</span>
+          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
+            graptorStats().edges }}</span>
+        </div>
+      </div>
+
+      <p-button (click)="rebuildGraptorIndex()" [disabled]="graptorStatus() === 'building'"
+        styleClass="w-full h-[36px] bg-amber-500/10 border-[1px] border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/40 text-xs px-3 py-0 mt-1 transition-all rounded-lg focus:ring-2 focus:ring-amber-500/30 outline-none w-full flex items-center justify-center font-medium shadow-sm">
+        <div class="flex items-center justify-center w-full gap-2.5">
+          <ng-icon [name]="graptorStatus() === 'building' ? 'lucideLoader2' : 'lucideLayers'" class="h-4 w-4 shrink-0"
+            [class.animate-spin]="graptorStatus() === 'building'"></ng-icon>
+          <span class="whitespace-nowrap">Build graptor index</span>
+        </div>
+      </p-button>
     </div>
   </section>
 
-  <section *ngIf="notice()" class="message-banner info">{{ notice() }}</section>
-  <section *ngIf="error()" class="message-banner error">
-    <ng-icon name="lucideAlertCircle" class="h-4 w-4"></ng-icon>
-    <span>{{ error() }}</span>
-  </section>
+  <!-- Banners -->
+  <div *ngIf="notice()"
+    class="flex-shrink-0 flex items-center gap-2 p-3 text-xs rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 shadow-sm transition-all transform animate-in slide-in-from-top-2">
+    <ng-icon name="lucideSparkles" class="h-4 w-4 shrink-0"></ng-icon>
+    <span class="leading-relaxed">{{ notice() }}</span>
+  </div>
+  <div *ngIf="error()"
+    class="flex-shrink-0 flex items-center gap-2 p-3 text-xs rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 shadow-sm transition-all transform animate-in slide-in-from-top-2">
+    <ng-icon name="lucideAlertCircle" class="h-4 w-4 shrink-0"></ng-icon>
+    <span class="leading-relaxed">{{ error() }}</span>
+  </div>
 
-  <section class="results-shell">
-    <div class="results-header">
-      <span>{{ results().length }} results</span>
+  <!-- Results Section -->
+  <section
+    class="flex-1 flex flex-col min-h-0 bg-black/10 border border-white/5 rounded-xl overflow-hidden shadow-inner hover:border-white/10 transition-colors">
+    <div
+      class="flex justify-between items-center px-4 py-3 border-b border-white/10 text-[10px] uppercase tracking-wider font-bold text-zinc-500 bg-black/30 shrink-0">
+      <span class="flex items-center gap-1.5">
+        <div class="w-1.5 h-1.5 rounded-full bg-teal-500 opacity-60"></div> {{ results().length }} results
+      </span>
       <span>{{ isSearching() ? 'running' : searchTime() + ' ms' }}</span>
     </div>
 
-    <div class="results-body custom-scrollbar">
+    <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
       <ng-container *ngIf="results().length > 0; else emptyState">
-        <button *ngFor="let result of results()" type="button" class="result-card" (click)="openResult(result)">
-          <div class="result-top-row">
-            <div class="result-title-wrap">
-              <div class="result-title">{{ result.title }}</div>
-              <div class="result-meta-row">
-                <span class="mode-badge" [class.notes]="result.source === 'notes'" [class.vector]="result.source === 'vector'" [class.graptor]="result.source === 'graptor'">
-                  {{ result.sourceLabel }}
-                </span>
-                <span *ngIf="result.meta">{{ result.meta }}</span>
+        <div class="flex flex-col gap-2">
+          <button *ngFor="let result of results()" type="button"
+            class="text-left w-full bg-zinc-900/40 hover:bg-zinc-800/80 p-3.5 rounded-lg border border-white/5 hover:border-teal-500/30 transition-all shadow-sm group focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+            (click)="openResult(result)">
+
+            <div class="flex justify-between items-start gap-4 mb-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-zinc-100 truncate text-sm group-hover:text-teal-400 transition-colors">{{
+                  result.title }}</div>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <span
+                    class="px-1.5 py-0.5 rounded-[4px] text-[9px] font-bold uppercase tracking-wider border shadow-sm"
+                    [ngClass]="{
+                          'bg-teal-500/10 text-teal-400 border-teal-500/20': result.source === 'notes',
+                          'bg-cyan-500/10 text-cyan-400 border-cyan-500/20': result.source === 'vector',
+                          'bg-amber-500/10 text-amber-400 border-amber-500/20': result.source === 'graptor'
+                        }">
+                    {{ result.sourceLabel }}
+                  </span>
+                  <span *ngIf="result.meta"
+                    class="text-[9px] uppercase tracking-wider text-zinc-500 hidden sm:inline-block">{{ result.meta
+                    }}</span>
+                </div>
+              </div>
+              <div
+                class="text-xs font-semibold text-zinc-300 bg-black/40 border border-white/5 px-2 py-1 rounded shadow-sm shrink-0 flex items-center justify-center min-w-[3rem]">
+                {{ formatScore(result.score) }}
               </div>
             </div>
-            <div class="result-score">{{ formatScore(result.score) }}</div>
-          </div>
 
-          <p class="result-excerpt">{{ result.excerpt }}</p>
+            <p
+              class="text-xs text-zinc-400 leading-relaxed line-clamp-3 mb-2.5 group-hover:text-zinc-300 transition-colors">
+              {{ result.excerpt }}
+            </p>
 
-          <div class="result-graph-row" *ngIf="result.source === 'graptor' && (result.lexScore !== undefined || result.graphScore !== undefined || result.matchedEntities?.length)">
-            <span *ngIf="result.lexScore !== undefined">Lex {{ result.lexScore | number:'1.2-2' }}</span>
-            <span *ngIf="result.graphScore !== undefined">Graph {{ result.graphScore | number:'1.2-2' }}</span>
-            <span *ngFor="let entity of result.matchedEntities">{{ entity }}</span>
-          </div>
-        </button>
+            <div class="flex flex-wrap gap-1.5 mt-2"
+              *ngIf="result.source === 'graptor' && (result.lexScore !== undefined || result.graphScore !== undefined || result.matchedEntities?.length)">
+              <span *ngIf="result.lexScore !== undefined"
+                class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm flex items-center gap-1">Lex
+                <span>{{ result.lexScore | number:'1.2-2' }}</span></span>
+              <span *ngIf="result.graphScore !== undefined"
+                class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm flex items-center gap-1">Graph
+                <span>{{ result.graphScore | number:'1.2-2' }}</span></span>
+              <span *ngFor="let entity of result.matchedEntities"
+                class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm">{{
+                entity }}</span>
+            </div>
+          </button>
+        </div>
       </ng-container>
 
       <ng-template #emptyState>
-        <div class="empty-state">
-          <div class="empty-icon-wrap">
-            <ng-icon [name]="isSearching() ? 'lucideLoader2' : modeIcon()" class="h-8 w-8 text-zinc-500" [class.animate-spin]="isSearching()"></ng-icon>
+        <div class="flex flex-col items-center justify-center p-6 h-full text-center">
+          <div
+            class="flex items-center justify-center w-16 h-16 rounded-2xl bg-black/40 border border-white/5 mb-5 shadow-inner">
+            <ng-icon [name]="isSearching() ? 'lucideLoader2' : modeIcon()" class="h-7 w-7 text-zinc-500"
+              [class.animate-spin]="isSearching()"></ng-icon>
           </div>
-          <div class="empty-title">{{ emptyStateTitle() }}</div>
-          <p class="empty-copy">{{ emptyStateMessage() }}</p>
+          <h3 class="text-zinc-200 font-semibold mb-2 text-sm">{{ emptyStateTitle() }}</h3>
+          <p class="text-xs text-zinc-500 max-w-[14rem] leading-relaxed">{{ emptyStateMessage() }}</p>
         </div>
       </ng-template>
     </div>
   </section>
-</div>
 
+</div>
