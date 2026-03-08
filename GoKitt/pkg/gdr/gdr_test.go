@@ -554,3 +554,40 @@ func TestHNSWConfig(t *testing.T) {
 	assert.Equal(t, 400, gdr.Vec.EfCon)
 	assert.Equal(t, hnsw.Cosine, gdr.Vec.Metric)
 }
+
+func TestSoftSearchFallsBackToVectorWhenGateEmpty(t *testing.T) {
+	gdr := NewGDR(DefaultGDRConfig())
+
+	vecA := make([]float32, 256)
+	vecB := make([]float32, 256)
+	queryVec := make([]float32, 256)
+	for i := range vecA {
+		if i < 128 {
+			vecA[i] = 1.0
+			vecB[i] = 0.0
+			queryVec[i] = 0.0
+		} else {
+			vecA[i] = 0.0
+			vecB[i] = 1.0
+			queryVec[i] = 1.0
+		}
+	}
+
+	require.NoError(t, gdr.Upsert("doc-alpha", map[string]string{"content": "crimson forge ember"}, vecA))
+	require.NoError(t, gdr.Upsert("doc-beta", map[string]string{"content": "silver harbor moon"}, vecB))
+
+	config := DefaultGDRConfig()
+	config.Hard = false
+	config.K = 2
+	config.ScoreConfig.Alpha = 0.8
+
+	results := gdr.Search(SearchInput{
+		TextQuery: "prophecy oracle",
+		Vector:    queryVec,
+	}, config)
+
+	require.NotEmpty(t, results)
+	assert.Equal(t, "doc-beta", results[0].DocID)
+	assert.Greater(t, results[0].VecNorm, results[len(results)-1].VecNorm)
+	assert.Zero(t, results[0].Coverage)
+}

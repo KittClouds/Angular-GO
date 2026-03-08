@@ -45,11 +45,14 @@ func (gdr *GateDrivenRetriever) verifyAndScore(
 		return []GDRResult{}
 	}
 
-	qv := qgram.NewQueryVerifier(clauses)
+	hasLexical := len(clauses) > 0
+	var qv qgram.QueryVerifier
+	var idfs []float64
+	if hasLexical {
+		qv = qgram.NewQueryVerifier(clauses)
+		idfs = gdr.computeIDFs(clauses)
+	}
 	corpusStats := gdr.Lex.GetCorpusStats()
-
-	// Pre-compute IDFs
-	idfs := gdr.computeIDFs(clauses)
 
 	var results []GDRResult
 
@@ -75,34 +78,44 @@ func (gdr *GateDrivenRetriever) verifyAndScore(
 			}
 		}
 
-		// Verify all clauses (Aho-Corasick one-pass)
-		matches, matchedCount := gdr.Lex.VerifyCandidateAll(docID, &qv)
-		if matchedCount == 0 {
-			continue // Failed verification
-		}
+		lexScore := 0.0
+		lexNorm := 0.0
+		coverage := 0.0
 
-		// PhraseHard rejection
-		if config.LexicalConfig.PhraseHard {
-			reject := false
-			for i, clause := range clauses {
-				if clause.Type == qgram.PhraseClause && matches[i] == nil {
-					reject = true
-					break
+		if hasLexical {
+			// Verify all clauses (Aho-Corasick one-pass)
+			matches, matchedCount := gdr.Lex.VerifyCandidateAll(docID, &qv)
+			if matchedCount == 0 {
+				if config.Hard {
+					continue
 				}
-			}
-			if reject {
-				continue
-			}
-		}
+			} else {
+				// PhraseHard rejection
+				if config.LexicalConfig.PhraseHard {
+					reject := false
+					for i, clause := range clauses {
+						if clause.Type == qgram.PhraseClause && matches[i] == nil {
+							reject = true
+							break
+						}
+					}
+					if reject {
+						continue
+					}
+				}
 
-		// Compute FULL lexical score (BM25 + coverage + proximity)
-		lexScore := gdr.computeDocScore(docID, matches, matchedCount, idfs, config.LexicalConfig, corpusStats)
+				// Compute FULL lexical score (BM25 + coverage + proximity)
+				lexScore = gdr.computeDocScore(docID, matches, matchedCount, idfs, config.LexicalConfig, corpusStats)
 
-		// Normalize scores before blending
-		// Lexical: cap and normalize to [0, 1]
-		lexNorm := math.Min(lexScore, config.ScoreConfig.LexicalCap) / config.ScoreConfig.LexicalCap
-		if lexNorm < 0 {
-			lexNorm = 0
+				// Normalize scores before blending
+				// Lexical: cap and normalize to [0, 1]
+				lexNorm = math.Min(lexScore, config.ScoreConfig.LexicalCap) / config.ScoreConfig.LexicalCap
+				if lexNorm < 0 {
+					lexNorm = 0
+				}
+
+				coverage = float64(matchedCount) / float64(len(clauses))
+			}
 		}
 
 		// Vector: normalize cosine from [VecMin, VecMax] to [0, 1]
@@ -116,8 +129,11 @@ func (gdr *GateDrivenRetriever) verifyAndScore(
 		}
 
 		// Convex blend
-		alpha := config.ScoreConfig.Alpha
-		combinedNorm := lexNorm*(1.0-alpha) + vecNorm*alpha
+		combinedNorm := vecNorm
+		if hasLexical {
+			alpha := config.ScoreConfig.Alpha
+			combinedNorm = lexNorm*(1.0-alpha) + vecNorm*alpha
+		}
 
 		results = append(results, GDRResult{
 			DocID:    docID,
@@ -126,7 +142,7 @@ func (gdr *GateDrivenRetriever) verifyAndScore(
 			VecScore: cand.Score,
 			LexNorm:  lexNorm,
 			VecNorm:  vecNorm,
-			Coverage: float64(matchedCount) / float64(len(clauses)),
+			Coverage: coverage,
 		})
 	}
 

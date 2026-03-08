@@ -30,6 +30,7 @@ import { GoKittService, SearchScope } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { SemanticSearchService } from '../../lib/services/semantic-search.service';
+import { EmbeddingEngine } from '../../lib/embeddings/EmbeddingEngine';
 import type { Entity } from '../../lib/dexie/db';
 import { buildScopedCanonicalEntityMap, collectScopedRegistrationNames } from './search-panel.graptor';
 
@@ -73,6 +74,14 @@ interface GraptorStats {
   edges: number;
 }
 
+interface GraptorBatchEntry {
+  chunkId: string;
+  title: string;
+  content: string;
+  mentions: Array<{ entityId: string; count: number }>;
+  embeddingText: string;
+}
+
 @Component({
   selector: 'app-search-panel',
   standalone: true,
@@ -106,6 +115,7 @@ interface GraptorStats {
 })
 export class SearchPanelComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly graptorBatchSize = 16;
   private readonly goKitt = inject(GoKittService);
   private readonly notesService = inject(NotesService);
   private readonly noteStore = inject(NoteEditorStore);
@@ -237,8 +247,9 @@ export class SearchPanelComponent implements OnInit {
     this.error.set(null);
     try {
       await this.semanticSearch.initializeWorker();
+      await EmbeddingEngine.initialize();
       this.vectorStatus.set('ready');
-      this.notice.set('Embedding model loaded. Retrieval still falls back to the live Go note search path until vector retrieval is rebuilt.');
+      this.notice.set('Embedding model loaded. Vector mode still uses the live note fallback, but Graptor can now send embeddings into GLDR over SAB.');
     } catch (err) {
       this.vectorStatus.set('error');
       this.error.set(this.toErrorMessage(err));
@@ -247,10 +258,8 @@ export class SearchPanelComponent implements OnInit {
 
   async indexVectorNotes(): Promise<void> {
     if (this.vectorStatus() !== 'ready' && this.vectorStatus() !== 'error') return;
-
     this.vectorStatus.set('indexing');
     this.error.set(null);
-
     try {
       const notes = this.scopedNotes();
       await this.semanticSearch.indexNotes(notes.map((note) => ({
@@ -266,25 +275,37 @@ export class SearchPanelComponent implements OnInit {
       this.error.set(this.toErrorMessage(err));
     }
   }
-
   async rebuildGraptorIndex(): Promise<void> {
     this.graptorStatus.set('building');
     this.error.set(null);
-
     try {
       const init = await this.goKitt.gldrInit();
       if (!init.success) {
         throw new Error(init.error || 'Failed to initialize GLDR');
       }
-
       const notes = this.scopedNotes();
+      const pendingEmbeddingBatch: GraptorBatchEntry[] = [];
+      const canEmbed = EmbeddingEngine.isReady();
       for (const note of notes) {
         const scanText = this.buildGraptorScanText(note);
         const scanResult = scanText ? await this.goKitt.scan(scanText) : null;
         const mentions = this.extractGraptorMentions(scanResult);
-
+        const embeddingText = (scanText || note.content || note.title).trim();
         await this.registerGraptorEntities(scanResult, mentions);
-
+        await this.ingestGraptorEdges(scanResult);
+        if (canEmbed && embeddingText) {
+          pendingEmbeddingBatch.push({
+            chunkId: note.id,
+            title: note.title,
+            content: note.content,
+            mentions,
+            embeddingText,
+          });
+          if (pendingEmbeddingBatch.length >= this.graptorBatchSize) {
+            await this.flushGraptorEmbeddingBatch(pendingEmbeddingBatch.splice(0, pendingEmbeddingBatch.length));
+          }
+          continue;
+        }
         const indexRes = await this.goKitt.gldrIndexChunk(note.id, {
           title: note.title,
           content: note.content,
@@ -292,10 +313,10 @@ export class SearchPanelComponent implements OnInit {
         if (!indexRes.success) {
           throw new Error(indexRes.error || `Failed to index note ${note.title}`);
         }
-
-        await this.ingestGraptorEdges(scanResult);
       }
-
+      if (pendingEmbeddingBatch.length) {
+        await this.flushGraptorEmbeddingBatch(pendingEmbeddingBatch.splice(0, pendingEmbeddingBatch.length));
+      }
       await this.refreshGraptorStats();
       this.graptorStatus.set('ready');
       this.notice.set(`Built Graptor index for ${notes.length} notes with canonical entity mentions in the current scope.`);
@@ -304,7 +325,6 @@ export class SearchPanelComponent implements OnInit {
       this.error.set(this.toErrorMessage(err));
     }
   }
-
   openResult(result: SearchResultView): void {
     this.noteStore.openNote(result.noteId);
   }
@@ -375,8 +395,11 @@ export class SearchPanelComponent implements OnInit {
     }
 
     this.graptorStatus.set('searching');
-    const raw = await this.goKitt.gldrSearch(this.query(), { topChunks: 12 });
-    const parsed = JSON.parse(raw) as Array<{
+    const queryEmbedding = await this.embedForGraptor(this.query());
+    const raw = queryEmbedding
+      ? await this.goKitt.gldrSearchWithEmbedding(this.query(), queryEmbedding, { topChunks: 12 })
+      : await this.goKitt.gldrSearch(this.query(), { topChunks: 12 });
+    const parsed = this.parseGraptorResults(raw) as Array<{
       chunkId: string;
       chunkScore: number;
       lexScore: number;
@@ -401,6 +424,53 @@ export class SearchPanelComponent implements OnInit {
       } as SearchResultView;
     }));
     this.graptorStatus.set('ready');
+  }
+
+  private async flushGraptorEmbeddingBatch(items: GraptorBatchEntry[]): Promise<void> {
+    if (!items.length) return;
+
+    try {
+      const embeddings = await EmbeddingEngine.embed(items.map((item) => item.embeddingText));
+      const indexRes = await this.goKitt.gldrIndexChunksWithEmbeddings(items.map((item, index) => ({
+        chunkId: item.chunkId,
+        fields: {
+          title: item.title,
+          content: item.content,
+        },
+        mentions: item.mentions,
+        embedding: Float32Array.from(embeddings[index] || []),
+      })));
+      if (!indexRes.success) {
+        throw new Error(indexRes.error || 'Failed to batch index Graptor notes');
+      }
+    } catch (_err) {
+      for (const item of items) {
+        const indexRes = await this.goKitt.gldrIndexChunk(item.chunkId, {
+          title: item.title,
+          content: item.content,
+        }, item.mentions);
+        if (!indexRes.success) {
+          throw new Error(indexRes.error || `Failed to index note ${item.title}`);
+        }
+      }
+    }
+  }
+
+  private async embedForGraptor(text: string): Promise<Float32Array | null> {
+    const source = text.trim();
+    if (!source || !EmbeddingEngine.isReady()) return null;
+    const [embedding] = await EmbeddingEngine.embed([source]);
+    if (!embedding?.length) return null;
+    return Float32Array.from(embedding);
+  }
+
+  private parseGraptorResults(raw: string): unknown[] {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      throw new Error(String((parsed as { error?: string }).error || 'GLDR search failed'));
+    }
+    return [];
   }
 
   private buildGraptorScanText(note: SearchPanelNote): string {
@@ -509,6 +579,10 @@ export class SearchPanelComponent implements OnInit {
     return err instanceof Error ? err.message : String(err);
   }
 }
+
+
+
+
 
 
 

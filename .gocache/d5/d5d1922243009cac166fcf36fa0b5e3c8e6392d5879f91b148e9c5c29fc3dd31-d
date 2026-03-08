@@ -1,7 +1,0 @@
-./dimension_router.go
-./gate.go
-./gdr.go
-./metrics.go
-./scorer.go
-./search.go
-./search_brute.go

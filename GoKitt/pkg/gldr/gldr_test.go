@@ -23,6 +23,11 @@ func TestGLDRConfigDefaults(t *testing.T) {
 	assert.Equal(t, 0.3, cfg.Lambda)
 	assert.Equal(t, 20, cfg.TopChunks)
 	assert.Equal(t, 10, cfg.TopNodes)
+	assert.Equal(t, 16, cfg.SemanticTopK)
+	assert.Equal(t, 0.7, cfg.SemanticAlpha)
+	assert.Equal(t, 0.25, cfg.SemanticGamma)
+	assert.False(t, cfg.SemanticConfig.Hard)
+	assert.Equal(t, 16, cfg.SemanticConfig.K)
 
 	// PPR config
 	assert.Equal(t, 0.85, cfg.PPRDamping)
@@ -649,4 +654,32 @@ func TestTemporalEdgeRoundTrip(t *testing.T) {
 			assert.True(t, edges[0].ValidFrom.Equal(tc.marker))
 		})
 	}
+}
+
+func TestSearchWithVectorSemanticExpansion(t *testing.T) {
+	idx := NewGLDR(DefaultGLDRConfig())
+
+	vecA := make([]float32, 256)
+	vecB := make([]float32, 256)
+	queryVec := make([]float32, 256)
+	for i := range vecA {
+		if i < 128 {
+			vecA[i] = 1.0
+			vecB[i] = 0.0
+			queryVec[i] = 1.0
+		} else {
+			vecA[i] = 0.0
+			vecB[i] = 1.0
+			queryVec[i] = 0.0
+		}
+	}
+
+	idx.IndexChunkWithVector("chunk-semantic", map[string]string{"content": "azure falcon glides nightly"}, nil, vecA)
+	idx.IndexChunkWithVector("chunk-unrelated", map[string]string{"content": "iron merchant counts coins"}, nil, vecB)
+
+	results := idx.SearchWithVector("storm prophecy", queryVec, idx.Config)
+	require.NotEmpty(t, results)
+	assert.Equal(t, "chunk-semantic", results[0].ChunkID)
+	assert.Greater(t, results[0].SemanticScore, 0.0)
+	assert.Zero(t, results[0].LexScore)
 }

@@ -1,6 +1,9 @@
 package gldr
 
-import "github.com/kittclouds/gokitt/pkg/qgram"
+import (
+	"github.com/kittclouds/gokitt/pkg/gdr"
+	"github.com/kittclouds/gokitt/pkg/qgram"
+)
 
 // GLDRConfig holds all tuning parameters for GLDR search.
 type GLDRConfig struct {
@@ -10,6 +13,12 @@ type GLDRConfig struct {
 	// Fusion weights
 	Alpha float64 // Lexical weight (default: 0.6)
 	Beta  float64 // Graph weight (default: 0.4)
+
+	// Semantic expansion
+	SemanticTopK   int     // Max semantic sidecar candidates (default: 16)
+	SemanticAlpha  float64 // Vector weight inside GDR sidecar (default: 0.7)
+	SemanticGamma  float64 // Final semantic contribution to GLDR fused score (default: 0.25)
+	SemanticConfig gdr.GDRConfig
 
 	// Graph proximity (GraphStore PersonalizedPageRank)
 	MaxGraphHops  int     // Max BFS/PPR hop depth (default: 3)
@@ -29,10 +38,19 @@ type GLDRConfig struct {
 
 // DefaultGLDRConfig returns sane defaults for GLDR search.
 func DefaultGLDRConfig() GLDRConfig {
+	semanticCfg := gdr.DefaultGDRConfig()
+	semanticCfg.Hard = false
+	semanticCfg.K = 16
+	semanticCfg.ScoreConfig.Alpha = 0.7
+
 	return GLDRConfig{
 		LexicalConfig:    qgram.DefaultSearchConfig(),
 		Alpha:            0.6,
 		Beta:             0.4,
+		SemanticTopK:     16,
+		SemanticAlpha:    0.7,
+		SemanticGamma:    0.25,
+		SemanticConfig:   semanticCfg,
 		MaxGraphHops:     3,
 		PPRDamping:       0.85,
 		PPRIterations:    20,

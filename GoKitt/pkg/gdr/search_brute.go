@@ -68,3 +68,64 @@ func (gdr *GateDrivenRetriever) searchBruteForce(
 	// Verify and Score (Lexical + Vector blending)
 	return gdr.verifyAndScore(candidates, clauses, config)
 }
+
+// searchBruteForceNoGate performs an exhaustive scan without applying the lexical gate.
+// This is used for soft semantic fallback when lexical matching is optional.
+func (gdr *GateDrivenRetriever) searchBruteForceNoGate(
+	queryVec []float32,
+	clauses []qgram.Clause,
+	allowedUIDs map[uint32]bool,
+	config GDRConfig,
+) []GDRResult {
+	if len(queryVec) == 0 {
+		return []GDRResult{}
+	}
+
+	dim := len(queryVec)
+	qMag := distance.Magnitude(queryVec)
+
+	candidateCap := config.FetchCap
+	if candidateCap == 0 {
+		candidateCap = 1000
+	}
+
+	var uidSource []uint32
+	if len(allowedUIDs) > 0 {
+		uidSource = make([]uint32, 0, len(allowedUIDs))
+		for uid := range allowedUIDs {
+			uidSource = append(uidSource, uid)
+		}
+	} else {
+		uidSource = make([]uint32, 0, len(gdr.Lex.Documents))
+		for docID := range gdr.Lex.Documents {
+			uid := gdr.Lex.Mapper.Get(docID)
+			if uid != 0 {
+				uidSource = append(uidSource, uid)
+			}
+		}
+	}
+
+	candidates := make([]hnsw.Result, 0, len(uidSource))
+	for _, uid := range uidSource {
+		vec, ok := gdr.Vec.GetVector(dim, uid)
+		if !ok {
+			continue
+		}
+
+		score := distance.CosineSimilarity(queryVec, vec, qMag, 0)
+		candidates = append(candidates, hnsw.Result{
+			ID:    uid,
+			Score: score,
+		})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Score > candidates[j].Score
+	})
+
+	if len(candidates) > candidateCap {
+		candidates = candidates[:candidateCap]
+	}
+
+	return gdr.verifyAndScore(candidates, clauses, config)
+}

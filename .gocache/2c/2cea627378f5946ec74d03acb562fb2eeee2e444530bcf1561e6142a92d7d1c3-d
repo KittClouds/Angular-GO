@@ -1,7 +1,0 @@
-./entropy.go
-./fst_index.go
-./math.go
-./proximity.go
-./scorer.go
-./types.go
-./vector.go

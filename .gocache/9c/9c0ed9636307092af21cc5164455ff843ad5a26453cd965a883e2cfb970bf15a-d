@@ -1,8 +1,0 @@
-./cpuid.go
-./cpuid_unsupported.go
-./crypto.go
-./mmap_unsupported.go
-./path.go
-./platform.go
-./time.go
-./time_notwindows.go

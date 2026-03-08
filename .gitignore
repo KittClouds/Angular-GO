@@ -48,3 +48,7 @@ reference_impl/
 # Go tools cache
 GoKitt/.codex-go-cache
 GoKitt/.codex-go-tmp
+
+# Global Go cache
+/.gocache
+/.gomodcache

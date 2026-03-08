@@ -1,6 +1,7 @@
 package gdr
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kittclouds/gokitt/pkg/hnsw"
@@ -32,49 +33,51 @@ func (gdr *GateDrivenRetriever) Search(input SearchInput, config GDRConfig) []GD
 				allowedUIDs[uid] = true
 			}
 		}
-		// If map provided but no valid UIDs found, return empty
 		if len(allowedUIDs) == 0 {
 			return []GDRResult{}
 		}
 	}
 
-	// 1. Parse lexical query
 	clauses := qgram.ParseQuery(input.TextQuery)
 	if len(clauses) == 0 {
+		if len(input.Vector) > 0 && !config.Hard {
+			return gdr.searchVectorOnlyNoGate(input.Vector, clauses, allowedUIDs, config)
+		}
 		return []GDRResult{}
 	}
 
-	// Apply scope from config
-	if config.LexicalConfig.Scope != nil {
-		// Scope is applied during verification
-	}
-
-	// 2. Build lexical gate bitmap
 	gate := gdr.BuildGateBitmap(clauses, config.GateMaxCandidates)
 	if gate.IsEmpty() {
+		if len(input.Vector) > 0 && !config.Hard {
+			return gdr.searchVectorOnlyNoGate(input.Vector, clauses, allowedUIDs, config)
+		}
 		return []GDRResult{}
 	}
 
-	// 3. If no vector, fall back to lexical-only search
 	if len(input.Vector) == 0 {
 		return gdr.searchLexicalOnly(clauses, gate, allowedUIDs, config)
 	}
 
-	// 4. GDR Search (Brute Force fallback for small scopes)
-	// Benchmark shows HNSW is often faster (avg 63µs vs 242µs for N=1000),
-	// but Brute Force guarantees <1ms latency and eliminates P99 spikes (100ms+)
-	// caused by pathological graph traversal or GC.
-	if len(allowedUIDs) > 0 && len(allowedUIDs) <= 2000 {
-		return gdr.searchBruteForce(input.Vector, clauses, gate, allowedUIDs, config)
+	if config.Hard {
+		if len(allowedUIDs) > 0 && len(allowedUIDs) <= 2000 {
+			return gdr.searchBruteForce(input.Vector, clauses, gate, allowedUIDs, config)
+		}
+		return gdr.searchWithExpansion(input.Vector, clauses, gate, allowedUIDs, config)
 	}
 
-	// 5. Filtered HNSW search with expansion loop
-	return gdr.searchWithExpansion(input.Vector, clauses, gate, allowedUIDs, config)
+	gatedResults := func() []GDRResult {
+		if len(allowedUIDs) > 0 && len(allowedUIDs) <= 2000 {
+			return gdr.searchBruteForce(input.Vector, clauses, gate, allowedUIDs, config)
+		}
+		return gdr.searchWithExpansion(input.Vector, clauses, gate, allowedUIDs, config)
+	}()
+
+	semanticResults := gdr.searchVectorOnlyNoGate(input.Vector, clauses, allowedUIDs, config)
+	return mergeResults(gatedResults, semanticResults, config.K)
 }
 
 // searchLexicalOnly performs lexical-only search (no vector component).
 func (gdr *GateDrivenRetriever) searchLexicalOnly(clauses []qgram.Clause, gate *GateResult, allowedUIDs map[uint32]bool, config GDRConfig) []GDRResult {
-	// Convert gate bitmap to candidates
 	candidates := make([]hnsw.Result, 0)
 	it := gate.Iterator()
 	for it.HasNext() {
@@ -82,26 +85,17 @@ func (gdr *GateDrivenRetriever) searchLexicalOnly(clauses []qgram.Clause, gate *
 		if allowedUIDs != nil && !allowedUIDs[uid] {
 			continue
 		}
-		candidates = append(candidates, hnsw.Result{
-			ID:    uid,
-			Score: 1.0, // Neutral score for lexical-only
-		})
+		candidates = append(candidates, hnsw.Result{ID: uid, Score: 1.0})
 	}
 
-	// Verify and score
 	results := gdr.verifyAndScore(candidates, clauses, config)
-
-	// Limit results
 	if config.K > 0 && len(results) > config.K {
 		results = results[:config.K]
 	}
-
 	return results
 }
 
 // searchWithExpansion performs filtered HNSW search with expansion loop.
-// Because PhraseHard can reject neighbors, we may need to fetch more candidates
-// and expand the search if we don't get enough verified results.
 func (gdr *GateDrivenRetriever) searchWithExpansion(
 	queryVec []float32,
 	clauses []qgram.Clause,
@@ -139,12 +133,10 @@ func (gdr *GateDrivenRetriever) searchWithExpansion(
 	fetchK := k * expansionFactor
 
 	for expansions < maxExpansions {
-		// Cap fetch at FetchCap
 		if fetchK > fetchCap {
 			fetchK = fetchCap
 		}
 
-		// Filter predicate: check if ID is in gate bitmap AND allowed set
 		filter := func(id uint32) bool {
 			if allowedUIDs != nil && !allowedUIDs[id] {
 				return false
@@ -152,38 +144,106 @@ func (gdr *GateDrivenRetriever) searchWithExpansion(
 			return gate.Contains(id)
 		}
 
-		// Search HNSW with filter
 		candidates := gdr.Vec.SearchKNNFiltered(queryVec, fetchK, ef, filter)
-
 		if len(candidates) == 0 {
-			break // No more candidates
+			break
 		}
 
-		// Verify and score
 		results = gdr.verifyAndScore(candidates, clauses, config)
-
-		// Check if we have enough results
 		if len(results) >= k {
 			break
 		}
 
-		// Expand search parameters
 		fetchK *= expansionFactor
 		ef *= 2
 		expansions++
 	}
 
-	// Limit results
 	if k > 0 && len(results) > k {
 		results = results[:k]
 	}
-
 	return results
+}
+
+func (gdr *GateDrivenRetriever) searchVectorOnlyNoGate(
+	queryVec []float32,
+	clauses []qgram.Clause,
+	allowedUIDs map[uint32]bool,
+	config GDRConfig,
+) []GDRResult {
+	if len(queryVec) == 0 {
+		return []GDRResult{}
+	}
+
+	k := config.K
+	if k == 0 {
+		k = 10
+	}
+
+	fetchK := config.FetchCap
+	if fetchK == 0 {
+		fetchK = 1000
+	}
+	if fetchK < k {
+		fetchK = k
+	}
+
+	if len(allowedUIDs) > 0 && len(allowedUIDs) <= 2000 {
+		return gdr.searchBruteForceNoGate(queryVec, clauses, allowedUIDs, config)
+	}
+
+	var candidates []hnsw.Result
+	if allowedUIDs != nil {
+		filter := func(id uint32) bool {
+			return allowedUIDs[id]
+		}
+		candidates = gdr.Vec.SearchKNNFiltered(queryVec, fetchK, config.EfSearch, filter)
+	} else {
+		candidates = gdr.Vec.SearchKNN(queryVec, fetchK, config.EfSearch)
+	}
+
+	results := gdr.verifyAndScore(candidates, clauses, config)
+	if k > 0 && len(results) > k {
+		results = results[:k]
+	}
+	return results
+}
+
+func mergeResults(primary, extra []GDRResult, k int) []GDRResult {
+	merged := make(map[string]GDRResult, len(primary)+len(extra))
+	for _, result := range primary {
+		merged[result.DocID] = result
+	}
+	for _, result := range extra {
+		if existing, ok := merged[result.DocID]; ok {
+			if result.Score > existing.Score {
+				merged[result.DocID] = result
+			}
+			continue
+		}
+		merged[result.DocID] = result
+	}
+
+	out := make([]GDRResult, 0, len(merged))
+	for _, result := range merged {
+		out = append(out, result)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score == out[j].Score {
+			return out[i].DocID < out[j].DocID
+		}
+		return out[i].Score > out[j].Score
+	})
+
+	if k > 0 && len(out) > k {
+		out = out[:k]
+	}
+	return out
 }
 
 // SearchWithScope performs a GDR search with scope constraints.
 func (gdr *GateDrivenRetriever) SearchWithScope(input SearchInput, config GDRConfig, narrativeID, folderPath string) []GDRResult {
-	// Set scope in config
 	config.LexicalConfig.Scope = &qgram.SearchScope{
 		NarrativeID: narrativeID,
 		FolderPath:  folderPath,
@@ -192,13 +252,11 @@ func (gdr *GateDrivenRetriever) SearchWithScope(input SearchInput, config GDRCon
 }
 
 // SearchLexical performs lexical-only search (no vector component).
-// This is a convenience method for text-only queries.
 func (gdr *GateDrivenRetriever) SearchLexical(textQuery string, config GDRConfig) []GDRResult {
 	return gdr.Search(SearchInput{TextQuery: textQuery}, config)
 }
 
 // SearchVector performs vector-only search with lexical gate.
-// The textQuery is used only for the lexical gate, not for scoring.
 func (gdr *GateDrivenRetriever) SearchVector(textQuery string, queryVec []float32, config GDRConfig) []GDRResult {
 	return gdr.Search(SearchInput{TextQuery: textQuery, Vector: queryVec}, config)
 }
@@ -222,8 +280,6 @@ func (gdr *GateDrivenRetriever) CountWithScope(textQuery, narrativeID, folderPat
 	}
 
 	gate := gdr.BuildGateBitmap(clauses, 0)
-
-	// Apply scope filter
 	count := 0
 	it := gate.Iterator()
 	for it.HasNext() {

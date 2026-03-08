@@ -1,4 +1,0 @@
-./cast.go
-./sha256.go
-./sha256block.go
-./sha256block_noasm.go

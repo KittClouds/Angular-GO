@@ -99,6 +99,7 @@ type GLDRResult struct {
 	ChunkScore      float64       // Fused score (for ranking)
 	LexScore        float64       // Raw lexical BM25 score
 	GraphScore      float64       // Raw graph proximity score
+	SemanticScore   float64       // Raw semantic sidecar score
 	MatchedEntities []EntityMatch // Entity attribution
 }
 

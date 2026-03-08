@@ -1,5 +1,0 @@
-./canonical.go
-./discovery_test_stopword.go
-./engine.go
-./inference.go
-./registry.go

@@ -123,10 +123,14 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_INIT'; id: number }
     | { type: 'GLDR_REGISTER_ENTITY'; payload: { name: string; entityId: string }; id: number }
     | { type: 'GLDR_INDEX_CHUNK'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string }; id: number }
+    | { type: 'GLDR_INDEX_CHUNK_SAB'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
+    | { type: 'GLDR_INDEX_CHUNKS_SAB'; payload: { itemsJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_ADD_GRAPH_EDGE'; payload: { sourceId: string; edgeJSON: string }; id: number }
     | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
     | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_STATS'; id: number }
     | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string }; id: number };
 
@@ -249,11 +253,15 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_REGISTER_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_INDEX_CHUNK_SAB_RESULT'; id: number; payload: { success: boolean; error?: string; count?: number; dim?: number } }
+    | { type: 'GLDR_INDEX_CHUNKS_SAB_RESULT'; id: number; payload: { success: boolean; error?: string; count?: number; dim?: number } }
     | { type: 'GLDR_ADD_GRAPH_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
-    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
-    | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
+    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_SAB_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_NODES_SAB_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_STATS_RESULT'; id: number; payload: string }
     | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
@@ -1090,10 +1098,14 @@ export class GoKittService {
                         case 'GLDR_INIT_RESULT':
                         case 'GLDR_REGISTER_ENTITY_RESULT':
                         case 'GLDR_INDEX_CHUNK_RESULT':
+                        case 'GLDR_INDEX_CHUNK_SAB_RESULT':
+                        case 'GLDR_INDEX_CHUNKS_SAB_RESULT':
                         case 'GLDR_ADD_GRAPH_EDGE_RESULT':
                         case 'GLDR_LOAD_COOCCURRENCES_RESULT':
                         case 'GLDR_SEARCH_RESULT':
+                        case 'GLDR_SEARCH_SAB_RESULT':
                         case 'GLDR_SEARCH_NODES_RESULT':
+                        case 'GLDR_SEARCH_NODES_SAB_RESULT':
                         case 'GLDR_STATS_RESULT':
                             pending.resolve(msg.payload);
                             break;
@@ -1771,6 +1783,61 @@ export class GoKittService {
         return this.sendRequest('GLDR_INDEX_CHUNK', { chunkId, fieldsJSON, mentionsJSON });
     }
 
+    async gldrIndexChunkWithEmbedding(
+        chunkId: string,
+        fields: Record<string, string>,
+        mentions: Array<{ entityId: string; count: number }>,
+        embedding: Float32Array
+    ): Promise<{ success: boolean; error?: string; count?: number; dim?: number }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        if (!embedding?.length) return { success: false, error: 'Embedding is required' };
+        const fieldsJSON = JSON.stringify(fields);
+        const mentionsJSON = JSON.stringify(mentions);
+        return this.sendRequest('GLDR_INDEX_CHUNK_SAB', {
+            chunkId,
+            fieldsJSON,
+            mentionsJSON,
+            count: 1,
+            dim: embedding.length,
+            embeddings: embedding,
+        });
+    }
+
+    async gldrIndexChunksWithEmbeddings(
+        items: Array<{
+            chunkId: string;
+            fields: Record<string, string>;
+            mentions: Array<{ entityId: string; count: number }>;
+            embedding: Float32Array;
+        }>
+    ): Promise<{ success: boolean; error?: string; count?: number; dim?: number }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        if (!items.length) return { success: false, error: 'Items are required' };
+
+        const dim = items[0].embedding?.length || 0;
+        if (!dim) return { success: false, error: 'Embedding is required' };
+
+        const normalized = items.map((item) => ({
+            chunkId: item.chunkId,
+            fields: item.fields,
+            mentions: item.mentions,
+        }));
+        const flat = new Float32Array(items.length * dim);
+        for (let i = 0; i < items.length; i++) {
+            const embedding = items[i].embedding;
+            if (!embedding?.length) return { success: false, error: `Embedding is required for item ${i}` };
+            if (embedding.length !== dim) return { success: false, error: 'All embeddings in a batch must share the same dimension' };
+            flat.set(embedding, i * dim);
+        }
+
+        return this.sendRequest('GLDR_INDEX_CHUNKS_SAB', {
+            itemsJSON: JSON.stringify(normalized),
+            count: items.length,
+            dim,
+            embeddings: flat,
+        });
+    }
+
     /** Add a semantic graph edge between two entities in GLDR. */
     async gldrAddGraphEdge(
         sourceId: string,
@@ -1802,6 +1869,19 @@ export class GoKittService {
         return this.sendRequest('GLDR_SEARCH', { query, configJSON });
     }
 
+    async gldrSearchWithEmbedding(query: string, embedding: Float32Array, config: Record<string, unknown> = {}): Promise<string> {
+        if (!this.wasmLoaded) return '[]';
+        if (!embedding?.length) return '[]';
+        const configJSON = JSON.stringify(config);
+        return this.sendRequest('GLDR_SEARCH_SAB', {
+            query,
+            configJSON,
+            count: 1,
+            dim: embedding.length,
+            embeddings: embedding,
+        });
+    }
+
     /**
      * Run entity node ranking search.
      * @param query  Natural language query string
@@ -1814,6 +1894,19 @@ export class GoKittService {
         return this.sendRequest('GLDR_SEARCH_NODES', { query, configJSON });
     }
 
+    async gldrSearchNodesWithEmbedding(query: string, embedding: Float32Array, config: Record<string, unknown> = {}): Promise<string> {
+        if (!this.wasmLoaded) return '[]';
+        if (!embedding?.length) return '[]';
+        const configJSON = JSON.stringify(config);
+        return this.sendRequest('GLDR_SEARCH_NODES_SAB', {
+            query,
+            configJSON,
+            count: 1,
+            dim: embedding.length,
+            embeddings: embedding,
+        });
+    }
+
     /**
      * Get GLDR index statistics.
      * @returns JSON-encoded { entities: number, chunks: number, edges: number }
@@ -1823,6 +1916,10 @@ export class GoKittService {
         return this.sendRequest('GLDR_STATS', {});
     }
 }
+
+
+
+
 
 
 

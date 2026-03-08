@@ -158,10 +158,14 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_INIT'; id: number }
     | { type: 'GLDR_REGISTER_ENTITY'; payload: { name: string; entityId: string }; id: number }
     | { type: 'GLDR_INDEX_CHUNK'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string }; id: number }
+    | { type: 'GLDR_INDEX_CHUNK_SAB'; payload: { chunkId: string; fieldsJSON: string; mentionsJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
+    | { type: 'GLDR_INDEX_CHUNKS_SAB'; payload: { itemsJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_ADD_GRAPH_EDGE'; payload: { sourceId: string; edgeJSON: string }; id: number }
     | { type: 'GLDR_LOAD_COOCCURRENCES'; payload: { minCount: number }; id: number }
     | { type: 'GLDR_SEARCH'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
+    | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_STATS'; id: number }; 
 
 /** Outgoing messages to main thread */
@@ -302,11 +306,15 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_REGISTER_ENTITY_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_INDEX_CHUNK_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'GLDR_INDEX_CHUNK_SAB_RESULT'; id: number; payload: { success: boolean; error?: string; count?: number; dim?: number } }
+    | { type: 'GLDR_INDEX_CHUNKS_SAB_RESULT'; id: number; payload: { success: boolean; error?: string; count?: number; dim?: number } }
     | { type: 'GLDR_ADD_GRAPH_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'GLDR_LOAD_COOCCURRENCES_RESULT'; id: number; payload: { success: boolean; error?: string } }
-    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: any[] }
-    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: any[] }
-    | { type: 'GLDR_STATS_RESULT'; id: number; payload: any }
+    | { type: 'GLDR_SEARCH_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_SAB_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_SEARCH_NODES_SAB_RESULT'; id: number; payload: string }
+    | { type: 'GLDR_STATS_RESULT'; id: number; payload: string }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -505,10 +513,14 @@ declare const GoKitt: {
     gldrInit: (configJSON?: string) => string;
     gldrRegisterEntity: (name: string, entityId: string) => string;
     gldrIndexChunk: (chunkId: string, fieldsJSON: string, mentionsJSON: string) => string;
+    gldrIndexChunkSAB: (chunkId: string, fieldsJSON: string, mentionsJSON: string, count: number, dim: number) => string;
+    gldrIndexChunksSAB: (itemsJSON: string, count: number, dim: number) => string;
     gldrAddGraphEdge: (sourceId: string, edgeJSON: string) => string;
     gldrLoadCooccurrences: (minCount: number) => string;
     gldrSearch: (query: string, configJSON?: string) => string;
+    gldrSearchSAB: (query: string, configJSON: string, count: number, dim: number) => string;
     gldrSearchNodes: (query: string, configJSON?: string) => string;
+    gldrSearchNodesSAB: (query: string, configJSON: string, count: number, dim: number) => string;
     gldrStats: () => string;
 };
 
@@ -555,6 +567,34 @@ async function loadWasm(): Promise<void> {
     console.log('[GoKittWorker] ✅ WASM loaded and ready');
 }
 
+
+function ensureSharedArrayBuffer(requiredSize: number): { success: true; sab: SharedArrayBuffer } | { success: false; error: string } {
+    if (!(self as any).__sabBuffer || (self as any).__sabBuffer.byteLength < requiredSize) {
+        const allocSize = Math.max(requiredSize * 2, 65536);
+        try {
+            (self as any).__sabBuffer = new SharedArrayBuffer(allocSize);
+            const initRes = GoKitt.sabInit((self as any).__sabBuffer);
+            const initParsed = JSON.parse(initRes);
+            if (!initParsed.success) {
+                return { success: false, error: 'sabInit failed: ' + initParsed.error };
+            }
+            console.log('[GoKittWorker] SAB initialized: ' + allocSize + ' bytes');
+        } catch {
+            return { success: false, error: 'SharedArrayBuffer not available (check COOP/COEP headers)' };
+        }
+    }
+
+    return { success: true, sab: (self as any).__sabBuffer as SharedArrayBuffer };
+}
+
+function writeEmbeddingsToSab(sab: SharedArrayBuffer, count: number, dim: number, embeddings: Float32Array): void {
+    const headerView = new DataView(sab);
+    const payloadOffset = 16;
+    headerView.setUint32(payloadOffset, count, true);
+    headerView.setUint32(payloadOffset + 4, dim, true);
+    const float32View = new Float32Array(sab, payloadOffset + 8, count * dim);
+    float32View.set(embeddings);
+}
 // =============================================================================
 // Message Handler
 // =============================================================================
@@ -2963,6 +3003,56 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 break;
             }
 
+            case 'GLDR_INDEX_CHUNK_SAB': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_INDEX_CHUNK_SAB_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+
+                const { chunkId, fieldsJSON, mentionsJSON, count, dim, embeddings } = msg.payload;
+                const requiredSize = 16 + 8 + (count * dim * 4);
+                const sabReady = ensureSharedArrayBuffer(requiredSize);
+                if (!sabReady.success) {
+                    self.postMessage({ type: 'GLDR_INDEX_CHUNK_SAB_RESULT', id: msg.id, payload: { success: false, error: sabReady.error } as any });
+                    return;
+                }
+
+                writeEmbeddingsToSab(sabReady.sab, count, dim, embeddings);
+                const res = GoKitt.gldrIndexChunkSAB(chunkId, fieldsJSON, mentionsJSON, count, dim);
+                const parsed = JSON.parse(res);
+                self.postMessage({
+                    type: 'GLDR_INDEX_CHUNK_SAB_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error, count: parsed.count, dim: parsed.dim }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'GLDR_INDEX_CHUNKS_SAB': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_INDEX_CHUNKS_SAB_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+
+                const { itemsJSON, count, dim, embeddings } = msg.payload;
+                const requiredSize = 16 + 8 + (count * dim * 4);
+                const sabReady = ensureSharedArrayBuffer(requiredSize);
+                if (!sabReady.success) {
+                    self.postMessage({ type: 'GLDR_INDEX_CHUNKS_SAB_RESULT', id: msg.id, payload: { success: false, error: sabReady.error } as any });
+                    return;
+                }
+
+                writeEmbeddingsToSab(sabReady.sab, count, dim, embeddings);
+                const res = GoKitt.gldrIndexChunksSAB(itemsJSON, count, dim);
+                const parsed = JSON.parse(res);
+                self.postMessage({
+                    type: 'GLDR_INDEX_CHUNKS_SAB_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error, count: parsed.count, dim: parsed.dim }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
             case 'GLDR_ADD_GRAPH_EDGE': {
                 if (!wasmLoaded) {
                     self.postMessage({ type: 'GLDR_ADD_GRAPH_EDGE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
@@ -2987,34 +3077,71 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 
             case 'GLDR_SEARCH': {
                 if (!wasmLoaded) {
-                    self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: [] });
+                    self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: '[]' });
                     return;
                 }
                 const res = GoKitt.gldrSearch(msg.payload.query, msg.payload.configJSON);
-                const parsed = JSON.parse(res);
-                self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: parsed });
+                self.postMessage({ type: 'GLDR_SEARCH_RESULT', id: msg.id, payload: res });
+                break;
+            }
+
+            case 'GLDR_SEARCH_SAB': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_SEARCH_SAB_RESULT', id: msg.id, payload: '[]' });
+                    return;
+                }
+
+                const { query, configJSON, count, dim, embeddings } = msg.payload;
+                const requiredSize = 16 + 8 + (count * dim * 4);
+                const sabReady = ensureSharedArrayBuffer(requiredSize);
+                if (!sabReady.success) {
+                    self.postMessage({ type: 'GLDR_SEARCH_SAB_RESULT', id: msg.id, payload: JSON.stringify({ error: sabReady.error }) });
+                    return;
+                }
+
+                writeEmbeddingsToSab(sabReady.sab, count, dim, embeddings);
+                const res = GoKitt.gldrSearchSAB(query, configJSON, count, dim);
+                self.postMessage({ type: 'GLDR_SEARCH_SAB_RESULT', id: msg.id, payload: res });
                 break;
             }
 
             case 'GLDR_SEARCH_NODES': {
                 if (!wasmLoaded) {
-                    self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: [] });
+                    self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: '[]' });
                     return;
                 }
                 const res = GoKitt.gldrSearchNodes(msg.payload.query, msg.payload.configJSON);
-                const parsed = JSON.parse(res);
-                self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: parsed });
+                self.postMessage({ type: 'GLDR_SEARCH_NODES_RESULT', id: msg.id, payload: res });
+                break;
+            }
+
+            case 'GLDR_SEARCH_NODES_SAB': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'GLDR_SEARCH_NODES_SAB_RESULT', id: msg.id, payload: '[]' });
+                    return;
+                }
+
+                const { query, configJSON, count, dim, embeddings } = msg.payload;
+                const requiredSize = 16 + 8 + (count * dim * 4);
+                const sabReady = ensureSharedArrayBuffer(requiredSize);
+                if (!sabReady.success) {
+                    self.postMessage({ type: 'GLDR_SEARCH_NODES_SAB_RESULT', id: msg.id, payload: JSON.stringify({ error: sabReady.error }) });
+                    return;
+                }
+
+                writeEmbeddingsToSab(sabReady.sab, count, dim, embeddings);
+                const res = GoKitt.gldrSearchNodesSAB(query, configJSON, count, dim);
+                self.postMessage({ type: 'GLDR_SEARCH_NODES_SAB_RESULT', id: msg.id, payload: res });
                 break;
             }
 
             case 'GLDR_STATS': {
                 if (!wasmLoaded) {
-                    self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: { entities: 0, chunks: 0, edges: 0 } });
+                    self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: '{"entities":0,"chunks":0,"edges":0}' });
                     return;
                 }
                 const res = GoKitt.gldrStats();
-                const parsed = JSON.parse(res);
-                self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: parsed });
+                self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: res });
                 break;
             }
         }
@@ -3029,6 +3156,9 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 };
 
 console.log('[GoKittWorker] Worker loaded - waiting for INIT');
+
+
+
 
 
 

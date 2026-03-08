@@ -204,10 +204,14 @@ func main() {
 		"gldrInit":              js.FuncOf(gldrInit),
 		"gldrRegisterEntity":    js.FuncOf(gldrRegisterEntity),
 		"gldrIndexChunk":        js.FuncOf(gldrIndexChunk),
+		"gldrIndexChunkSAB":     js.FuncOf(gldrIndexChunkSAB),
+		"gldrIndexChunksSAB":    js.FuncOf(gldrIndexChunksSAB),
 		"gldrAddGraphEdge":      js.FuncOf(gldrAddGraphEdge),
 		"gldrLoadCooccurrences": js.FuncOf(gldrLoadCooccurrences),
 		"gldrSearch":            js.FuncOf(gldrSearch),
+		"gldrSearchSAB":         js.FuncOf(gldrSearchSAB),
 		"gldrSearchNodes":       js.FuncOf(gldrSearchNodes),
+		"gldrSearchNodesSAB":    js.FuncOf(gldrSearchNodesSAB),
 		"gldrStats":             js.FuncOf(gldrStats),
 	}))
 

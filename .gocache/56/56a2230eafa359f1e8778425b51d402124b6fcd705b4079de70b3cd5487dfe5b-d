@@ -1,7 +1,0 @@
-./digit.go
-./prefilter.go
-./teddy.go
-./teddy_fallback.go
-./teddy_fat.go
-./teddy_fat_fallback.go
-./tracker.go

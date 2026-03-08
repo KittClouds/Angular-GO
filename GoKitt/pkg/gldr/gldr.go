@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/dominikbraun/graph"
 	"github.com/google/uuid"
 	"github.com/kittclouds/gokitt/internal/graphstore"
+	"github.com/kittclouds/gokitt/pkg/gdr"
 	"github.com/kittclouds/gokitt/pkg/graptor"
 	"github.com/kittclouds/gokitt/pkg/qgram"
 )
@@ -31,6 +33,9 @@ type GLDRIndex struct {
 
 	// Lexical index (wraps existing qgram)
 	QGram *qgram.CompressedQGramIndex
+
+	// Semantic sidecar (GDR lexical+vector retrieval)
+	Semantic *gdr.GateDrivenRetriever
 
 	// Entity→Chunk mapping (roaring bitmap for fast intersection)
 	EntityChunks map[string]*roaring.Bitmap // entity_id → chunk_ids
@@ -69,6 +74,7 @@ func NewGLDRWithDB(config GLDRConfig, db *sql.DB) *GLDRIndex {
 	store := graphstore.NewJSON[string](db)
 	return &GLDRIndex{
 		QGram:         qgram.NewCompressedQGramIndex(3),
+		Semantic:      gdr.NewGDR(config.SemanticConfig),
 		EntityChunks:  make(map[string]*roaring.Bitmap),
 		ChunkEntities: make(map[uint32][]EntityMention),
 		Store:         store,
@@ -79,19 +85,27 @@ func NewGLDRWithDB(config GLDRConfig, db *sql.DB) *GLDRIndex {
 
 // IndexChunk indexes a text chunk with its entity mentions.
 func (idx *GLDRIndex) IndexChunk(chunkID string, fields map[string]string, mentions []EntityMention) {
+	idx.IndexChunkWithVector(chunkID, fields, mentions, nil)
+}
+
+// IndexChunkWithVector indexes a text chunk with entity mentions and an optional semantic vector.
+func (idx *GLDRIndex) IndexChunkWithVector(chunkID string, fields map[string]string, mentions []EntityMention, vec []float32) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	// 1. Index in lexical index
 	idx.QGram.IndexDocumentScoped(chunkID, fields, "", "")
+	if idx.Semantic != nil {
+		_ = idx.Semantic.Upsert(chunkID, fields, vec)
+	}
 
 	// 2. Get uint32 ID
 	uid := idx.QGram.Mapper.GetOrAssign(chunkID)
 
-	// 3. Store chunk→entity mapping
+	// 3. Store chunk?entity mapping
 	idx.ChunkEntities[uid] = mentions
 
-	// 4. Store entity→chunk mapping
+	// 4. Store entity?chunk mapping
 	for _, m := range mentions {
 		bm, ok := idx.EntityChunks[m.EntityID]
 		if !ok {
@@ -345,6 +359,9 @@ func (idx *GLDRIndex) Delete(chunkID string) {
 
 	// Lazy delete from lexical index
 	idx.QGram.LazyDelete(chunkID)
+	if idx.Semantic != nil {
+		idx.Semantic.Delete(chunkID)
+	}
 }
 
 // resolveProximity computes graph proximity scores using the GraphStore.
@@ -392,6 +409,11 @@ func (idx *GLDRIndex) resolveProximity(anchors []EntityAnchor) map[string]float6
 
 // Search executes the full GLDR pipeline.
 func (idx *GLDRIndex) Search(query string, config GLDRConfig) []GLDRResult {
+	return idx.SearchWithVector(query, nil, config)
+}
+
+// SearchWithVector executes GLDR with optional semantic candidate expansion from GDR.
+func (idx *GLDRIndex) SearchWithVector(query string, queryVec []float32, config GLDRConfig) []GLDRResult {
 	if query == "" {
 		return nil
 	}
@@ -407,20 +429,56 @@ func (idx *GLDRIndex) Search(query string, config GLDRConfig) []GLDRResult {
 
 	// 2. Get lexical candidates and scores
 	lexResults := idx.QGram.Search(query, config.LexicalConfig, config.TopChunks*2)
-	if len(lexResults) == 0 {
-		return nil
-	}
 
-	// Build candidate set and lex score map
-	candidates := make([]uint32, 0, len(lexResults))
+	// Build candidate set and score maps
+	candidates := make([]uint32, 0, len(lexResults)+config.SemanticTopK)
 	lexScores := make(map[uint32]float64, len(lexResults))
+	semanticScores := make(map[uint32]float64)
+	seen := make(map[uint32]bool, len(lexResults)+config.SemanticTopK)
+
 	for _, r := range lexResults {
 		uid := idx.QGram.Mapper.Get(r.DocID)
 		if uid == 0 {
 			continue
 		}
-		candidates = append(candidates, uid)
+		if !seen[uid] {
+			candidates = append(candidates, uid)
+			seen[uid] = true
+		}
 		lexScores[uid] = r.Score
+	}
+
+	if idx.Semantic != nil && len(queryVec) > 0 {
+		semanticConfig := config.SemanticConfig
+		semanticConfig.Hard = false
+		semanticConfig.LexicalConfig = config.LexicalConfig
+		if config.SemanticTopK > 0 {
+			semanticConfig.K = config.SemanticTopK
+		}
+		if config.SemanticAlpha > 0 {
+			semanticConfig.ScoreConfig.Alpha = config.SemanticAlpha
+		}
+
+		semanticResults := idx.Semantic.Search(gdr.SearchInput{
+			TextQuery: query,
+			Vector:    queryVec,
+		}, semanticConfig)
+		for _, result := range semanticResults {
+			uid := idx.QGram.Mapper.Get(result.DocID)
+			if uid == 0 {
+				continue
+			}
+			if !seen[uid] {
+				candidates = append(candidates, uid)
+				seen[uid] = true
+			}
+			if result.Score > semanticScores[uid] {
+				semanticScores[uid] = result.Score
+			}
+			if _, ok := lexScores[uid]; !ok {
+				lexScores[uid] = 0
+			}
+		}
 	}
 
 	// 3. Expand candidates with entity chunks (graph-sourced candidates)
@@ -430,19 +488,26 @@ func (idx *GLDRIndex) Search(query string, config GLDRConfig) []GLDRResult {
 			it := bm.Iterator()
 			for it.HasNext() {
 				uid := it.Next()
-				if _, exists := lexScores[uid]; !exists {
+				if !seen[uid] {
 					candidates = append(candidates, uid)
-					lexScores[uid] = 0 // No lex score, pure graph hit
+					seen[uid] = true
+				}
+				if _, exists := lexScores[uid]; !exists {
+					lexScores[uid] = 0
 				}
 			}
 		}
+	}
+
+	if len(candidates) == 0 {
+		return nil
 	}
 
 	// 4. Compute graph proximity (GraphStore PPR)
 	proximity := idx.resolveProximity(allAnchors)
 
 	// 5. Fused scoring
-	results := idx.ScoreChunks(candidates, proximity, lexScores)
+	results := idx.scoreChunks(candidates, proximity, lexScores, semanticScores, config)
 
 	// 6. Limit results
 	if config.TopChunks > 0 && len(results) > config.TopChunks {
@@ -454,7 +519,12 @@ func (idx *GLDRIndex) Search(query string, config GLDRConfig) []GLDRResult {
 
 // SearchNodes executes GLDR and returns entity-level ranked results.
 func (idx *GLDRIndex) SearchNodes(query string, config GLDRConfig) []NodeResult {
-	chunkResults := idx.Search(query, config)
+	return idx.SearchNodesWithVector(query, nil, config)
+}
+
+// SearchNodesWithVector executes GLDR node ranking with optional semantic candidate expansion.
+func (idx *GLDRIndex) SearchNodesWithVector(query string, queryVec []float32, config GLDRConfig) []NodeResult {
+	chunkResults := idx.SearchWithVector(query, queryVec, config)
 	if len(chunkResults) == 0 {
 		return nil
 	}
@@ -524,9 +594,18 @@ func (idx *GLDRIndex) ScoreChunks(
 	proximity map[string]float64,
 	lexScores map[uint32]float64,
 ) []GLDRResult {
+	return idx.scoreChunks(candidates, proximity, lexScores, nil, idx.Config)
+}
+
+func (idx *GLDRIndex) scoreChunks(
+	candidates []uint32,
+	proximity map[string]float64,
+	lexScores map[uint32]float64,
+	semanticScores map[uint32]float64,
+	config GLDRConfig,
+) []GLDRResult {
 	results := make([]GLDRResult, 0, len(candidates))
 
-	// Normalize lexical scores
 	maxLex := 0.0
 	for _, s := range lexScores {
 		if s > maxLex {
@@ -534,7 +613,13 @@ func (idx *GLDRIndex) ScoreChunks(
 		}
 	}
 
-	// Find max graph contribution for normalization
+	maxSemantic := 0.0
+	for _, s := range semanticScores {
+		if s > maxSemantic {
+			maxSemantic = s
+		}
+	}
+
 	maxGraph := 0.0
 	for _, chunkID := range candidates {
 		graphScore := 0.0
@@ -548,20 +633,42 @@ func (idx *GLDRIndex) ScoreChunks(
 		}
 	}
 
-	// Determine weights based on anchor presence
-	alpha, beta := idx.Config.Alpha, idx.Config.Beta
+	lexWeight, graphWeight := config.Alpha, config.Beta
 	if len(proximity) == 0 {
-		alpha, beta = 1.0, 0.0 // Pure lexical when no graph signal
+		lexWeight, graphWeight = 1.0, 0.0
+	}
+
+	semanticWeight := 0.0
+	if maxSemantic > 0 {
+		semanticWeight = math.Max(0.0, math.Min(1.0, config.SemanticGamma))
+		baseWeight := 1.0 - semanticWeight
+		totalBase := lexWeight + graphWeight
+		if totalBase > 0 {
+			lexWeight = baseWeight * (lexWeight / totalBase)
+			graphWeight = baseWeight * (graphWeight / totalBase)
+		} else {
+			lexWeight = baseWeight
+			graphWeight = 0.0
+		}
+	} else {
+		totalBase := lexWeight + graphWeight
+		if totalBase > 0 {
+			lexWeight /= totalBase
+			graphWeight /= totalBase
+		}
 	}
 
 	for _, uid := range candidates {
-		// Lexical component
 		lexNorm := 0.0
 		if maxLex > 0 {
 			lexNorm = lexScores[uid] / maxLex
 		}
 
-		// Graph component: sum proximity of mentioned entities
+		semanticNorm := 0.0
+		if maxSemantic > 0 {
+			semanticNorm = semanticScores[uid] / maxSemantic
+		}
+
 		graphScore := 0.0
 		var matchedEntities []EntityMatch
 		for _, m := range idx.ChunkEntities[uid] {
@@ -575,14 +682,12 @@ func (idx *GLDRIndex) ScoreChunks(
 			}
 		}
 
-		// Normalize graph score
 		graphNorm := 0.0
 		if maxGraph > 0 {
 			graphNorm = graphScore / maxGraph
 		}
 
-		// Fused score
-		fusedScore := alpha*lexNorm + beta*graphNorm
+		fusedScore := lexWeight*lexNorm + graphWeight*graphNorm + semanticWeight*semanticNorm
 
 		docID := idx.QGram.Mapper.GetString(uid)
 		if docID == "" {
@@ -594,12 +699,15 @@ func (idx *GLDRIndex) ScoreChunks(
 			ChunkScore:      fusedScore,
 			LexScore:        lexScores[uid],
 			GraphScore:      graphScore,
+			SemanticScore:   semanticScores[uid],
 			MatchedEntities: matchedEntities,
 		})
 	}
 
-	// Sort by fused score descending
 	sort.Slice(results, func(i, j int) bool {
+		if results[i].ChunkScore == results[j].ChunkScore {
+			return results[i].ChunkID < results[j].ChunkID
+		}
 		return results[i].ChunkScore > results[j].ChunkScore
 	})
 
