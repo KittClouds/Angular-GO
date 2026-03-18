@@ -22,6 +22,7 @@ type StreamChatMessage struct {
 func (s *Service) StreamChat(
 	messagesJSON string,
 	systemPrompt string,
+	requestOptionsJSON string,
 	onChunk func(chunk string),
 	onReasoning func(chunk string),
 ) (string, error) {
@@ -36,6 +37,14 @@ func (s *Service) StreamChat(
 	if err := json.Unmarshal([]byte(messagesJSON), &messages); err != nil {
 		return "", fmt.Errorf("batch: invalid messages JSON: %w", err)
 	}
+
+	var requestOptions *RequestOptions
+	if strings.TrimSpace(requestOptionsJSON) != "" {
+		if err := json.Unmarshal([]byte(requestOptionsJSON), &requestOptions); err != nil {
+			return "", fmt.Errorf("batch: invalid request options JSON: %w", err)
+		}
+	}
+	requestOptions = mergeRequestOptions(s.defaultRequestOptions(), requestOptions)
 
 	fullMessages := make([]StreamChatMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
@@ -65,19 +74,31 @@ func (s *Service) StreamChat(
 	if reasoning := s.buildReasoningConfig(); reasoning != nil {
 		reqMap["reasoning"] = reasoning
 	}
+	optionPayload, err := buildOpenRouterOptionPayload(requestOptions, true)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range optionPayload {
+		reqMap[key] = value
+	}
 
 	reqBody, err := json.Marshal(reqMap)
 	if err != nil {
 		return "", fmt.Errorf("batch: failed to marshal stream request: %w", err)
 	}
 
-	return s.jsFetchStreaming(
+	fullResponse, err := s.jsFetchStreaming(
 		"https://openrouter.ai/api/v1/chat/completions",
 		string(reqBody),
 		s.config.OpenRouterAPIKey,
 		onChunk,
 		onReasoning,
 	)
+	if err != nil {
+		return fullResponse, wrapStructuredOutputError(err, requestOptions)
+	}
+
+	return fullResponse, nil
 }
 
 // jsFetchStreaming performs a fetch with streaming SSE response parsing.

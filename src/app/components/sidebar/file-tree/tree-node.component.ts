@@ -28,13 +28,14 @@ import type { FlatTreeNode } from '../../../lib/arborist/types';
             (mouseleave)="isHovered = false">
 
             <!-- Drag Handle (reorder mode only) -->
-            <button
-                *ngIf="isReorderMode"
-                class="drag-handle shrink-0 z-10 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-grab active:cursor-grabbing"
+            <div
+                [class.hidden]="!isReorderMode"
+                data-swapy-handle
+                class="drag-handle shrink-0 z-10 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-grab active:cursor-grabbing select-none touch-none flex items-center justify-center w-6 h-6"
                 (mousedown)="onDragStart($event)"
                 (click)="$event.stopPropagation()">
                 <lucide-icon [img]="GripVertical" size="14"></lucide-icon>
-            </button>
+            </div>
 
             <!-- Connector Lines (VS Code structured style) -->
             <ng-container *ngIf="node.level > 0">
@@ -191,6 +192,7 @@ export class TreeNodeComponent implements AfterViewChecked {
     @Output() menuClick = new EventEmitter<{ node: FlatTreeNode; event: MouseEvent }>();
     @Output() rename = new EventEmitter<{ node: FlatTreeNode; newName: string }>();
     @Output() startRename = new EventEmitter<FlatTreeNode>();
+    @Output() dragState = new EventEmitter<string | null>();
 
     @ViewChild('editInput') editInput?: ElementRef<HTMLInputElement>;
 
@@ -252,8 +254,7 @@ export class TreeNodeComponent implements AfterViewChecked {
     }
 
     onDragStart(event: MouseEvent): void {
-        // Notify parent that drag started
-        // The actual Swapy drag handling is done at the file-tree level
+        this.dragState.emit(this.node.id);
         console.log(`[TreeNode] Drag start for ${this.node.id}`);
     }
 
@@ -265,3 +266,8 @@ export class TreeNodeComponent implements AfterViewChecked {
         event.dataTransfer.effectAllowed = 'copyLink';
     }
 }
+
+
+
+
+

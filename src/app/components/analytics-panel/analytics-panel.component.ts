@@ -1,13 +1,16 @@
 // src/app/components/analytics-panel/analytics-panel.component.ts
-import { Component, inject, computed, signal, importProvidersFrom } from '@angular/core';
+import { Component, inject, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles, Target } from 'lucide-angular';
+import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles, Target, X } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
 
+import { getPrettyTextApi } from '../../api/pretty-text-api';
 import { FlowScoreComponent } from './flow-score/flow-score.component';
 import { TextAnalytics } from '../../lib/analytics';
+import { parseSearchHighlightTerms } from '../../lib/Scanner/keyword-focus';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
+import { keywordHighlightStore } from '../../lib/store/keywordHighlightStore';
 import { FooterStatsService } from '../../services/footer-stats.service';
 import { GoKittService } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
@@ -41,14 +44,23 @@ import { NotesService } from '../../lib/dexie/notes.service';
                 </div>
                 <div class="search-box">
                     <input 
-                        #searchInput
                         type="text" 
                         class="search-input" 
                         placeholder="Search notes..."
-                        (keyup.enter)="performSearch(searchInput.value)"
+                        [value]="searchInput()"
+                        (input)="updateSearchInput($event)"
+                        (keyup.enter)="performSearch(searchInput())"
                     />
-                    <button class="search-btn" (click)="performSearch(searchInput.value)">
+                    <button class="search-btn" (click)="performSearch(searchInput())" title="Search analytics">
                         <lucide-icon [img]="Sparkles" class="h-3 w-3"></lucide-icon>
+                    </button>
+                    <button
+                        class="search-btn search-clear-btn"
+                        [disabled]="!hasActiveSearchHighlight()"
+                        (click)="clearSearchHighlight()"
+                        title="Clear search highlight"
+                    >
+                        <lucide-icon [img]="X" class="h-3 w-3"></lucide-icon>
                     </button>
                 </div>
                 
@@ -197,7 +209,15 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         } @else {
                             @for (item of displayedKeywords(); track item.word; let i = $index) {
                                 <div class="keyword-row" [class.top-keyword]="i < 3">
-                                    <span class="keyword-word">{{ item.word }}</span>
+                                    <label class="keyword-label-group">
+                                        <input
+                                            type="checkbox"
+                                            class="keyword-checkbox"
+                                            [checked]="isKeywordChecked(item.word)"
+                                            (change)="toggleKeywordHighlight(item.word)"
+                                        />
+                                        <span class="keyword-word">{{ item.word }}</span>
+                                    </label>
                                     <span class="keyword-stats">
                                         {{ item.count }} ({{ item.percentage }}%)
                                     </span>
@@ -291,6 +311,18 @@ import { NotesService } from '../../lib/dexie/notes.service';
         .search-btn:hover {
             color: hsl(var(--primary));
             border-color: hsl(var(--primary));
+        }
+
+        .search-btn:disabled {
+            cursor: default;
+            opacity: 0.45;
+            color: hsl(var(--muted-foreground));
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .search-btn:disabled:hover {
+            color: hsl(var(--muted-foreground));
+            border-color: rgba(255, 255, 255, 0.1);
         }
 
         .search-results {
@@ -411,10 +443,30 @@ import { NotesService } from '../../lib/dexie/notes.service';
             justify-content: space-between;
             padding: 0.25rem 0;
             font-size: 0.875rem;
+            gap: 0.75rem;
+        }
+
+        .keyword-label-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            min-width: 0;
+            cursor: pointer;
+        }
+
+        .keyword-checkbox {
+            width: 0.875rem;
+            height: 0.875rem;
+            accent-color: rgb(45, 212, 191);
+            cursor: pointer;
+            flex-shrink: 0;
         }
 
         .keyword-word {
             color: hsl(var(--muted-foreground));
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .keyword-row.top-keyword .keyword-word {
@@ -458,8 +510,10 @@ export class AnalyticsPanelComponent {
     private noteStore = inject(NoteEditorStore);
     private footerStatsService = inject(FooterStatsService);
     private router = inject(Router);
+    private prettyTextApi = getPrettyTextApi();
 
     // Search State
+    searchInput = signal('');
     searchQuery = signal('');
     isSearching = signal(false);
     searchResults = signal<any[]>([]);
@@ -470,6 +524,7 @@ export class AnalyticsPanelComponent {
     // existing state
     minCount = signal(1);
     isKeywordsExpanded = signal(false);
+    keywordSelectionVersion = signal(0);
 
     // ... Icons ...
     readonly FileText = FileText;
@@ -482,6 +537,7 @@ export class AnalyticsPanelComponent {
     readonly ChevronUp = ChevronUp;
     readonly Sparkles = Sparkles;
     readonly Target = Target;
+    readonly X = X;
 
     constructor() {
         // Build note title map
@@ -489,12 +545,17 @@ export class AnalyticsPanelComponent {
             this.noteTitleMap.clear();
             notes.forEach(n => this.noteTitleMap.set(n.id, n.title || 'Untitled'));
         });
+
+        keywordHighlightStore.subscribe(() => {
+            this.keywordSelectionVersion.update(version => version + 1);
+        });
     }
 
     // Parse and analyze content
     analytics = computed<TextAnalytics>(() => this.footerStatsService.analytics());
 
     hasContent = computed(() => this.analytics().wordCount > 0);
+    hasActiveSearchHighlight = computed(() => this.searchQuery().trim().length > 0);
 
     filteredKeywords = computed(() => {
         return this.analytics().keywordDensity.filter(k => k.count >= this.minCount());
@@ -505,13 +566,25 @@ export class AnalyticsPanelComponent {
         return this.isKeywordsExpanded() ? keywords : keywords.slice(0, 5);
     });
 
+    selectedKeywords = computed(() => {
+        this.keywordSelectionVersion();
+        return new Set(keywordHighlightStore.getKeywordsForNote(this.noteStore.activeNoteId()));
+    });
+
+    updateSearchInput(event: Event): void {
+        const target = event.target as HTMLInputElement | null;
+        this.searchInput.set(target?.value ?? '');
+    }
+
     async performSearch(query: string) {
         this.searchQuery.set(query);
         if (!query.trim()) {
             this.searchResults.set([]);
+            this.prettyTextApi.clearSearchHighlights();
             return;
         }
 
+        this.prettyTextApi.setSearchHighlightTerms(parseSearchHighlightTerms(query));
         this.isSearching.set(true);
         try {
             // Search via WASM
@@ -536,12 +609,32 @@ export class AnalyticsPanelComponent {
         }
     }
 
+    clearSearchHighlight(): void {
+        this.searchInput.set('');
+        this.searchQuery.set('');
+        this.searchResults.set([]);
+        this.prettyTextApi.clearSearchHighlights();
+    }
+
     openNoteResult(noteId: string) {
         this.noteStore.openNote(noteId);
     }
 
     openEval() {
         this.router.navigate(['/playground']);
+    }
+
+    isKeywordChecked(keyword: string): boolean {
+        return this.selectedKeywords().has(keyword);
+    }
+
+    toggleKeywordHighlight(keyword: string): void {
+        const noteId = this.noteStore.activeNoteId();
+        if (!noteId) {
+            return;
+        }
+
+        keywordHighlightStore.toggleKeyword(noteId, keyword);
     }
 
     // ... formatTime ...

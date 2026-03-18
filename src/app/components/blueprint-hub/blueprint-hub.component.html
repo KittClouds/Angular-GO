@@ -38,12 +38,12 @@
             [style.display]="activeTab() === 'theme' ? 'block' : 'none'"></app-theme-tab>
         <app-patterns-tab class="h-full w-full"
             [style.display]="activeTab() === 'patterns' ? 'block' : 'none'"></app-patterns-tab>
-        <app-story-beats-tab class="h-full w-full"
-            [style.display]="activeTab() === 'story-beats' ? 'block' : 'none'"></app-story-beats-tab>
+        <app-plot-threads-tab class="h-full w-full"
+            [style.display]="activeTab() === 'plot-threads' ? 'block' : 'none'"></app-plot-threads-tab>
         <app-worldbuilding-tab class="h-full w-full"
             [style.display]="activeTab() === 'worldbuilding' ? 'block' : 'none'"></app-worldbuilding-tab>
 
-        @if (!['graph', 'theme', 'patterns', 'story-beats', 'worldbuilding'].includes(activeTab())) {
+        @if (!['graph', 'theme', 'patterns', 'plot-threads', 'worldbuilding'].includes(activeTab())) {
         <div class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
             <div
                 class="text-center p-8 border rounded-xl bg-background/50 backdrop-blur-sm border-dashed border-border/60">

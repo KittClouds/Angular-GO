@@ -29,47 +29,41 @@ export const WORLDBUILDING_CATEGORIES: CategoryDef[] = [
     { id: 'art', label: 'Art and Entertainment', icon: 'pi pi-book', color: '#3b82f6', description: 'Creative expression in your world.' },
 ];
 
-export interface BeatTypeDef {
+// ─── Thread Types ─────────────────────────────────────────
+
+export interface ThreadTypeDef {
     id: string;
     label: string;
-    actId: string;
+    icon: string;
     color: string;
-    order: number;
 }
 
-export const BEAT_TYPES: BeatTypeDef[] = [
-    // Act 1
-    { id: 'opening-image', label: 'Opening Image', actId: 'act1', color: '#3b82f6', order: 1 },
-    { id: 'theme-stated', label: 'Theme Stated', actId: 'act1', color: '#8b5cf6', order: 2 },
-    { id: 'setup', label: 'Set-Up', actId: 'act1', color: '#10b981', order: 3 },
-    { id: 'catalyst', label: 'Catalyst', actId: 'act1', color: '#f59e0b', order: 4 },
-    { id: 'debate', label: 'Debate', actId: 'act1', color: '#ec4899', order: 5 },
-    { id: 'break-into-2', label: 'Break Into Act 2', actId: 'act1', color: '#ef4444', order: 6 },
-    // Act 2
-    { id: 'b-story', label: 'B-Story', actId: 'act2', color: '#f59e0b', order: 7 },
-    { id: 'fun-and-games', label: 'Fun and Games', actId: 'act2', color: '#ec4899', order: 8 },
-    { id: 'midpoint', label: 'Midpoint', actId: 'act2', color: '#8b5cf6', order: 9 },
-    { id: 'bad-guys-close-in', label: 'Bad Guys Close In', actId: 'act2', color: '#ef4444', order: 10 },
-    { id: 'all-is-lost', label: 'All Is Lost', actId: 'act2', color: '#64748b', order: 11 },
-    { id: 'dark-night', label: 'Dark Night of the Soul', actId: 'act2', color: '#1e293b', order: 12 },
-    // Act 3
-    { id: 'break-into-3', label: 'Break Into Act 3', actId: 'act3', color: '#ef4444', order: 13 },
-    { id: 'finale', label: 'Finale', actId: 'act3', color: '#dc2626', order: 14 },
-    { id: 'final-image', label: 'Final Image', actId: 'act3', color: '#3b82f6', order: 15 },
+export const THREAD_TYPES: ThreadTypeDef[] = [
+    { id: 'main-plot',      label: 'Main Plot',      icon: 'pi pi-bookmark-fill', color: '#3b82f6' },
+    { id: 'subplot',        label: 'Subplot',        icon: 'pi pi-bookmark',      color: '#8b5cf6' },
+    { id: 'character-arc',  label: 'Character Arc',  icon: 'pi pi-user',          color: '#ec4899' },
+    { id: 'mystery',        label: 'Mystery',        icon: 'pi pi-question-circle', color: '#f59e0b' },
+    { id: 'theme',          label: 'Theme',          icon: 'pi pi-palette',       color: '#10b981' },
 ];
 
-export interface ActDef {
+export interface ThreadStatusDef {
     id: string;
-    name: string;
+    label: string;
     color: string;
-    order: number;
+    severity: 'success' | 'warn' | 'secondary' | 'info';
 }
 
-export const ACTS: ActDef[] = [
-    { id: 'act1', name: 'Act 1', color: '#3b82f6', order: 1 },
-    { id: 'act2', name: 'Act 2', color: '#f59e0b', order: 2 },
-    { id: 'act3', name: 'Act 3', color: '#ef4444', order: 3 },
+export const THREAD_STATUSES: ThreadStatusDef[] = [
+    { id: 'active',   label: 'Active',   color: '#22c55e', severity: 'success'   },
+    { id: 'dormant',  label: 'Dormant',  color: '#f59e0b', severity: 'warn'      },
+    { id: 'resolved', label: 'Resolved', color: '#64748b', severity: 'secondary' },
 ];
+
+// Legacy compat — kept so any stale references don't explode
+export type BeatTypeDef = ThreadTypeDef;
+export type ActDef = { id: string; name: string; color: string; order: number };
+export const BEAT_TYPES: BeatTypeDef[] = [];
+export const ACTS: ActDef[] = [];
 
 @Injectable({
     providedIn: 'root'
@@ -130,6 +124,82 @@ export class CodexService {
                     .sortBy('order')
             ) as DexieObservable<CodexEntry[]>
         );
+    }
+
+    // ─── Plot Threads ────────────────────────────────────────
+
+    /**
+     * Get all threads for a narrative (entryType === 'thread')
+     */
+    getThreads$(narrativeId: string): Observable<CodexEntry[]> {
+        return from(
+            liveQuery(() =>
+                db.codexEntries
+                    .where('[narrativeId+entryType]')
+                    .equals([narrativeId, 'thread'])
+                    .sortBy('order')
+            ) as DexieObservable<CodexEntry[]>
+        );
+    }
+
+    /**
+     * Get all beats belonging to a specific thread (via parentId)
+     */
+    getBeatsForThread$(threadId: string): Observable<CodexEntry[]> {
+        return from(
+            liveQuery(() =>
+                db.codexEntries
+                    .where('parentId')
+                    .equals(threadId)
+                    .sortBy('order')
+            ) as DexieObservable<CodexEntry[]>
+        );
+    }
+
+    /**
+     * Create a plot thread
+     */
+    async createThread(
+        narrativeId: string,
+        title: string,
+        threadType: string = 'subplot',
+        color?: string
+    ): Promise<string> {
+        const maxOrder = await this.getMaxOrder(narrativeId, 'thread');
+        const typeDef = THREAD_TYPES.find(t => t.id === threadType);
+        return this.createEntry({
+            narrativeId,
+            entryType: 'thread' as any,
+            title,
+            description: '',
+            status: 'active' as any,
+            category: threadType,
+            order: maxOrder + 1,
+            entityIds: [],
+            color: color || typeDef?.color || '#8b5cf6',
+        });
+    }
+
+    /**
+     * Create a beat attached to a thread
+     */
+    async createBeatForThread(
+        narrativeId: string,
+        threadId: string,
+        title: string,
+        description: string = ''
+    ): Promise<string> {
+        const maxOrder = await this.getMaxOrderForParent(threadId);
+        return this.createEntry({
+            narrativeId,
+            entryType: 'beat',
+            title,
+            description,
+            status: 'planned',
+            parentId: threadId,
+            order: maxOrder + 1,
+            entityIds: [],
+        });
     }
 
     /**
@@ -363,33 +433,39 @@ export class CodexService {
         return entries.reduce((max, e) => Math.max(max, e.order), 0);
     }
 
+    private async getMaxOrderForParent(parentId: string): Promise<number> {
+        const entries = await db.codexEntries
+            .where('parentId')
+            .equals(parentId)
+            .toArray();
+        return entries.reduce((max, e) => Math.max(max, e.order), 0);
+    }
+
     // ─── Category Helpers ───────────────────────────────────
 
     getWorldbuildingCategories(): CategoryDef[] {
         return WORLDBUILDING_CATEGORIES;
     }
 
-    getBeatTypes(): BeatTypeDef[] {
-        return BEAT_TYPES;
-    }
-
-    getActs(): ActDef[] {
-        return ACTS;
-    }
-
-    getBeatTypesForAct(actId: string): BeatTypeDef[] {
-        return BEAT_TYPES.filter(bt => bt.actId === actId);
-    }
-
     getCategoryDef(categoryId: string): CategoryDef | undefined {
         return WORLDBUILDING_CATEGORIES.find(c => c.id === categoryId);
     }
 
-    getBeatTypeDef(beatTypeId: string): BeatTypeDef | undefined {
-        return BEAT_TYPES.find(bt => bt.id === beatTypeId);
+    // ─── Thread Helpers ─────────────────────────────────────
+
+    getThreadTypes(): ThreadTypeDef[] {
+        return THREAD_TYPES;
     }
 
-    getActDef(actId: string): ActDef | undefined {
-        return ACTS.find(a => a.id === actId);
+    getThreadTypeDef(typeId: string): ThreadTypeDef | undefined {
+        return THREAD_TYPES.find(t => t.id === typeId);
+    }
+
+    getThreadStatuses(): ThreadStatusDef[] {
+        return THREAD_STATUSES;
+    }
+
+    getThreadStatusDef(statusId: string): ThreadStatusDef | undefined {
+        return THREAD_STATUSES.find(s => s.id === statusId);
     }
 }

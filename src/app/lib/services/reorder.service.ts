@@ -1,12 +1,10 @@
 // src/app/lib/services/reorder.service.ts
 // Service for managing drag-and-drop reorder mode with Swapy
 
-import { Injectable, signal, inject, Injector, runInInjectionContext } from '@angular/core';
+import { Injectable, signal, Injector, runInInjectionContext } from '@angular/core';
 import { createSwapy, Swapy, SwapEvent } from 'swapy';
 import type { FlatTreeNode } from '../arborist/types';
 import {
-    reorderFolder,
-    reorderNote,
     moveFolderToParent,
     moveNoteToFolder,
     swapItems,
@@ -20,56 +18,51 @@ export type ReorderScope = 'siblings-only' | 'cross-folder';
     providedIn: 'root'
 })
 export class ReorderService {
-    // State
     isReorderMode = signal(false);
-    reorderScope = signal<ReorderScope>('siblings-only');
+    reorderScope = signal<ReorderScope>('cross-folder');
 
-    // Swapy instance
     private swapy: Swapy | null = null;
     private containerElement: HTMLElement | null = null;
 
-    // Track drag state
     isDragging = signal(false);
     draggedNodeId = signal<string | null>(null);
 
+    private currentNodes: FlatTreeNode[] = [];
+
     constructor(private injector: Injector) { }
 
-    /**
-     * Enable reorder mode and initialize Swapy on a container.
-     * @param container - The HTML element containing reorderable items
-     * @param scope - Whether to allow cross-folder moves or siblings only
-     */
-    /**
-     * Enable reorder mode and initialize Swapy on a container.
-     * @param container - The HTML element containing reorderable items
-     * @param scope - Whether to allow cross-folder moves or siblings only
-     */
     enableReorderMode(container: HTMLElement, scope: ReorderScope = 'siblings-only'): void {
-        // Cleanup existing instance without notifying listeners (avoids infinite loop)
         this.cleanupSwapy();
 
         this.containerElement = container;
         this.reorderScope.set(scope);
-
-        // Initialize Swapy
-        this.swapy = createSwapy(container, {
-            animation: 'dynamic'
-        });
-
-        // Listen for swap events
-        this.swapy.onSwap((event: SwapEvent) => {
-            runInInjectionContext(this.injector, async () => {
-                await this.handleSwap(event);
-            });
-        });
-
         this.isReorderMode.set(true);
-        console.log('[ReorderService] Reorder mode enabled');
+
+        setTimeout(() => {
+            if (!this.containerElement || !this.isReorderMode()) return;
+
+            this.swapy = createSwapy(this.containerElement, {
+                animation: 'dynamic'
+            });
+
+            this.swapy.onSwapStart((event) => {
+                this.setDraggedNodeId(this.extractNodeId(event.draggingItem));
+            });
+
+            this.swapy.onSwap((event: SwapEvent) => {
+                runInInjectionContext(this.injector, async () => {
+                    await this.handleSwap(event);
+                });
+            });
+
+            this.swapy.onSwapEnd(() => {
+                this.setDraggedNodeId(null);
+            });
+
+            console.log('[ReorderService] Reorder mode enabled & Swapy initialized');
+        }, 150);
     }
 
-    /**
-     * Disable reorder mode and clean up Swapy.
-     */
     disableReorderMode(): void {
         this.cleanupSwapy();
         this.containerElement = null;
@@ -79,9 +72,12 @@ export class ReorderService {
         console.log('[ReorderService] Reorder mode disabled');
     }
 
-    /**
-     * Internally destroy Swapy instance without changing active mode signals.
-     */
+    update(): void {
+        if (this.swapy && this.isReorderMode()) {
+            this.swapy.update();
+        }
+    }
+
     private cleanupSwapy(): void {
         if (this.swapy) {
             this.swapy.destroy();
@@ -89,48 +85,36 @@ export class ReorderService {
         }
     }
 
-    /**
-     * Toggle reorder mode on/off.
-     */
-    toggleReorderMode(): void {
+    toggleReorderMode(scope: ReorderScope = 'cross-folder'): void {
         if (this.isReorderMode()) {
             this.disableReorderMode();
         } else if (this.containerElement) {
-            this.enableReorderMode(this.containerElement, this.reorderScope());
+            this.enableReorderMode(this.containerElement, scope);
         }
     }
 
-    /**
-     * Set the container element for reordering.
-     * This should be called before enableReorderMode.
-     */
     setContainer(container: HTMLElement | null): void {
         this.containerElement = container;
     }
 
-    /**
-     * Handle a swap event from Swapy.
-     */
-    private async handleSwap(event: SwapEvent): Promise<void> {
-        // Swapy event properties vary by version - use type assertion
-        const swapEvent = event as any;
-        const slotId = swapEvent.slotId || swapEvent.destinationId;
-        const itemId = swapEvent.itemId || swapEvent.sourceId;
+    setCurrentNodes(nodes: FlatTreeNode[]): void {
+        this.currentNodes = nodes;
+    }
 
-        if (!slotId || !itemId) {
-            console.warn('[ReorderService] Invalid swap data', event);
+    setDraggedNodeId(id: string | null): void {
+        this.draggedNodeId.set(id);
+        this.isDragging.set(id !== null);
+    }
+
+    private async handleSwap(event: SwapEvent): Promise<void> {
+        const sourceId = this.extractNodeId(event.draggingItem || this.draggedNodeId() || '');
+        const targetId = this.extractNodeId(event.swappedWithItem || event.toSlot || '');
+
+        if (!sourceId || !targetId || sourceId === targetId) {
             return;
         }
 
-        // Extract the actual node IDs from the slot/item IDs
-        // Format: "slot-{id}" and "item-{id}"
-        const sourceId = this.draggedNodeId();
-        const targetId = this.extractNodeId(itemId);
-
-        if (!sourceId || sourceId === targetId) return;
-
         try {
-            // Determine if this is same-container or cross-container
             const sourceNode = this.findNodeById(sourceId);
             const targetNode = this.findNodeById(targetId);
 
@@ -139,123 +123,104 @@ export class ReorderService {
                 return;
             }
 
-            if (sourceNode.type !== targetNode.type) {
-                // Can't swap folder with note
-                console.warn('[ReorderService] Cannot swap different node types');
-                return;
-            }
+            const sameType = sourceNode.type === targetNode.type;
+            const sameParent = sameType && this.areNodesInSameContainer(sourceNode, targetNode);
 
-            // Check if same parent (sibling reorder) or different parent (cross-container move)
-            const sameParent = this.areNodesInSameContainer(sourceNode, targetNode);
+            // Turn off Swapy to prevent its own DOM animation from racing with Angular's structural DOM teardown.
+            // We will restart it after Angular's reactive changes settle.
+            this.cleanupSwapy();
 
-            if (sameParent) {
-                // Simple swap of orders
+            if (sameType && sameParent) {
                 await swapItems(sourceId, targetId, sourceNode.type);
-                console.log(`[ReorderService] Swapped ${sourceNode.type}s: ${sourceId} ↔ ${targetId}`);
-            } else if (this.reorderScope() === 'cross-folder') {
-                // Cross-container move
-                await this.handleCrossContainerMove(sourceNode, targetNode);
+                console.log(`[ReorderService] Swapped ${sourceNode.type}s: ${sourceId} <-> ${targetId}`);
             } else {
-                console.warn('[ReorderService] Cross-container moves not allowed in current scope');
+                if (this.reorderScope() !== 'cross-folder') {
+                    console.warn('[ReorderService] Cross-container moves not allowed in current scope');
+                } else {
+                    await this.handleCrossContainerMove(sourceNode, targetNode);
+                }
             }
+
+            // After DB operations conclude, give Angular a tick to repaint the `<ng-container *ngFor>` DOM nodes,
+            // then resurrect Swapy cleanly on the fresh DOM.
+            setTimeout(() => {
+                if (this.containerElement && this.isReorderMode()) {
+                    this.enableReorderMode(this.containerElement, this.reorderScope());
+                }
+            }, 50);
+
         } catch (error) {
             console.error('[ReorderService] Swap failed:', error);
+            // Attempt to recover Swapy if the backend op fails
+            setTimeout(() => {
+                if (this.containerElement && this.isReorderMode()) {
+                    this.enableReorderMode(this.containerElement, this.reorderScope());
+                }
+            }, 50);
         }
     }
 
-    /**
-     * Extract the node ID from a Swapy slot/item ID.
-     */
     private extractNodeId(swapyId: string): string {
-        // Swapy IDs are formatted as "slot-{id}" or "item-{id}"
-        // Extract the actual ID after the prefix
         const match = swapyId.match(/^(?:slot|item)-(.+)$/);
         return match ? match[1] : swapyId;
     }
 
-    /**
-     * Find a node by its ID in the current tree.
-     */
     private findNodeById(id: string): FlatTreeNode | null {
-        const nodes = this.getCurrentNodes();
-        return nodes.find(n => n.id === id) || null;
+        return this.currentNodes.find(n => n.id === id) || null;
     }
 
-    /**
-     * Check if two nodes are in the same container (same parent folder).
-     */
     private areNodesInSameContainer(node1: FlatTreeNode, node2: FlatTreeNode): boolean {
         if (node1.type !== node2.type) return false;
 
         if (node1.type === 'folder') {
-            // Compare parentId - access from the extended node data
             const parent1 = (node1 as any).parentId || '';
             const parent2 = (node2 as any).parentId || '';
             return parent1 === parent2;
-        } else {
-            // Compare folderId
-            const folder1 = (node1 as any).folderId || '';
-            const folder2 = (node2 as any).folderId || '';
-            return folder1 === folder2;
         }
+
+        const folder1 = (node1 as any).folderId || '';
+        const folder2 = (node2 as any).folderId || '';
+        return folder1 === folder2;
     }
 
-    /**
-     * Handle moving a node to a different container.
-     */
     private async handleCrossContainerMove(source: FlatTreeNode, target: FlatTreeNode): Promise<void> {
         if (source.type === 'folder') {
+            if (target.type !== 'folder') {
+                console.warn('[ReorderService] Folder moves require a folder target');
+                return;
+            }
+
             const targetParentId = (target as any).parentId || '';
             const siblings = await this.getFolderSiblings(targetParentId);
             const targetIndex = siblings.findIndex(f => f.id === target.id);
             await moveFolderToParent(source.id, targetParentId, Math.max(0, targetIndex));
-        } else {
-            const targetFolderId = (target as any).folderId || '';
-            const siblings = await this.getNoteSiblings(targetFolderId);
-            const targetIndex = siblings.findIndex(n => n.id === target.id);
-            await moveNoteToFolder(source.id, targetFolderId, Math.max(0, targetIndex));
+            return;
         }
+
+        const targetFolderId = target.type === 'folder'
+            ? target.id
+            : ((target as any).folderId || '');
+        const siblings = await this.getNoteSiblings(targetFolderId);
+        const targetIndex = target.type === 'folder'
+            ? siblings.length
+            : siblings.findIndex(n => n.id === target.id);
+
+        await moveNoteToFolder(
+            source.id,
+            targetFolderId,
+            targetIndex === -1 ? siblings.length : Math.max(0, targetIndex)
+        );
     }
 
-    /**
-     * Get sibling folders for a parent.
-     */
     private async getFolderSiblings(parentId: string): Promise<Array<{ id: string; order: number }>> {
         const folders = await getFolderChildren(parentId);
         return folders.sort((a, b) => a.order - b.order);
     }
 
-    /**
-     * Get sibling notes for a folder.
-     */
     private async getNoteSiblings(folderId: string): Promise<Array<{ id: string; order: number }>> {
         const notes = await getNotesByFolder(folderId);
         return notes.sort((a, b) => a.order - b.order);
     }
-
-    // Storage for current nodes (set by component)
-    private currentNodes: FlatTreeNode[] = [];
-
-    /**
-     * Set the current list of nodes (called by component).
-     */
-    setCurrentNodes(nodes: FlatTreeNode[]): void {
-        this.currentNodes = nodes;
-    }
-
-    /**
-     * Get the current list of nodes.
-     */
-    private getCurrentNodes(): FlatTreeNode[] {
-        return this.currentNodes;
-    }
-
-    /**
-     * Set the currently dragged node ID.
-     * Called by the component on drag start.
-     */
-    setDraggedNodeId(id: string | null): void {
-        this.draggedNodeId.set(id);
-        this.isDragging.set(id !== null);
-    }
 }
+
+

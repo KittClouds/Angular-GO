@@ -9,16 +9,17 @@ import (
 // Matches the TypeScript relation extractor's 8000-char limit.
 const MaxTextLength = 8000
 
-// SystemPrompt instructs the LLM to return structured JSON only.
+// SystemPrompt keeps extraction behavior specific while leaving response
+// enforcement to structured outputs when available.
 const SystemPrompt = `You are an entity and relationship extraction assistant for narrative analysis.
 Extract named entities AND relationships between them from the given text.
-Return ONLY a valid JSON object with two arrays: "entities" and "relations".
-No markdown, no explanation. Start with { and end with }.`
+When a response schema is provided, follow it exactly.
+Otherwise, return a JSON object with two arrays: "entities" and "relations".
+No markdown or commentary.`
 
 // BuildUserPrompt constructs the combined extraction prompt.
 // knownEntities primes the LLM with entity labels already in the registry.
 func BuildUserPrompt(text string, knownEntities []string) string {
-	// Truncate text to avoid token limits
 	truncated := text
 	if len(truncated) > MaxTextLength {
 		truncated = truncated[:MaxTextLength]
@@ -26,16 +27,14 @@ func BuildUserPrompt(text string, knownEntities []string) string {
 
 	var sb strings.Builder
 	sb.WriteString("Extract named entities AND relationships from this text. ")
-	sb.WriteString("Return a JSON object with two arrays: \"entities\" and \"relations\".\n\n")
+	sb.WriteString("If no response schema is supplied, respond as JSON with \"entities\" and \"relations\" arrays.\n\n")
 
-	// Known entities section (if any)
 	if len(knownEntities) > 0 {
 		sb.WriteString("KNOWN ENTITIES (prioritize these):\n")
 		sb.WriteString(strings.Join(knownEntities, ", "))
 		sb.WriteString("\n\n")
 	}
 
-	// Entity extraction instructions
 	sb.WriteString("=== ENTITIES ===\n")
 	sb.WriteString("Each entity object:\n")
 	sb.WriteString("- \"label\": Canonical name (string)\n")
@@ -52,7 +51,6 @@ func BuildUserPrompt(text string, knownEntities []string) string {
 	sb.WriteString("- EVENT: Historical events\n")
 	sb.WriteString("- CONCEPT: Magic systems, lore\n\n")
 
-	// Relation extraction instructions
 	sb.WriteString("=== RELATIONS ===\n")
 	sb.WriteString("Each relation object:\n")
 	sb.WriteString("- \"subject\": Entity performing the action (string)\n")
@@ -66,9 +64,8 @@ func BuildUserPrompt(text string, knownEntities []string) string {
 	sb.WriteString("- \"confidence\": 0.0-1.0 (number)\n")
 	sb.WriteString("- \"sourceSentence\": The exact sentence this came from (string)\n\n")
 
-	// Rules
 	sb.WriteString("RULES:\n")
-	sb.WriteString("1. Only proper nouns — skip generic terms\n")
+	sb.WriteString("1. Only proper nouns - skip generic terms\n")
 	sb.WriteString("2. Deduplicate entities\n")
 	sb.WriteString("3. One relationship per verb phrase\n")
 	sb.WriteString("4. Include the exact source sentence for each relation\n")

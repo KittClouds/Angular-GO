@@ -33,6 +33,40 @@ export interface SearchScope {
     folderPath?: string;
 }
 
+export interface OpenRouterStructuredOutputConfig {
+    enabled?: boolean;
+    type?: 'json_schema' | 'json_object';
+    schema?: unknown;
+    strict?: boolean;
+    name?: string;
+    description?: string;
+}
+
+export interface OpenRouterPlugin {
+    id: string;
+}
+
+export interface OpenRouterRequestOptions {
+    structuredOutput?: OpenRouterStructuredOutputConfig;
+    plugins?: OpenRouterPlugin[];
+}
+
+export interface GoKittBatchConfig {
+    provider: 'google' | 'openrouter';
+    googleApiKey?: string;
+    googleModel?: string;
+    openRouterApiKey?: string;
+    openRouterModel?: string;
+    temperature?: number;
+    maxTokens?: number;
+    reasoningEnabled?: boolean;
+    reasoningEffort?: 'low' | 'medium' | 'high';
+    reasoningMaxTokens?: number;
+    includeReasoning?: boolean;
+    structuredOutput?: OpenRouterStructuredOutputConfig;
+    plugins?: OpenRouterPlugin[];
+}
+
 type GoKittWorkerMessage =
     | { type: 'INIT' }
     | { type: 'HYDRATE'; payload: { entitiesJSON: string } }
@@ -132,7 +166,7 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_STATS'; id: number }
-    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string }; id: number };
+    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string; requestOptionsJSON?: string }; id: number };
 
 type GoKittWorkerResponse =
     | { type: 'INIT_COMPLETE' }
@@ -153,7 +187,6 @@ type GoKittWorkerResponse =
     | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
     | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
     | { type: 'ANALYZE_TEXT_RESULT'; id: number; payload: any }
-    | { type: 'ANALYTICS_UPDATE'; payload: any }
     // SQLite Store responses
     | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_UPSERT_NOTE_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -285,10 +318,6 @@ export class GoKittService {
     // Last graph data from GoKitt scan - PRIMARY source for graph visualization
     private _lastGraphData = signal<GoKittGraphData | null>(null);
     readonly lastGraphData = this._lastGraphData.asReadonly();
-
-    // Piggybacked analytics from background implicit scans
-    private _activeAnalytics = signal<any>(null);
-    readonly activeAnalytics = this._activeAnalytics.asReadonly();
 
     /** Get the worker instance for external services (like GoKittStoreService) */
     get worker(): Worker | null {
@@ -970,19 +999,12 @@ export class GoKittService {
     // ============ Worker Communication ============
 
     private handleWorkerMessage(msg: GoKittWorkerResponse): void {
-        // Intercept background pushes
-        if (msg.type === 'ANALYTICS_UPDATE') {
-            this._activeAnalytics.set(msg.payload);
-            return;
-        }
-
         // Handle responses with IDs
         if ('id' in msg && msg.id !== undefined) {
             const pending = this.pendingRequests.get(msg.id);
             if (pending) {
-                this.pendingRequests.delete(msg.id);
-
                 if (msg.type === 'ERROR') {
+                    this.pendingRequests.delete(msg.id);
                     pending.reject(new Error(msg.payload.message));
                 } else {
                     // Extract payload based on message type
@@ -1002,6 +1024,7 @@ export class GoKittService {
                         case 'SCAN_NOTE_RESULT':
                         case 'DOC_COUNT_RESULT':
                         case 'VALIDATE_RELATIONS_RESULT':
+                        case 'ANALYZE_TEXT_RESULT':
                         // SQLite Store responses
                         case 'STORE_INIT_RESULT':
                         case 'STORE_UPSERT_NOTE_RESULT':
@@ -1107,10 +1130,11 @@ export class GoKittService {
                         case 'GLDR_SEARCH_NODES_RESULT':
                         case 'GLDR_SEARCH_NODES_SAB_RESULT':
                         case 'GLDR_STATS_RESULT':
+                            this.pendingRequests.delete(msg.id);
                             pending.resolve(msg.payload);
                             break;
                         default:
-                            pending.resolve(undefined);
+                            console.warn('[GoKittService] Ignoring unhandled worker response:', msg.type);
                     }
                 }
             }
@@ -1241,19 +1265,7 @@ export class GoKittService {
      * Must be called before any extraction or agent calls.
      * @param config LLM provider configuration
      */
-    async batchInit(config: {
-        provider: 'google' | 'openrouter';
-        googleApiKey?: string;
-        googleModel?: string;
-        openRouterApiKey?: string;
-        openRouterModel?: string;
-        temperature?: number;
-        maxTokens?: number;
-        reasoningEnabled?: boolean;
-        reasoningEffort?: 'low' | 'medium' | 'high';
-        reasoningMaxTokens?: number;
-        includeReasoning?: boolean;
-    }): Promise<{ success: boolean; provider?: string; model?: string; error?: string }> {
+    async batchInit(config: GoKittBatchConfig): Promise<{ success: boolean; provider?: string; model?: string; error?: string }> {
         if (!this.wasmLoaded) {
             return { success: false, error: 'WASM not loaded' };
         }
@@ -1354,7 +1366,8 @@ export class GoKittService {
         messagesJSON: string,
         systemPrompt: string,
         onChunk: (chunk: string) => void,
-        onReasoning?: (chunk: string) => void
+        onReasoning?: (chunk: string) => void,
+        requestOptions?: OpenRouterRequestOptions
     ): Promise<{ response: string; error?: string }> {
         if (!this.wasmLoaded) return { response: '', error: 'WASM not loaded' };
 
@@ -1386,7 +1399,11 @@ export class GoKittService {
 
             this._worker?.postMessage({
                 type: 'GO_STREAM_CHAT',
-                payload: { messagesJSON, systemPrompt },
+                payload: {
+                    messagesJSON,
+                    systemPrompt,
+                    requestOptionsJSON: requestOptions ? JSON.stringify(requestOptions) : undefined,
+                },
                 id
             } as GoKittWorkerMessage);
         });
@@ -1916,6 +1933,7 @@ export class GoKittService {
         return this.sendRequest('GLDR_STATS', {});
     }
 }
+
 
 
 

@@ -40,7 +40,12 @@ func (s *Service) ExtractFromNote(
 
 	userPrompt := BuildUserPrompt(text, knownEntities)
 
-	raw, err := s.batch.Complete(ctx, userPrompt, SystemPrompt)
+	var requestOptions *batch.RequestOptions
+	if s.batch.SupportsStructuredOutput() {
+		requestOptions = StructuredRequestOptions()
+	}
+
+	raw, err := s.batch.CompleteWithOptions(ctx, userPrompt, SystemPrompt, requestOptions)
 	if err != nil {
 		return nil, fmt.Errorf("extraction: LLM call failed: %w", err)
 	}

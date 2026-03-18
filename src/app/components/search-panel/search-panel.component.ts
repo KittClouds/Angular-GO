@@ -16,7 +16,6 @@ import {
   lucideSearch,
   lucideSparkles,
   lucideZap,
-  lucideSettings2,
 } from '@ng-icons/lucide';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { InputTextModule } from 'primeng/inputtext';
@@ -24,7 +23,6 @@ import { SelectModule } from 'primeng/select';
 import { ButtonModule } from 'primeng/button';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { TooltipModule } from 'primeng/tooltip';
-import { SelectButtonChangeEvent } from 'primeng/selectbutton';
 
 import { GoKittService, SearchScope } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
@@ -37,7 +35,7 @@ import { buildScopedCanonicalEntityMap, collectScopedRegistrationNames } from '.
 type SearchMode = 'notes' | 'vector' | 'graptor';
 type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
 type GraptorStatus = 'idle' | 'building' | 'ready' | 'searching' | 'error';
-type ModelId = 'mdbr-leaf' | 'bge-small' | 'modernbert-base';
+type ModelId = 'mongodb-leaf' | 'bge-small-en' | 'gte-modernbert-base';
 type TruncateDim = 'full' | '256' | '128' | '64';
 
 interface SearchPanelEntity {
@@ -134,7 +132,7 @@ export class SearchPanelComponent implements OnInit {
   readonly graptorStatus = signal<GraptorStatus>('idle');
   readonly graptorStats = signal<GraptorStats>({ entities: 0, chunks: 0, edges: 0 });
 
-  readonly selectedModel = signal<ModelId>('mdbr-leaf');
+  readonly selectedModel = signal<ModelId>('mongodb-leaf');
   readonly truncateDim = signal<TruncateDim>('full');
   readonly folders = signal<Array<{ id: string; name: string }>>([]);
   readonly notes = signal<SearchPanelNote[]>([]);
@@ -146,7 +144,6 @@ export class SearchPanelComponent implements OnInit {
     { id: 'graptor', label: 'Graptor', icon: 'lucideLayers' },
   ];
 
-  // For PrimeNG SelectButton usage:
   readonly modeOptions = [
     { label: 'Notes', value: 'notes' as SearchMode },
     { label: 'Vector', value: 'vector' as SearchMode },
@@ -154,9 +151,9 @@ export class SearchPanelComponent implements OnInit {
   ];
 
   readonly models: Array<{ id: ModelId; label: string; dims: number; desc: string }> = [
-    { id: 'mdbr-leaf', label: 'MDBR Leaf', dims: 256, desc: 'Fastest local TypeScript path.' },
-    { id: 'bge-small', label: 'BGE-small', dims: 384, desc: 'Balanced Rust/WASM embeddings.' },
-    { id: 'modernbert-base', label: 'ModernBERT', dims: 768, desc: 'Largest local embedding model.' },
+    { id: 'mongodb-leaf', label: 'MDBR Leaf', dims: 256, desc: 'Fastest local TypeScript path.' },
+    { id: 'bge-small-en', label: 'BGE-small', dims: 384, desc: 'Balanced local embedding path.' },
+    { id: 'gte-modernbert-base', label: 'ModernBERT', dims: 768, desc: 'Largest local embedding model.' },
   ];
 
   readonly truncateDims: TruncateDim[] = ['full', '256', '128', '64'];
@@ -170,6 +167,38 @@ export class SearchPanelComponent implements OnInit {
 
   readonly modeLabel = computed(() => this.modes.find((mode) => mode.id === this.activeMode())?.label || 'Notes');
   readonly modeIcon = computed(() => this.modes.find((mode) => mode.id === this.activeMode())?.icon || 'lucideSearch');
+  readonly selectedModelDefinition = computed(() =>
+    this.models.find((model) => model.id === this.selectedModel()) || this.models[0]
+  );
+  readonly embeddingsReady = computed(() => EmbeddingEngine.isReady());
+  readonly activeEmbeddingDimensionLabel = computed(() => {
+    const modelDims = this.selectedModelDefinition().dims;
+    const truncateDim = this.truncateDim();
+    return truncateDim === 'full' ? `${modelDims}d` : `${Math.min(Number(truncateDim), modelDims)}d`;
+  });
+  readonly headerSubtitle = computed(() => {
+    if (this.activeMode() === 'notes') return 'Live Go qgram';
+    if (this.activeMode() === 'vector') {
+      return this.embeddingsReady()
+        ? `${this.currentModelLabel()} ready for Graptor semantic sidecar`
+        : 'Local embeddings + Go note fallback';
+    }
+    return this.graptorSemanticEnabled()
+      ? 'GLDR + qgram + graph + semantic expansion'
+      : 'GLDR + qgram + graph';
+  });
+  readonly searchActionLabel = computed(() => {
+    if (this.activeMode() === 'notes') return 'Search';
+    if (this.activeMode() === 'vector') return 'Vector';
+    return 'Graptor';
+  });
+  readonly graptorSemanticEnabled = computed(() => this.embeddingsReady() && this.graptorStats().chunks > 0);
+  readonly vectorRouteLabel = computed(() =>
+    this.embeddingsReady() ? 'Embeddings ready for GLDR sidecar' : 'Go note fallback'
+  );
+  readonly graptorBuildLabel = computed(() =>
+    this.embeddingsReady() ? 'Build Graptor + semantic index' : 'Build Graptor index'
+  );
 
   ngOnInit(): void {
     this.notesService.getAllNotes$()
@@ -200,6 +229,8 @@ export class SearchPanelComponent implements OnInit {
       .subscribe((folders) => {
         this.folders.set(folders.map((folder) => ({ id: folder.id, name: folder.name })));
       });
+
+    void this.hydrateUiState();
   }
 
   async handleSearch(): Promise<void> {
@@ -236,9 +267,12 @@ export class SearchPanelComponent implements OnInit {
     }
   }
 
-  onModeChange(event: any): void {
+  onModeChange(event: { value?: SearchMode }): void {
     if (event.value) {
       this.activeMode.set(event.value);
+      if (event.value === 'graptor') {
+        void this.refreshGraptorStatsSafe();
+      }
     }
   }
 
@@ -247,9 +281,11 @@ export class SearchPanelComponent implements OnInit {
     this.error.set(null);
     try {
       await this.semanticSearch.initializeWorker();
-      await EmbeddingEngine.initialize();
+      await EmbeddingEngine.initialize(this.selectedModel());
       this.vectorStatus.set('ready');
-      this.notice.set('Embedding model loaded. Vector mode still uses the live note fallback, but Graptor can now send embeddings into GLDR over SAB.');
+      this.notice.set(
+        `${this.currentModelLabel()} loaded at ${this.activeEmbeddingDimensionLabel()}. Vector mode still uses the live note fallback, and Graptor can now send semantic candidates into GLDR over SAB.`
+      );
     } catch (err) {
       this.vectorStatus.set('error');
       this.error.set(this.toErrorMessage(err));
@@ -269,12 +305,15 @@ export class SearchPanelComponent implements OnInit {
         content: note.content,
       })));
       this.vectorStatus.set('ready');
-      this.notice.set(`Queued ${notes.length} notes for embedding. Search remains on the live Go note backend for now.`);
+      this.notice.set(
+        `Queued ${notes.length} notes for embedding. Graptor will use ${this.currentModelLabel()} at ${this.activeEmbeddingDimensionLabel()} when you build its index.`
+      );
     } catch (err) {
       this.vectorStatus.set('error');
       this.error.set(this.toErrorMessage(err));
     }
   }
+
   async rebuildGraptorIndex(): Promise<void> {
     this.graptorStatus.set('building');
     this.error.set(null);
@@ -283,16 +322,20 @@ export class SearchPanelComponent implements OnInit {
       if (!init.success) {
         throw new Error(init.error || 'Failed to initialize GLDR');
       }
+
       const notes = this.scopedNotes();
       const pendingEmbeddingBatch: GraptorBatchEntry[] = [];
       const canEmbed = EmbeddingEngine.isReady();
+
       for (const note of notes) {
         const scanText = this.buildGraptorScanText(note);
         const scanResult = scanText ? await this.goKitt.scan(scanText) : null;
         const mentions = this.extractGraptorMentions(scanResult);
         const embeddingText = (scanText || note.content || note.title).trim();
+
         await this.registerGraptorEntities(scanResult, mentions);
         await this.ingestGraptorEdges(scanResult);
+
         if (canEmbed && embeddingText) {
           pendingEmbeddingBatch.push({
             chunkId: note.id,
@@ -306,6 +349,7 @@ export class SearchPanelComponent implements OnInit {
           }
           continue;
         }
+
         const indexRes = await this.goKitt.gldrIndexChunk(note.id, {
           title: note.title,
           content: note.content,
@@ -314,17 +358,24 @@ export class SearchPanelComponent implements OnInit {
           throw new Error(indexRes.error || `Failed to index note ${note.title}`);
         }
       }
+
       if (pendingEmbeddingBatch.length) {
         await this.flushGraptorEmbeddingBatch(pendingEmbeddingBatch.splice(0, pendingEmbeddingBatch.length));
       }
+
       await this.refreshGraptorStats();
       this.graptorStatus.set('ready');
-      this.notice.set(`Built Graptor index for ${notes.length} notes with canonical entity mentions in the current scope.`);
+      this.notice.set(
+        this.embeddingsReady()
+          ? `Built Graptor index for ${notes.length} notes with semantic expansion enabled via ${this.currentModelLabel()} at ${this.activeEmbeddingDimensionLabel()}.`
+          : `Built Graptor index for ${notes.length} notes with canonical entity mentions in the current scope.`
+      );
     } catch (err) {
       this.graptorStatus.set('error');
       this.error.set(this.toErrorMessage(err));
     }
   }
+
   openResult(result: SearchResultView): void {
     this.noteStore.openNote(result.noteId);
   }
@@ -335,11 +386,15 @@ export class SearchPanelComponent implements OnInit {
   }
 
   vectorStatusLabel(): string {
+    if (this.embeddingsReady() && this.vectorStatus() === 'idle') {
+      return this.activeEmbeddingDimensionLabel();
+    }
+
     switch (this.vectorStatus()) {
       case 'loading':
         return 'Loading';
       case 'ready':
-        return 'Ready';
+        return this.activeEmbeddingDimensionLabel();
       case 'indexing':
         return 'Indexing';
       case 'error':
@@ -376,15 +431,15 @@ export class SearchPanelComponent implements OnInit {
   }
 
   private async runNotesSearch(): Promise<void> {
-    const rawResults = await this.goKitt.search(this.query(), 60);
+    const rawResults = await this.goKitt.searchScoped(this.query(), 60, this.buildScope());
     this.results.set(this.mapGoResults(rawResults, 'notes'));
   }
 
   private async runVectorSearch(): Promise<void> {
     if (this.vectorStatus() === 'idle') {
-      this.notice.set('Load the embedding model to manage vector indexing. Query results still come from the live note search path.');
+      this.notice.set('Load the embedding model to manage vector indexing. Query results still come from the live Go note path until a dedicated vector retrieval UI replaces the retired Cozo stack.');
     }
-    const rawResults = await this.goKitt.search(this.query(), 60);
+    const rawResults = await this.goKitt.searchScoped(this.query(), 60, this.buildScope());
     this.results.set(this.mapGoResults(rawResults, 'vector'));
   }
 
@@ -396,9 +451,12 @@ export class SearchPanelComponent implements OnInit {
 
     this.graptorStatus.set('searching');
     const queryEmbedding = await this.embedForGraptor(this.query());
+    const config = queryEmbedding
+      ? { topChunks: 12, semanticTopK: 24, semanticAlpha: 0.22, semanticGamma: 0.35 }
+      : { topChunks: 12 };
     const raw = queryEmbedding
-      ? await this.goKitt.gldrSearchWithEmbedding(this.query(), queryEmbedding, { topChunks: 12 })
-      : await this.goKitt.gldrSearch(this.query(), { topChunks: 12 });
+      ? await this.goKitt.gldrSearchWithEmbedding(this.query(), queryEmbedding, config)
+      : await this.goKitt.gldrSearch(this.query(), config);
     const parsed = this.parseGraptorResults(raw) as Array<{
       chunkId: string;
       chunkScore: number;
@@ -417,7 +475,7 @@ export class SearchPanelComponent implements OnInit {
         score: result.chunkScore,
         source: 'graptor',
         sourceLabel: 'Graptor',
-        meta: 'Chunk ranking',
+        meta: queryEmbedding ? `Semantic ${this.activeEmbeddingDimensionLabel()} + graph` : 'Graph + lexical',
         lexScore: result.lexScore,
         graphScore: result.graphScore,
         matchedEntities: (result.matchedEntities || []).map((item) => item.entityId),
@@ -438,7 +496,7 @@ export class SearchPanelComponent implements OnInit {
           content: item.content,
         },
         mentions: item.mentions,
-        embedding: Float32Array.from(embeddings[index] || []),
+        embedding: this.prepareEmbedding(embeddings[index] || []),
       })));
       if (!indexRes.success) {
         throw new Error(indexRes.error || 'Failed to batch index Graptor notes');
@@ -461,7 +519,7 @@ export class SearchPanelComponent implements OnInit {
     if (!source || !EmbeddingEngine.isReady()) return null;
     const [embedding] = await EmbeddingEngine.embed([source]);
     if (!embedding?.length) return null;
-    return Float32Array.from(embedding);
+    return this.prepareEmbedding(embedding);
   }
 
   private parseGraptorResults(raw: string): unknown[] {
@@ -541,7 +599,7 @@ export class SearchPanelComponent implements OnInit {
           score: result.Score || result.score || 0,
           source,
           sourceLabel: source === 'notes' ? 'Notes' : 'Vector fallback',
-          meta: source === 'notes' ? 'Title + body' : 'Embedding workspace active',
+          meta: source === 'notes' ? 'Title + body' : this.vectorRouteLabel(),
         };
       })
       .filter((result) => allowedNoteIds.has(result.noteId))
@@ -551,6 +609,21 @@ export class SearchPanelComponent implements OnInit {
   private async refreshGraptorStats(): Promise<void> {
     const raw = await this.goKitt.gldrStats();
     this.graptorStats.set(JSON.parse(raw) as GraptorStats);
+  }
+
+  private async refreshGraptorStatsSafe(): Promise<void> {
+    try {
+      await this.refreshGraptorStats();
+    } catch {
+      this.graptorStats.set({ entities: 0, chunks: 0, edges: 0 });
+    }
+  }
+
+  private async hydrateUiState(): Promise<void> {
+    if (EmbeddingEngine.isReady()) {
+      this.vectorStatus.set('ready');
+    }
+    await this.refreshGraptorStatsSafe();
   }
 
   private buildScope(): SearchScope | undefined {
@@ -578,12 +651,31 @@ export class SearchPanelComponent implements OnInit {
   private toErrorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
+
+  currentModelLabel(): string {
+    return this.selectedModelDefinition().label;
+  }
+
+  private prepareEmbedding(source: ArrayLike<number>): Float32Array {
+    const targetDim = this.truncateDim() === 'full' ? 0 : Number(this.truncateDim());
+    const sourceLength = typeof source.length === 'number' ? source.length : 0;
+    const finalLength = targetDim > 0 ? Math.min(targetDim, sourceLength) : sourceLength;
+    const embedding = new Float32Array(finalLength);
+    let norm = 0;
+
+    for (let i = 0; i < finalLength; i++) {
+      const value = Number(source[i] || 0);
+      embedding[i] = value;
+      norm += value * value;
+    }
+
+    if (norm > 0) {
+      const invNorm = 1 / Math.sqrt(norm);
+      for (let i = 0; i < finalLength; i++) {
+        embedding[i] *= invNorm;
+      }
+    }
+
+    return embedding;
+  }
 }
-
-
-
-
-
-
-
-

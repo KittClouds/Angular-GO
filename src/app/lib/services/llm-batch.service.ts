@@ -12,6 +12,7 @@
  */
 
 import { Injectable, signal, computed } from '@angular/core';
+import type { OpenRouterPlugin, OpenRouterStructuredOutputConfig } from '../../services/gokitt.service';
 import { getSetting, setSetting } from '../dexie/settings.service';
 
 export type LlmProvider = 'google' | 'openrouter';
@@ -26,6 +27,8 @@ interface LlmBatchConfig {
     openRouterModel: string;
     temperature?: number;
     maxTokens?: number;
+    structuredOutput?: OpenRouterStructuredOutputConfig;
+    plugins?: OpenRouterPlugin[];
 }
 
 // Popular models for batch operations (good at structured output)
@@ -110,3 +113,4 @@ export class LlmBatchService {
     }
 
 }
+

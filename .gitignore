@@ -52,3 +52,5 @@ GoKitt/.codex-go-tmp
 # Global Go cache
 /.gocache
 /.gomodcache
+GoKitt/.gocache/
+*.txt

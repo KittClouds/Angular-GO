@@ -281,7 +281,7 @@ export interface CodexEntry {
     // Common fields
     title: string;
     description: string;
-    status: 'draft' | 'planned' | 'complete' | 'locked';
+    status: 'draft' | 'planned' | 'complete' | 'locked' | 'active' | 'dormant' | 'resolved';
 
     // Category (for facts/beats)
     category?: string;                // e.g., 'geography', 'magic', 'act1'
@@ -542,7 +542,7 @@ export interface Setting {
 
 export type LeftSidebarMode = 'open' | 'collapsed' | 'closed';
 export type RightSidebarMode = 'open' | 'closed';
-export type RightSidebarPanel = 'entities' | 'timeline' | 'chat';
+export type RightSidebarPanel = 'entities' | 'analytics' | 'timeline' | 'ai';
 export type SearchMode = 'vector' | 'keyword' | 'raptor';
 export type CalendarView = 'month' | 'week' | 'timeline';
 export type ThemePreference = 'light' | 'dark' | 'system';

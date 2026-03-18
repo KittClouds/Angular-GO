@@ -11,6 +11,20 @@ import { db, UIState, getDefaultUIState, LeftSidebarMode, RightSidebarMode, Righ
 
 const STATE_ID = 'app-state';
 
+function normalizeRightSidebarPanel(panel: string | undefined): RightSidebarPanel {
+    switch (panel) {
+        case 'analytics':
+        case 'timeline':
+        case 'ai':
+        case 'entities':
+            return panel;
+        case 'chat':
+            return 'ai';
+        default:
+            return 'entities';
+    }
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -47,7 +61,7 @@ export class AppStateService {
     // Sidebar states
     readonly leftSidebarMode = computed(() => this.state().leftSidebarMode);
     readonly rightSidebarMode = computed(() => this.state().rightSidebarMode);
-    readonly rightSidebarActivePanel = computed(() => this.state().rightSidebarActivePanel);
+    readonly rightSidebarActivePanel = computed(() => normalizeRightSidebarPanel(this.state().rightSidebarActivePanel));
 
     // Panel dimensions
     readonly leftSidebarWidth = computed(() => this.state().leftSidebarWidth);
@@ -83,6 +97,14 @@ export class AppStateService {
         if (this.isBrowser) {
             this.ensureStateExists();
         }
+
+        effect(() => {
+            const panel = this.stateSignal()?.rightSidebarActivePanel;
+            const normalized = normalizeRightSidebarPanel(panel);
+            if (panel && panel !== normalized) {
+                this.updateState({ rightSidebarActivePanel: normalized });
+            }
+        });
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -138,7 +160,7 @@ export class AppStateService {
     }
 
     setRightSidebarActivePanel(panel: RightSidebarPanel): void {
-        this.updateState({ rightSidebarActivePanel: panel });
+        this.updateState({ rightSidebarActivePanel: normalizeRightSidebarPanel(panel) });
     }
 
     // ─────────────────────────────────────────────────────────────

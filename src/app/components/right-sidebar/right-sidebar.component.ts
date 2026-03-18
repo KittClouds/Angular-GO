@@ -27,7 +27,6 @@ const VIEW_OPTIONS: ViewOption[] = [
     { value: 'ai', label: 'AI', icon: Bot },
 ];
 
-const STORAGE_KEY = 'right-sidebar:tab';
 const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 
 @Component({
@@ -235,8 +234,8 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     readonly viewOptions = VIEW_OPTIONS;
 
-    /** Active view (persisted) */
-    activeView = signal<SidebarView>(this.loadSavedView());
+    /** Active view (persisted in AppStateService) */
+    activeView = this.service.activePanel;
 
     /** Dropdown state */
     isDropdownOpen = signal(false);
@@ -279,14 +278,6 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
         return opt?.icon || Sparkles;
     });
 
-    private loadSavedView(): SidebarView {
-        const saved = getSetting<string | null>(STORAGE_KEY, null);
-        if (saved === 'entities' || saved === 'analytics' || saved === 'timeline' || saved === 'ai') {
-            return saved as SidebarView;
-        }
-        return 'entities';
-    }
-
     constructor() {
         // Auto-select first entity when scope changes and current selection is no longer in scope
         effect(() => {
@@ -310,8 +301,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
     }
 
     onViewChange(view: SidebarView) {
-        this.activeView.set(view);
-        setSetting(STORAGE_KEY, view);
+        this.service.setActivePanel(view);
         this.closeDropdown();
     }
 

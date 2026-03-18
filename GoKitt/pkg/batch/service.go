@@ -26,17 +26,19 @@ const (
 
 // Config holds batch LLM settings passed from TypeScript.
 type Config struct {
-	Provider           Provider `json:"provider"`
-	GoogleAPIKey       string   `json:"googleApiKey"`
-	GoogleModel        string   `json:"googleModel"`
-	OpenRouterAPIKey   string   `json:"openRouterApiKey"`
-	OpenRouterModel    string   `json:"openRouterModel"`
-	Temperature        float64  `json:"temperature"`
-	MaxTokens          int      `json:"maxTokens"`
-	ReasoningEnabled   bool     `json:"reasoningEnabled"`
-	ReasoningEffort    string   `json:"reasoningEffort"`
-	ReasoningMaxTokens int      `json:"reasoningMaxTokens"`
-	IncludeReasoning   bool     `json:"includeReasoning"`
+	Provider           Provider                `json:"provider"`
+	GoogleAPIKey       string                  `json:"googleApiKey"`
+	GoogleModel        string                  `json:"googleModel"`
+	OpenRouterAPIKey   string                  `json:"openRouterApiKey"`
+	OpenRouterModel    string                  `json:"openRouterModel"`
+	Temperature        float64                 `json:"temperature"`
+	MaxTokens          int                     `json:"maxTokens"`
+	ReasoningEnabled   bool                    `json:"reasoningEnabled"`
+	ReasoningEffort    string                  `json:"reasoningEffort"`
+	ReasoningMaxTokens int                     `json:"reasoningMaxTokens"`
+	IncludeReasoning   bool                    `json:"includeReasoning"`
+	StructuredOutput   *StructuredOutputConfig `json:"structuredOutput,omitempty"`
+	Plugins            []OpenRouterPlugin      `json:"plugins,omitempty"`
 }
 
 // Service handles non-streaming LLM completions.
@@ -71,6 +73,12 @@ func (s *Service) IsConfigured() bool {
 	}
 }
 
+// SupportsStructuredOutput reports whether the current provider supports
+// response_format and OpenRouter plugins in this service.
+func (s *Service) SupportsStructuredOutput() bool {
+	return s.config.Provider == ProviderOpenRouter
+}
+
 // GetCurrentModel returns the model for the current provider.
 func (s *Service) GetCurrentModel() string {
 	switch s.config.Provider {
@@ -86,15 +94,26 @@ func (s *Service) GetCurrentModel() string {
 // Complete makes a non-streaming LLM completion request.
 // Returns the full response text.
 func (s *Service) Complete(ctx context.Context, userPrompt, systemPrompt string) (string, error) {
+	return s.CompleteWithOptions(ctx, userPrompt, systemPrompt, nil)
+}
+
+// CompleteWithOptions makes a non-streaming LLM completion request with
+// optional OpenRouter-specific request controls.
+func (s *Service) CompleteWithOptions(ctx context.Context, userPrompt, systemPrompt string, requestOptions *RequestOptions) (string, error) {
 	if !s.IsConfigured() {
 		return "", errors.New("batch: provider not configured")
 	}
 
+	mergedOptions := mergeRequestOptions(s.defaultRequestOptions(), requestOptions)
+
 	switch s.config.Provider {
 	case ProviderGoogle:
+		if hasOpenRouterOptions(mergedOptions) {
+			return "", errors.New("batch: structured outputs are only supported via OpenRouter")
+		}
 		return s.callGoogle(ctx, userPrompt, systemPrompt)
 	case ProviderOpenRouter:
-		return s.callOpenRouter(ctx, userPrompt, systemPrompt)
+		return s.callOpenRouter(ctx, userPrompt, systemPrompt, mergedOptions)
 	default:
 		return "", errors.New("batch: unknown provider")
 	}
@@ -113,6 +132,8 @@ func (s *Service) CompleteWithTools(ctx context.Context, messages interface{}, t
 	if s.config.Provider != ProviderOpenRouter {
 		return "", errors.New("batch: tool calling only supported via OpenRouter")
 	}
+
+	_ = ctx
 
 	temperature := 0.7
 	if s.config.Temperature != 0 {

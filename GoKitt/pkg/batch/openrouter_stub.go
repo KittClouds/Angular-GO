@@ -9,7 +9,7 @@ import (
 )
 
 // callOpenRouter is a stub for non-WASM builds.
-func (s *Service) callOpenRouter(_ context.Context, _, _ string) (string, error) {
+func (s *Service) callOpenRouter(_ context.Context, _, _ string, _ *RequestOptions) (string, error) {
 	return "", fmt.Errorf("batch: OpenRouter API calls require WASM environment")
 }
 

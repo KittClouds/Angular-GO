@@ -28,6 +28,7 @@ import { textAlignPlugin, setTextAlignCommand, indentPlugin, indentCommand, outd
 // Unified Pretty Text System (formerly Highlighter C)
 import { entitySchema } from './plugins/marks/entity';
 import { prettyTextPlugin } from './plugins/prettyTextPlugin';
+import { keywordFocusPlugin } from './plugins/keywordFocusPlugin';
 
 import { detailsNodes, detailsInteractivePlugin } from './plugins/details';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
@@ -37,6 +38,7 @@ import { EditorService } from '../../services/editor.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { getPrettyTextApi } from '../../api/pretty-text-api';
 import type { Note } from '../../lib/dexie/db';
+import { configurePlainTextClipboard } from './plugins/plain-text-clipboard';
 
 @Component({
     selector: 'app-editor',
@@ -81,6 +83,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         this.crepe.editor
             .use(gfm)
             .use(history)
+            .config(configurePlainTextClipboard())
             .config(configureAngularToolbar(this.injector, this.appRef, () => this.currentNoteId ?? undefined))
             .use(angularToolbarPlugin)
             .config(configureAngularBlockHandle(this.injector, this.appRef))
@@ -105,6 +108,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             .use(entitySchema)
             .use(prettyTextPlugin)
+            .use(keywordFocusPlugin)
             // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             .use(detailsNodes)
             .use(detailsInteractivePlugin);

@@ -58,8 +58,12 @@ export class DiscoveryStore {
             }));
 
             this.candidates.set(mapped);
-        } catch (e) {
-            console.error('[DiscoveryStore] Failed to load candidates', e);
+        } catch (e: any) {
+            if (e?.message?.includes('timed out')) {
+                console.warn('[DiscoveryStore] Skipping candidates load: No candidates available (timeout)');
+            } else {
+                console.error('[DiscoveryStore] Failed to load candidates', e);
+            }
         }
     }
 

@@ -2379,7 +2379,7 @@ func jsAgentChatWithTools(this js.Value, args []js.Value) interface{} {
 }
 
 // jsGoStreamChat performs a streaming OpenRouter chat call.
-// Args: messagesJSON (string), systemPrompt (string), onChunk (JS callback function)
+// Args: messagesJSON (string), systemPrompt (string), [requestOptionsJSON (string)], onChunk (JS callback function)
 // Returns: Promise<string> with the full accumulated response
 func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 	if len(args) < 3 {
@@ -2391,10 +2391,23 @@ func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 	if !args[1].IsUndefined() && !args[1].IsNull() {
 		systemPrompt = args[1].String()
 	}
-	onChunkJS := args[2]
+
+	requestOptionsJSON := ""
+	callbackIndex := 2
+	if len(args) > 2 && args[2].Type() != js.TypeFunction {
+		if !args[2].IsUndefined() && !args[2].IsNull() {
+			requestOptionsJSON = args[2].String()
+		}
+		callbackIndex = 3
+	}
+	if len(args) <= callbackIndex || args[callbackIndex].Type() != js.TypeFunction {
+		return ErrorResult("goStreamChat: onChunk callback required")
+	}
+
+	onChunkJS := args[callbackIndex]
 	onReasoningJS := js.Undefined()
-	if len(args) > 3 && args[3].Type() == js.TypeFunction {
-		onReasoningJS = args[3]
+	if len(args) > callbackIndex+1 && args[callbackIndex+1].Type() == js.TypeFunction {
+		onReasoningJS = args[callbackIndex+1]
 	}
 
 	promise, resolve, reject := makePromise()
@@ -2405,8 +2418,7 @@ func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 			return
 		}
 
-		fullResponse, err := batchSvc.StreamChat(messagesJSON, systemPrompt, func(chunk string) {
-			// Call the JS onChunk callback with each delta
+		fullResponse, err := batchSvc.StreamChat(messagesJSON, systemPrompt, requestOptionsJSON, func(chunk string) {
 			onChunkJS.Invoke(chunk)
 		}, func(reasoning string) {
 			if onReasoningJS.Truthy() {

@@ -80,7 +80,9 @@ export class LlmEntityExtractorService {
             openRouterApiKey: cfg.openRouterApiKey,
             openRouterModel: cfg.openRouterModel,
             temperature: cfg.temperature,
-            maxTokens: cfg.maxTokens
+            maxTokens: cfg.maxTokens,
+            structuredOutput: cfg.structuredOutput,
+            plugins: cfg.plugins
         });
 
         if (result.success) {
@@ -257,3 +259,4 @@ export class LlmEntityExtractorService {
         return result;
     }
 }
+

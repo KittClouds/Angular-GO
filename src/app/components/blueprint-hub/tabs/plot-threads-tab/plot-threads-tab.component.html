@@ -1,0 +1,322 @@
+<div class="flex h-full w-full bg-background text-foreground overflow-hidden">
+    <!-- Left Pane: Thread List -->
+    <div class="w-72 min-w-[280px] border-r border-border flex flex-col bg-muted/5">
+        <!-- Header -->
+        <div class="p-4 border-b border-border space-y-2">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold tracking-tight">Plot Threads</h2>
+                <span class="text-xs text-muted-foreground">
+                    {{ activeCount() }} active
+                </span>
+            </div>
+            <p class="text-xs text-muted-foreground">Track narrative lines, subplots &amp; arcs</p>
+        </div>
+
+        <!-- Thread List -->
+        <div class="flex-1 overflow-y-auto">
+            <div *ngFor="let thread of allThreads(); trackBy: trackById"
+                class="thread-card group px-3 py-3 border-b border-border/50 cursor-pointer hover:bg-accent/30"
+                [class.bg-accent]="selectedThreadId() === thread.id"
+                [class.border-l-2]="selectedThreadId() === thread.id"
+                [style.borderLeftColor]="selectedThreadId() === thread.id ? getThreadColor(thread) : 'transparent'"
+                (click)="selectThread(thread.id)">
+
+                <div class="flex items-start gap-2.5">
+                    <!-- Color dot -->
+                    <div class="w-3 h-3 rounded-full shrink-0 mt-1 ring-1 ring-black/10"
+                        [style.backgroundColor]="getThreadColor(thread)">
+                    </div>
+
+                    <div class="flex-1 min-w-0">
+                        <!-- Thread name -->
+                        <h4 class="text-sm font-medium text-foreground truncate leading-tight">
+                            {{ thread.title }}
+                        </h4>
+                        <!-- Type + Status -->
+                        <div class="flex items-center gap-1.5 mt-1.5">
+                            <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium"
+                                [style.backgroundColor]="getThreadTypeColor(thread.category) + '20'"
+                                [style.color]="getThreadTypeColor(thread.category)">
+                                {{ getThreadTypeLabel(thread.category) }}
+                            </span>
+                            <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium"
+                                [style.backgroundColor]="getStatusDef(thread.status).color + '20'"
+                                [style.color]="getStatusDef(thread.status).color">
+                                {{ getStatusDef(thread.status).label }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Delete button on hover -->
+                    <button
+                        class="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/20 rounded shrink-0"
+                        (click)="deleteThread(thread.id); $event.stopPropagation()">
+                        <i class="pi pi-trash text-[10px] text-red-400"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Empty state -->
+            <div *ngIf="allThreads().length === 0" class="text-center py-12 px-4">
+                <div class="w-14 h-14 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-3">
+                    <i class="pi pi-sitemap text-2xl text-muted-foreground/50"></i>
+                </div>
+                <p class="text-sm text-muted-foreground font-medium">No plot threads yet</p>
+                <p class="text-xs text-muted-foreground mt-1">Create your first thread to start tracking narrative lines</p>
+            </div>
+        </div>
+
+        <!-- New Thread Button -->
+        <div class="p-3 border-t border-border">
+            <button
+                class="w-full py-2.5 flex items-center justify-center gap-2 text-sm font-medium text-primary bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors"
+                (click)="openNewThreadDialog()">
+                <i class="pi pi-plus text-xs"></i>
+                New Thread
+            </button>
+        </div>
+    </div>
+
+    <!-- Right Pane: Thread Detail -->
+    <div class="flex-1 flex flex-col min-w-0 bg-background">
+        <ng-container *ngIf="selectedThread(); else noSelection">
+            <!-- Thread Header -->
+            <div class="px-6 py-4 border-b border-border"
+                [style.borderLeftWidth]="'3px'"
+                [style.borderLeftColor]="getThreadColor(selectedThread()!)">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-xl font-semibold truncate">{{ selectedThread()!.title }}</h3>
+                        <div class="flex items-center gap-2 mt-1.5">
+                            <i [class]="getThreadTypeIcon(selectedThread()!.category) + ' text-sm'"
+                                [style.color]="getThreadTypeColor(selectedThread()!.category)"></i>
+                            <span class="text-sm text-muted-foreground">
+                                {{ getThreadTypeLabel(selectedThread()!.category) }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Status Toggle Pills -->
+                    <div class="flex items-center gap-1 bg-muted/30 rounded-lg p-1">
+                        <button *ngFor="let s of threadStatuses()"
+                            class="px-3 py-1.5 text-xs font-medium rounded-md transition-all"
+                            [class.text-foreground]="selectedThread()!.status === s.id"
+                            [class.text-muted-foreground]="selectedThread()!.status !== s.id"
+                            [class.shadow-sm]="selectedThread()!.status === s.id"
+                            [style.backgroundColor]="selectedThread()!.status === s.id ? s.color + '25' : 'transparent'"
+                            [style.color]="selectedThread()!.status === s.id ? s.color : ''"
+                            (click)="updateThreadStatus(selectedThread()!.id, s.id)">
+                            {{ s.label }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Thread Detail Content (scrollable) -->
+            <div class="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                <!-- Story Beats Section -->
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                            <i class="pi pi-list text-xs"></i>
+                            Story Beats
+                            <span class="text-[10px] font-normal bg-muted px-1.5 py-0.5 rounded">
+                                {{ threadBeats().length }}
+                            </span>
+                        </h4>
+                        <button *ngIf="!isAddingBeat()"
+                            class="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                            (click)="startAddBeat()">
+                            <i class="pi pi-plus text-[10px]"></i>
+                            Add Beat
+                        </button>
+                    </div>
+
+                    <!-- Beat List -->
+                    <div class="space-y-1.5">
+                        <div *ngFor="let beat of threadBeats(); trackBy: trackById"
+                            class="beat-item group flex items-start gap-2.5 p-2.5 rounded-lg border border-border/50 hover:border-border hover:bg-muted/20">
+                            <!-- Checkbox -->
+                            <button
+                                class="w-5 h-5 rounded-md border-2 shrink-0 mt-0.5 flex items-center justify-center transition-colors"
+                                [class.border-muted-foreground/30]="beat.status !== 'complete'"
+                                [class.border-primary]="beat.status === 'complete'"
+                                [class.bg-primary]="beat.status === 'complete'"
+                                (click)="toggleBeatStatus(beat)">
+                                <i *ngIf="beat.status === 'complete'" class="pi pi-check text-[9px] text-primary-foreground"></i>
+                            </button>
+
+                            <!-- Beat content -->
+                            <div class="flex-1 min-w-0">
+                                <span class="text-sm"
+                                    [class.text-foreground]="beat.status !== 'complete'"
+                                    [class.text-muted-foreground]="beat.status === 'complete'"
+                                    [class.line-through]="beat.status === 'complete'">
+                                    {{ beat.title }}
+                                </span>
+                                <p *ngIf="beat.description" class="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                                    {{ beat.description }}
+                                </p>
+                            </div>
+
+                            <!-- Delete -->
+                            <button
+                                class="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/20 rounded shrink-0"
+                                (click)="deleteBeat(beat.id); $event.stopPropagation()">
+                                <i class="pi pi-trash text-[10px] text-red-400"></i>
+                            </button>
+                        </div>
+
+                        <!-- Empty state for beats -->
+                        <div *ngIf="threadBeats().length === 0 && !isAddingBeat()"
+                            class="text-center py-6 text-muted-foreground">
+                            <i class="pi pi-inbox text-lg mb-1.5 opacity-40"></i>
+                            <p class="text-xs">No beats yet — add story moments to this thread</p>
+                        </div>
+
+                        <!-- Inline add beat input -->
+                        <div *ngIf="isAddingBeat()" class="flex items-center gap-2 p-2 rounded-lg border border-primary/30 bg-primary/5">
+                            <i class="pi pi-plus text-[10px] text-primary/60"></i>
+                            <input pInputText
+                                [(ngModel)]="newBeatTitle"
+                                placeholder="Type a story beat and press Enter..."
+                                class="flex-1 !bg-transparent !border-none !shadow-none text-sm !p-0 !ring-0"
+                                (keydown.enter)="addBeat()"
+                                (keydown.escape)="cancelAddBeat()"
+                                autofocus />
+                            <button class="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50 transition-colors"
+                                (click)="cancelAddBeat()">
+                                <i class="pi pi-times text-[10px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <hr class="border-border/50" />
+
+                <!-- Notes Section -->
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                            <i class="pi pi-pencil text-xs"></i>
+                            Thread Notes
+                        </h4>
+                        <button *ngIf="!editingNotes()"
+                            class="text-xs text-primary hover:text-primary/80 transition-colors"
+                            (click)="startEditNotes()">
+                            Edit
+                        </button>
+                    </div>
+
+                    <!-- Notes Display -->
+                    <ng-container *ngIf="!editingNotes()">
+                        <div *ngIf="selectedThread()!.description; else noNotes"
+                            class="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap p-3 rounded-lg bg-muted/15 border border-border/30">
+                            {{ selectedThread()!.description }}
+                        </div>
+                        <ng-template #noNotes>
+                            <div class="text-sm text-muted-foreground/60 italic cursor-pointer hover:text-muted-foreground transition-colors p-3 rounded-lg border border-dashed border-border/40"
+                                (click)="startEditNotes()">
+                                Click to add notes about this thread...
+                            </div>
+                        </ng-template>
+                    </ng-container>
+
+                    <!-- Notes Editor -->
+                    <div *ngIf="editingNotes()" class="space-y-2">
+                        <textarea pTextarea
+                            [(ngModel)]="notesBuffer"
+                            placeholder="Notes, ideas, reminders for this thread..."
+                            rows="5"
+                            class="w-full text-sm">
+                        </textarea>
+                        <div class="flex gap-2 justify-end">
+                            <button class="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-md hover:bg-muted/50 transition-colors"
+                                (click)="cancelEditNotes()">
+                                Cancel
+                            </button>
+                            <button class="px-3 py-1.5 text-xs text-primary-foreground bg-primary rounded-md hover:bg-primary/90 transition-colors"
+                                (click)="saveNotes()">
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Thread Type Selector -->
+                <div>
+                    <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2 mb-3">
+                        <i class="pi pi-tag text-xs"></i>
+                        Thread Type
+                    </h4>
+                    <div class="flex flex-wrap gap-2">
+                        <button *ngFor="let tt of threadTypes()"
+                            class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all"
+                            [class.border-transparent]="selectedThread()!.category === tt.id"
+                            [class.border-border]="selectedThread()!.category !== tt.id"
+                            [class.text-foreground]="selectedThread()!.category === tt.id"
+                            [class.text-muted-foreground]="selectedThread()!.category !== tt.id"
+                            [style.backgroundColor]="selectedThread()!.category === tt.id ? tt.color + '20' : 'transparent'"
+                            (click)="updateThreadType(selectedThread()!.id, tt.id)">
+                            <i [class]="tt.icon + ' text-[10px]'" [style.color]="tt.color"></i>
+                            {{ tt.label }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </ng-container>
+
+        <!-- No Selection -->
+        <ng-template #noSelection>
+            <div class="flex-1 flex items-center justify-center">
+                <div class="text-center p-8">
+                    <div class="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-4">
+                        <i class="pi pi-sitemap text-2xl text-muted-foreground/40"></i>
+                    </div>
+                    <h3 class="font-medium text-foreground">Select a thread</h3>
+                    <p class="text-sm text-muted-foreground mt-1.5 max-w-xs">
+                        Choose a plot thread from the left to view its beats and details, or create a new one.
+                    </p>
+                    <button
+                        class="mt-4 px-4 py-2 text-sm font-medium text-primary bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors"
+                        (click)="openNewThreadDialog()">
+                        <i class="pi pi-plus text-xs mr-1.5"></i>
+                        Create First Thread
+                    </button>
+                </div>
+            </div>
+        </ng-template>
+    </div>
+</div>
+
+<!-- New Thread Dialog -->
+<p-dialog header="New Plot Thread" [(visible)]="showNewThreadDialog" [modal]="true" [style]="{width: '420px'}"
+    [draggable]="false" [resizable]="false">
+
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Thread Name</label>
+            <input pInputText [(ngModel)]="newThreadTitle" placeholder="e.g., The Prophecy, Revenge Subplot..."
+                class="w-full"
+                (keydown.enter)="createThread()" />
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-foreground">Thread Type</label>
+            <p-select [options]="threadTypes()" [(ngModel)]="selectedThreadType"
+                optionLabel="label" placeholder="Select type" styleClass="w-full">
+            </p-select>
+        </div>
+    </div>
+
+    <ng-template pTemplate="footer">
+        <div class="flex gap-2 justify-end">
+            <p-button label="Cancel" [text]="true" (onClick)="cancelNewThread()"></p-button>
+            <p-button label="Create Thread" icon="pi pi-check" (onClick)="createThread()"
+                [disabled]="!newThreadTitle.trim()"></p-button>
+        </div>
+    </ng-template>
+</p-dialog>
+
+<p-toast position="bottom-right"></p-toast>

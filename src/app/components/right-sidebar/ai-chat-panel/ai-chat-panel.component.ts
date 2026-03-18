@@ -1002,6 +1002,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     saveSettings(): void {
         // Persist Go OpenRouter config to the shared openrouter:config key
         if (this.apiKeyInput()) {
+            const existingOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
             const orConfig: ChatConfig = {
                 apiKey: this.apiKeyInput(),
                 model: this.selectedModel(),
@@ -1011,6 +1012,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 reasoningEffort: this.reasoningEffortInput(),
                 reasoningMaxTokens: this.reasoningMaxTokensInput(),
                 includeReasoning: this.reasoningEnabledInput(),
+                structuredOutput: existingOrConfig?.structuredOutput,
+                plugins: existingOrConfig?.plugins,
             };
             setSetting('openrouter:config', orConfig);
 
@@ -1024,6 +1027,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 reasoningEffort: orConfig.reasoningEffort,
                 reasoningMaxTokens: orConfig.reasoningMaxTokens,
                 includeReasoning: orConfig.includeReasoning,
+                structuredOutput: orConfig.structuredOutput,
+                plugins: orConfig.plugins,
                 omEnabled: true,
             });
         }
@@ -1669,6 +1674,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         URL.revokeObjectURL(url);
     }
 }
+
+
 
 
 

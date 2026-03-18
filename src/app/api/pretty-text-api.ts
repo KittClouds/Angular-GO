@@ -28,12 +28,15 @@ import {
     remapSpans,
     remapSpansPermissive,
 } from '../lib/Scanner/prosemirror-bridge';
+import { createKeywordFocusSpans } from '../lib/Scanner/keyword-focus';
 import { HighlightScanner } from '../lib/Scanner/highlight-scanner';
 import { DiscoveryScanner } from '../lib/Scanner/discovery-scanner';
 import { GraphScanner } from '../lib/Scanner/graph-scanner';
 import { ScanPipeline } from '../lib/Scanner/scan-pipeline';
 
 import { highlightingStore } from '../lib/store/highlightingStore';
+import { keywordHighlightStore } from '../lib/store/keywordHighlightStore';
+import { searchHighlightStore } from '../lib/store/searchHighlightStore';
 import { GoKittService } from '../services/gokitt.service';
 import {
     getNoteDecorations,
@@ -94,6 +97,11 @@ export interface PrettyTextApi {
     setConfig(config: Partial<HighlighterConfig>): void;
     subscribe(callback: () => void): () => void;
     setNoteId(noteId: string, narrativeId?: string): void;
+    setKeywordHighlights(noteId: string, keywords: string[]): void;
+    toggleKeywordHighlight(noteId: string, keyword: string): void;
+    clearKeywordHighlights(noteId: string): void;
+    setSearchHighlightTerms(terms: string[]): void;
+    clearSearchHighlights(): void;
     onKeystroke(char: string, cursorPos: number, contextText: string): void;
     forceRescan(): void;
 }
@@ -117,8 +125,12 @@ class PrettyTextAPI implements PrettyTextApi {
     private lastSentenceEndPos = 0;
     private pendingRescan = false;
     private lastDoc: ProseMirrorDoc | null = null;
+    private selectedKeywords: string[] = [];
+    private searchHighlightTerms: string[] = [];
 
     constructor() {
+        this.searchHighlightTerms = searchHighlightStore.getTerms();
+
         if (typeof window !== 'undefined') {
             window.addEventListener('gokitt-ready', () => {
                 console.log('[PrettyTextAPI] GoKitt ready — triggering rescan');
@@ -141,6 +153,20 @@ class PrettyTextAPI implements PrettyTextApi {
         }
 
         highlightingStore.subscribe(() => this.notifyListeners());
+        keywordHighlightStore.subscribe(() => {
+            const nextKeywords = keywordHighlightStore.getKeywordsForNote(this.currentNoteId);
+            if (JSON.stringify(nextKeywords) !== JSON.stringify(this.selectedKeywords)) {
+                this.selectedKeywords = nextKeywords;
+                this.notifyListeners();
+            }
+        });
+        searchHighlightStore.subscribe(() => {
+            const nextTerms = searchHighlightStore.getTerms();
+            if (JSON.stringify(nextTerms) !== JSON.stringify(this.searchHighlightTerms)) {
+                this.searchHighlightTerms = nextTerms;
+                this.notifyListeners();
+            }
+        });
     }
 
     // ── Note Context ──────────────────────────────────────────────────────
@@ -157,6 +183,29 @@ class PrettyTextAPI implements PrettyTextApi {
             this.lastContext = '';
             this.lastScannedContext = '';
         }
+
+        this.selectedKeywords = keywordHighlightStore.getKeywordsForNote(noteId);
+        this.notifyListeners();
+    }
+
+    setKeywordHighlights(noteId: string, keywords: string[]): void {
+        keywordHighlightStore.setKeywordsForNote(noteId, keywords);
+    }
+
+    toggleKeywordHighlight(noteId: string, keyword: string): void {
+        keywordHighlightStore.toggleKeyword(noteId, keyword);
+    }
+
+    clearKeywordHighlights(noteId: string): void {
+        keywordHighlightStore.clearKeywordsForNote(noteId);
+    }
+
+    setSearchHighlightTerms(terms: string[]): void {
+        searchHighlightStore.setTerms(terms);
+    }
+
+    clearSearchHighlights(): void {
+        searchHighlightStore.clear();
     }
 
     onKeystroke(char: string, cursorPos: number, contextText: string): void {
@@ -180,8 +229,11 @@ class PrettyTextAPI implements PrettyTextApi {
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[] {
         this.lastDoc = doc;
         const settings = highlightingStore.getSettings();
+        const { segments } = extractText(doc);
+        const focusTerms = [...new Set([...this.selectedKeywords, ...this.searchHighlightTerms])];
+        const keywordSpans = createKeywordFocusSpans(segments, focusTerms);
 
-        if (settings.mode === 'off') return [];
+        if (settings.mode === 'off') return keywordSpans;
 
         const text = docContent(doc);
 
@@ -244,9 +296,12 @@ class PrettyTextAPI implements PrettyTextApi {
             return true;
         });
 
+        const combinedSpans = [...filteredSpans, ...keywordSpans];
+        combinedSpans.sort((a, b) => a.from - b.from);
+
         // Emit to ScanCoordinator for entity-event tracking
         if (this.currentNoteId) {
-            const entitySpans = filteredSpans.filter(s =>
+            const entitySpans = combinedSpans.filter(s =>
                 s.type === 'entity' ||
                 s.type === 'entity_ref' ||
                 s.type === 'relationship' ||
@@ -257,7 +312,7 @@ class PrettyTextAPI implements PrettyTextApi {
             }
         }
 
-        return filteredSpans;
+        return combinedSpans;
     }
 
     /** Async scan that waits for GoKitt to return spans (used on note open) */

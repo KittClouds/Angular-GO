@@ -1,4 +1,4 @@
-﻿// src/app/components/sidebar/file-tree/file-tree.component.ts
+// src/app/components/sidebar/file-tree/file-tree.component.ts
 // Main file tree component with virtual scroll and context menu - WIRED to Dexie
 
 import { Component, signal, computed, Input, inject, ViewChild, ElementRef, AfterViewInit, OnDestroy, effect, Injector, runInInjectionContext, DestroyRef } from '@angular/core';
@@ -22,21 +22,15 @@ import { ScopeService } from '../../../lib/services/scope.service';
     standalone: true,
     imports: [CommonModule, ScrollerModule, TreeNodeComponent, LucideAngularModule],
     template: `
-        <div class="h-full w-full flex flex-col relative" #treeContainer>
-            <!-- Virtual Scroller -->
-            <p-scroller
-                [items]="flatNodes()"
-                [itemSize]="28"
-                scrollHeight="100%"
-                styleClass="h-full w-full"
-                [lazy]="false">
-                <ng-template pTemplate="item" let-node let-options="options">
-                    <!-- Swapy slot wrapper (only in reorder mode) -->
+        <div class="h-full w-full flex flex-col relative">
+            <div class="h-full w-full overflow-y-auto custom-scrollbar flex flex-col pb-8" #treeContainer>
+                <ng-container *ngFor="let node of flatNodes(); trackBy: trackByNode">
+                    <!-- Swapy slot wrapper -->
                     <div
-                        [attr.data-swapy-slot]="reorderService.isReorderMode() ? 'slot-' + node.id : null"
-                        class="w-full">
+                        [attr.data-swapy-slot]="'slot-' + node.id"
+                        class="w-full shrink-0 h-7">
                         <div
-                            [attr.data-swapy-item]="reorderService.isReorderMode() ? 'item-' + node.id : null"
+                            [attr.data-swapy-item]="'item-' + node.id"
                             class="w-full">
                             <app-tree-node
                                 [node]="node"
@@ -48,12 +42,13 @@ import { ScopeService } from '../../../lib/services/scope.service';
                                 (select)="onSelect($event)"
                                 (menuClick)="onMenuClick($event)"
                                 (startRename)="onStartRename($event)"
-                                (rename)="onRename($event)">
+                                (rename)="onRename($event)"
+                                (dragState)="onDragState($event)">
                             </app-tree-node>
                         </div>
                     </div>
-                </ng-template>
-            </p-scroller>
+                </ng-container>
+            </div>
 
             <!-- Context Menu Dropdown -->
             <div
@@ -253,6 +248,10 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         return flattenTree(this._tree(), this.expansion());
     });
 
+    trackByNode(index: number, node: FlatTreeNode): string {
+        return node.id;
+    }
+
     onToggle(nodeId: string): void {
         // Delegate to AppStateService for persistence
         this.appStateService.toggleFolderExpansion(nodeId);
@@ -281,6 +280,10 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.editingNodeId.set(node.id);
     }
 
+    onDragState(nodeId: string | null): void {
+        this.reorderService.setDraggedNodeId(nodeId);
+    }
+
     async onRename(event: { node: FlatTreeNode; newName: string }): Promise<void> {
         const { node, newName } = event;
         this.editingNodeId.set(null); // Clear editing state
@@ -290,12 +293,12 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
             try {
                 if (node.type === 'folder') {
                     await this.folderService.updateFolder(node.id, { name: newName });
-                    console.log(`[FileTree] Renamed folder "${node.name}" â†’ "${newName}"`);
+                    console.log(`[FileTree] Renamed folder "${node.name}" → "${newName}"`);
                 } else {
                     // Optimistic tab title sync for immediate sidebar <-> tab feedback.
                     this.tabStore.updateTabTitle(node.id, newName);
                     await this.notesService.updateNote(node.id, { title: newName });
-                    console.log(`[FileTree] Renamed note "${node.name}" â†’ "${newName}"`);
+                    console.log(`[FileTree] Renamed note "${node.name}" → "${newName}"`);
                 }
             } catch (e) {
                 console.error('[FileTree] Rename failed:', e);
@@ -327,9 +330,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.menuNode.set(null);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // WIRED ACTIONS - Now actually do things!
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     async handleAction(type: 'new-note' | 'new-subfolder' | 'rename' | 'delete'): Promise<void> {
         const node = this.menuNode();
@@ -400,9 +403,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.closeMenu();
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // Private helpers
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     private async createNoteInFolder(folder: FlatTreeNode): Promise<void> {
         console.log(`[FileTree] Creating note in folder: ${folder.name}`);
@@ -452,11 +455,22 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.tabStore.closeTab(note.id);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // Lifecycle Hooks for Swapy Integration & Selection Sync
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     constructor() {
+        effect(() => {
+            this.reorderService.setCurrentNodes(this.flatNodes());
+        });
+
+        effect(() => {
+            if (this.reorderService.isReorderMode()) {
+                const _nodes = this.flatNodes(); // establish dependency
+                setTimeout(() => this.reorderService.update(), 0);
+            }
+        });
+
         // Effect: Sync active note from store to tree selection & scope
         effect(() => {
             const activeNoteId = this.noteEditorStore.activeNoteId();
@@ -485,25 +499,6 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         if (this.treeContainer) {
             this.reorderService.setContainer(this.treeContainer.nativeElement);
         }
-
-        // Watch for reorder mode changes - run in injection context
-        runInInjectionContext(this.injector, () => {
-            const reorderEffect = effect(() => {
-                if (this.reorderService.isReorderMode()) {
-                    // Enable Swapy when reorder mode is active
-                    if (this.treeContainer) {
-                        this.reorderService.enableReorderMode(this.treeContainer.nativeElement, 'siblings-only');
-                    }
-                } else {
-                    // Swapy is disabled via service
-                }
-            });
-
-            // Clean up effect when component is destroyed
-            this.destroyRef.onDestroy(() => {
-                reorderEffect.destroy();
-            });
-        });
     }
 
     ngOnDestroy(): void {
@@ -511,9 +506,9 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         this.reorderService.disableReorderMode();
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // Tree Helpers
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     private findNodeRecursive(nodes: TreeNode[], id: string): TreeNode | null {
         for (const node of nodes) {
@@ -536,3 +531,8 @@ export class FileTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 }
+
+
+
+
+

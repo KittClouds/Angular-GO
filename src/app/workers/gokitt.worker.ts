@@ -100,7 +100,7 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_UPDATE_MESSAGE'; payload: { messageId: string; content: string }; id: number }
     | { type: 'CHAT_APPEND_MESSAGE'; payload: { messageId: string; chunk: string }; id: number }
     | { type: 'CHAT_START_STREAMING'; payload: { threadId: string; narrativeId: string }; id: number }
-    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string }; id: number }
+    | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string; requestOptionsJSON?: string }; id: number }
     | { type: 'CHAT_GET_MEMORIES'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
@@ -166,7 +166,7 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_SEARCH_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
-    | { type: 'GLDR_STATS'; id: number }; 
+    | { type: 'GLDR_STATS'; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -187,7 +187,6 @@ type GoKittWorkerResponse =
     | { type: 'SCAN_NOTE_RESULT'; id: number; payload: any }
     | { type: 'VALIDATE_RELATIONS_RESULT'; id: number; payload: any }
     | { type: 'ANALYZE_TEXT_RESULT'; id: number; payload: any }
-    | { type: 'ANALYTICS_UPDATE'; payload: any }
     | { type: 'DOC_COUNT_RESULT'; id: number; payload: number }
     // SQLite Store responses
     | { type: 'STORE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -315,6 +314,9 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: string }
     | { type: 'GLDR_SEARCH_NODES_SAB_RESULT'; id: number; payload: string }
     | { type: 'GLDR_STATS_RESULT'; id: number; payload: string }
+    | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
+    | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
     | { type: 'ERROR'; id?: number; payload: { message: string } };
 
 // =============================================================================
@@ -468,7 +470,7 @@ declare const GoKitt: {
     extractEntities: (text: string) => Promise<string>;
     extractRelations: (text: string, knownEntitiesJSON?: string) => Promise<string>;
     agentChatWithTools: (messagesJSON: string, toolsJSON: string, systemPrompt?: string) => Promise<string>;
-    goStreamChat: (messagesJSON: string, systemPrompt: string, onChunk: (chunk: string) => void, onReasoning?: (chunk: string) => void) => Promise<string>;
+    goStreamChat: (messagesJSON: string, systemPrompt: string, requestOptionsJSON: string | undefined, onChunk: (chunk: string) => void, onReasoning?: (chunk: string) => void) => Promise<string>;
     // Phase 7: Observational Memory + Chat Service
     chatInit: (configJSON: string) => string;
     chatCreateThread: (worldId: string, narrativeId: string) => string;
@@ -683,19 +685,6 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     id: msg.id,
                     payload: spans
                 } as GoKittWorkerResponse);
-
-                // Option C -> Option B Pipeline: Piggyback text analytics on the implicit scan!
-                // Zero additional boundary crossing, text is already in the worker.
-                try {
-                    const analyticsJson = GoKitt.analyzeText(msg.payload.text);
-                    self.postMessage({
-                        type: 'ANALYTICS_UPDATE',
-                        payload: JSON.parse(analyticsJson)
-                    });
-                } catch (e) {
-                    console.error('[GoKittWorker] Background analytics failed:', e);
-                }
-
                 break;
             }
 
@@ -2864,6 +2853,7 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     const response = await GoKitt.goStreamChat(
                         msg.payload.messagesJSON,
                         msg.payload.systemPrompt || '',
+                        msg.payload.requestOptionsJSON || '',
                         (chunk: string) => {
                             self.postMessage({ type: 'GO_STREAM_CHAT_CHUNK', id: msg.id, payload: { chunk } });
                         },
@@ -3156,6 +3146,7 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
 };
 
 console.log('[GoKittWorker] Worker loaded - waiting for INIT');
+
 
 
 

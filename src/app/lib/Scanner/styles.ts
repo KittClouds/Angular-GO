@@ -64,9 +64,19 @@ export function getDecorationStyle(span: DecorationSpan, mode: HighlightMode): s
       return getEntityStyle(span.kind || 'UNKNOWN', mode);
     case 'entity_candidate':
       return getCandidateStyle(mode);
+    case 'keyword_focus':
+      return getKeywordFocusStyle();
     default:
       return '';
   }
+}
+
+function getKeywordFocusStyle(): string {
+  return `
+    background-color: rgba(45, 212, 191, 0.18);
+    box-shadow: inset 0 -1px 0 rgba(45, 212, 191, 0.55);
+    border-radius: 2px;
+  `;
 }
 
 function getAmbiguousStyle(mode: HighlightMode): string {
@@ -210,6 +220,8 @@ export function getDecorationClass(span: DecorationSpan): string {
       return `entity-implicit entity-${(span.kind || 'unknown').toLowerCase()}`;
     case 'entity_candidate':
       return `entity-candidate`;
+    case 'keyword_focus':
+      return 'keyword-focus';
     default:
       return '';
   }

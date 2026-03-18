@@ -470,7 +470,10 @@ export async function reorderNote(noteId: string, targetIndex: number): Promise<
     const nextOrder = filteredSiblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await store.upsertNote({ ...note, order: newOrder, updatedAt: Date.now() } as StoreNote);
+    const updatedNote = { ...note, order: newOrder, updatedAt: Date.now() } as StoreNote;
+
+    await store.upsertNote(updatedNote);
+    warmDexieNote(storeNoteToNote(updatedNote));
 
     const allOrders = [...filteredSiblings.map(n => n.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
@@ -492,7 +495,10 @@ export async function reorderFolder(folderId: string, targetIndex: number): Prom
     const nextOrder = filteredSiblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...folder, order: newOrder, updatedAt: Date.now() }));
+    const updatedFolder = { ...folder, order: newOrder, updatedAt: Date.now() };
+
+    await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedFolder));
+    warmDexieFolder(updatedFolder);
 
     const allOrders = [...filteredSiblings.map(f => f.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
@@ -506,31 +512,44 @@ export async function moveNoteToFolder(noteId: string, targetFolderId: string, t
     const note = await store.getNote(noteId);
     if (!note) throw new Error(`Note ${noteId} not found`);
 
+    const sourceFolderId = note.folderId || '';
+    const targetFolder = targetFolderId ? await getFolder(targetFolderId) : undefined;
+    const targetNarrativeId = targetFolderId
+        ? (targetFolder?.narrativeId || (targetFolder?.isNarrativeRoot ? targetFolder.id : ''))
+        : '';
+
     const siblings = await getNotesByFolder(targetFolderId);
     siblings.sort((a, b) => a.order - b.order);
 
     const prevOrder = siblings[targetIndex - 1]?.order ?? 0;
     const nextOrder = siblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
-
-    await store.upsertNote({
+    const movedNote = {
         ...note,
         folderId: targetFolderId,
+        narrativeId: targetNarrativeId,
         order: newOrder,
         updatedAt: Date.now()
-    } as StoreNote);
+    } as StoreNote;
+
+    await store.upsertNote(movedNote);
+    warmDexieNote(storeNoteToNote(movedNote));
 
     const allOrders = [...siblings.map(n => n.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceNoteOrders(targetFolderId);
     }
-    console.log(`[Operations] Moved note ${noteId} to folder ${targetFolderId}`);
+    if (sourceFolderId !== targetFolderId) {
+        await rebalanceNoteOrders(sourceFolderId);
+    }
+    console.log(`[Operations] Moved note ${noteId} to folder ${targetFolderId || 'root'} with narrative ${targetNarrativeId || 'global'}`);
 }
 
 export async function moveFolderToParent(folderId: string, targetParentId: string, targetIndex: number): Promise<void> {
     const folder = await getFolder(folderId);
     if (!folder) throw new Error(`Folder ${folderId} not found`);
 
+    const sourceParentId = folder.parentId || '';
     const store = requireStore();
     const siblings = await getFolderChildren(targetParentId);
     siblings.sort((a, b) => a.order - b.order);
@@ -538,17 +557,22 @@ export async function moveFolderToParent(folderId: string, targetParentId: strin
     const prevOrder = siblings[targetIndex - 1]?.order ?? 0;
     const nextOrder = siblings[targetIndex]?.order ?? 0;
     const newOrder = calculateNewOrder(prevOrder, nextOrder);
-
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder({
+    const movedFolder = {
         ...folder,
         parentId: targetParentId,
         order: newOrder,
         updatedAt: Date.now()
-    }));
+    };
+
+    await store.upsertFolder(GoKittStoreService.fromDexieFolder(movedFolder));
+    warmDexieFolder(movedFolder);
 
     const allOrders = [...siblings.map(f => f.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
         await rebalanceFolderOrders(targetParentId);
+    }
+    if (sourceParentId !== targetParentId) {
+        await rebalanceFolderOrders(sourceParentId);
     }
     console.log(`[Operations] Moved folder ${folderId} to parent ${targetParentId}`);
 }
@@ -561,16 +585,26 @@ export async function swapItems(sourceId: string, targetId: string, type: 'folde
         const target = await getFolder(targetId);
         if (!source || !target) throw new Error('Folder not found');
 
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...source, order: target.order, updatedAt: Date.now() }));
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder({ ...target, order: source.order, updatedAt: Date.now() }));
+        const updatedSource = { ...source, order: target.order, updatedAt: Date.now() };
+        const updatedTarget = { ...target, order: source.order, updatedAt: Date.now() };
+        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedSource));
+        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedTarget));
+        warmDexieFolder(updatedSource);
+        warmDexieFolder(updatedTarget);
     } else {
         const source = await store.getNote(sourceId);
         const target = await store.getNote(targetId);
         if (!source || !target) throw new Error('Note not found');
 
-        await store.upsertNote({ ...source, order: target.order, updatedAt: Date.now() } as StoreNote);
-        await store.upsertNote({ ...target, order: source.order, updatedAt: Date.now() } as StoreNote);
+        const updatedSource = { ...source, order: target.order, updatedAt: Date.now() } as StoreNote;
+        const updatedTarget = { ...target, order: source.order, updatedAt: Date.now() } as StoreNote;
+        await store.upsertNote(updatedSource);
+        await store.upsertNote(updatedTarget);
+        warmDexieNote(storeNoteToNote(updatedSource));
+        warmDexieNote(storeNoteToNote(updatedTarget));
     }
 
     console.log(`[Operations] Swapped ${type}s: ${sourceId} <-> ${targetId}`);
 }
+
+

@@ -10,7 +10,7 @@
  */
 
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { GoKittService } from '../../services/gokitt.service';
+import { GoKittService, type OpenRouterPlugin, type OpenRouterRequestOptions, type OpenRouterStructuredOutputConfig } from '../../services/gokitt.service';
 import { getSetting, setSetting } from '../dexie/settings.service';
 import { ScopeService } from './scope.service';
 import { GoKittStoreService } from '../../services/gokitt-store.service';
@@ -58,6 +58,8 @@ export interface Memory {
 export interface ChatConfig {
     apiKey: string;
     model: string;
+    structuredOutput?: OpenRouterStructuredOutputConfig;
+    plugins?: OpenRouterPlugin[];
     // Observational Memory settings
     omEnabled?: boolean;
     observeThreshold?: number;
@@ -163,7 +165,9 @@ export class GoChatService {
                     reasoningEnabled: config.reasoningEnabled,
                     reasoningEffort: config.reasoningEffort,
                     reasoningMaxTokens: config.reasoningMaxTokens,
-                    includeReasoning: config.includeReasoning
+                    includeReasoning: config.includeReasoning,
+                    structuredOutput: config.structuredOutput,
+                    plugins: config.plugins
                 });
                 if (batchResult.error) {
                     console.warn('[GoChatService] Batch init failed:', batchResult.error);
@@ -228,7 +232,9 @@ export class GoChatService {
                 reasoningEnabled: config.reasoningEnabled,
                 reasoningEffort: config.reasoningEffort,
                 reasoningMaxTokens: config.reasoningMaxTokens,
-                includeReasoning: config.includeReasoning
+                includeReasoning: config.includeReasoning,
+                structuredOutput: config.structuredOutput,
+                plugins: config.plugins
             });
 
             if (batchResult.error) {
@@ -706,7 +712,8 @@ export class GoChatService {
             onReasoningChunk?: (chunk: string) => void,
             onEvent?: (event: ChatProgressEvent) => void
         },
-        systemPrompt?: string
+        systemPrompt?: string,
+        requestOptions?: OpenRouterRequestOptions
     ): Promise<void> {
         try {
             callbacks.onEvent?.({ stage: 'stream', status: 'running', detail: 'Contacting OpenRouter...' });
@@ -714,7 +721,8 @@ export class GoChatService {
                 JSON.stringify(messages),
                 systemPrompt || '',
                 (chunk) => callbacks.onChunk(chunk),
-                (chunk) => callbacks.onReasoningChunk?.(chunk)
+                (chunk) => callbacks.onReasoningChunk?.(chunk),
+                requestOptions
             );
 
             if (error) {
@@ -771,4 +779,5 @@ export class GoChatService {
         }
     }
 }
+
 

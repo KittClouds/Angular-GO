@@ -1,9 +1,7 @@
 <div class="flex flex-col h-full overflow-hidden p-3 gap-3 bg-sidebar-background w-full">
 
-  <!-- Header Section -->
   <section
     class="flex-shrink-0 p-3.5 rounded-xl border border-zinc-700/60 bg-gradient-to-br from-zinc-800/80 to-zinc-900/95 shadow-lg relative overflow-hidden">
-    <!-- background effect -->
     <div class="absolute -top-12 -left-12 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
     <div class="flex items-start justify-between gap-2 relative z-10 w-full">
@@ -14,7 +12,8 @@
         </div>
         <div class="min-w-0 flex-1 pt-0.5">
           <h2 class="text-zinc-100 font-semibold text-sm leading-tight truncate">Semantic Search</h2>
-          <p class="text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mt-0.5 line-clamp-1">Live Go qgram
+          <p class="text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mt-0.5 line-clamp-1">
+            {{ headerSubtitle() }}
           </p>
         </div>
       </div>
@@ -31,15 +30,15 @@
       </div>
     </div>
 
-    <!-- Stats List -->
     <div class="flex flex-col gap-1.5 mt-4 relative z-10 w-full">
       <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
         <div class="flex items-center gap-1.5 text-zinc-400 font-medium">
           <ng-icon name="lucideSparkles" class="h-3.5 w-3.5 text-teal-400"></ng-icon>
           <span>Notes</span>
         </div>
-        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
-          scopedNotes().length }}</span>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">
+          {{ scopedNotes().length }}
+        </span>
       </div>
 
       <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
@@ -47,8 +46,9 @@
           <ng-icon name="lucideZap" class="h-3.5 w-3.5 text-cyan-400"></ng-icon>
           <span>Vector</span>
         </div>
-        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
-          vectorStatusLabel() }}</span>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">
+          {{ vectorStatusLabel() }}
+        </span>
       </div>
 
       <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
@@ -56,16 +56,14 @@
           <ng-icon name="lucideLayers" class="h-3.5 w-3.5 text-amber-400"></ng-icon>
           <span>Graptor chunks</span>
         </div>
-        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
-          graptorStats().chunks }}</span>
+        <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">
+          {{ graptorStats().chunks }}
+        </span>
       </div>
     </div>
   </section>
 
-  <!-- Controls Section -->
   <section class="flex-shrink-0 p-3 rounded-xl border border-zinc-800/80 bg-black/20 flex flex-col gap-3">
-
-    <!-- Mode Switcher -->
     <div class="w-full flex justify-center">
       <p-selectbutton [options]="modeOptions" [ngModel]="activeMode()" (onChange)="onModeChange($event)"
         styleClass="w-full flex mode-switcher-icons">
@@ -80,7 +78,6 @@
       </p-selectbutton>
     </div>
 
-    <!-- Search Input Row -->
     <div class="relative w-full">
       <ng-icon name="lucideSearch"
         class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 z-10 pointer-events-none"></ng-icon>
@@ -90,7 +87,6 @@
         (keydown.enter)="handleSearch()" />
     </div>
 
-    <!-- Scope Row -->
     <div class="flex items-center gap-2 w-full">
       <div class="flex-1 min-w-0">
         <p-select [options]="[{id: 'global', name: 'Global (All Notes)'}, ...folders()]" [ngModel]="indexScope()"
@@ -117,39 +113,28 @@
         </p-select>
       </div>
 
-      <p-button [ngStyle]="{'flex-shrink': '0', 'width': '85px'}" (click)="handleSearch()" [disabled]="isSearching()"
-        styleClass="h-[36px] bg-teal-500/10 text-teal-300 border border-teal-500/30 hover:bg-teal-500/20 text-xs px-0 font-medium rounded-lg shadow-sm transition-all focus:ring-2 focus:ring-teal-500/40 outline-none w-full flex items-center justify-center p-0">
-        <div class="flex items-center justify-center w-full gap-1.5 px-1 py-0">
+      <p-button [ngStyle]="{'flex-shrink': '0', 'width': '92px'}" (click)="handleSearch()" [disabled]="isSearching()"
+        styleClass="h-[36px] bg-teal-500/10 text-teal-300 border border-teal-500/30 hover:bg-teal-500/20 px-0 rounded-lg shadow-sm transition-all focus:ring-2 focus:ring-teal-500/40 outline-none w-full flex items-center justify-center p-0">
+        <div
+          class="flex items-center justify-center w-full gap-1 px-1 py-0 font-sans text-[11px] font-semibold tracking-wide">
           <ng-icon [name]="isSearching() ? 'lucideLoader2' : modeIcon()" class="h-3.5 w-3.5 shrink-0"
             [class.animate-spin]="isSearching()">
           </ng-icon>
-          <span>{{ isSearching() ? 'Search' : 'Search' }}</span>
+          <span class="truncate">{{ isSearching() ? 'Search' : searchActionLabel() }}</span>
         </div>
       </p-button>
     </div>
 
-    <!-- Notes Context -->
-    <div *ngIf="activeMode() === 'notes'"
-      class="mt-1 p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
-      <div class="flex items-center justify-between mb-2">
-        <span class="text-zinc-200 font-medium">Live note retrieval</span>
-        <span
-          class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">Go
-          qgram</span>
-      </div>
-      <p class="leading-relaxed">This mode uses the same Go search path that works in the analytics sidebar.</p>
-    </div>
-
-    <!-- Vector Context -->
     <div *ngIf="activeMode() === 'vector'" class="mt-1 flex flex-col gap-3">
-      <div class="p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-zinc-200 font-medium">Vector workspace</span>
-          <span
-            class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">Embeddings</span>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="p-2 rounded-lg border border-white/5 bg-black/20 text-xs">
+          <div class="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mb-1">Route</div>
+          <div class="text-cyan-300 font-medium leading-tight">{{ vectorRouteLabel() }}</div>
         </div>
-        <p class="leading-relaxed text-zinc-500">Fallback to live search path until vector layer is rebuilt. Use
-          controls to load/index local models.</p>
+        <div class="p-2 rounded-lg border border-white/5 bg-black/20 text-xs">
+          <div class="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mb-1">Dim</div>
+          <div class="text-zinc-200 font-medium leading-tight">{{ activeEmbeddingDimensionLabel() }}</div>
+        </div>
       </div>
 
       <div>
@@ -170,7 +155,7 @@
       </div>
 
       <div>
-        <div class="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Dimension Truncation</div>
+        <div class="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Dimension truncation</div>
         <div class="grid grid-cols-4 gap-2">
           <button *ngFor="let dim of truncateDims" (click)="truncateDim.set(dim)"
             class="p-1.5 rounded-lg border text-xs font-medium transition-colors outline-none focus:ring-1 focus:ring-cyan-500/30"
@@ -178,50 +163,61 @@
             {{ dim === 'full' ? 'Full' : dim + 'd' }}
           </button>
         </div>
+        <p class="mt-2 text-[10px] text-zinc-500 leading-relaxed">
+          Truncation is applied to Graptor semantic indexing and query expansion over SAB.
+        </p>
       </div>
 
       <div class="grid grid-cols-2 gap-2 mt-1">
         <p-button (click)="loadVectorModel()" [disabled]="vectorStatus() === 'loading'"
-          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-xs px-2 py-0 transition-colors rounded-lg font-medium shadow-sm outline-none w-full flex items-center justify-center">
-          <div class="flex items-center justify-center w-full gap-2">
+          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 px-2 py-0 transition-colors rounded-lg shadow-sm outline-none w-full flex items-center justify-center">
+          <div
+            class="flex items-center justify-center w-full gap-1.5 font-sans text-[11px] font-semibold tracking-wide">
             <ng-icon [name]="vectorStatus() === 'loading' ? 'lucideLoader2' : 'lucideMicrochip'"
               class="h-3.5 w-3.5 shrink-0" [class.animate-spin]="vectorStatus() === 'loading'"></ng-icon>
-            <span class="whitespace-nowrap">Load model</span>
+            <span class="whitespace-nowrap truncate">Load model</span>
           </div>
         </p-button>
         <p-button (click)="indexVectorNotes()" [disabled]="vectorStatus() !== 'ready' && vectorStatus() !== 'error'"
-          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-xs px-2 py-0 transition-colors rounded-lg font-medium shadow-sm outline-none w-full flex items-center justify-center">
-          <div class="flex items-center justify-center w-full gap-2">
+          styleClass="w-full h-[32px] bg-zinc-800 border-[1px] border-zinc-700 text-zinc-300 hover:bg-zinc-700 px-2 py-0 transition-colors rounded-lg shadow-sm outline-none w-full flex items-center justify-center">
+          <div
+            class="flex items-center justify-center w-full gap-1.5 font-sans text-[11px] font-semibold tracking-wide">
             <ng-icon [name]="vectorStatus() === 'indexing' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5 shrink-0"
               [class.animate-spin]="vectorStatus() === 'indexing'"></ng-icon>
-            <span class="whitespace-nowrap">Index notes</span>
+            <span class="whitespace-nowrap truncate">Index notes</span>
           </div>
         </p-button>
       </div>
     </div>
 
-    <!-- Graptor Context -->
     <div *ngIf="activeMode() === 'graptor'" class="mt-1 flex flex-col gap-3">
-      <div class="p-3 rounded-lg border border-white/5 bg-black/20 text-xs text-zinc-400">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-zinc-200 font-medium">Graptor retrieval</span>
-          <span
-            class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">GLDR</span>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="p-2 rounded-lg border border-white/5 bg-black/20 text-xs">
+          <div class="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mb-1">Semantic</div>
+          <div [ngClass]="graptorSemanticEnabled() ? 'text-amber-300 font-medium' : 'text-zinc-400 font-medium'">
+            {{ graptorSemanticEnabled() ? 'Enabled' : 'Graph + lexical only' }}
+          </div>
         </div>
-        <p class="leading-relaxed text-zinc-500">Graptor mode uses GLDR chunk ranking, giving the left sidebar access to
-          graph evaluations workspace.</p>
+        <div class="p-2 rounded-lg border border-white/5 bg-black/20 text-xs">
+          <div class="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mb-1">Embedding</div>
+          <div class="text-zinc-200 font-medium leading-tight">
+            {{ embeddingsReady() ? currentModelLabel() + ' ' + activeEmbeddingDimensionLabel() : 'Not loaded' }}
+          </div>
+        </div>
       </div>
 
-      <div class="flex flex-col gap-1.5 mt-2 w-full">
+      <div class="flex flex-col gap-1.5 mt-1 w-full">
         <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
           <span class="text-zinc-400 font-medium">Entities registered</span>
-          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
-            graptorStats().entities }}</span>
+          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">
+            {{ graptorStats().entities }}
+          </span>
         </div>
         <div class="flex items-center justify-between p-2 rounded border border-white/5 bg-black/20 text-xs">
           <span class="text-zinc-400 font-medium">Edges scanned</span>
-          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">{{
-            graptorStats().edges }}</span>
+          <span class="text-zinc-200 font-bold border border-white/10 px-1.5 py-0.5 rounded shadow-sm bg-black/40">
+            {{ graptorStats().edges }}
+          </span>
         </div>
       </div>
 
@@ -230,13 +226,12 @@
         <div class="flex items-center justify-center w-full gap-2.5">
           <ng-icon [name]="graptorStatus() === 'building' ? 'lucideLoader2' : 'lucideLayers'" class="h-4 w-4 shrink-0"
             [class.animate-spin]="graptorStatus() === 'building'"></ng-icon>
-          <span class="whitespace-nowrap">Build graptor index</span>
+          <span class="whitespace-nowrap">{{ graptorBuildLabel() }}</span>
         </div>
       </p-button>
     </div>
   </section>
 
-  <!-- Banners -->
   <div *ngIf="notice()"
     class="flex-shrink-0 flex items-center gap-2 p-3 text-xs rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 shadow-sm transition-all transform animate-in slide-in-from-top-2">
     <ng-icon name="lucideSparkles" class="h-4 w-4 shrink-0"></ng-icon>
@@ -248,7 +243,6 @@
     <span class="leading-relaxed">{{ error() }}</span>
   </div>
 
-  <!-- Results Section -->
   <section
     class="flex-1 flex flex-col min-h-0 bg-black/10 border border-white/5 rounded-xl overflow-hidden shadow-inner hover:border-white/10 transition-colors">
     <div
@@ -268,8 +262,9 @@
 
             <div class="flex justify-between items-start gap-4 mb-2">
               <div class="flex-1 min-w-0">
-                <div class="font-medium text-zinc-100 truncate text-sm group-hover:text-teal-400 transition-colors">{{
-                  result.title }}</div>
+                <div class="font-medium text-zinc-100 truncate text-sm group-hover:text-teal-400 transition-colors">
+                  {{ result.title }}
+                </div>
                 <div class="flex items-center gap-2 mt-1.5">
                   <span
                     class="px-1.5 py-0.5 rounded-[4px] text-[9px] font-bold uppercase tracking-wider border shadow-sm"
@@ -305,8 +300,9 @@
                 class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm flex items-center gap-1">Graph
                 <span>{{ result.graphScore | number:'1.2-2' }}</span></span>
               <span *ngFor="let entity of result.matchedEntities"
-                class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm">{{
-                entity }}</span>
+                class="px-2 py-0.5 rounded-full bg-black/40 border border-white/5 text-[9px] font-medium text-zinc-400 shadow-sm">
+                {{ entity }}
+              </span>
             </div>
           </button>
         </div>

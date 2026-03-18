@@ -4,6 +4,7 @@
 
 import { Injectable, inject, computed } from '@angular/core';
 import { AppStateService } from './app-state.service';
+import { RightSidebarPanel } from '../dexie/db';
 
 @Injectable({
     providedIn: 'root'
@@ -24,7 +25,7 @@ export class RightSidebarService {
     close() { this.appState.setRightSidebarMode('closed'); }
     toggle() { this.appState.toggleRightSidebar(); }
 
-    setActivePanel(panel: 'entities' | 'timeline' | 'chat'): void {
+    setActivePanel(panel: RightSidebarPanel): void {
         this.appState.setRightSidebarActivePanel(panel);
     }
 }
