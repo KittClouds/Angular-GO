@@ -313,6 +313,7 @@ import { db } from '../../../../../lib/dexie/db';
         
         <!-- Create/Edit Meta Dialog -->
         <p-dialog header="{{ isCreating ? 'New Culture' : 'Edit Culture' }}" [(visible)]="showMetaDialog" [modal]="true" [style]="{width: '30vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Name</label>
@@ -329,6 +330,7 @@ import { db } from '../../../../../lib/dexie/db';
                     </div>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showMetaDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveMeta()" class="p-button-primary"></button>
@@ -339,6 +341,7 @@ import { db } from '../../../../../lib/dexie/db';
          <p-dialog [header]="'Edit ' + activeEditModule" [(visible)]="showModuleDialog" [modal]="true" [style]="{width: '50vw'}">
              <!-- Dnamically render fields based on activeEditModule -->
              <!-- Simplified for Prototype: Just JSON TextAreas or specific fields based on switch -->
+             <ng-template pTemplate="content">
              <div class="py-2" [ngSwitch]="activeEditModule">
                 
                 <div *ngSwitchCase="'identity'" class="space-y-4">
@@ -399,6 +402,7 @@ import { db } from '../../../../../lib/dexie/db';
                 </div>
 
              </div>
+             </ng-template>
              <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showModuleDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveModule()" class="p-button-primary"></button>
@@ -407,6 +411,7 @@ import { db } from '../../../../../lib/dexie/db';
         
         <!-- Override Dialog -->
         <p-dialog header="Update Act Status" [(visible)]="showOverrideDialog" [modal]="true" [style]="{width: '30vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                  <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Status</label>
@@ -424,6 +429,7 @@ import { db } from '../../../../../lib/dexie/db';
                     <textarea pInputTextarea [(ngModel)]="tempOverride.changelog" rows="4" placeholder="Since the last act, the guild has collapsed..."></textarea>
                 </div>
             </div>
+             </ng-template>
              <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showOverrideDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveOverride()" class="p-button-primary"></button>

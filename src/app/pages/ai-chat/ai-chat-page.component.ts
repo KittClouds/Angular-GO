@@ -5,17 +5,7 @@
  * Uses @neurodevworks/angular-chatbot types + our existing GoChatService/GoogleGenAIService.
  */
 
-import {
-    Component,
-    signal,
-    computed,
-    inject,
-    OnInit,
-    OnDestroy,
-    AfterViewInit,
-    ViewChild,
-    ElementRef,
-} from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, signal, computed, inject, effect, untracked, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -92,9 +82,9 @@ Keep responses concise but helpful. If you don't know something specific about t
     standalone: true,
     imports: [CommonModule, FormsModule, LucideAngularModule],
     template: `
-        <div class="h-full flex flex-col chat-page-bg">
+        <div class="h-full flex flex-col bg-background text-foreground">
             <!-- Top Toolbar -->
-            <div class="flex items-center gap-4 px-4 py-2 border-b border-white/10 bg-[#12121a] shrink-0">
+            <div class="flex items-center gap-4 px-4 py-2 border-b border-white/10 bg-gradient-to-b from-zinc-800 to-zinc-950 shrink-0">
                 <button
                     (click)="navigateToEditor()"
                     class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
@@ -159,7 +149,7 @@ Keep responses concise but helpful. If you don't know something specific about t
             <div class="flex-1 flex overflow-hidden relative">
                 <!-- History Panel (left overlay) -->
                 @if (showHistory()) {
-                    <div class="w-72 border-r border-white/10 bg-[#12121a] overflow-y-auto shrink-0 flex flex-col">
+                    <div class="w-72 border-r border-border bg-sidebar overflow-y-auto shrink-0 flex flex-col">
                         <div class="p-3 border-b border-white/10 flex items-center justify-between">
                             <span class="text-sm font-semibold text-white">Threads</span>
                             <button class="p-1 rounded text-slate-400 hover:text-white" (click)="showHistory.set(false)">
@@ -222,23 +212,22 @@ Keep responses concise but helpful. If you don't know something specific about t
                         @for (msg of displayMessages(); track msg.id) {
                             <div class="flex gap-3 max-w-3xl mx-auto w-full" [class.flex-row-reverse]="msg.role === 'user'">
                                 <!-- Avatar -->
-                                <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center"
+                                <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center border"
                                     [class.bg-teal-500/20]="msg.role === 'assistant'"
                                     [class.border-teal-500/30]="msg.role === 'assistant'"
-                                    [class.bg-violet-500/20]="msg.role === 'user'"
-                                    [class.border-violet-500/30]="msg.role === 'user'"
-                                    [class.border]="true">
+                                    [class.bg-zinc-800]="msg.role === 'user'"
+                                    [class.border-zinc-700]="msg.role === 'user'">
                                     <lucide-icon
                                         [img]="msg.role === 'user' ? UserIcon : BotIcon"
                                         size="16"
                                         [class.text-teal-400]="msg.role === 'assistant'"
-                                        [class.text-violet-400]="msg.role === 'user'">
+                                        [class.text-zinc-400]="msg.role === 'user'">
                                     </lucide-icon>
                                 </div>
                                 <!-- Content -->
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center gap-2 mb-1" [class.justify-end]="msg.role === 'user'">
-                                        <span class="text-xs font-medium" [class.text-teal-400]="msg.role === 'assistant'" [class.text-violet-400]="msg.role === 'user'">
+                                        <span class="text-xs font-medium" [class.text-teal-400]="msg.role === 'assistant'" [class.text-zinc-400]="msg.role === 'user'">
                                             {{ msg.role === 'user' ? 'You' : 'Kammi' }}
                                         </span>
                                         <span class="text-[10px] text-slate-600">{{ formatTime(msg.timestamp) }}</span>
@@ -261,12 +250,12 @@ Keep responses concise but helpful. If you don't know something specific about t
                     </div>
 
                     <!-- Input Area -->
-                    <div class="shrink-0 border-t border-white/10 px-4 py-4 chat-input-area">
+                    <div class="shrink-0 border-t border-border px-4 py-4 chat-input-area">
                         <div class="max-w-3xl mx-auto flex items-end gap-3">
                             <div class="flex-1 relative">
                                 <textarea
                                     #messageInput
-                                    class="w-full px-4 py-3 pr-12 text-sm rounded-xl border border-teal-500/20 bg-black/30 text-white placeholder:text-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 resize-none transition-all"
+                                    class="w-full px-4 py-3 pr-12 text-sm rounded-xl border border-zinc-700 bg-zinc-900 text-white placeholder:text-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 resize-none transition-all"
                                     [placeholder]="'Ask Kammi anything...'"
                                     [(ngModel)]="currentMessage"
                                     (keydown.enter)="onEnterKey($event)"
@@ -303,7 +292,7 @@ Keep responses concise but helpful. If you don't know something specific about t
 
                 <!-- Settings Panel (right) -->
                 @if (showSettings()) {
-                    <div class="w-80 border-l border-white/10 bg-[#12121a] overflow-y-auto shrink-0 custom-scrollbar">
+                    <div class="w-80 border-l border-border bg-sidebar overflow-y-auto shrink-0 custom-scrollbar">
                         <div class="p-4 space-y-5">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-sm font-semibold text-white">Settings</h3>
@@ -457,10 +446,6 @@ Keep responses concise but helpful. If you don't know something specific about t
     styles: [`
         :host { display: block; height: 100%; }
 
-        .chat-page-bg {
-            background: linear-gradient(180deg, #0a0a0f 0%, #0d1117 50%, #0a0a0f 100%);
-        }
-
         .chat-input-area {
             background: linear-gradient(to top,
                 rgba(17, 94, 89, 0.08) 0%,
@@ -469,9 +454,9 @@ Keep responses concise but helpful. If you don't know something specific about t
         }
 
         .user-bubble {
-            background: linear-gradient(135deg, rgba(17, 94, 89, 0.3) 0%, rgba(20, 184, 166, 0.2) 100%);
-            border: 1px solid rgba(20, 184, 166, 0.25);
-            color: #e2e8f0;
+            background: #27272a;
+            border: 1px solid #3f3f46;
+            color: #f4f4f5;
         }
 
         .assistant-bubble {
@@ -599,7 +584,7 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     // History
     sessions = signal<SessionInfo[]>([]);
 
-    // Display messages
+    // Display messages synced locally during streaming, globally when thread changes
     displayMessages = signal<DisplayMessage[]>([]);
 
     // Suggestions
@@ -612,13 +597,25 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
 
     readonly isGoConfigured = computed(() => !!this.apiKeyInput());
 
+    constructor() {
+        effect(() => {
+            // Re-sync local message state whenever the global active thread pointer changes
+            const thread = this.goChatService.currentThread();
+            if (thread || !thread) { // Trigger on thread change or initial null
+                untracked(() => {
+                    this.restoreHistory();
+                    this.scrollToBottom();
+                });
+            }
+        });
+    }
+
     ngOnInit(): void {
         this.loadSettings();
         this.initGoChatService();
     }
 
     ngAfterViewInit(): void {
-        this.restoreHistory();
         this.scrollToBottom();
     }
 
@@ -772,7 +769,6 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     async selectSession(sessionId: string): Promise<void> {
         await this.goChatService.loadThread(sessionId);
         this.showHistory.set(false);
-        this.restoreHistory();
     }
 
     formatSessionDate(timestamp: number): string {
@@ -784,13 +780,15 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     }
 
     // ---- Messages ----
+    
     private restoreHistory(): void {
         const messages = this.goChatService.messages();
         this.displayMessages.set(messages.map((m: any) => ({
-            id: this.generateId(),
+            id: m.id || this.generateId(),
             content: m.content,
-            role: m.role as 'user' | 'assistant',
-            timestamp: new Date(m.timestamp || Date.now()),
+            role: m.role as 'user' | 'assistant' | 'system',
+            timestamp: new Date(m.created_at || m.timestamp || Date.now()),
+            isStreaming: m.is_streaming || false
         })));
     }
 
@@ -931,7 +929,6 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     // ---- Actions ----
     async newSession(): Promise<void> {
         await this.goChatService.newSession();
-        this.displayMessages.set([]);
     }
 
     async clearChat(): Promise<void> {

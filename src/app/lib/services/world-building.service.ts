@@ -1,14 +1,15 @@
 
-import { Injectable, inject } from '@angular/core';
-import { liveQuery, Observable as DexieObservable } from 'dexie';
-import { from, Observable, switchMap, map, of } from 'rxjs';
-import { db, Folder } from '../dexie/db';
-import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { Injectable, inject, signal } from '@angular/core';
+import { Observable, combineLatest, from, map, of, switchMap } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
+import { db } from '../dexie/db';
+import { ScopeService } from './scope.service';
+import { ScopedDocumentService } from './scoped-document.service';
 
 export interface WorldSnapshot {
     logline: string;
-    tone: string[]; // e.g., ["Grimdark", "High Magic"]
-    description: string; // The "Prose" part
+    tone: string[];
+    description: string;
 }
 
 export interface CanonConstraint {
@@ -21,7 +22,7 @@ export interface WorldPillar {
     id: string;
     title: string;
     description: string;
-    icon: string; // PrimeIcons
+    icon: string;
 }
 
 export interface ActDelta {
@@ -46,24 +47,18 @@ export const DEFAULT_SNAPSHOT: WorldSnapshot = {
     description: ''
 };
 
-// ===================================
-// CULTURE TYPES
-// ===================================
-
 export interface Culture {
     id: string;
     name: string;
-    icon: string;        // Emoji or icon class
-    color: string;       // Hex or Tailwind class
-
-    // Modules
+    icon: string;
+    color: string;
     identity: {
         values: string[];
         virtues: string[];
         vices: string[];
     };
     structure: {
-        hierarchy: string;  // Simple text desc
+        hierarchy: string;
         family: string;
         gender: string;
     };
@@ -76,8 +71,6 @@ export interface Culture {
         name: string;
         description: string;
     };
-
-    // The "Scene Fuel"
     hooks: {
         misunderstandings: string[];
         rituals: string[];
@@ -87,22 +80,18 @@ export interface Culture {
 
 export interface CultureOverride {
     status: 'Stable' | 'Reforming' | 'Fragmenting' | 'Occupied' | 'Extinct';
-    changelog: string; // "What changed since last act?"
+    changelog: string;
 }
-
-// ===================================
-// POWER SYSTEM TYPES (Magic & Tech)
-// ===================================
 
 export interface PowerCapability {
     id: string;
     name: string;
     type: 'spell' | 'tech' | 'artifact' | 'hybrid';
     description: string;
-    cost: string[];     // e.g. ["Mana", "Health", "Fuel"]
-    risks: string[];    // e.g. ["Corruption", "Explosion"]
-    prerequisites: string[]; // IDs of other capabilities
-    position?: { x: number, y: number }; // For the visual Graph/Map
+    cost: string[];
+    risks: string[];
+    prerequisites: string[];
+    position?: { x: number, y: number };
 }
 
 export interface PowerSystem {
@@ -120,17 +109,13 @@ export interface PowerSystem {
 
 export interface PowerProgression {
     status: 'unknown' | 'rumored' | 'known' | 'unlocked' | 'forbidden';
-    note?: string; // Optional context for this act
+    note?: string;
 }
-
-// ===================================
-// RELIGION TYPES
-// ===================================
 
 export interface Deity {
     id: string;
     name: string;
-    domains: string[]; // e.g., "War", "Love"
+    domains: string[];
     symbol: string;
     description: string;
 }
@@ -146,82 +131,55 @@ export interface Sect {
     id: string;
     name: string;
     description: string;
-    divergence: string; // Core disagreement
+    divergence: string;
 }
 
 export interface Religion {
     id: string;
     name: string;
-    // e.g. "Monotheistic", "Polytheistic", "Animist", etc.
     type: string;
     description: string;
-
-    // Fast Facts
     symbols: string[];
-    adjectives: string[]; // e.g. "Orthodox", "Mystical"
-
-    // Core Beliefs
+    adjectives: string[];
     cosmology: {
         creation: string;
         afterlife: string;
-        moralCode: string; // Sin/Virtue
+        moralCode: string;
     };
-
-    // Practices
     practices: {
         rituals: string;
         holidays: string[];
         taboos: string[];
     };
-
-    // Pantheon
     deities: Deity[];
-
-    // Structure
     structure: {
-        hierarchy: string; // "Top-down", "Democratic"
-        leadership: string; // "High Priest", "Council"
+        hierarchy: string;
+        leadership: string;
     };
-
-    // Sects
     sects: Sect[];
-
-    // Texts
     scriptures: string[];
-
-    // Myths
     myths: MythBlock[];
-
-    // Scene-Use Snippets
-    prayers: string[]; // Short snippets for copy-paste
+    prayers: string[];
 }
 
 export interface ReligionOverride {
     status: 'Stable' | 'Schism' | 'Reform' | 'Persecuted' | 'Dominant';
-    changes: string[]; // Log of changes in this act
+    changes: string[];
 }
 
-// ===================================
-// MYSTERY / CLUE SYSTEM
-// ===================================
 export type ClueType = 'artifact' | 'testimony' | 'record' | 'anomaly' | 'symbol';
 export type ClueStatus = 'Open' | 'Chasing' | 'Stalled' | 'Resolved' | 'Retconned';
 
-/** @deprecated Use LoreThread instead */
 export interface MysteryClue {
     id: string;
     summary: string;
     type: ClueType;
-    provenance: string; // Where found + who logged
-    timeBounds: string; // Earliest / Latest
-    reliability: string; // Witness quality / chain of custody
-    confidence: number; // 0-100
+    provenance: string;
+    timeBounds: string;
+    reliability: string;
+    confidence: number;
     status: ClueStatus;
-
-    // Act association (for swimlanes) - Optional, null means global/backstory
     actId?: string;
-
-    // Locks
     locks: {
         access: string;
         skill: string;
@@ -229,8 +187,6 @@ export interface MysteryClue {
         location: string;
         event: string;
     };
-
-    // Costs/Risks
     risks: {
         attention: string;
         resource: string;
@@ -238,74 +194,153 @@ export interface MysteryClue {
         escalation: string;
         contradiction: string;
     };
-
-    // Interested Parties
     parties: {
         name: string;
         motivation: string;
     }[];
-
-    // Payoff
     payoff: {
         decision: string;
         spawns: string;
     };
 }
 
-// ===================================
-// LORE THREADS (Simplified v2)
-// ===================================
 export type ThreadStatus = 'open' | 'hinted' | 'revealed' | 'dropped';
 
 export interface LoreThread {
     id: string;
-    /** The mystery question (e.g. "Who killed the old king?") */
     question: string;
-    /** Current status of this thread */
     status: ThreadStatus;
-    /** Note ID where this was first planted */
     plantedIn?: string;
-    /** The answer/resolution (hidden until status = revealed) */
     answer?: string;
-    /** Linked entity IDs */
     connectedEntities: string[];
-    /** When this was created */
     createdAt: number;
-    /** Last update */
     updatedAt: number;
 }
 
 export interface WorldScopeData {
-    // Global Data (stored on Narrative Root)
     snapshot: WorldSnapshot;
     constraints: CanonConstraint[];
     pillars: WorldPillar[];
     cultures: Culture[];
     powerSystems: PowerSystem[];
-    religions: Religion[]; // Added Religions
-    mysteries: MysteryClue[]; // @deprecated - use loreThreads
-    loreThreads: LoreThread[]; // NEW: Simplified lore tracking
-
-    // Act Data (stored on Act Folder)
+    religions: Religion[];
+    mysteries: MysteryClue[];
+    loreThreads: LoreThread[];
     statusQuo: string;
     deltas: ActDelta[];
     stakes: ActStake[];
     cultureOverrides: Record<string, CultureOverride>;
     powerProgression: Record<string, PowerProgression>;
-    religionOverrides: Record<string, ReligionOverride>; // Added Religion Overrides
+    religionOverrides: Record<string, ReligionOverride>;
 }
+
+interface OverviewDocument {
+    snapshot: WorldSnapshot;
+    constraints: CanonConstraint[];
+    pillars: WorldPillar[];
+}
+
+interface CulturesDocument {
+    cultures: Culture[];
+}
+
+interface CultureOverridesDocument {
+    overrides: Record<string, CultureOverride>;
+}
+
+interface MagicDocument {
+    powerSystems: PowerSystem[];
+}
+
+interface MagicOverridesDocument {
+    progression: Record<string, PowerProgression>;
+}
+
+interface ReligionDocument {
+    religions: Religion[];
+}
+
+interface ReligionOverridesDocument {
+    overrides: Record<string, ReligionOverride>;
+}
+
+interface MysteryDocument {
+    mysteries: MysteryClue[];
+    loreThreads: LoreThread[];
+}
+
+interface ActOverviewDocument {
+    statusQuo: string;
+    deltas: ActDelta[];
+    stakes: ActStake[];
+}
+
+const WORLD_OVERVIEW_NAMESPACE = 'world.overview';
+const WORLD_CULTURES_NAMESPACE = 'world.cultures';
+const WORLD_CULTURE_OVERRIDES_NAMESPACE = 'world.cultures.overrides';
+const WORLD_MAGIC_NAMESPACE = 'world.magic';
+const WORLD_MAGIC_OVERRIDES_NAMESPACE = 'world.magic.overrides';
+const WORLD_RELIGION_NAMESPACE = 'world.religion';
+const WORLD_RELIGION_OVERRIDES_NAMESPACE = 'world.religion.overrides';
+const WORLD_MYSTERY_NAMESPACE = 'world.mystery';
+const WORLD_GEOGRAPHY_NAMESPACE = 'world.geography';
+const WORLD_POLITICS_NAMESPACE = 'world.politics';
+const WORLD_ACT_OVERVIEW_NAMESPACE = 'world.overview.act';
+const DOC_KEY = 'data';
+
+const DEFAULT_OVERVIEW_DOC: OverviewDocument = {
+    snapshot: DEFAULT_SNAPSHOT,
+    constraints: [],
+    pillars: [],
+};
+
+const DEFAULT_CULTURES_DOC: CulturesDocument = {
+    cultures: [],
+};
+
+const DEFAULT_CULTURE_OVERRIDES_DOC: CultureOverridesDocument = {
+    overrides: {},
+};
+
+const DEFAULT_MAGIC_DOC: MagicDocument = {
+    powerSystems: [],
+};
+
+const DEFAULT_MAGIC_OVERRIDES_DOC: MagicOverridesDocument = {
+    progression: {},
+};
+
+const DEFAULT_RELIGION_DOC: ReligionDocument = {
+    religions: [],
+};
+
+const DEFAULT_RELIGION_OVERRIDES_DOC: ReligionOverridesDocument = {
+    overrides: {},
+};
+
+const DEFAULT_MYSTERY_DOC: MysteryDocument = {
+    mysteries: [],
+    loreThreads: [],
+};
+
+const DEFAULT_ACT_OVERVIEW_DOC: ActOverviewDocument = {
+    statusQuo: '',
+    deltas: [],
+    stakes: [],
+};
 
 @Injectable({
     providedIn: 'root'
 })
 export class WorldBuildingService {
-    private goKittStore = inject(GoKittStoreService);
+    private scopedDocuments = inject(ScopedDocumentService);
+    private scopeService = inject(ScopeService);
+    private refresh = signal(0);
+    
+    // Evaluate toObservable() once during class instantiation to leverage active injection context
+    private scope$ = toObservable(this.scopeService.resolvedScope);
+    private refresh$ = toObservable(this.refresh);
 
-    constructor() { }
-
-    /**
-     * Get World Data (Snapshot, Constraints, Pillars, Cultures, PowerSystems, Religions) from the Narrative Root.
-     */
     getWorldData$(narrativeId: string): Observable<{
         snapshot: WorldSnapshot;
         constraints: CanonConstraint[];
@@ -316,29 +351,19 @@ export class WorldBuildingService {
         mysteries: MysteryClue[];
         loreThreads: LoreThread[];
     }> {
-        const DEFAULT: any = { snapshot: DEFAULT_SNAPSHOT, constraints: [], pillars: [], cultures: [], powerSystems: [], religions: [], mysteries: [], loreThreads: [] };
+        const DEFAULT = { snapshot: DEFAULT_SNAPSHOT, constraints: [], pillars: [], cultures: [], powerSystems: [], religions: [], mysteries: [], loreThreads: [] };
 
-        return from(liveQuery(async () => {
-            const folder = await db.folders.get(narrativeId);
-            if (!folder) return DEFAULT;
-
-            const world = folder.attributes?.['world'] || {};
-            return {
-                snapshot: world.snapshot || DEFAULT.snapshot,
-                constraints: world.constraints || [],
-                pillars: world.pillars || [],
-                cultures: world.cultures || [],
-                powerSystems: world.powerSystems || [],
-                religions: world.religions || [],
-                mysteries: world.mysteries || [],
-                loreThreads: world.loreThreads || []
-            };
-        }));
+        return combineLatest([
+            this.scope$,
+            this.refresh$,
+        ]).pipe(
+            switchMap(([scope]) => {
+                if (!narrativeId) return of(DEFAULT);
+                return from(this.loadWorldData(narrativeId, scope.scopeFolderId || narrativeId));
+            })
+        );
     }
 
-    /**
-     * Get Act Data (Status Quo, Deltas, Stakes, Culture Overrides, Power Progression, Religion Overrides) from an Act Folder.
-     */
     getActData$(actFolderId: string): Observable<{
         statusQuo: string;
         deltas: ActDelta[];
@@ -347,53 +372,15 @@ export class WorldBuildingService {
         powerProgression: Record<string, PowerProgression>;
         religionOverrides: Record<string, ReligionOverride>;
     }> {
-        const DEFAULT: any = { statusQuo: '', deltas: [], stakes: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} };
+        const DEFAULT = { statusQuo: '', deltas: [], stakes: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} };
 
         if (!actFolderId) return of(DEFAULT);
 
-        return from(liveQuery(async () => {
-            const folder = await db.folders.get(actFolderId);
-            if (!folder) return DEFAULT;
-
-            const act = folder.attributes?.['act'] || {};
-            return {
-                statusQuo: act.statusQuo || '',
-                deltas: act.deltas || [],
-                stakes: act.stakes || [],
-                cultureOverrides: act.cultureOverrides || {},
-                powerProgression: act.powerProgression || {},
-                religionOverrides: act.religionOverrides || {}
-            };
-        }));
+        return this.refresh$.pipe(
+            switchMap(() => from(this.loadActData(actFolderId)))
+        );
     }
 
-    // =========================================================================================
-    // WRITE-THROUGH HELPER
-    // =========================================================================================
-
-    /**
-     * After updating folder attributes in Dexie, sync the full folder to SQLite.
-     * This ensures worldbuilding data survives refresh.
-     */
-    private async syncFolderToSqlite(folderId: string): Promise<void> {
-        try {
-            if (!this.goKittStore.isReady) return;
-            const updated = await db.folders.get(folderId);
-            if (updated) {
-                await this.goKittStore.upsertFolder(GoKittStoreService.fromDexieFolder(updated));
-            }
-        } catch (err) {
-            console.warn('[WorldBuildingService] SQLite sync failed (non-fatal):', err);
-        }
-    }
-
-    // =========================================================================================
-    // UPDATE METHODS (Persist to IndexedDB + write-through to SQLite)
-    // =========================================================================================
-
-    /**
-     * Update Global World Data
-     */
     async updateWorldData(narrativeId: string, data: Partial<{
         snapshot: WorldSnapshot;
         constraints: CanonConstraint[];
@@ -403,34 +390,31 @@ export class WorldBuildingService {
         religions: Religion[];
         mysteries: MysteryClue[];
     }>): Promise<void> {
-        const folder = await db.folders.get(narrativeId);
-        if (!folder) throw new Error('Narrative root not found');
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
 
-        const attributes = folder.attributes || {};
-        const world = attributes['world'] || {};
+        const overview = await this.loadOverviewDocument(scopeFolderId, narrativeId);
+        const cultures = await this.loadCulturesDocument(scopeFolderId, narrativeId);
+        const magic = await this.loadMagicDocument(scopeFolderId, narrativeId);
+        const religion = await this.loadReligionDocument(scopeFolderId, narrativeId);
+        const mystery = await this.loadMysteryDocument(scopeFolderId, narrativeId);
 
-        if (data.snapshot) world.snapshot = data.snapshot;
-        if (data.constraints) world.constraints = data.constraints;
-        if (data.pillars) world.pillars = data.pillars;
-        if (data.cultures) world.cultures = data.cultures;
-        if (data.powerSystems) world.powerSystems = data.powerSystems;
-        if (data.religions) world.religions = data.religions;
-        if (data.mysteries) world.mysteries = data.mysteries;
+        if (data.snapshot) overview.snapshot = data.snapshot;
+        if (data.constraints) overview.constraints = data.constraints;
+        if (data.pillars) overview.pillars = data.pillars;
+        if (data.cultures) cultures.cultures = data.cultures;
+        if (data.powerSystems) magic.powerSystems = data.powerSystems;
+        if (data.religions) religion.religions = data.religions;
+        if (data.mysteries) mystery.mysteries = data.mysteries;
 
-        attributes['world'] = world;
-
-        await db.folders.update(narrativeId, {
-            attributes,
-            updatedAt: Date.now()
-        });
-
-        // Write-through to SQLite
-        await this.syncFolderToSqlite(narrativeId);
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_OVERVIEW_NAMESPACE, DOC_KEY, overview);
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_CULTURES_NAMESPACE, DOC_KEY, cultures);
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_MAGIC_NAMESPACE, DOC_KEY, magic);
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_RELIGION_NAMESPACE, DOC_KEY, religion);
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_MYSTERY_NAMESPACE, DOC_KEY, mystery);
+        await this.ensurePlaceholderScopeDocs(scopeFolderId, narrativeId);
+        this.bumpRefresh();
     }
 
-    /**
-     * Update Act Data
-     */
     async updateActData(actFolderId: string, data: Partial<{
         statusQuo: string;
         deltas: ActDelta[];
@@ -439,52 +423,72 @@ export class WorldBuildingService {
         powerProgression: Record<string, PowerProgression>;
         religionOverrides: Record<string, ReligionOverride>;
     }>): Promise<void> {
-        const folder = await db.folders.get(actFolderId);
-        if (!folder) throw new Error('Act folder not found');
+        const actFolder = await db.folders.get(actFolderId);
+        if (!actFolder?.narrativeId) throw new Error('Act folder not found');
 
-        const attributes = folder.attributes || {};
-        const act = attributes['act'] || {};
+        const overview = await this.loadActOverviewDocument(actFolderId, actFolder.narrativeId);
+        const cultureOverrides = await this.loadCultureOverridesDocument(actFolderId, actFolder.narrativeId);
+        const magicOverrides = await this.loadMagicOverridesDocument(actFolderId, actFolder.narrativeId);
+        const religionOverrides = await this.loadReligionOverridesDocument(actFolderId, actFolder.narrativeId);
 
-        if (data.statusQuo !== undefined) act.statusQuo = data.statusQuo;
-        if (data.deltas) act.deltas = data.deltas;
-        if (data.stakes) act.stakes = data.stakes;
-        if (data.cultureOverrides) act.cultureOverrides = data.cultureOverrides;
-        if (data.powerProgression) act.powerProgression = data.powerProgression;
-        if (data.religionOverrides) act.religionOverrides = data.religionOverrides;
+        if (data.statusQuo !== undefined) overview.statusQuo = data.statusQuo;
+        if (data.deltas) overview.deltas = data.deltas;
+        if (data.stakes) overview.stakes = data.stakes;
+        if (data.cultureOverrides) cultureOverrides.overrides = data.cultureOverrides;
+        if (data.powerProgression) magicOverrides.progression = data.powerProgression;
+        if (data.religionOverrides) religionOverrides.overrides = data.religionOverrides;
 
-        attributes['act'] = act;
-
-        await db.folders.update(actFolderId, {
-            attributes,
-            updatedAt: Date.now()
-        });
-
-        // Write-through to SQLite
-        await this.syncFolderToSqlite(actFolderId);
+        await this.scopedDocuments.savePayload(actFolderId, actFolder.narrativeId, WORLD_ACT_OVERVIEW_NAMESPACE, DOC_KEY, overview);
+        await this.scopedDocuments.savePayload(actFolderId, actFolder.narrativeId, WORLD_CULTURE_OVERRIDES_NAMESPACE, DOC_KEY, cultureOverrides);
+        await this.scopedDocuments.savePayload(actFolderId, actFolder.narrativeId, WORLD_MAGIC_OVERRIDES_NAMESPACE, DOC_KEY, magicOverrides);
+        await this.scopedDocuments.savePayload(actFolderId, actFolder.narrativeId, WORLD_RELIGION_OVERRIDES_NAMESPACE, DOC_KEY, religionOverrides);
+        await this.ensurePlaceholderScopeDocs(actFolderId, actFolder.narrativeId);
+        this.bumpRefresh();
     }
 
     async updateCultures(narrativeId: string, cultures: Culture[]): Promise<void> {
-        await this.updateWorldData(narrativeId, { cultures });
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
+        const doc = await this.loadCulturesDocument(scopeFolderId, narrativeId);
+        doc.cultures = cultures;
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_CULTURES_NAMESPACE, DOC_KEY, doc);
+        this.bumpRefresh();
     }
 
     async updateActCultureOverrides(actFolderId: string, overrides: Record<string, CultureOverride>): Promise<void> {
-        await this.updateActData(actFolderId, { cultureOverrides: overrides });
+        const folder = await db.folders.get(actFolderId);
+        if (!folder?.narrativeId) throw new Error('Act folder not found');
+        await this.scopedDocuments.savePayload(actFolderId, folder.narrativeId, WORLD_CULTURE_OVERRIDES_NAMESPACE, DOC_KEY, { overrides });
+        this.bumpRefresh();
     }
 
     async updatePowerSystems(narrativeId: string, powerSystems: PowerSystem[]): Promise<void> {
-        await this.updateWorldData(narrativeId, { powerSystems });
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
+        const doc = await this.loadMagicDocument(scopeFolderId, narrativeId);
+        doc.powerSystems = powerSystems;
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_MAGIC_NAMESPACE, DOC_KEY, doc);
+        this.bumpRefresh();
     }
 
     async updateActPowerProgression(actFolderId: string, progression: Record<string, PowerProgression>): Promise<void> {
-        await this.updateActData(actFolderId, { powerProgression: progression });
+        const folder = await db.folders.get(actFolderId);
+        if (!folder?.narrativeId) throw new Error('Act folder not found');
+        await this.scopedDocuments.savePayload(actFolderId, folder.narrativeId, WORLD_MAGIC_OVERRIDES_NAMESPACE, DOC_KEY, { progression });
+        this.bumpRefresh();
     }
 
     async updateReligions(narrativeId: string, religions: Religion[]): Promise<void> {
-        await this.updateWorldData(narrativeId, { religions });
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
+        const doc = await this.loadReligionDocument(scopeFolderId, narrativeId);
+        doc.religions = religions;
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_RELIGION_NAMESPACE, DOC_KEY, doc);
+        this.bumpRefresh();
     }
 
     async updateActReligionOverrides(actFolderId: string, overrides: Record<string, ReligionOverride>): Promise<void> {
-        await this.updateActData(actFolderId, { religionOverrides: overrides });
+        const folder = await db.folders.get(actFolderId);
+        if (!folder?.narrativeId) throw new Error('Act folder not found');
+        await this.scopedDocuments.savePayload(actFolderId, folder.narrativeId, WORLD_RELIGION_OVERRIDES_NAMESPACE, DOC_KEY, { overrides });
+        this.bumpRefresh();
     }
 
     getCultures$(narrativeId: string): Observable<Culture[]> {
@@ -515,42 +519,284 @@ export class WorldBuildingService {
         return this.getActData$(actFolderId).pipe(map(data => data.religionOverrides));
     }
 
-    /** @deprecated Use getLoreThreads$ instead */
-    // Helper to update mysteries
     async updateMysteries(narrativeId: string, mysteries: MysteryClue[]): Promise<void> {
-        await this.updateWorldData(narrativeId, { mysteries });
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
+        const doc = await this.loadMysteryDocument(scopeFolderId, narrativeId);
+        doc.mysteries = mysteries;
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_MYSTERY_NAMESPACE, DOC_KEY, doc);
+        this.bumpRefresh();
     }
-
-    // ===================================
-    // LORE THREADS (v2)
-    // ===================================
 
     getLoreThreads$(narrativeId: string): Observable<LoreThread[]> {
         return this.getWorldData$(narrativeId).pipe(map(data => data.loreThreads));
     }
 
     async updateLoreThreads(narrativeId: string, threads: LoreThread[]): Promise<void> {
-        const folder = await db.folders.get(narrativeId);
-        if (!folder) throw new Error('Narrative root not found');
-
-        const attributes = folder.attributes || {};
-        const world = attributes['world'] || {};
-        world.loreThreads = threads;
-        attributes['world'] = world;
-
-        await db.folders.update(narrativeId, {
-            attributes,
-            updatedAt: Date.now()
-        });
-
-        // Write-through to SQLite
-        await this.syncFolderToSqlite(narrativeId);
+        const scopeFolderId = this.resolveCurrentWorldScopeFolderId(narrativeId);
+        const doc = await this.loadMysteryDocument(scopeFolderId, narrativeId);
+        doc.loreThreads = threads;
+        await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, WORLD_MYSTERY_NAMESPACE, DOC_KEY, doc);
+        this.bumpRefresh();
     }
 
-    /*
-     * Helper to create a new unique ID
-     */
     generateId(): string {
         return crypto.randomUUID();
+    }
+
+    private async loadWorldData(narrativeId: string, currentScopeFolderId: string): Promise<{
+        snapshot: WorldSnapshot;
+        constraints: CanonConstraint[];
+        pillars: WorldPillar[];
+        cultures: Culture[];
+        powerSystems: PowerSystem[];
+        religions: Religion[];
+        mysteries: MysteryClue[];
+        loreThreads: LoreThread[];
+    }> {
+        const scopeFolderId = this.isScopeInNarrative(currentScopeFolderId, narrativeId) ? currentScopeFolderId : narrativeId;
+        const overview = await this.loadOverviewDocument(scopeFolderId, narrativeId);
+        const cultures = await this.loadCulturesDocument(scopeFolderId, narrativeId);
+        const magic = await this.loadMagicDocument(scopeFolderId, narrativeId);
+        const religion = await this.loadReligionDocument(scopeFolderId, narrativeId);
+        const mystery = await this.loadMysteryDocument(scopeFolderId, narrativeId);
+
+        return {
+            snapshot: overview.snapshot,
+            constraints: overview.constraints,
+            pillars: overview.pillars,
+            cultures: cultures.cultures,
+            powerSystems: magic.powerSystems,
+            religions: religion.religions,
+            mysteries: mystery.mysteries,
+            loreThreads: mystery.loreThreads,
+        };
+    }
+
+    private async loadActData(actFolderId: string): Promise<{
+        statusQuo: string;
+        deltas: ActDelta[];
+        stakes: ActStake[];
+        cultureOverrides: Record<string, CultureOverride>;
+        powerProgression: Record<string, PowerProgression>;
+        religionOverrides: Record<string, ReligionOverride>;
+    }> {
+        const folder = await db.folders.get(actFolderId);
+        if (!folder?.narrativeId) {
+            return { statusQuo: '', deltas: [], stakes: [], cultureOverrides: {}, powerProgression: {}, religionOverrides: {} };
+        }
+
+        const overview = await this.loadActOverviewDocument(actFolderId, folder.narrativeId);
+        const cultureOverrides = await this.loadCultureOverridesDocument(actFolderId, folder.narrativeId);
+        const magicOverrides = await this.loadMagicOverridesDocument(actFolderId, folder.narrativeId);
+        const religionOverrides = await this.loadReligionOverridesDocument(actFolderId, folder.narrativeId);
+
+        return {
+            statusQuo: overview.statusQuo,
+            deltas: overview.deltas,
+            stakes: overview.stakes,
+            cultureOverrides: cultureOverrides.overrides,
+            powerProgression: magicOverrides.progression,
+            religionOverrides: religionOverrides.overrides,
+        };
+    }
+
+    private async loadOverviewDocument(scopeFolderId: string, narrativeId: string): Promise<OverviewDocument> {
+        return this.loadScopedWithNarrativeFallback(scopeFolderId, narrativeId, WORLD_OVERVIEW_NAMESPACE, DEFAULT_OVERVIEW_DOC, () => this.migrateLegacyNarrativeDocument(narrativeId, WORLD_OVERVIEW_NAMESPACE));
+    }
+
+    private async loadCulturesDocument(scopeFolderId: string, narrativeId: string): Promise<CulturesDocument> {
+        return this.loadScopedWithNarrativeFallback(scopeFolderId, narrativeId, WORLD_CULTURES_NAMESPACE, DEFAULT_CULTURES_DOC, () => this.migrateLegacyNarrativeDocument(narrativeId, WORLD_CULTURES_NAMESPACE));
+    }
+
+    private async loadMagicDocument(scopeFolderId: string, narrativeId: string): Promise<MagicDocument> {
+        return this.loadScopedWithNarrativeFallback(scopeFolderId, narrativeId, WORLD_MAGIC_NAMESPACE, DEFAULT_MAGIC_DOC, () => this.migrateLegacyNarrativeDocument(narrativeId, WORLD_MAGIC_NAMESPACE));
+    }
+
+    private async loadReligionDocument(scopeFolderId: string, narrativeId: string): Promise<ReligionDocument> {
+        return this.loadScopedWithNarrativeFallback(scopeFolderId, narrativeId, WORLD_RELIGION_NAMESPACE, DEFAULT_RELIGION_DOC, () => this.migrateLegacyNarrativeDocument(narrativeId, WORLD_RELIGION_NAMESPACE));
+    }
+
+    private async loadMysteryDocument(scopeFolderId: string, narrativeId: string): Promise<MysteryDocument> {
+        return this.loadScopedWithNarrativeFallback(scopeFolderId, narrativeId, WORLD_MYSTERY_NAMESPACE, DEFAULT_MYSTERY_DOC, () => this.migrateLegacyNarrativeDocument(narrativeId, WORLD_MYSTERY_NAMESPACE));
+    }
+
+    private async loadActOverviewDocument(actFolderId: string, narrativeId: string): Promise<ActOverviewDocument> {
+        return this.scopedDocuments.getPayload(
+            actFolderId,
+            narrativeId,
+            WORLD_ACT_OVERVIEW_NAMESPACE,
+            DOC_KEY,
+            DEFAULT_ACT_OVERVIEW_DOC,
+            () => this.migrateLegacyActDocument(actFolderId, WORLD_ACT_OVERVIEW_NAMESPACE)
+        );
+    }
+
+    private async loadCultureOverridesDocument(actFolderId: string, narrativeId: string): Promise<CultureOverridesDocument> {
+        return this.scopedDocuments.getPayload(
+            actFolderId,
+            narrativeId,
+            WORLD_CULTURE_OVERRIDES_NAMESPACE,
+            DOC_KEY,
+            DEFAULT_CULTURE_OVERRIDES_DOC,
+            () => this.migrateLegacyActDocument(actFolderId, WORLD_CULTURE_OVERRIDES_NAMESPACE)
+        );
+    }
+
+    private async loadMagicOverridesDocument(actFolderId: string, narrativeId: string): Promise<MagicOverridesDocument> {
+        return this.scopedDocuments.getPayload(
+            actFolderId,
+            narrativeId,
+            WORLD_MAGIC_OVERRIDES_NAMESPACE,
+            DOC_KEY,
+            DEFAULT_MAGIC_OVERRIDES_DOC,
+            () => this.migrateLegacyActDocument(actFolderId, WORLD_MAGIC_OVERRIDES_NAMESPACE)
+        );
+    }
+
+    private async loadReligionOverridesDocument(actFolderId: string, narrativeId: string): Promise<ReligionOverridesDocument> {
+        return this.scopedDocuments.getPayload(
+            actFolderId,
+            narrativeId,
+            WORLD_RELIGION_OVERRIDES_NAMESPACE,
+            DOC_KEY,
+            DEFAULT_RELIGION_OVERRIDES_DOC,
+            () => this.migrateLegacyActDocument(actFolderId, WORLD_RELIGION_OVERRIDES_NAMESPACE)
+        );
+    }
+
+    private async loadScopedWithNarrativeFallback<T>(
+        scopeFolderId: string,
+        narrativeId: string,
+        namespace: string,
+        defaultValue: T,
+        legacyRootFallback: () => Promise<T | undefined>
+    ): Promise<T> {
+        const exact = await this.scopedDocuments.findPayload(scopeFolderId, namespace, DOC_KEY, defaultValue);
+        if (exact) {
+            return exact;
+        }
+
+        if (scopeFolderId !== narrativeId) {
+            const narrativeValue = await this.scopedDocuments.getPayload(
+                narrativeId,
+                narrativeId,
+                namespace,
+                DOC_KEY,
+                defaultValue,
+                legacyRootFallback
+            );
+            return narrativeValue;
+        }
+
+        return this.scopedDocuments.getPayload(
+            narrativeId,
+            narrativeId,
+            namespace,
+            DOC_KEY,
+            defaultValue,
+            legacyRootFallback
+        );
+    }
+
+    private async migrateLegacyNarrativeDocument(narrativeId: string, namespace: string): Promise<any | undefined> {
+        const folder = await db.folders.get(narrativeId);
+        if (!folder) return undefined;
+
+        const world = folder.attributes?.['world'] || {};
+
+        switch (namespace) {
+            case WORLD_OVERVIEW_NAMESPACE:
+                if (world.snapshot || world.constraints || world.pillars) {
+                    return {
+                        snapshot: world.snapshot || DEFAULT_SNAPSHOT,
+                        constraints: world.constraints || [],
+                        pillars: world.pillars || [],
+                    } satisfies OverviewDocument;
+                }
+                break;
+            case WORLD_CULTURES_NAMESPACE:
+                if (world.cultures) {
+                    return { cultures: world.cultures || [] } satisfies CulturesDocument;
+                }
+                break;
+            case WORLD_MAGIC_NAMESPACE:
+                if (world.powerSystems) {
+                    return { powerSystems: world.powerSystems || [] } satisfies MagicDocument;
+                }
+                break;
+            case WORLD_RELIGION_NAMESPACE:
+                if (world.religions) {
+                    return { religions: world.religions || [] } satisfies ReligionDocument;
+                }
+                break;
+            case WORLD_MYSTERY_NAMESPACE:
+                if (world.mysteries || world.loreThreads) {
+                    return {
+                        mysteries: world.mysteries || [],
+                        loreThreads: world.loreThreads || [],
+                    } satisfies MysteryDocument;
+                }
+                break;
+        }
+
+        return undefined;
+    }
+
+    private async migrateLegacyActDocument(actFolderId: string, namespace: string): Promise<any | undefined> {
+        const folder = await db.folders.get(actFolderId);
+        if (!folder) return undefined;
+
+        const act = folder.attributes?.['act'] || {};
+
+        switch (namespace) {
+            case WORLD_ACT_OVERVIEW_NAMESPACE:
+                if (act.statusQuo || act.deltas || act.stakes) {
+                    return {
+                        statusQuo: act.statusQuo || '',
+                        deltas: act.deltas || [],
+                        stakes: act.stakes || [],
+                    } satisfies ActOverviewDocument;
+                }
+                break;
+            case WORLD_CULTURE_OVERRIDES_NAMESPACE:
+                if (act.cultureOverrides) {
+                    return { overrides: act.cultureOverrides || {} } satisfies CultureOverridesDocument;
+                }
+                break;
+            case WORLD_MAGIC_OVERRIDES_NAMESPACE:
+                if (act.powerProgression) {
+                    return { progression: act.powerProgression || {} } satisfies MagicOverridesDocument;
+                }
+                break;
+            case WORLD_RELIGION_OVERRIDES_NAMESPACE:
+                if (act.religionOverrides) {
+                    return { overrides: act.religionOverrides || {} } satisfies ReligionOverridesDocument;
+                }
+                break;
+        }
+
+        return undefined;
+    }
+
+    private resolveCurrentWorldScopeFolderId(narrativeId: string): string {
+        const scope = this.scopeService.resolvedScope();
+        if (scope.narrativeId === narrativeId && scope.scopeFolderId && scope.scopeFolderId !== 'vault:global') {
+            return scope.scopeFolderId;
+        }
+        return narrativeId;
+    }
+
+    private isScopeInNarrative(scopeFolderId: string, narrativeId: string): boolean {
+        const scope = this.scopeService.resolvedScope();
+        return scope.scopeFolderId === scopeFolderId && scope.narrativeId === narrativeId;
+    }
+
+    private async ensurePlaceholderScopeDocs(scopeFolderId: string, narrativeId: string): Promise<void> {
+        await this.scopedDocuments.getPayload(scopeFolderId, narrativeId, WORLD_GEOGRAPHY_NAMESPACE, DOC_KEY, {});
+        await this.scopedDocuments.getPayload(scopeFolderId, narrativeId, WORLD_POLITICS_NAMESPACE, DOC_KEY, {});
+    }
+
+    private bumpRefresh(): void {
+        this.refresh.update(value => value + 1);
     }
 }

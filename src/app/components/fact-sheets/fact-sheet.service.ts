@@ -12,6 +12,8 @@ import { ChapterService } from '../../lib/services/chapter.service';
 import { inject } from '@angular/core';
 import { DEFAULT_ENTITY_SCHEMAS } from '../../lib/schemas/entity-fact-sheet-schemas';
 import { GoKittService } from '../../services/gokitt.service';
+import { ScopeService } from '../../lib/services/scope.service';
+import { ScopedEntityFieldService } from '../../lib/services/scoped-entity-field.service';
 
 // ============================================================================
 // DEFAULT SCHEMAS - Loaded synchronously, no async delay
@@ -138,15 +140,12 @@ export interface CardWithFields {
 export class FactSheetService {
     // In-memory cache - populated synchronously from defaults
     private schemaCache: Map<string, CardWithFields[]> = new Map();
-    // Cache is now Map<entityId, Map<contextId, Record<string, any>>> ?
-    // Or just simple cache of the "current view"?
-    // For simplicity, we cache the LAST LOADED view so synchronous getters work for the active view.
     private attributeCache: Map<string, Record<string, any>> = new Map();
 
-    // We also need the ChapterService for inheritance, but circular dependency risk if not careful.
-    // We'll inject it.
     private chapterService = inject(ChapterService);
     private goKitt = inject(GoKittService);
+    private scopeService = inject(ScopeService);
+    private scopedFields = inject(ScopedEntityFieldService);
 
     constructor() {
         // Pre-populate cache with defaults synchronously
@@ -172,7 +171,8 @@ export class FactSheetService {
      * Returns cached values, may be empty on first call
      */
     getAttributesSync(entityId: string): Record<string, any> {
-        return this.attributeCache.get(entityId) || {};
+        const scopeFolderId = this.scopeService.resolvedScope().scopeFolderId;
+        return this.attributeCache.get(this.getCacheKey(entityId, scopeFolderId)) || this.attributeCache.get(entityId) || {};
     }
 
     /**
@@ -210,19 +210,29 @@ export class FactSheetService {
      * Set a single attribute - updates cache immediately, persists to Dexie
      */
     async setAttribute(entityId: string, key: string, value: any, contextId: string = 'global'): Promise<void> {
-        // Update cache immediately (optimistic)
-        const cached = this.attributeCache.get(entityId) || {};
+        const target = await this.scopeService.resolveEffectiveScopeTarget(contextId);
+        const cacheKey = this.getCacheKey(entityId, target.scopeFolderId);
+
+        const cached = this.attributeCache.get(cacheKey) || {};
         cached[key] = value;
+        this.attributeCache.set(cacheKey, cached);
         this.attributeCache.set(entityId, cached);
 
-        // Persist to Dexie
-        const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+        if (target.scopeFolderId !== 'vault:global' && target.narrativeId) {
+            await this.scopedFields.setField(
+                entityId,
+                target.scopeFolderId,
+                target.narrativeId,
+                key,
+                value
+            );
+            return;
+        }
 
-        // Use put to upsert based on composite key [entityId+key+contextId]
         await db.entityMetadata.put({
             entityId,
             key,
-            value: serialized,
+            value: typeof value === 'string' ? value : JSON.stringify(value),
             contextId
         });
     }
@@ -232,33 +242,16 @@ export class FactSheetService {
      * contextId: The specific chapter/scope to view.
      */
     async loadAttributes(entityId: string, contextId: string = 'global'): Promise<Record<string, any>> {
-        // 1. Get inheritance chain (e.g., ['global', 'ch1', 'ch2', 'ch3'])
-        const chain = this.chapterService.getInheritanceChain(contextId);
+        const target = await this.scopeService.resolveEffectiveScopeTarget(contextId);
+        const scopeChain = this.scopeService.buildScopeFallbackChain(target);
+        let result = await this.scopedFields.getMergedFields(entityId, scopeChain);
 
-        // 2. Fetch all metadata for this entity where contextId is in the chain
-        const rows = await db.entityMetadata
-            .where('entityId').equals(entityId)
-            .filter(row => chain.includes(row.contextId || 'global')) // 'global' fallback for old data
-            .toArray();
-
-        // 3. Merge values in order of the chain
-        const result: Record<string, any> = {};
-
-        // Sort rows by chain index to ensure correct override order
-        rows.sort((a, b) => {
-            const idxA = chain.indexOf(a.contextId || 'global');
-            const idxB = chain.indexOf(b.contextId || 'global');
-            return idxA - idxB;
-        });
-
-        for (const row of rows) {
-            try {
-                result[row.key] = JSON.parse(row.value);
-            } catch {
-                result[row.key] = row.value;
-            }
+        if (Object.keys(result).length === 0) {
+            result = await this.loadLegacyAttributes(entityId, contextId, target);
         }
 
+        const cacheKey = this.getCacheKey(entityId, target.scopeFolderId);
+        this.attributeCache.set(cacheKey, result);
         this.attributeCache.set(entityId, result);
         return result;
     }
@@ -343,5 +336,49 @@ export class FactSheetService {
         } catch (err) {
             console.error('[FactSheetService] Error seeding Dexie:', err);
         }
+    }
+
+    private async loadLegacyAttributes(entityId: string, contextId: string, target: Awaited<ReturnType<ScopeService['resolveEffectiveScopeTarget']>>): Promise<Record<string, any>> {
+        const legacyChain = new Set<string>([
+            'global',
+            contextId,
+            target.scopeFolderId,
+            target.narrativeId || '',
+            target.selectedNoteId || '',
+            ...this.chapterService.getInheritanceChain(contextId),
+        ].filter(Boolean));
+
+        const rows = await db.entityMetadata
+            .where('entityId').equals(entityId)
+            .filter(row => legacyChain.has(row.contextId || 'global'))
+            .toArray();
+
+        const priority = ['global', target.narrativeId || '', contextId, target.scopeFolderId, target.selectedNoteId || ''];
+
+        rows.sort((a, b) => {
+            const keyA = a.contextId || 'global';
+            const keyB = b.contextId || 'global';
+            const idxA = priority.indexOf(keyA);
+            const idxB = priority.indexOf(keyB);
+            if (idxA === -1 && idxB === -1) return 0;
+            if (idxA === -1) return -1;
+            if (idxB === -1) return 1;
+            return idxA - idxB;
+        });
+
+        const result: Record<string, any> = {};
+        for (const row of rows) {
+            try {
+                result[row.key] = JSON.parse(row.value);
+            } catch {
+                result[row.key] = row.value;
+            }
+        }
+
+        return result;
+    }
+
+    private getCacheKey(entityId: string, scopeFolderId: string): string {
+        return `${entityId}::${scopeFolderId || 'vault:global'}`;
     }
 }

@@ -1,12 +1,13 @@
 // src/app/components/sidebar/sidebar.component.ts
 // Sidebar with file tree and action buttons - wired to Dexie and document ingestion.
 
-import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, inject, signal, computed, OnInit, OnDestroy, HostListener } from '@angular/core';
+import { Router, NavigationEnd } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain, MoveVertical, RefreshCw, Share2, Upload, MessageCircle } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain, MoveVertical, RefreshCw, Share2, Upload, MessageCircle, History } from 'lucide-angular';
 import { Subscription } from 'rxjs';
+import { filter } from 'rxjs/operators';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { FolderService } from '../../lib/services/folder.service';
 import { NotesService } from '../../lib/dexie/notes.service';
@@ -22,6 +23,7 @@ import { DocumentIngestionService, DocumentIngestionMode, DocumentIngestionResul
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note } from '../../lib/dexie/db';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
+import { GoChatService } from '../../lib/services/go-chat.service';
 
 interface EntityFolderOption {
     entityKind: string;
@@ -85,6 +87,9 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private goKittService = inject(GoKittService);
     private documentIngestionService = inject(DocumentIngestionService);
     private router = inject(Router);
+    goChatService = inject(GoChatService);
+
+    isChatRoute = signal(false);
 
     private foldersSubscription?: Subscription;
     private notesSubscription?: Subscription;
@@ -111,10 +116,17 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly RefreshCw = RefreshCw;
     readonly Share2 = Share2;
     readonly MessageCircle = MessageCircle;
+    readonly HistoryIcon = History;
 
     isScanning = signal(false);
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;
     folderDropdownOpen = signal(false);
+
+    // Resize state for left sidebar
+    sidebarWidth = getSetting<number>('kittclouds-left-sidebar-width', 240) || 240;
+    isResizing = false;
+    private startX = 0;
+    private startWidth = 0;
 
     private folders = signal<DexieFolder[]>([]);
     private notes = signal<Note[]>([]);
@@ -133,6 +145,16 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     collapsedNodes = computed<TreeNode[]>(() => {
         return this.treeData().filter(node => !node.parentId || node.parentId === '');
+    });
+
+    chatSessions = computed(() => {
+        const threads = this.goChatService.threads();
+        return threads.map(t => ({
+            id: t.id,
+            messageCount: 0,
+            createdAt: t.created_at,
+            preview: t.title || undefined,
+        }));
     });
 
     importDialogOpen = signal(false);
@@ -171,6 +193,15 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.notesSubscription = this.notesService.getAllNotes$().subscribe(notes => {
             this.notes.set(notes);
         });
+
+        this.router.events.pipe(
+            filter(event => event instanceof NavigationEnd)
+        ).subscribe((event: any) => {
+            this.isChatRoute.set(event.urlAfterRedirects.includes('/chat'));
+        });
+        
+        // Initial setup
+        this.isChatRoute.set(this.router.url.includes('/chat'));
     }
 
     ngOnDestroy(): void {
@@ -570,5 +601,55 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     navigateToChat(): void {
         this.router.navigate(['/chat']);
+    }
+
+    startResize(event: MouseEvent): void {
+        event.preventDefault();
+        this.isResizing = true;
+        this.startX = event.clientX;
+        this.startWidth = this.sidebarWidth;
+        
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        if (!this.sidebarService.isOpen()) {
+            this.sidebarService.open();
+        }
+    }
+
+    @HostListener('window:mousemove', ['$event'])
+    onMouseMove(event: MouseEvent): void {
+        if (!this.isResizing) return;
+
+        const delta = event.clientX - this.startX;
+        const newWidth = this.startWidth + delta;
+
+        // Constraints
+        const minWidth = 150;
+        const maxWidth = 800;
+
+        this.sidebarWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    }
+
+    @HostListener('window:mouseup')
+    onMouseUp(): void {
+        if (this.isResizing) {
+            this.isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            setSetting('kittclouds-left-sidebar-width', this.sidebarWidth);
+        }
+    }
+
+    async selectChatSession(id: string): Promise<void> {
+        await this.goChatService.loadThread(id);
+    }
+
+    formatSessionDate(timestamp: number): string {
+        const date = new Date(timestamp);
+        const diff = Date.now() - date.getTime();
+        if (diff < 86400000) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (diff < 604800000) return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     }
 }

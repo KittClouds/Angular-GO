@@ -280,6 +280,7 @@ import { db } from '../../../../../lib/dexie/db';
         
         <!-- Snapshot Edit Dialog -->
         <p-dialog header="Edit World Snapshot" [(visible)]="showSnapshotDialog" [modal]="true" [style]="{width: '50vw'}" styleClass="dark:bg-zinc-900 dark:text-white">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Logline</label>
@@ -302,6 +303,7 @@ import { db } from '../../../../../lib/dexie/db';
                      </div>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showSnapshotDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveSnapshot()" class="p-button-primary"></button>
@@ -310,12 +312,14 @@ import { db } from '../../../../../lib/dexie/db';
 
         <!-- Constraint Dialog -->
         <p-dialog header="Add Canon Constraint" [(visible)]="showConstraintDialog" [modal]="true" [style]="{width: '30vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Rule</label>
                     <input pInputText [(ngModel)]="newConstraintText" placeholder="e.g. Magic requires blood..." class="w-full" (keydown.enter)="saveConstraint()" />
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showConstraintDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveConstraint()" class="p-button-primary"></button>
@@ -324,12 +328,14 @@ import { db } from '../../../../../lib/dexie/db';
 
         <!-- Status Quo Dialog -->
         <p-dialog header="Edit Status Quo" [(visible)]="showStatusQuoDialog" [modal]="true" [style]="{width: '50vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Status Quo</label>
                     <textarea pInputTextarea [(ngModel)]="editStatusQuo" rows="8" class="w-full"></textarea>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showStatusQuoDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveStatusQuo()" class="p-button-primary"></button>
@@ -338,6 +344,7 @@ import { db } from '../../../../../lib/dexie/db';
         
         <!-- Pillar Dialog -->
         <p-dialog header="Add World Pillar" [(visible)]="showPillarDialog" [modal]="true" [style]="{width: '30vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Title</label>
@@ -352,6 +359,7 @@ import { db } from '../../../../../lib/dexie/db';
                     <textarea pInputTextarea [(ngModel)]="newPillar.description" rows="3" class="w-full"></textarea>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showPillarDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="savePillar()" class="p-button-primary"></button>
@@ -360,6 +368,7 @@ import { db } from '../../../../../lib/dexie/db';
 
         <!-- Delta Dialog -->
         <p-dialog header="Log Act Change (Delta)" [(visible)]="showDeltaDialog" [modal]="true" [style]="{width: '30vw'}">
+             <ng-template pTemplate="content">
              <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Type</label>
@@ -382,6 +391,7 @@ import { db } from '../../../../../lib/dexie/db';
                     <textarea pInputTextarea [(ngModel)]="newDelta.description" rows="3" class="w-full"></textarea>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showDeltaDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveDelta()" class="p-button-primary"></button>
@@ -390,6 +400,7 @@ import { db } from '../../../../../lib/dexie/db';
 
         <!-- Stake Dialog -->
         <p-dialog [header]="editingStakeId ? 'Edit Stake Pressure' : 'Add Stake Pressure'" [(visible)]="showStakeDialog" [modal]="true" [style]="{width: '36vw'}">
+            <ng-template pTemplate="content">
             <div class="flex flex-col gap-4 py-2">
                 <div class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Stake / Clock</label>
@@ -415,6 +426,7 @@ import { db } from '../../../../../lib/dexie/db';
                     <textarea pInputTextarea [(ngModel)]="tempStake.details" rows="5" placeholder="Describe what this pressure means right now..." class="w-full"></textarea>
                 </div>
             </div>
+            </ng-template>
             <ng-template pTemplate="footer">
                 <button pButton label="Cancel" (click)="showStakeDialog = false" class="p-button-text"></button>
                 <button pButton label="Save" (click)="saveStake()" class="p-button-primary"></button>

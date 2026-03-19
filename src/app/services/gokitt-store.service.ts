@@ -100,6 +100,40 @@ export interface StoreFolder {
     updatedAt: number;
 }
 
+export interface StoreScopedDocument {
+    id: string;
+    scopeFolderId: string;
+    narrativeId: string;
+    namespace: string;
+    documentKey: string;
+    payload: string;
+    seededFromScopeFolderId?: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface StoreScopedEntityField {
+    id: string;
+    entityId: string;
+    scopeFolderId: string;
+    narrativeId: string;
+    fieldKey: string;
+    valueJson: string;
+    seededFromScopeFolderId?: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface StoreScopedDefinition {
+    id: string;
+    narrativeId: string;
+    namespace: string;
+    definitionKey: string;
+    payload: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
 // =============================================================================
 // Worker Message Types (added to extend GoKitt API)
 // =============================================================================
@@ -127,7 +161,20 @@ type StoreWorkerMessage =
     | { type: 'STORE_UPSERT_FOLDER'; payload: { folderJSON: string }; id: number }
     | { type: 'STORE_GET_FOLDER'; payload: { id: string }; id: number }
     | { type: 'STORE_DELETE_FOLDER'; payload: { id: string }; id: number }
-    | { type: 'STORE_LIST_FOLDERS'; payload: { parentId?: string }; id: number };
+    | { type: 'STORE_LIST_FOLDERS'; payload: { parentId?: string }; id: number }
+    // Scoped metadata
+    | { type: 'STORE_UPSERT_SCOPED_DOCUMENT'; payload: { documentJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DOCUMENTS'; payload: { scopeFolderId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD'; payload: { fieldJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_ENTITY_FIELDS'; payload: { scopeFolderId: string; entityId?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_DEFINITION'; payload: { definitionJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DEFINITIONS'; payload: { narrativeId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number };
 
 // =============================================================================
 // Service
@@ -166,8 +213,31 @@ export class GoKittStoreService {
         if (this.initialized) return;
         if (this.initPromise) return this.initPromise;
 
-        this.initPromise = this._initializeInternal();
+        this.initPromise = this._initializeInternal().catch((err) => {
+            this.initPromise = null;
+            throw err;
+        });
         return this.initPromise;
+    }
+
+    /**
+     * Best-effort initialization used by early-boot consumers.
+     * Returns false instead of throwing when GoKitt/WASM is not ready yet.
+     */
+    async tryInitialize(): Promise<boolean> {
+        if (this.initialized) return true;
+        if (!this.canInitialize) return false;
+
+        try {
+            await this.initialize();
+            return this.initialized;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message.includes('GoKitt worker not available')) {
+                return false;
+            }
+            throw err;
+        }
     }
 
     private async _initializeInternal(): Promise<void> {
@@ -565,6 +635,100 @@ export class GoKittStoreService {
     }
 
     // =========================================================================
+    // Scoped Metadata CRUD
+    // =========================================================================
+
+    async upsertScopedDocument(document: StoreScopedDocument): Promise<void> {
+        await this.ensureInitialized();
+        const documentJSON = JSON.stringify(document);
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_UPSERT_SCOPED_DOCUMENT', { documentJSON });
+        if (!result.success) {
+            throw new Error(`Failed to upsert scoped document: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    async getScopedDocument(scopeFolderId: string, namespace: string, documentKey: string): Promise<StoreScopedDocument | null> {
+        await this.ensureInitialized();
+        return this.sendRequest<StoreScopedDocument | null>('STORE_GET_SCOPED_DOCUMENT', { scopeFolderId, namespace, documentKey });
+    }
+
+    async listScopedDocuments(scopeFolderId: string, namespace?: string): Promise<StoreScopedDocument[]> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<StoreScopedDocument[]>('STORE_LIST_SCOPED_DOCUMENTS', { scopeFolderId, namespace });
+        return result || [];
+    }
+
+    async deleteScopedDocument(scopeFolderId: string, namespace: string, documentKey: string): Promise<void> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_DELETE_SCOPED_DOCUMENT', { scopeFolderId, namespace, documentKey });
+        if (!result.success) {
+            throw new Error(`Failed to delete scoped document: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    async upsertScopedEntityField(field: StoreScopedEntityField): Promise<void> {
+        await this.ensureInitialized();
+        const fieldJSON = JSON.stringify(field);
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_UPSERT_SCOPED_ENTITY_FIELD', { fieldJSON });
+        if (!result.success) {
+            throw new Error(`Failed to upsert scoped entity field: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    async getScopedEntityField(entityId: string, scopeFolderId: string, fieldKey: string): Promise<StoreScopedEntityField | null> {
+        await this.ensureInitialized();
+        return this.sendRequest<StoreScopedEntityField | null>('STORE_GET_SCOPED_ENTITY_FIELD', { entityId, scopeFolderId, fieldKey });
+    }
+
+    async listScopedEntityFields(scopeFolderId: string, entityId?: string): Promise<StoreScopedEntityField[]> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<StoreScopedEntityField[]>('STORE_LIST_SCOPED_ENTITY_FIELDS', { scopeFolderId, entityId });
+        return result || [];
+    }
+
+    async deleteScopedEntityField(entityId: string, scopeFolderId: string, fieldKey: string): Promise<void> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_DELETE_SCOPED_ENTITY_FIELD', { entityId, scopeFolderId, fieldKey });
+        if (!result.success) {
+            throw new Error(`Failed to delete scoped entity field: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    async upsertScopedDefinition(definition: StoreScopedDefinition): Promise<void> {
+        await this.ensureInitialized();
+        const definitionJSON = JSON.stringify(definition);
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_UPSERT_SCOPED_DEFINITION', { definitionJSON });
+        if (!result.success) {
+            throw new Error(`Failed to upsert scoped definition: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    async getScopedDefinition(narrativeId: string, namespace: string, definitionKey: string): Promise<StoreScopedDefinition | null> {
+        await this.ensureInitialized();
+        return this.sendRequest<StoreScopedDefinition | null>('STORE_GET_SCOPED_DEFINITION', { narrativeId, namespace, definitionKey });
+    }
+
+    async listScopedDefinitions(narrativeId: string, namespace?: string): Promise<StoreScopedDefinition[]> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<StoreScopedDefinition[]>('STORE_LIST_SCOPED_DEFINITIONS', { narrativeId, namespace });
+        return result || [];
+    }
+
+    async deleteScopedDefinition(narrativeId: string, namespace: string, definitionKey: string): Promise<void> {
+        await this.ensureInitialized();
+        const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_DELETE_SCOPED_DEFINITION', { narrativeId, namespace, definitionKey });
+        if (!result.success) {
+            throw new Error(`Failed to delete scoped definition: ${result.error}`);
+        }
+        this.scheduleSnapshot();
+    }
+
+    // =========================================================================
     // Export / Import (OPFS Sync)
     // =========================================================================
 
@@ -620,6 +784,10 @@ export class GoKittStoreService {
      */
     get isReady(): boolean {
         return this.initialized;
+    }
+
+    get canInitialize(): boolean {
+        return !!this.goKitt.worker && this.goKitt.isReady;
     }
 
     // =========================================================================

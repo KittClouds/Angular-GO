@@ -115,6 +115,18 @@ type GoKittWorkerMessage =
     | { type: 'STORE_GET_ENTITY_CARDS'; payload: { entityId: string }; id: number }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA'; payload: { schemaJSON: string }; id: number }
     | { type: 'STORE_GET_FOLDER_SCHEMA'; payload: { id: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_DOCUMENT'; payload: { documentJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DOCUMENTS'; payload: { scopeFolderId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD'; payload: { fieldJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_ENTITY_FIELDS'; payload: { scopeFolderId: string; entityId?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_DEFINITION'; payload: { definitionJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DEFINITIONS'; payload: { narrativeId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number }
     // Phase 7: Observational Memory + Chat Service
     | { type: 'CHAT_INIT'; payload: { configJSON: string }; id: number }
     | { type: 'CHAT_CREATE_THREAD'; payload: { worldId: string; narrativeId: string }; id: number }
@@ -222,6 +234,18 @@ type GoKittWorkerResponse =
     | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_DOCUMENT_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_DOCUMENTS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_DOCUMENT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_ENTITY_FIELDS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_DEFINITION_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_DEFINITIONS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_DEFINITION_RESULT'; id: number; payload: { success: boolean; error?: string } }
     // Phase 3: Graph Merger responses
     | { type: 'MERGER_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'MERGER_ADD_SCANNER_RESULT'; id: number; payload: { success: boolean; added: number; error?: string } }
@@ -1060,6 +1084,18 @@ export class GoKittService {
                         case 'STORE_GET_ENTITY_CARDS_RESULT':
                         case 'STORE_UPSERT_FOLDER_SCHEMA_RESULT':
                         case 'STORE_GET_FOLDER_SCHEMA_RESULT':
+                        case 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT':
+                        case 'STORE_GET_SCOPED_DOCUMENT_RESULT':
+                        case 'STORE_LIST_SCOPED_DOCUMENTS_RESULT':
+                        case 'STORE_DELETE_SCOPED_DOCUMENT_RESULT':
+                        case 'STORE_UPSERT_SCOPED_ENTITY_FIELD_RESULT':
+                        case 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT':
+                        case 'STORE_LIST_SCOPED_ENTITY_FIELDS_RESULT':
+                        case 'STORE_DELETE_SCOPED_ENTITY_FIELD_RESULT':
+                        case 'STORE_UPSERT_SCOPED_DEFINITION_RESULT':
+                        case 'STORE_GET_SCOPED_DEFINITION_RESULT':
+                        case 'STORE_LIST_SCOPED_DEFINITIONS_RESULT':
+                        case 'STORE_DELETE_SCOPED_DEFINITION_RESULT':
                         // Phase 3: Graph Merger responses
                         case 'MERGER_INIT_RESULT':
                         case 'MERGER_ADD_SCANNER_RESULT':
@@ -1687,6 +1723,57 @@ export class GoKittService {
 
     async storeGetFolderSchema(id: string): Promise<any | null> {
         return this.sendRequest('STORE_GET_FOLDER_SCHEMA', { id });
+    }
+
+    async storeUpsertScopedDocument(document: any): Promise<{ success: boolean; error?: string }> {
+        const documentJSON = JSON.stringify(document);
+        return this.sendRequest('STORE_UPSERT_SCOPED_DOCUMENT', { documentJSON });
+    }
+
+    async storeGetScopedDocument(scopeFolderId: string, namespace: string, documentKey: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_SCOPED_DOCUMENT', { scopeFolderId, namespace, documentKey });
+    }
+
+    async storeListScopedDocuments(scopeFolderId: string, namespace?: string): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_SCOPED_DOCUMENTS', { scopeFolderId, namespace });
+    }
+
+    async storeDeleteScopedDocument(scopeFolderId: string, namespace: string, documentKey: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_SCOPED_DOCUMENT', { scopeFolderId, namespace, documentKey });
+    }
+
+    async storeUpsertScopedEntityField(field: any): Promise<{ success: boolean; error?: string }> {
+        const fieldJSON = JSON.stringify(field);
+        return this.sendRequest('STORE_UPSERT_SCOPED_ENTITY_FIELD', { fieldJSON });
+    }
+
+    async storeGetScopedEntityField(entityId: string, scopeFolderId: string, fieldKey: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_SCOPED_ENTITY_FIELD', { entityId, scopeFolderId, fieldKey });
+    }
+
+    async storeListScopedEntityFields(scopeFolderId: string, entityId?: string): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_SCOPED_ENTITY_FIELDS', { scopeFolderId, entityId });
+    }
+
+    async storeDeleteScopedEntityField(entityId: string, scopeFolderId: string, fieldKey: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_SCOPED_ENTITY_FIELD', { entityId, scopeFolderId, fieldKey });
+    }
+
+    async storeUpsertScopedDefinition(definition: any): Promise<{ success: boolean; error?: string }> {
+        const definitionJSON = JSON.stringify(definition);
+        return this.sendRequest('STORE_UPSERT_SCOPED_DEFINITION', { definitionJSON });
+    }
+
+    async storeGetScopedDefinition(narrativeId: string, namespace: string, definitionKey: string): Promise<any | null> {
+        return this.sendRequest('STORE_GET_SCOPED_DEFINITION', { narrativeId, namespace, definitionKey });
+    }
+
+    async storeListScopedDefinitions(narrativeId: string, namespace?: string): Promise<any[]> {
+        return this.sendRequest('STORE_LIST_SCOPED_DEFINITIONS', { narrativeId, namespace });
+    }
+
+    async storeDeleteScopedDefinition(narrativeId: string, namespace: string, definitionKey: string): Promise<{ success: boolean; error?: string }> {
+        return this.sendRequest('STORE_DELETE_SCOPED_DEFINITION', { narrativeId, namespace, definitionKey });
     }
 
     // =========================================================================

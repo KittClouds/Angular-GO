@@ -261,6 +261,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Create/Edit System -->
     <p-dialog header="{{ isCreating ? 'New System' : 'Edit System' }}" [(visible)]="showSystemDialog" [modal]="true" [style]="{width: '30vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Name</label>
@@ -276,6 +277,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <textarea pInputTextarea [(ngModel)]="tempSystem.description" rows="3"></textarea>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showSystemDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveSystem()" class="p-button-primary"></button>
@@ -284,6 +286,7 @@ import { db } from '../../../../../lib/dexie/db';
     
     <!-- Edit Rules -->
     <p-dialog header="Edit Rules" [(visible)]="showRulesDialog" [modal]="true" [style]="{width: '40vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div *ngIf="activeRuleField === 'limits'" class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Hard Limits</label>
@@ -298,6 +301,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <textarea pInputTextarea [(ngModel)]="tempRuleValue" rows="6" placeholder="What happens when it goes wrong?"></textarea>
             </div>
         </div>
+        </ng-template>
          <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showRulesDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveRules()" class="p-button-primary"></button>
@@ -306,6 +310,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Capability Editor -->
     <p-dialog header="Capability Details" [(visible)]="showCapDialog" [modal]="true" [style]="{width: '35vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
              <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Name</label>
@@ -345,6 +350,7 @@ import { db } from '../../../../../lib/dexie/db';
                 </div>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showCapDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveCapability()" class="p-button-primary"></button>

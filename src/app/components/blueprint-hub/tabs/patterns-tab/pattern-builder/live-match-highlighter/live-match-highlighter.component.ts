@@ -13,7 +13,7 @@ interface MatchSegment {
     standalone: true,
     imports: [CommonModule],
     template: `
-    <div *ngIf="input && tokens?.length" class="mt-3 p-3 bg-card border border-border rounded-lg">
+    <div *ngIf="input && tokens.length" class="mt-3 p-3 bg-card border border-border rounded-lg max-h-[400px] overflow-y-auto">
         <div class="text-xs text-muted-foreground mb-2">
             <span *ngIf="matches().length">{{ matches().length }} match(es) found</span>
             <span *ngIf="!matches().length">No matches</span>

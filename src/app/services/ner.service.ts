@@ -55,7 +55,7 @@ export class NerService {
 
         try {
             // Step 1: GoKitt unsupervised NER
-            const rawSuggestions = this.goKitt.scanDiscovery(text);
+            const rawSuggestions = await this.goKitt.scanDiscovery(text);
             console.log('[NerService] Raw suggestions from GoKitt:', rawSuggestions);
 
             if (!rawSuggestions || !Array.isArray(rawSuggestions)) {

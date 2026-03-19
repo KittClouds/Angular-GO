@@ -1,12 +1,10 @@
-import { Component, inject, signal, OnInit, OnDestroy, computed, effect } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy, computed, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, BookOpen, Bot, Clock } from 'lucide-angular';
+import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, Bot, Clock } from 'lucide-angular';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
-import { ChapterService } from '../../lib/services/chapter.service';
 import { ScopeService } from '../../lib/services/scope.service';
 import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-sheet-container/fact-sheet-container.component';
-import { FactSheetService } from '../fact-sheets/fact-sheet.service';
 import { AnalyticsPanelComponent } from '../analytics-panel';
 import { TimelineViewComponent } from './timeline-view/timeline-view.component';
 import { AiChatPanelComponent } from './ai-chat-panel/ai-chat-panel.component';
@@ -35,9 +33,14 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
     imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent, AiChatPanelComponent],
     template: `
         <aside
-            class="h-full border-l border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out overflow-hidden"
-            [class.w-80]="service.isOpen()"
-            [class.w-0]="service.isClosed()">
+            class="h-full border-l border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col overflow-hidden relative"
+            [class.transition-all]="!isResizing" [class.duration-300]="!isResizing" [class.ease-in-out]="!isResizing"
+            [style.width.px]="service.isOpen() ? rightSidebarWidth : 0">
+
+            @if (service.isOpen()) {
+                <div class="absolute top-0 left-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-primary/50 transition-colors"
+                (mousedown)="startResize($event)"></div>
+            }
             
             @if (service.isOpen()) {
                 <!-- View Selector Header -->
@@ -87,24 +90,6 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
                                     <span class="text-[10px] opacity-60 ml-auto">scope</span>
                                 </div>
 
-                                <!-- Chapter Context Selector (for attribute inheritance, NOT entity filtering) -->
-                                <div class="flex items-center gap-2">
-                                    <div class="relative w-full">
-                                        <select
-                                            class="w-full pl-8 pr-2 py-1.5 text-xs bg-background/50 border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
-                                            [ngModel]="chapterService.activeChapterId()"
-                                            (ngModelChange)="onChapterSelect($event)"
-                                        >
-                                            <option value="global">Base Attributes</option>
-                                            @for (chap of chapterService.chapters(); track chap.id) {
-                                                <option [value]="chap.id">{{ chap.title }}</option>
-                                            }
-                                        </select>
-                                        <lucide-icon name="book-open" class="absolute left-2.5 top-1.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none"></lucide-icon>
-                                        <lucide-icon name="chevron-down" class="absolute right-2 top-1.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none opacity-50"></lucide-icon>
-                                    </div>
-                                </div>
-
                                 <!-- Entity Selector -->
                                 @if (entities().length > 0) {
                                     <select
@@ -124,7 +109,7 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
                             <div class="flex-1 overflow-hidden">
                                 <app-fact-sheet-container 
                                     [entity]="selectedEntity()" 
-                                    [contextId]="chapterService.activeChapterId()"
+                                    [contextId]="factSheetContextId()"
                                 />
                             </div>
 
@@ -229,7 +214,6 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 })
 export class RightSidebarComponent implements OnInit, OnDestroy {
     service = inject(RightSidebarService);
-    chapterService = inject(ChapterService);
     scopeService = inject(ScopeService);
 
     readonly viewOptions = VIEW_OPTIONS;
@@ -242,6 +226,12 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
 
     /** Loading state */
     loading = signal(false);
+
+    // Resize state for right sidebar
+    rightSidebarWidth = getSetting<number>('kittclouds-right-sidebar-width', 320) || 320;
+    isResizing = false;
+    private startX = 0;
+    private startWidth = 0;
 
     /**
      * Entities derived from ScopeService's reactive signal.
@@ -266,6 +256,8 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
         const id = this.selectedEntityId();
         return this.entities().find(e => e.id === id) || null;
     });
+
+    factSheetContextId = computed(() => this.scopeService.resolvedScope().scopeFolderId || 'vault:global');
 
     /** Current view display helpers */
     currentViewLabel = computed(() => {
@@ -318,8 +310,42 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
         setSetting(ENTITY_STORAGE_KEY, entityId);
     }
 
-    onChapterSelect(chapterId: string) {
-        const val = chapterId === 'global' ? 'global' : chapterId;
-        this.chapterService.setManualChapter(val);
+    startResize(event: MouseEvent): void {
+        event.preventDefault();
+        this.isResizing = true;
+        this.startX = event.clientX;
+        this.startWidth = this.rightSidebarWidth;
+        
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        
+        if (this.service.isClosed()) {
+            this.service.open();
+        }
+    }
+
+    @HostListener('window:mousemove', ['$event'])
+    onMouseMove(event: MouseEvent): void {
+        if (!this.isResizing) return;
+
+        // Pulling cursor LEFT (smaller clientX) makes sidebar WIDER
+        const delta = this.startX - event.clientX;
+        const newWidth = this.startWidth + delta;
+
+        // Constraints
+        const minWidth = 200;
+        const maxWidth = 800;
+
+        this.rightSidebarWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    }
+
+    @HostListener('window:mouseup')
+    onMouseUp(): void {
+        if (this.isResizing) {
+            this.isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            setSetting('kittclouds-right-sidebar-width', this.rightSidebarWidth);
+        }
     }
 }

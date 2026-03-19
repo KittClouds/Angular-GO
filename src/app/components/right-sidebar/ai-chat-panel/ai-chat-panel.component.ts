@@ -982,12 +982,18 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private async initGoChatService(): Promise<void> {
         if (this.goChatInitialized) return;
         // init() reads openrouter:config from Dexie internally when no arg provided
-        await this.goChatService.init();
+        await this.goChatService.init();
         this.goChatInitialized = true;
         console.log('[AiChatPanel] Go chat service initialized');
     }
 
     ngOnDestroy(): void {
+        if (this.chat && typeof this.chat.destroy === 'function') {
+            this.chat.destroy();
+        }
+        if (this.chatContainer?.nativeElement) {
+            this.chatContainer.nativeElement.innerHTML = '';
+        }
         this.chat = null;
     }
 

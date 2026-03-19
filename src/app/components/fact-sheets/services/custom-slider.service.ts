@@ -1,19 +1,24 @@
 // Custom Slider Service
-// Manages CRUD operations for custom slider definitions
+// Narrative-scoped slider definitions persisted in scoped_definitions.
 
-import { Injectable, signal, computed } from '@angular/core';
-import { db, CustomSliderDef } from '../../../lib/dexie/db';
+import { Injectable, inject, signal, computed, effect } from '@angular/core';
+import { CustomSliderDef, db } from '../../../lib/dexie/db';
 import { UMBRA_PRESETS, UmbraPreset } from '../types/umbra-presets';
+import { ScopeService } from '../../../lib/services/scope.service';
+import { ScopedEntityFieldService } from '../../../lib/services/scoped-entity-field.service';
+
+const SLIDER_DEFINITION_NAMESPACE = 'fact_sheet.slider_definitions';
 
 @Injectable({
     providedIn: 'root'
 })
 export class CustomSliderService {
-    // Signal-based state for reactivity
+    private scopeService = inject(ScopeService);
+    private scopedFields = inject(ScopedEntityFieldService);
+
     private _sliders = signal<CustomSliderDef[]>([]);
     readonly sliders = this._sliders.asReadonly();
 
-    // Get sliders by entity kind
     getSlidersByKind = computed(() => {
         const byKind = new Map<string, CustomSliderDef[]>();
         for (const slider of this._sliders()) {
@@ -24,48 +29,55 @@ export class CustomSliderService {
         return byKind;
     });
 
-    // Umbra presets for UI
     readonly umbraPresets = UMBRA_PRESETS;
 
     constructor() {
-        this.loadAll();
+        effect(() => {
+            this.scopeService.resolvedScope();
+            void this.loadAll();
+        });
     }
 
-    /**
-     * Load all custom sliders from Dexie
-     */
     async loadAll(): Promise<void> {
-        const sliders = await db.customSliderDefs.orderBy('displayOrder').toArray();
-        this._sliders.set(sliders);
+        const narrativeId = this.getDefinitionNarrativeId();
+        if (!narrativeId) {
+            this._sliders.set([]);
+            return;
+        }
+
+        const definitions = await this.scopedFields.listDefinitionPayloads<CustomSliderDef[]>(narrativeId, SLIDER_DEFINITION_NAMESPACE, []);
+        if (definitions.length === 0) {
+            await this.migrateLegacyDexieDefinitions(narrativeId);
+            const migrated = await this.scopedFields.listDefinitionPayloads<CustomSliderDef[]>(narrativeId, SLIDER_DEFINITION_NAMESPACE, []);
+            this._sliders.set(migrated.flatMap(item => item.payload));
+            return;
+        }
+
+        this._sliders.set(definitions.flatMap(item => item.payload));
     }
 
-    /**
-     * Get sliders for a specific entity kind
-     */
     async getForEntityKind(entityKind: string): Promise<CustomSliderDef[]> {
-        return await db.customSliderDefs
-            .where('entityKind')
-            .equals(entityKind)
-            .sortBy('displayOrder');
+        await this.loadAll();
+        return this._sliders()
+            .filter(slider => slider.entityKind === entityKind)
+            .sort((a, b) => a.displayOrder - b.displayOrder);
     }
 
-    /**
-     * Create a new custom slider
-     */
     async createSlider(
         entityKind: string,
         name: string,
         label: string,
         preset?: UmbraPreset
     ): Promise<CustomSliderDef> {
+        const narrativeId = this.getDefinitionNarrativeId();
+        if (!narrativeId) {
+            throw new Error('No narrative scope available for slider definitions');
+        }
+
         const now = Date.now();
         const id = `slider-${now}-${Math.random().toString(36).slice(2, 8)}`;
-
-        // Get current count for display order
         const existing = await this.getForEntityKind(entityKind);
         const displayOrder = existing.length * 10;
-
-        // Use preset or default to neutral
         const defaultPreset = preset || UMBRA_PRESETS.find(p => p.id === 'neutral')!;
 
         const slider: CustomSliderDef = {
@@ -86,59 +98,100 @@ export class CustomSliderService {
             updatedAt: now,
         };
 
-        await db.customSliderDefs.put(slider);
+        await this.saveEntityKindDefinitions(narrativeId, entityKind, [...existing, slider]);
         await this.loadAll();
         return slider;
     }
 
-    /**
-     * Update a slider's umbra preset
-     */
     async updateUmbra(sliderId: string, preset: UmbraPreset): Promise<void> {
-        await db.customSliderDefs.update(sliderId, {
+        await this.updateSlider(sliderId, {
             colorLow: preset.colorLow,
             colorMid: preset.colorMid,
             colorHigh: preset.colorHigh,
             umbraPreset: preset.id,
-            updatedAt: Date.now(),
         });
-        await this.loadAll();
     }
 
-    /**
-     * Update slider properties
-     */
     async updateSlider(sliderId: string, updates: Partial<CustomSliderDef>): Promise<void> {
-        await db.customSliderDefs.update(sliderId, {
-            ...updates,
-            updatedAt: Date.now(),
-        });
+        const narrativeId = this.getDefinitionNarrativeId();
+        if (!narrativeId) return;
+
+        const slider = this._sliders().find(item => item.id === sliderId);
+        if (!slider) return;
+
+        const list = await this.getForEntityKind(slider.entityKind);
+        const next = list.map(item =>
+            item.id === sliderId
+                ? { ...item, ...updates, updatedAt: Date.now() }
+                : item
+        );
+
+        await this.saveEntityKindDefinitions(narrativeId, slider.entityKind, next);
         await this.loadAll();
     }
 
-    /**
-     * Delete a custom slider (only if not system)
-     */
     async deleteSlider(sliderId: string): Promise<boolean> {
-        const slider = await db.customSliderDefs.get(sliderId);
+        const narrativeId = this.getDefinitionNarrativeId();
+        if (!narrativeId) return false;
+
+        const slider = this._sliders().find(item => item.id === sliderId);
         if (!slider || slider.isSystem) {
             console.warn('[CustomSliderService] Cannot delete system slider');
             return false;
         }
 
-        await db.customSliderDefs.delete(sliderId);
+        const next = (await this.getForEntityKind(slider.entityKind)).filter(item => item.id !== sliderId);
+        await this.saveEntityKindDefinitions(narrativeId, slider.entityKind, next);
         await this.loadAll();
         return true;
     }
 
-    /**
-     * Reorder sliders via drag-and-drop
-     */
     async reorderSliders(entityKind: string, orderedIds: string[]): Promise<void> {
-        const updates = orderedIds.map((id, index) =>
-            db.customSliderDefs.update(id, { displayOrder: index * 10, updatedAt: Date.now() })
-        );
-        await Promise.all(updates);
+        const narrativeId = this.getDefinitionNarrativeId();
+        if (!narrativeId) return;
+
+        const mapById = new Map((await this.getForEntityKind(entityKind)).map(slider => [slider.id, slider]));
+        const next = orderedIds
+            .map((id, index) => {
+                const slider = mapById.get(id);
+                if (!slider) return null;
+                return {
+                    ...slider,
+                    displayOrder: index * 10,
+                    updatedAt: Date.now(),
+                };
+            })
+            .filter((slider): slider is CustomSliderDef => !!slider);
+
+        await this.saveEntityKindDefinitions(narrativeId, entityKind, next);
         await this.loadAll();
+    }
+
+    private getDefinitionNarrativeId(): string {
+        return this.scopeService.resolvedScope().narrativeId || 'vault:global';
+    }
+
+    private async saveEntityKindDefinitions(narrativeId: string, entityKind: string, sliders: CustomSliderDef[]): Promise<void> {
+        await this.scopedFields.saveDefinitionPayload(
+            narrativeId,
+            SLIDER_DEFINITION_NAMESPACE,
+            entityKind,
+            sliders.sort((a, b) => a.displayOrder - b.displayOrder)
+        );
+    }
+
+    private async migrateLegacyDexieDefinitions(narrativeId: string): Promise<void> {
+        const allSliders = await db.customSliderDefs.orderBy('displayOrder').toArray();
+        const byKind = new Map<string, CustomSliderDef[]>();
+
+        for (const slider of allSliders) {
+            const list = byKind.get(slider.entityKind) || [];
+            list.push(slider);
+            byKind.set(slider.entityKind, list);
+        }
+
+        for (const [entityKind, sliders] of byKind.entries()) {
+            await this.saveEntityKindDefinitions(narrativeId, entityKind, sliders);
+        }
     }
 }

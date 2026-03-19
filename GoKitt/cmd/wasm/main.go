@@ -140,6 +140,18 @@ func main() {
 		"storeGetEntityCards":     js.FuncOf(storeGetEntityCards),
 		"storeUpsertFolderSchema": js.FuncOf(storeUpsertFolderSchema),
 		"storeGetFolderSchema":    js.FuncOf(storeGetFolderSchema),
+		"storeUpsertScopedDocument":    js.FuncOf(storeUpsertScopedDocument),
+		"storeGetScopedDocument":       js.FuncOf(storeGetScopedDocument),
+		"storeListScopedDocuments":     js.FuncOf(storeListScopedDocuments),
+		"storeDeleteScopedDocument":    js.FuncOf(storeDeleteScopedDocument),
+		"storeUpsertScopedEntityField": js.FuncOf(storeUpsertScopedEntityField),
+		"storeGetScopedEntityField":    js.FuncOf(storeGetScopedEntityField),
+		"storeListScopedEntityFields":  js.FuncOf(storeListScopedEntityFields),
+		"storeDeleteScopedEntityField": js.FuncOf(storeDeleteScopedEntityField),
+		"storeUpsertScopedDefinition":  js.FuncOf(storeUpsertScopedDefinition),
+		"storeGetScopedDefinition":     js.FuncOf(storeGetScopedDefinition),
+		"storeListScopedDefinitions":   js.FuncOf(storeListScopedDefinitions),
+		"storeDeleteScopedDefinition":  js.FuncOf(storeDeleteScopedDefinition),
 		// Phase 3: Graph Merger API
 		"mergerInit":       js.FuncOf(mergerInit),
 		"mergerAddScanner": js.FuncOf(mergerAddScanner),
@@ -1706,6 +1718,253 @@ func storeGetFolderSchema(this js.Value, args []js.Value) interface{} {
 
 	bytes, _ := json.Marshal(schema)
 	return string(bytes)
+}
+
+// storeUpsertScopedDocument inserts or updates a scoped document.
+// Args: [documentJSON string]
+func storeUpsertScopedDocument(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertScopedDocument requires 1 arg: documentJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var doc store.ScopedDocument
+	if err := json.Unmarshal([]byte(args[0].String()), &doc); err != nil {
+		return ErrorResult("invalid scoped document json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertScopedDocument(&doc); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+
+	return SuccessResult("upserted scoped document")
+}
+
+// storeGetScopedDocument retrieves a scoped document.
+// Args: [scopeFolderID string, namespace string, documentKey string]
+func storeGetScopedDocument(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeGetScopedDocument requires 3 args: scopeFolderID, namespace, documentKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	doc, err := sqlStore.GetScopedDocument(args[0].String(), args[1].String(), args[2].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if doc == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(doc)
+	return string(bytes)
+}
+
+// storeListScopedDocuments lists scoped documents for a scope, optionally filtered by namespace.
+// Args: [scopeFolderID string, namespace string]
+func storeListScopedDocuments(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeListScopedDocuments requires 1+ args: scopeFolderID, [namespace]")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	namespace := ""
+	if len(args) > 1 {
+		namespace = args[1].String()
+	}
+	docs, err := sqlStore.ListScopedDocuments(args[0].String(), namespace)
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(docs)
+	return string(bytes)
+}
+
+// storeDeleteScopedDocument deletes a scoped document.
+// Args: [scopeFolderID string, namespace string, documentKey string]
+func storeDeleteScopedDocument(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeDeleteScopedDocument requires 3 args: scopeFolderID, namespace, documentKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	if err := sqlStore.DeleteScopedDocument(args[0].String(), args[1].String(), args[2].String()); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+	return SuccessResult("deleted scoped document")
+}
+
+// storeUpsertScopedEntityField inserts or updates a scoped entity field.
+// Args: [fieldJSON string]
+func storeUpsertScopedEntityField(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertScopedEntityField requires 1 arg: fieldJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var field store.ScopedEntityField
+	if err := json.Unmarshal([]byte(args[0].String()), &field); err != nil {
+		return ErrorResult("invalid scoped entity field json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertScopedEntityField(&field); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+	return SuccessResult("upserted scoped entity field")
+}
+
+// storeGetScopedEntityField retrieves a scoped entity field.
+// Args: [entityID string, scopeFolderID string, fieldKey string]
+func storeGetScopedEntityField(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeGetScopedEntityField requires 3 args: entityID, scopeFolderID, fieldKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	field, err := sqlStore.GetScopedEntityField(args[0].String(), args[1].String(), args[2].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if field == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(field)
+	return string(bytes)
+}
+
+// storeListScopedEntityFields lists scoped entity fields for a scope, optionally filtered by entity.
+// Args: [scopeFolderID string, entityID string]
+func storeListScopedEntityFields(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeListScopedEntityFields requires 1+ args: scopeFolderID, [entityID]")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	entityID := ""
+	if len(args) > 1 {
+		entityID = args[1].String()
+	}
+	fields, err := sqlStore.ListScopedEntityFields(args[0].String(), entityID)
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(fields)
+	return string(bytes)
+}
+
+// storeDeleteScopedEntityField deletes a scoped entity field.
+// Args: [entityID string, scopeFolderID string, fieldKey string]
+func storeDeleteScopedEntityField(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeDeleteScopedEntityField requires 3 args: entityID, scopeFolderID, fieldKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	if err := sqlStore.DeleteScopedEntityField(args[0].String(), args[1].String(), args[2].String()); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+	return SuccessResult("deleted scoped entity field")
+}
+
+// storeUpsertScopedDefinition inserts or updates a narrative-scoped definition.
+// Args: [definitionJSON string]
+func storeUpsertScopedDefinition(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeUpsertScopedDefinition requires 1 arg: definitionJSON")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	var definition store.ScopedDefinition
+	if err := json.Unmarshal([]byte(args[0].String()), &definition); err != nil {
+		return ErrorResult("invalid scoped definition json: " + err.Error())
+	}
+
+	if err := sqlStore.UpsertScopedDefinition(&definition); err != nil {
+		return ErrorResult("upsert failed: " + err.Error())
+	}
+	return SuccessResult("upserted scoped definition")
+}
+
+// storeGetScopedDefinition retrieves a narrative-scoped definition.
+// Args: [narrativeID string, namespace string, definitionKey string]
+func storeGetScopedDefinition(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeGetScopedDefinition requires 3 args: narrativeID, namespace, definitionKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	definition, err := sqlStore.GetScopedDefinition(args[0].String(), args[1].String(), args[2].String())
+	if err != nil {
+		return ErrorResult("get failed: " + err.Error())
+	}
+	if definition == nil {
+		return "null"
+	}
+
+	bytes, _ := json.Marshal(definition)
+	return string(bytes)
+}
+
+// storeListScopedDefinitions lists narrative-scoped definitions, optionally filtered by namespace.
+// Args: [narrativeID string, namespace string]
+func storeListScopedDefinitions(this js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return ErrorResult("storeListScopedDefinitions requires 1+ args: narrativeID, [namespace]")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	namespace := ""
+	if len(args) > 1 {
+		namespace = args[1].String()
+	}
+	definitions, err := sqlStore.ListScopedDefinitions(args[0].String(), namespace)
+	if err != nil {
+		return ErrorResult("list failed: " + err.Error())
+	}
+
+	bytes, _ := json.Marshal(definitions)
+	return string(bytes)
+}
+
+// storeDeleteScopedDefinition deletes a narrative-scoped definition.
+// Args: [narrativeID string, namespace string, definitionKey string]
+func storeDeleteScopedDefinition(this js.Value, args []js.Value) interface{} {
+	if len(args) < 3 {
+		return ErrorResult("storeDeleteScopedDefinition requires 3 args: narrativeID, namespace, definitionKey")
+	}
+	if sqlStore == nil {
+		return ErrorResult("store not initialized")
+	}
+
+	if err := sqlStore.DeleteScopedDefinition(args[0].String(), args[1].String(), args[2].String()); err != nil {
+		return ErrorResult("delete failed: " + err.Error())
+	}
+	return SuccessResult("deleted scoped definition")
 }
 
 // =============================================================================

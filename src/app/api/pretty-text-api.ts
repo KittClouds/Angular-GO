@@ -47,7 +47,6 @@ import {
 } from '../lib/dexie/decorations';
 import { smartGraphRegistry } from '../lib/registry';
 import { DiscoveryStore } from '../lib/store/discoveryStore';
-import { isFstEnabled } from '../services/ner.service';
 import type { AnalyticsHighlightRange } from '../lib/analytics';
 import { filterCachedEntitySpans } from './pretty-text-cache';
 
@@ -496,8 +495,10 @@ class PrettyTextAPI implements PrettyTextApi {
         const shouldRunFull = entityCount > 0 && sentenceEnded && hadNewEntities;
 
         // Run pipeline
+        // Discovery is manual-only via NerService/NER panel. Implicit rescans should
+        // refresh highlights (and graph when eligible) without running unsupervised NER.
         const pipelinePromise = scanPipeline.run(scanText, {
-            skipDiscovery: !isFstEnabled(),
+            skipDiscovery: true,
             skipGraph: !shouldRunFull,
             noteId: this.currentNoteId || undefined,
             provenance: this.currentNoteId ? {

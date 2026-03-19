@@ -8,12 +8,16 @@ import { from, Observable } from 'rxjs';
 import { db, Folder, FolderSchema, AllowedSubfolderDef, AllowedNoteTypeDef } from '../dexie/db';
 import { getNextFolderOrder } from '../operations';
 import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { ScopedDocumentService } from './scoped-document.service';
+import { ScopedEntityFieldService } from './scoped-entity-field.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class FolderService {
     private goKittStore = inject(GoKittStoreService);
+    private scopedDocuments = inject(ScopedDocumentService);
+    private scopedEntityFields = inject(ScopedEntityFieldService);
 
     /**
      * Write-through to SQLite directly via GoKittStoreService.
@@ -253,6 +257,14 @@ export class FolderService {
 
         await db.folders.add(folder);
         await this.syncToSqlite(folder);
+
+        if (entityKind === 'ACT' && folder.narrativeId) {
+            try {
+                await this.seedActScope(folder);
+            } catch (err) {
+                console.warn('[FolderService] Failed to seed ACT scope (non-fatal):', err);
+            }
+        }
 
         return id;
     }
@@ -514,5 +526,35 @@ export class FolderService {
         }
 
         return null;
+    }
+
+    private async seedActScope(actFolder: Folder): Promise<void> {
+        const siblings = await db.folders
+            .where('parentId')
+            .equals(actFolder.parentId)
+            .sortBy('order');
+
+        const sourceAct = siblings
+            .filter(folder => folder.entityKind === 'ACT' && folder.id !== actFolder.id && folder.order < actFolder.order)
+            .sort((a, b) => b.order - a.order)[0];
+
+        const sourceScopeFolderId = sourceAct?.id || actFolder.narrativeId;
+        if (!sourceScopeFolderId || sourceScopeFolderId === actFolder.id) {
+            return;
+        }
+
+        await this.scopedDocuments.cloneScopeDocuments(
+            sourceScopeFolderId,
+            actFolder.id,
+            actFolder.narrativeId,
+            sourceScopeFolderId
+        );
+
+        await this.scopedEntityFields.cloneScopeFields(
+            sourceScopeFolderId,
+            actFolder.id,
+            actFolder.narrativeId,
+            sourceScopeFolderId
+        );
     }
 }

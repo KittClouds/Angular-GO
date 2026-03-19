@@ -131,6 +131,18 @@ type GoKittWorkerMessage =
     | { type: 'STORE_GET_ENTITY_CARDS'; payload: { entityId: string }; id: number }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA'; payload: { schemaJSON: string }; id: number }
     | { type: 'STORE_GET_FOLDER_SCHEMA'; payload: { id: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_DOCUMENT'; payload: { documentJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DOCUMENTS'; payload: { scopeFolderId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DOCUMENT'; payload: { scopeFolderId: string; namespace: string; documentKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD'; payload: { fieldJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_ENTITY_FIELDS'; payload: { scopeFolderId: string; entityId?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_ENTITY_FIELD'; payload: { entityId: string; scopeFolderId: string; fieldKey: string }; id: number }
+    | { type: 'STORE_UPSERT_SCOPED_DEFINITION'; payload: { definitionJSON: string }; id: number }
+    | { type: 'STORE_GET_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number }
+    | { type: 'STORE_LIST_SCOPED_DEFINITIONS'; payload: { narrativeId: string; namespace?: string }; id: number }
+    | { type: 'STORE_DELETE_SCOPED_DEFINITION'; payload: { narrativeId: string; namespace: string; definitionKey: string }; id: number }
     // RAPTOR API
     | { type: 'RAPTOR_INIT'; payload: { configJSON?: string }; id: number }
     | { type: 'RAPTOR_CHUNK'; payload: { docID: string; text: string }; id: number }
@@ -278,6 +290,18 @@ type GoKittWorkerResponse =
     | { type: 'STORE_GET_ENTITY_CARDS_RESULT'; id: number; payload: any[] }
     | { type: 'STORE_UPSERT_FOLDER_SCHEMA_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_FOLDER_SCHEMA_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_DOCUMENT_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_DOCUMENTS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_DOCUMENT_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_ENTITY_FIELDS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_ENTITY_FIELD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'STORE_GET_SCOPED_DEFINITION_RESULT'; id: number; payload: any | null }
+    | { type: 'STORE_LIST_SCOPED_DEFINITIONS_RESULT'; id: number; payload: any[] }
+    | { type: 'STORE_DELETE_SCOPED_DEFINITION_RESULT'; id: number; payload: { success: boolean; error?: string } }
     // RAPTOR responses
     | { type: 'RAPTOR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'RAPTOR_CHUNK_RESULT'; id: number; payload: { success: boolean; chunks?: Array<{ text: string; start: number; end: number }>; count?: number; error?: string } }
@@ -450,6 +474,18 @@ declare const GoKitt: {
     storeGetEntityCards: (entityId: string) => string;
     storeUpsertFolderSchema: (schemaJSON: string) => string;
     storeGetFolderSchema: (id: string) => string;
+    storeUpsertScopedDocument: (documentJSON: string) => string;
+    storeGetScopedDocument: (scopeFolderId: string, namespace: string, documentKey: string) => string;
+    storeListScopedDocuments: (scopeFolderId: string, namespace?: string) => string;
+    storeDeleteScopedDocument: (scopeFolderId: string, namespace: string, documentKey: string) => string;
+    storeUpsertScopedEntityField: (fieldJSON: string) => string;
+    storeGetScopedEntityField: (entityId: string, scopeFolderId: string, fieldKey: string) => string;
+    storeListScopedEntityFields: (scopeFolderId: string, entityId?: string) => string;
+    storeDeleteScopedEntityField: (entityId: string, scopeFolderId: string, fieldKey: string) => string;
+    storeUpsertScopedDefinition: (definitionJSON: string) => string;
+    storeGetScopedDefinition: (narrativeId: string, namespace: string, definitionKey: string) => string;
+    storeListScopedDefinitions: (narrativeId: string, namespace?: string) => string;
+    storeDeleteScopedDefinition: (narrativeId: string, namespace: string, definitionKey: string) => string;
     // Phase 3: Graph Merger API
 
     mergerInit: () => string;
@@ -1818,6 +1854,153 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 } catch {
                     self.postMessage({ type: 'STORE_GET_FOLDER_SCHEMA_RESULT', id: msg.id, payload: null });
                 }
+                break;
+            }
+
+            case 'STORE_UPSERT_SCOPED_DOCUMENT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertScopedDocument(msg.payload.documentJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_SCOPED_DOCUMENT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetScopedDocument(msg.payload.scopeFolderId, msg.payload.namespace, msg.payload.documentKey);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: null });
+                }
+                break;
+            }
+
+            case 'STORE_LIST_SCOPED_DOCUMENTS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_SCOPED_DOCUMENTS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListScopedDocuments(msg.payload.scopeFolderId, msg.payload.namespace || '');
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_SCOPED_DOCUMENTS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_SCOPED_DOCUMENT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteScopedDocument(msg.payload.scopeFolderId, msg.payload.namespace, msg.payload.documentKey);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_UPSERT_SCOPED_ENTITY_FIELD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertScopedEntityField(msg.payload.fieldJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_SCOPED_ENTITY_FIELD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetScopedEntityField(msg.payload.entityId, msg.payload.scopeFolderId, msg.payload.fieldKey);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: null });
+                }
+                break;
+            }
+
+            case 'STORE_LIST_SCOPED_ENTITY_FIELDS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_SCOPED_ENTITY_FIELDS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListScopedEntityFields(msg.payload.scopeFolderId, msg.payload.entityId || '');
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_SCOPED_ENTITY_FIELDS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_SCOPED_ENTITY_FIELD': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteScopedEntityField(msg.payload.entityId, msg.payload.scopeFolderId, msg.payload.fieldKey);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_SCOPED_ENTITY_FIELD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_UPSERT_SCOPED_DEFINITION': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeUpsertScopedDefinition(msg.payload.definitionJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                break;
+            }
+
+            case 'STORE_GET_SCOPED_DEFINITION': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DEFINITION_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                const res = GoKitt.storeGetScopedDefinition(msg.payload.narrativeId, msg.payload.namespace, msg.payload.definitionKey);
+                try {
+                    const parsed = JSON.parse(res);
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DEFINITION_RESULT', id: msg.id, payload: parsed });
+                } catch {
+                    self.postMessage({ type: 'STORE_GET_SCOPED_DEFINITION_RESULT', id: msg.id, payload: null });
+                }
+                break;
+            }
+
+            case 'STORE_LIST_SCOPED_DEFINITIONS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_LIST_SCOPED_DEFINITIONS_RESULT', id: msg.id, payload: [] });
+                    return;
+                }
+                const res = GoKitt.storeListScopedDefinitions(msg.payload.narrativeId, msg.payload.namespace || '');
+                let parsed = [];
+                try { parsed = JSON.parse(res); } catch { }
+                self.postMessage({ type: 'STORE_LIST_SCOPED_DEFINITIONS_RESULT', id: msg.id, payload: Array.isArray(parsed) ? parsed : [] });
+                break;
+            }
+
+            case 'STORE_DELETE_SCOPED_DEFINITION': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'STORE_DELETE_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.storeDeleteScopedDefinition(msg.payload.narrativeId, msg.payload.namespace, msg.payload.definitionKey);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'STORE_DELETE_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
                 break;
             }
 

@@ -465,6 +465,58 @@ CREATE TABLE IF NOT EXISTS folder_schemas (
     updated_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS scoped_documents (
+    id TEXT PRIMARY KEY,
+    scope_folder_id TEXT NOT NULL,
+    narrative_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    document_key TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    seeded_from_scope_folder_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(scope_folder_id, namespace, document_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoped_documents_scope
+    ON scoped_documents(scope_folder_id, namespace, document_key);
+
+CREATE INDEX IF NOT EXISTS idx_scoped_documents_narrative
+    ON scoped_documents(narrative_id, namespace);
+
+CREATE TABLE IF NOT EXISTS scoped_entity_fields (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL,
+    scope_folder_id TEXT NOT NULL,
+    narrative_id TEXT NOT NULL,
+    field_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    seeded_from_scope_folder_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(entity_id, scope_folder_id, field_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoped_entity_fields_scope
+    ON scoped_entity_fields(scope_folder_id, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_scoped_entity_fields_narrative
+    ON scoped_entity_fields(narrative_id, field_key);
+
+CREATE TABLE IF NOT EXISTS scoped_definitions (
+    id TEXT PRIMARY KEY,
+    narrative_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    definition_key TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(narrative_id, namespace, definition_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoped_definitions_narrative
+    ON scoped_definitions(narrative_id, namespace, definition_key);
+
 -- Blocks: Fine-grained memory access (Legacy/Complementary to Chunks)
 CREATE TABLE IF NOT EXISTS blocks (
     id TEXT PRIMARY KEY,
@@ -1457,6 +1509,13 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+func nullIfEmpty(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
 // =============================================================================
 // Folder CRUD
 // =============================================================================
@@ -1960,12 +2019,15 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	type ExportData struct {
-		Notes          []*Note          `json:"notes"`
-		Entities       []*Entity        `json:"entities"`
-		Edges          []*Edge          `json:"edges"`
-		Folders        []*Folder        `json:"folders"`
-		Threads        []*Thread        `json:"threads"`
-		ThreadMessages []*ThreadMessage `json:"thread_messages"`
+		Notes              []*Note              `json:"notes"`
+		Entities           []*Entity            `json:"entities"`
+		Edges              []*Edge              `json:"edges"`
+		Folders            []*Folder            `json:"folders"`
+		Threads            []*Thread            `json:"threads"`
+		ThreadMessages     []*ThreadMessage     `json:"thread_messages"`
+		ScopedDocuments    []*ScopedDocument    `json:"scoped_documents"`
+		ScopedEntityFields []*ScopedEntityField `json:"scoped_entity_fields"`
+		ScopedDefinitions  []*ScopedDefinition  `json:"scoped_definitions"`
 	}
 
 	var data ExportData
@@ -2118,6 +2180,75 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 		data.ThreadMessages = append(data.ThreadMessages, &m)
 	}
 
+	// Export scoped documents
+	scopedDocRows, err := s.db.Query(`
+		SELECT id, scope_folder_id, narrative_id, namespace, document_key, payload,
+		       seeded_from_scope_folder_id, created_at, updated_at
+		FROM scoped_documents
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export scoped documents: %w", err)
+	}
+	defer scopedDocRows.Close()
+	for scopedDocRows.Next() {
+		var d ScopedDocument
+		var seededFrom sql.NullString
+		if err := scopedDocRows.Scan(
+			&d.ID, &d.ScopeFolderID, &d.NarrativeID, &d.Namespace, &d.DocumentKey, &d.Payload,
+			&seededFrom, &d.CreatedAt, &d.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan scoped document: %w", err)
+		}
+		if seededFrom.Valid {
+			d.SeededFromScopeFolder = seededFrom.String
+		}
+		data.ScopedDocuments = append(data.ScopedDocuments, &d)
+	}
+
+	// Export scoped entity fields
+	scopedFieldRows, err := s.db.Query(`
+		SELECT id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+		       seeded_from_scope_folder_id, created_at, updated_at
+		FROM scoped_entity_fields
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export scoped entity fields: %w", err)
+	}
+	defer scopedFieldRows.Close()
+	for scopedFieldRows.Next() {
+		var f ScopedEntityField
+		var seededFrom sql.NullString
+		if err := scopedFieldRows.Scan(
+			&f.ID, &f.EntityID, &f.ScopeFolderID, &f.NarrativeID, &f.FieldKey, &f.ValueJSON,
+			&seededFrom, &f.CreatedAt, &f.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan scoped entity field: %w", err)
+		}
+		if seededFrom.Valid {
+			f.SeededFromScopeFolder = seededFrom.String
+		}
+		data.ScopedEntityFields = append(data.ScopedEntityFields, &f)
+	}
+
+	// Export scoped definitions
+	scopedDefRows, err := s.db.Query(`
+		SELECT id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+		FROM scoped_definitions
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export scoped definitions: %w", err)
+	}
+	defer scopedDefRows.Close()
+	for scopedDefRows.Next() {
+		var d ScopedDefinition
+		if err := scopedDefRows.Scan(
+			&d.ID, &d.NarrativeID, &d.Namespace, &d.DefinitionKey, &d.Payload, &d.CreatedAt, &d.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan scoped definition: %w", err)
+		}
+		data.ScopedDefinitions = append(data.ScopedDefinitions, &d)
+	}
+
 	return json.Marshal(data)
 }
 
@@ -2132,12 +2263,15 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	type ExportData struct {
-		Notes          []*Note          `json:"notes"`
-		Entities       []*Entity        `json:"entities"`
-		Edges          []*Edge          `json:"edges"`
-		Folders        []*Folder        `json:"folders"`
-		Threads        []*Thread        `json:"threads"`
-		ThreadMessages []*ThreadMessage `json:"thread_messages"`
+		Notes              []*Note              `json:"notes"`
+		Entities           []*Entity            `json:"entities"`
+		Edges              []*Edge              `json:"edges"`
+		Folders            []*Folder            `json:"folders"`
+		Threads            []*Thread            `json:"threads"`
+		ThreadMessages     []*ThreadMessage     `json:"thread_messages"`
+		ScopedDocuments    []*ScopedDocument    `json:"scoped_documents"`
+		ScopedEntityFields []*ScopedEntityField `json:"scoped_entity_fields"`
+		ScopedDefinitions  []*ScopedDefinition  `json:"scoped_definitions"`
 	}
 
 	var importData ExportData
@@ -2146,7 +2280,7 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	// Clear all tables
-	for _, table := range []string{"edges", "entities", "folders", "notes", "threads", "thread_messages"} {
+	for _, table := range []string{"scoped_definitions", "scoped_entity_fields", "scoped_documents", "edges", "entities", "folders", "notes", "threads", "thread_messages"} {
 		if _, err := s.db.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("clear %s: %w", table, err)
 		}
@@ -2238,6 +2372,51 @@ func (s *SQLiteStore) Import(data []byte) error {
 		`, m.ID, m.ThreadID, m.Role, m.Content, m.NarrativeID, m.CreatedAt, updated, boolToInt(m.IsStreaming))
 		if err != nil {
 			return fmt.Errorf("import thread message %s: %w", m.ID, err)
+		}
+	}
+
+	for _, d := range importData.ScopedDocuments {
+		var seededFrom interface{}
+		if d.SeededFromScopeFolder != "" {
+			seededFrom = d.SeededFromScopeFolder
+		}
+		_, err := s.db.Exec(`
+			INSERT INTO scoped_documents (
+				id, scope_folder_id, narrative_id, namespace, document_key, payload,
+				seeded_from_scope_folder_id, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, d.ID, d.ScopeFolderID, d.NarrativeID, d.Namespace, d.DocumentKey, d.Payload,
+			seededFrom, d.CreatedAt, d.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import scoped document %s: %w", d.ID, err)
+		}
+	}
+
+	for _, f := range importData.ScopedEntityFields {
+		var seededFrom interface{}
+		if f.SeededFromScopeFolder != "" {
+			seededFrom = f.SeededFromScopeFolder
+		}
+		_, err := s.db.Exec(`
+			INSERT INTO scoped_entity_fields (
+				id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+				seeded_from_scope_folder_id, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, f.ID, f.EntityID, f.ScopeFolderID, f.NarrativeID, f.FieldKey, f.ValueJSON,
+			seededFrom, f.CreatedAt, f.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import scoped entity field %s: %w", f.ID, err)
+		}
+	}
+
+	for _, d := range importData.ScopedDefinitions {
+		_, err := s.db.Exec(`
+			INSERT INTO scoped_definitions (
+				id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, d.ID, d.NarrativeID, d.Namespace, d.DefinitionKey, d.Payload, d.CreatedAt, d.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import scoped definition %s: %w", d.ID, err)
 		}
 	}
 
@@ -4064,6 +4243,319 @@ func (s *SQLiteStore) GetFolderSchema(id string) (*FolderSchema, error) {
 		return nil, err
 	}
 	return &fs, nil
+}
+
+// UpsertScopedDocument inserts or updates a folder-scoped document.
+func (s *SQLiteStore) UpsertScopedDocument(doc *ScopedDocument) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO scoped_documents (
+			id, scope_folder_id, narrative_id, namespace, document_key, payload,
+			seeded_from_scope_folder_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(scope_folder_id, namespace, document_key) DO UPDATE SET
+			id = excluded.id,
+			narrative_id = excluded.narrative_id,
+			payload = excluded.payload,
+			seeded_from_scope_folder_id = excluded.seeded_from_scope_folder_id,
+			updated_at = excluded.updated_at
+	`, doc.ID, doc.ScopeFolderID, doc.NarrativeID, doc.Namespace, doc.DocumentKey, doc.Payload,
+		nullIfEmpty(doc.SeededFromScopeFolder), doc.CreatedAt, doc.UpdatedAt)
+	return err
+}
+
+// GetScopedDocument retrieves a folder-scoped document.
+func (s *SQLiteStore) GetScopedDocument(scopeFolderID, namespace, documentKey string) (*ScopedDocument, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var doc ScopedDocument
+	var seededFrom sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, scope_folder_id, narrative_id, namespace, document_key, payload,
+		       seeded_from_scope_folder_id, created_at, updated_at
+		FROM scoped_documents
+		WHERE scope_folder_id = ? AND namespace = ? AND document_key = ?
+	`, scopeFolderID, namespace, documentKey).Scan(
+		&doc.ID, &doc.ScopeFolderID, &doc.NarrativeID, &doc.Namespace, &doc.DocumentKey, &doc.Payload,
+		&seededFrom, &doc.CreatedAt, &doc.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if seededFrom.Valid {
+		doc.SeededFromScopeFolder = seededFrom.String
+	}
+	return &doc, nil
+}
+
+// ListScopedDocuments lists scoped documents for a scope, optionally filtered by namespace.
+func (s *SQLiteStore) ListScopedDocuments(scopeFolderID, namespace string) ([]*ScopedDocument, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if namespace != "" {
+		rows, err = s.db.Query(`
+			SELECT id, scope_folder_id, narrative_id, namespace, document_key, payload,
+			       seeded_from_scope_folder_id, created_at, updated_at
+			FROM scoped_documents
+			WHERE scope_folder_id = ? AND namespace = ?
+			ORDER BY namespace, document_key
+		`, scopeFolderID, namespace)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, scope_folder_id, narrative_id, namespace, document_key, payload,
+			       seeded_from_scope_folder_id, created_at, updated_at
+			FROM scoped_documents
+			WHERE scope_folder_id = ?
+			ORDER BY namespace, document_key
+		`, scopeFolderID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	docs := make([]*ScopedDocument, 0)
+	for rows.Next() {
+		var doc ScopedDocument
+		var seededFrom sql.NullString
+		if err := rows.Scan(
+			&doc.ID, &doc.ScopeFolderID, &doc.NarrativeID, &doc.Namespace, &doc.DocumentKey, &doc.Payload,
+			&seededFrom, &doc.CreatedAt, &doc.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if seededFrom.Valid {
+			doc.SeededFromScopeFolder = seededFrom.String
+		}
+		docs = append(docs, &doc)
+	}
+	return docs, rows.Err()
+}
+
+// DeleteScopedDocument removes a folder-scoped document.
+func (s *SQLiteStore) DeleteScopedDocument(scopeFolderID, namespace, documentKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		DELETE FROM scoped_documents
+		WHERE scope_folder_id = ? AND namespace = ? AND document_key = ?
+	`, scopeFolderID, namespace, documentKey)
+	return err
+}
+
+// UpsertScopedEntityField inserts or updates a scoped entity field.
+func (s *SQLiteStore) UpsertScopedEntityField(field *ScopedEntityField) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO scoped_entity_fields (
+			id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+			seeded_from_scope_folder_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(entity_id, scope_folder_id, field_key) DO UPDATE SET
+			id = excluded.id,
+			narrative_id = excluded.narrative_id,
+			value_json = excluded.value_json,
+			seeded_from_scope_folder_id = excluded.seeded_from_scope_folder_id,
+			updated_at = excluded.updated_at
+	`, field.ID, field.EntityID, field.ScopeFolderID, field.NarrativeID, field.FieldKey, field.ValueJSON,
+		nullIfEmpty(field.SeededFromScopeFolder), field.CreatedAt, field.UpdatedAt)
+	return err
+}
+
+// GetScopedEntityField retrieves a single scoped entity field.
+func (s *SQLiteStore) GetScopedEntityField(entityID, scopeFolderID, fieldKey string) (*ScopedEntityField, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var field ScopedEntityField
+	var seededFrom sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+		       seeded_from_scope_folder_id, created_at, updated_at
+		FROM scoped_entity_fields
+		WHERE entity_id = ? AND scope_folder_id = ? AND field_key = ?
+	`, entityID, scopeFolderID, fieldKey).Scan(
+		&field.ID, &field.EntityID, &field.ScopeFolderID, &field.NarrativeID, &field.FieldKey, &field.ValueJSON,
+		&seededFrom, &field.CreatedAt, &field.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if seededFrom.Valid {
+		field.SeededFromScopeFolder = seededFrom.String
+	}
+	return &field, nil
+}
+
+// ListScopedEntityFields lists scoped entity fields for a scope, optionally filtered by entity.
+func (s *SQLiteStore) ListScopedEntityFields(scopeFolderID, entityID string) ([]*ScopedEntityField, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if entityID != "" {
+		rows, err = s.db.Query(`
+			SELECT id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+			       seeded_from_scope_folder_id, created_at, updated_at
+			FROM scoped_entity_fields
+			WHERE scope_folder_id = ? AND entity_id = ?
+			ORDER BY entity_id, field_key
+		`, scopeFolderID, entityID)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, entity_id, scope_folder_id, narrative_id, field_key, value_json,
+			       seeded_from_scope_folder_id, created_at, updated_at
+			FROM scoped_entity_fields
+			WHERE scope_folder_id = ?
+			ORDER BY entity_id, field_key
+		`, scopeFolderID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fields := make([]*ScopedEntityField, 0)
+	for rows.Next() {
+		var field ScopedEntityField
+		var seededFrom sql.NullString
+		if err := rows.Scan(
+			&field.ID, &field.EntityID, &field.ScopeFolderID, &field.NarrativeID, &field.FieldKey, &field.ValueJSON,
+			&seededFrom, &field.CreatedAt, &field.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if seededFrom.Valid {
+			field.SeededFromScopeFolder = seededFrom.String
+		}
+		fields = append(fields, &field)
+	}
+	return fields, rows.Err()
+}
+
+// DeleteScopedEntityField removes a scoped entity field.
+func (s *SQLiteStore) DeleteScopedEntityField(entityID, scopeFolderID, fieldKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		DELETE FROM scoped_entity_fields
+		WHERE entity_id = ? AND scope_folder_id = ? AND field_key = ?
+	`, entityID, scopeFolderID, fieldKey)
+	return err
+}
+
+// UpsertScopedDefinition inserts or updates a narrative-scoped definition.
+func (s *SQLiteStore) UpsertScopedDefinition(definition *ScopedDefinition) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO scoped_definitions (
+			id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(narrative_id, namespace, definition_key) DO UPDATE SET
+			id = excluded.id,
+			payload = excluded.payload,
+			updated_at = excluded.updated_at
+	`, definition.ID, definition.NarrativeID, definition.Namespace, definition.DefinitionKey,
+		definition.Payload, definition.CreatedAt, definition.UpdatedAt)
+	return err
+}
+
+// GetScopedDefinition retrieves a single narrative-scoped definition.
+func (s *SQLiteStore) GetScopedDefinition(narrativeID, namespace, definitionKey string) (*ScopedDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var definition ScopedDefinition
+	err := s.db.QueryRow(`
+		SELECT id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+		FROM scoped_definitions
+		WHERE narrative_id = ? AND namespace = ? AND definition_key = ?
+	`, narrativeID, namespace, definitionKey).Scan(
+		&definition.ID, &definition.NarrativeID, &definition.Namespace, &definition.DefinitionKey,
+		&definition.Payload, &definition.CreatedAt, &definition.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &definition, nil
+}
+
+// ListScopedDefinitions lists narrative-scoped definitions, optionally filtered by namespace.
+func (s *SQLiteStore) ListScopedDefinitions(narrativeID, namespace string) ([]*ScopedDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if namespace != "" {
+		rows, err = s.db.Query(`
+			SELECT id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+			FROM scoped_definitions
+			WHERE narrative_id = ? AND namespace = ?
+			ORDER BY namespace, definition_key
+		`, narrativeID, namespace)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, narrative_id, namespace, definition_key, payload, created_at, updated_at
+			FROM scoped_definitions
+			WHERE narrative_id = ?
+			ORDER BY namespace, definition_key
+		`, narrativeID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	definitions := make([]*ScopedDefinition, 0)
+	for rows.Next() {
+		var definition ScopedDefinition
+		if err := rows.Scan(
+			&definition.ID, &definition.NarrativeID, &definition.Namespace, &definition.DefinitionKey,
+			&definition.Payload, &definition.CreatedAt, &definition.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, &definition)
+	}
+	return definitions, rows.Err()
+}
+
+// DeleteScopedDefinition removes a narrative-scoped definition.
+func (s *SQLiteStore) DeleteScopedDefinition(narrativeID, namespace, definitionKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		DELETE FROM scoped_definitions
+		WHERE narrative_id = ? AND namespace = ? AND definition_key = ?
+	`, narrativeID, namespace, definitionKey)
+	return err
 }
 
 // GetVersion returns the SQLite library version.

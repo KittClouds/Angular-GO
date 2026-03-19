@@ -349,6 +349,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Create/Edit Religion Meta -->
     <p-dialog header="{{ isCreating ? 'New Religion' : 'Edit Identity' }}" [(visible)]="showMetaDialog" [modal]="true" [style]="{width: '35vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Name</label>
@@ -380,6 +381,7 @@ import { db } from '../../../../../lib/dexie/db';
                 </div>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showMetaDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveMeta()" class="p-button-primary"></button>
@@ -388,6 +390,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Practices Dialog -->
     <p-dialog header="Edit Practices" [(visible)]="showPracticesDialog" [modal]="true" [style]="{width: '35vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Rituals</label>
@@ -408,6 +411,7 @@ import { db } from '../../../../../lib/dexie/db';
                 </div>
             </div>
         </div>
+         </ng-template>
          <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showPracticesDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="savePractices()" class="p-button-primary"></button>
@@ -416,6 +420,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Structure Dialog -->
     <p-dialog header="Edit Structure" [(visible)]="showStructureDialog" [modal]="true" [style]="{width: '30vw'}">
+         <ng-template pTemplate="content">
          <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Hierarchy Type</label>
@@ -426,6 +431,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <input pInputText [(ngModel)]="tempReligion.structure.leadership" placeholder="e.g. The Pontiff, The Council of Elders" />
             </div>
          </div>
+          </ng-template>
           <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showStructureDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveStructure()" class="p-button-primary"></button>
@@ -434,6 +440,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Snippets Dialog -->
     <p-dialog header="Edit Scene Snippets" [(visible)]="showSnippetsDialog" [modal]="true" [style]="{width: '30vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
              <label class="text-sm text-zinc-500">Short prayers, greetings, or oaths for easy use in scenes.</label>
              <div class="flex gap-2">
@@ -447,6 +454,7 @@ import { db } from '../../../../../lib/dexie/db';
                  </div>
              </div>
         </div>
+         </ng-template>
          <ng-template pTemplate="footer">
             <button pButton label="Done" (click)="saveSnippets()" class="p-button-primary"></button>
         </ng-template>
@@ -454,6 +462,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Myth Dialog -->
     <p-dialog header="Edit Myth" [(visible)]="showMythDialog" [modal]="true" [style]="{width: '50vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Title</label>
@@ -469,6 +478,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <textarea pInputTextarea [(ngModel)]="tempMyth.content" rows="12" class="font-serif leading-relaxed"></textarea>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showMythDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveMyth()" class="p-button-primary"></button>
@@ -477,6 +487,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Deity Dialog -->
     <p-dialog header="Edit Deity" [(visible)]="showDeityDialog" [modal]="true" [style]="{width: '35vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
              <div class="grid grid-cols-2 gap-4">
                 <div class="flex flex-col gap-2">
@@ -500,6 +511,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <textarea pInputTextarea [(ngModel)]="tempDeity.description" rows="4"></textarea>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showDeityDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveDeity()" class="p-button-primary"></button>
@@ -508,6 +520,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Sect Dialog -->
     <p-dialog header="Edit Sect" [(visible)]="showSectDialog" [modal]="true" [style]="{width: '35vw'}">
+        <ng-template pTemplate="content">
         <div class="flex flex-col gap-4 py-2">
             <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Name</label>
@@ -522,6 +535,7 @@ import { db } from '../../../../../lib/dexie/db';
                 <textarea pInputTextarea [(ngModel)]="tempSect.divergence" rows="2" placeholder="Why did they split?"></textarea>
             </div>
         </div>
+        </ng-template>
         <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showSectDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveSect()" class="p-button-primary"></button>
@@ -530,6 +544,7 @@ import { db } from '../../../../../lib/dexie/db';
 
     <!-- Override Dialog (Act Changes) -->
     <p-dialog header="Act Log & Status" [(visible)]="showOverrideDialog" [modal]="true" [style]="{width: '35vw'}">
+         <ng-template pTemplate="content">
          <div class="flex flex-col gap-4 py-2">
              <div class="flex flex-col gap-2">
                 <label class="text-sm font-bold">Status in {{ currentActName() }}</label>
@@ -551,6 +566,7 @@ import { db } from '../../../../../lib/dexie/db';
                 </div>
             </div>
          </div>
+         </ng-template>
          <ng-template pTemplate="footer">
             <button pButton label="Cancel" (click)="showOverrideDialog=false" class="p-button-text"></button>
             <button pButton label="Save" (click)="saveOverride()" class="p-button-primary"></button>

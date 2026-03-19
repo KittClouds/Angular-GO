@@ -8,8 +8,10 @@ import { LucideAngularModule, Plus, X } from 'lucide-angular';
 import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { CustomSliderService } from '../services/custom-slider.service';
 import { DynamicSliderComponent } from './dynamic-slider.component';
-import { CustomSliderDef, db } from '../../../lib/dexie/db';
+import { CustomSliderDef } from '../../../lib/dexie/db';
 import { UMBRA_PRESETS, UmbraPreset } from '../types/umbra-presets';
+import { FactSheetService } from '../fact-sheet.service';
+import { ScopeService } from '../../../lib/services/scope.service';
 
 @Component({
     selector: 'app-slider-manager',
@@ -143,6 +145,8 @@ export class SliderManagerComponent implements OnInit {
     @Input({ required: true }) entityId!: string;
 
     private sliderService = inject(CustomSliderService);
+    private factSheetService = inject(FactSheetService);
+    private scopeService = inject(ScopeService);
 
     readonly PlusIcon = Plus;
     readonly XIcon = X;
@@ -166,14 +170,16 @@ export class SliderManagerComponent implements OnInit {
     }
 
     async loadValues() {
-        // Load current slider values from EntityMetadata
-        const metadata = await db.entityMetadata
-            .where('[entityId+contextId]')
-            .equals([this.entityId, 'global'])
-            .toArray();
+        this.sliderValues.clear();
+        const attrs = await this.factSheetService.loadAttributes(
+            this.entityId,
+            this.scopeService.resolvedScope().scopeFolderId
+        );
 
-        for (const m of metadata) {
-            this.sliderValues.set(m.key, parseFloat(m.value) || 0);
+        for (const [key, value] of Object.entries(attrs)) {
+            if (typeof value === 'number') {
+                this.sliderValues.set(key, value);
+            }
         }
     }
 
@@ -183,14 +189,12 @@ export class SliderManagerComponent implements OnInit {
 
     async onValueChange(name: string, value: number) {
         this.sliderValues.set(name, value);
-
-        // Persist to EntityMetadata
-        await db.entityMetadata.put({
-            entityId: this.entityId,
-            key: name,
-            value: String(value),
-            contextId: 'global',
-        });
+        await this.factSheetService.setAttribute(
+            this.entityId,
+            name,
+            value,
+            this.scopeService.resolvedScope().scopeFolderId
+        );
     }
 
     async onUmbraChange(sliderId: string, presetId: string) {

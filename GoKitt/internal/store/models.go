@@ -409,6 +409,18 @@ type Storer interface {
 	GetEntityCards(entityID string) ([]*EntityCard, error)
 	UpsertFolderSchema(schema *FolderSchema) error
 	GetFolderSchema(id string) (*FolderSchema, error)
+	UpsertScopedDocument(doc *ScopedDocument) error
+	GetScopedDocument(scopeFolderID, namespace, documentKey string) (*ScopedDocument, error)
+	ListScopedDocuments(scopeFolderID, namespace string) ([]*ScopedDocument, error)
+	DeleteScopedDocument(scopeFolderID, namespace, documentKey string) error
+	UpsertScopedEntityField(field *ScopedEntityField) error
+	GetScopedEntityField(entityID, scopeFolderID, fieldKey string) (*ScopedEntityField, error)
+	ListScopedEntityFields(scopeFolderID, entityID string) ([]*ScopedEntityField, error)
+	DeleteScopedEntityField(entityID, scopeFolderID, fieldKey string) error
+	UpsertScopedDefinition(definition *ScopedDefinition) error
+	GetScopedDefinition(narrativeID, namespace, definitionKey string) (*ScopedDefinition, error)
+	ListScopedDefinitions(narrativeID, namespace string) ([]*ScopedDefinition, error)
+	DeleteScopedDefinition(narrativeID, namespace, definitionKey string) error
 }
 
 // =============================================================================
@@ -543,4 +555,41 @@ type FolderSchema struct {
 	IsSystem                bool   `json:"isSystem"`
 	CreatedAt               int64  `json:"createdAt"`
 	UpdatedAt               int64  `json:"updatedAt"`
+}
+
+// ScopedDocument stores versioned UI metadata for a folder-backed scope.
+type ScopedDocument struct {
+	ID                    string `json:"id"`
+	ScopeFolderID         string `json:"scopeFolderId"`
+	NarrativeID           string `json:"narrativeId"`
+	Namespace             string `json:"namespace"`
+	DocumentKey           string `json:"documentKey"`
+	Payload               string `json:"payload"`
+	SeededFromScopeFolder string `json:"seededFromScopeFolderId,omitempty"`
+	CreatedAt             int64  `json:"createdAt"`
+	UpdatedAt             int64  `json:"updatedAt"`
+}
+
+// ScopedEntityField stores per-entity scoped fact sheet values.
+type ScopedEntityField struct {
+	ID                    string `json:"id"`
+	EntityID              string `json:"entityId"`
+	ScopeFolderID         string `json:"scopeFolderId"`
+	NarrativeID           string `json:"narrativeId"`
+	FieldKey              string `json:"fieldKey"`
+	ValueJSON             string `json:"valueJson"`
+	SeededFromScopeFolder string `json:"seededFromScopeFolderId,omitempty"`
+	CreatedAt             int64  `json:"createdAt"`
+	UpdatedAt             int64  `json:"updatedAt"`
+}
+
+// ScopedDefinition stores narrative-level reusable definitions for scoped systems.
+type ScopedDefinition struct {
+	ID            string `json:"id"`
+	NarrativeID   string `json:"narrativeId"`
+	Namespace     string `json:"namespace"`
+	DefinitionKey string `json:"definitionKey"`
+	Payload       string `json:"payload"`
+	CreatedAt     int64  `json:"createdAt"`
+	UpdatedAt     int64  `json:"updatedAt"`
 }

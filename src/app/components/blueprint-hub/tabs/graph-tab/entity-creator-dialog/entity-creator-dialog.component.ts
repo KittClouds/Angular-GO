@@ -90,6 +90,7 @@ export interface EntityCreatorData {
                 <span class="text-lg font-semibold">{{ editEntity ? 'Edit Entity' : 'Create Entity' }}</span>
             </ng-template>
 
+            <ng-template pTemplate="content">
             <div class="p-5 space-y-5">
                 <!-- Name Input -->
                 <div class="space-y-2">
@@ -256,6 +257,7 @@ export interface EntityCreatorData {
                     </div>
                 }
             </div>
+            </ng-template>
 
             <ng-template pTemplate="footer">
                 <div class="flex justify-end gap-2 px-5 pb-5">
