@@ -1,6 +1,5 @@
 // src/app/lib/analytics/text-analytics.ts
-// Text Analytics Service - Pure TypeScript text analysis engine
-// Ported from React reference implementation
+// Text Analytics Service - shared TS model + local fallback analysis engine
 
 export interface SentenceLengthDistribution {
     '1': number;
@@ -16,6 +15,68 @@ export interface FlowInsights {
     dominantRange: string;
     varietyScore: number;
     hasMonotony: boolean;
+}
+
+export interface AnalyticsHighlightRange {
+    from: number;
+    to: number;
+    text: string;
+}
+
+export interface PhraseEchoItem {
+    id: string;
+    phrase: string;
+    occurrenceCount: number;
+    severity: 'low' | 'medium' | 'high';
+    snippets: string[];
+    highlightRanges: AnalyticsHighlightRange[];
+}
+
+export interface ProximityConflictItem {
+    id: string;
+    root: string;
+    surfaceForms: string[];
+    partOfSpeech: string;
+    minWordDistance: number;
+    severity: 'low' | 'medium' | 'high';
+    snippets: string[];
+    highlightRanges: AnalyticsHighlightRange[];
+}
+
+export interface CadenceSentence {
+    id: string;
+    paragraphIndex: number;
+    sentenceIndex: number;
+    from: number;
+    to: number;
+    wordCount: number;
+    bucket: keyof SentenceLengthDistribution;
+    snippet: string;
+}
+
+export interface CadenceHotspot {
+    id: string;
+    type: 'monotony' | 'whiplash';
+    label: string;
+    severity: 'low' | 'medium' | 'high';
+    explanation: string;
+    sentenceIds: string[];
+    highlightRanges: AnalyticsHighlightRange[];
+}
+
+export interface CadenceAnalysis {
+    sentences: CadenceSentence[];
+    hotspots: CadenceHotspot[];
+}
+
+export interface RepetitionAnalysis {
+    items: PhraseEchoItem[];
+    totalFlags: number;
+}
+
+export interface ProximityAnalysis {
+    items: ProximityConflictItem[];
+    totalFlags: number;
 }
 
 export interface TextAnalytics {
@@ -35,9 +96,27 @@ export interface TextAnalytics {
     sentenceLengthDistribution: SentenceLengthDistribution;
     flowInsights: FlowInsights;
     keywordDensity: Array<{ word: string; count: number; percentage: number }>;
+    repetition: RepetitionAnalysis;
+    proximity: ProximityAnalysis;
+    cadence: CadenceAnalysis;
 }
 
-// Common English stop words to filter out
+interface TokenMatch {
+    text: string;
+    normalized: string;
+    root: string;
+    from: number;
+    to: number;
+    index: number;
+}
+
+interface SentenceMatch {
+    text: string;
+    from: number;
+    to: number;
+    paragraphIndex: number;
+}
+
 const STOP_WORDS = new Set([
     'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
@@ -51,7 +130,7 @@ const STOP_WORDS = new Set([
     'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too',
     'very', 'just', 'also', 'now', 'here', 'there', 'then', 'once', 'if',
     'into', 'through', 'during', 'before', 'after', 'above', 'below', 'up',
-    'down', 'out', 'off', 'over', 'under', 'again', 'further', 'any', 'about'
+    'down', 'out', 'off', 'over', 'under', 'again', 'further', 'any', 'about',
 ]);
 
 /**
@@ -64,7 +143,6 @@ export function parseContentToPlainText(content: string): string {
         const json = JSON.parse(content);
         return extractTextFromNode(json).trim();
     } catch {
-        // If not JSON, return as-is (might be plain text or markdown)
         return content;
     }
 }
@@ -72,16 +150,13 @@ export function parseContentToPlainText(content: string): string {
 function extractTextFromNode(node: any): string {
     if (!node) return '';
 
-    // Text node
     if (node.text) {
         return node.text;
     }
 
-    // Has children
     if (node.content && Array.isArray(node.content)) {
         const texts = node.content.map(extractTextFromNode);
 
-        // Add appropriate spacing based on node type
         if (node.type === 'paragraph' || node.type === 'heading') {
             return texts.join('') + '\n\n';
         }
@@ -95,24 +170,17 @@ function extractTextFromNode(node: any): string {
     return '';
 }
 
-/**
- * Count syllables in a word (approximate)
- */
 function countSyllables(word: string): number {
-    word = word.toLowerCase().trim();
-    if (word.length <= 3) return 1;
+    let normalized = word.toLowerCase().trim();
+    if (normalized.length <= 3) return 1;
 
-    // Remove silent e at end
-    word = word.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
-    word = word.replace(/^y/, '');
+    normalized = normalized.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
+    normalized = normalized.replace(/^y/, '');
 
-    const matches = word.match(/[aeiouy]{1,2}/g);
+    const matches = normalized.match(/[aeiouy]{1,2}/g);
     return matches ? Math.max(matches.length, 1) : 1;
 }
 
-/**
- * Split text into words
- */
 function getWords(text: string): string[] {
     return text
         .replace(/[^\w\s'-]/g, ' ')
@@ -120,29 +188,20 @@ function getWords(text: string): string[] {
         .filter(word => word.length > 0);
 }
 
-/**
- * Split text into sentences
- */
 function getSentences(text: string): string[] {
     return text
         .split(/[.!?]+/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
+        .map(sentence => sentence.trim())
+        .filter(Boolean);
 }
 
-/**
- * Split text into paragraphs
- */
 function getParagraphs(text: string): string[] {
     return text
         .split(/\n\n+/)
-        .map(p => p.trim())
-        .filter(p => p.length > 0);
+        .map(paragraph => paragraph.trim())
+        .filter(Boolean);
 }
 
-/**
- * Categorize sentences by word count
- */
 function categorizeSentenceLengths(sentences: string[]): SentenceLengthDistribution {
     const distribution: SentenceLengthDistribution = {
         '1': 0,
@@ -153,33 +212,30 @@ function categorizeSentenceLengths(sentences: string[]): SentenceLengthDistribut
         '40+': 0,
     };
 
-    sentences.forEach(sentence => {
-        const wordCount = getWords(sentence).length;
-
-        if (wordCount === 1) distribution['1']++;
-        else if (wordCount <= 6) distribution['2-6']++;
-        else if (wordCount <= 15) distribution['7-15']++;
-        else if (wordCount <= 25) distribution['16-25']++;
-        else if (wordCount <= 39) distribution['26-39']++;
-        else distribution['40+']++;
-    });
+    for (const sentence of sentences) {
+        const count = getWords(sentence).length;
+        distribution[getSentenceBucket(count)]++;
+    }
 
     return distribution;
 }
 
-/**
- * Detect consecutive sentences of similar length
- */
+function getSentenceBucket(count: number): keyof SentenceLengthDistribution {
+    if (count <= 1) return '1';
+    if (count <= 6) return '2-6';
+    if (count <= 15) return '7-15';
+    if (count <= 25) return '16-25';
+    if (count <= 39) return '26-39';
+    return '40+';
+}
+
 function detectConsecutivePatterns(sentences: string[]): number {
-    const lengths = sentences.map(s => getWords(s).length);
+    const lengths = sentences.map(sentence => getWords(sentence).length);
     let patternCount = 0;
     let consecutiveCount = 1;
 
-    for (let i = 1; i < lengths.length; i++) {
-        const diff = Math.abs(lengths[i] - lengths[i - 1]);
-
-        // Consider "similar" if within 3 words
-        if (diff <= 3) {
+    for (let index = 1; index < lengths.length; index++) {
+        if (Math.abs(lengths[index] - lengths[index - 1]) <= 3) {
             consecutiveCount++;
             if (consecutiveCount >= 3) {
                 patternCount++;
@@ -192,52 +248,36 @@ function detectConsecutivePatterns(sentences: string[]): number {
     return patternCount;
 }
 
-/**
- * Calculate variety score (entropy-based)
- */
 function calculateVarietyScore(distribution: SentenceLengthDistribution, totalSentences: number): number {
     if (totalSentences === 0) return 0;
 
-    const values = Object.values(distribution);
-    const probabilities = values.map(v => v / totalSentences).filter(p => p > 0);
+    const probabilities = Object.values(distribution)
+        .map(value => value / totalSentences)
+        .filter(value => value > 0);
 
-    // Guard: If only one category has sentences, variety is 0
     if (probabilities.length <= 1) return 0;
 
-    // Shannon entropy normalized to 0-100
-    const entropy = -probabilities.reduce((sum, p) => sum + p * Math.log2(p), 0);
+    const entropy = -probabilities.reduce((sum, probability) => sum + probability * Math.log2(probability), 0);
     const maxEntropy = Math.log2(probabilities.length);
 
-    // Guard against division by zero
     if (maxEntropy === 0) return 0;
-
     return Math.round((entropy / maxEntropy) * 100);
 }
 
-/**
- * Generate flow insights
- */
-function analyzeFlowInsights(
-    distribution: SentenceLengthDistribution,
-    sentences: string[]
-): FlowInsights {
+function analyzeFlowInsights(distribution: SentenceLengthDistribution, sentences: string[]): FlowInsights {
     const consecutivePatterns = detectConsecutivePatterns(sentences);
-    const totalSentences = Object.values(distribution).reduce((a, b) => a + b, 0);
+    const totalSentences = Object.values(distribution).reduce((sum, value) => sum + value, 0);
     const varietyScore = calculateVarietyScore(distribution, totalSentences);
 
-    // Find dominant range
     const entries = Object.entries(distribution) as [keyof SentenceLengthDistribution, number][];
-    const dominant = entries.reduce((max, entry) =>
-        entry[1] > max[1] ? entry : max
-    );
+    const dominant = entries.reduce((best, entry) => (entry[1] > best[1] ? entry : best), entries[0] || ['7-15', 0]);
 
-    // Check for monotony (5+ consecutive similar sentences)
-    const lengths = sentences.map(s => getWords(s).length);
+    const lengths = sentences.map(sentence => getWords(sentence).length);
     let maxConsecutive = 1;
     let currentConsecutive = 1;
 
-    for (let i = 1; i < lengths.length; i++) {
-        if (Math.abs(lengths[i] - lengths[i - 1]) <= 3) {
+    for (let index = 1; index < lengths.length; index++) {
+        if (Math.abs(lengths[index] - lengths[index - 1]) <= 3) {
             currentConsecutive++;
             maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
         } else {
@@ -253,19 +293,11 @@ function analyzeFlowInsights(
     };
 }
 
-/**
- * Calculate Flesch-Kincaid Grade Level
- */
-function calculateReadingLevel(
-    wordCount: number,
-    sentenceCount: number,
-    syllableCount: number
-): string {
+function calculateReadingLevel(wordCount: number, sentenceCount: number, syllableCount: number): string {
     if (wordCount === 0 || sentenceCount === 0) return 'N/A';
 
     const avgWordsPerSentence = wordCount / sentenceCount;
     const avgSyllablesPerWord = syllableCount / wordCount;
-
     const grade = 0.39 * avgWordsPerSentence + 11.8 * avgSyllablesPerWord - 15.59;
 
     if (grade < 1) return 'Kindergarten';
@@ -276,61 +308,359 @@ function calculateReadingLevel(
     return 'Graduate Level';
 }
 
-/**
- * Calculate standard deviation
- */
 function calculateStandardDeviation(numbers: number[]): number {
     if (numbers.length === 0) return 0;
 
-    const mean = numbers.reduce((a, b) => a + b, 0) / numbers.length;
-    const squaredDiffs = numbers.map(n => Math.pow(n - mean, 2));
-    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / numbers.length;
-
+    const mean = numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+    const squaredDiffs = numbers.map(value => (value - mean) ** 2);
+    const variance = squaredDiffs.reduce((sum, value) => sum + value, 0) / numbers.length;
     return Math.sqrt(variance);
 }
 
-/**
- * Calculate keyword density
- */
-function calculateKeywordDensity(
-    words: string[],
-    totalWords: number
-): Array<{ word: string; count: number; percentage: number }> {
+function calculateKeywordDensity(words: string[], totalWords: number): Array<{ word: string; count: number; percentage: number }> {
     const frequencies: Record<string, number> = {};
 
-    words.forEach(word => {
-        const normalized = word.toLowerCase().replace(/[^a-z'-]/g, '');
-
-        // Skip stop words, short words, and words with numbers
-        if (
-            normalized.length < 4 ||
-            STOP_WORDS.has(normalized) ||
-            /\d/.test(normalized)
-        ) {
-            return;
+    for (const word of words) {
+        const normalized = normalizeLexeme(word);
+        if (normalized.length < 4 || STOP_WORDS.has(normalized) || /\d/.test(normalized)) {
+            continue;
         }
 
         frequencies[normalized] = (frequencies[normalized] || 0) + 1;
-    });
+    }
 
-    // Sort by frequency and take top 100
     return Object.entries(frequencies)
-        .sort((a, b) => b[1] - a[1])
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
         .slice(0, 100)
         .map(([word, count]) => ({
             word,
             count,
-            percentage: Math.round((count / totalWords) * 1000) / 10,
+            percentage: Math.round((count / Math.max(totalWords, 1)) * 1000) / 10,
         }));
 }
 
-/**
- * Main analysis function
- */
+function normalizeLexeme(word: string): string {
+    return word.toLowerCase().replace(/[^a-z'-]/g, '');
+}
+
+function stemWord(word: string): string {
+    let stem = normalizeLexeme(word);
+    if (stem.length <= 4) {
+        return stem;
+    }
+
+    const suffixes = ['ingly', 'edly', 'ingly', 'ment', 'ness', 'tion', 'sion', 'able', 'ible', 'less', 'ously', 'edly', 'ing', 'ers', 'ies', 'ied', 'est', 'ism', 'ist', 'ous', 'ive', 'ful', 'ly', 'ed', 'es', 'er', 's'];
+    for (const suffix of suffixes) {
+        if (stem.endsWith(suffix) && stem.length - suffix.length >= 3) {
+            stem = stem.slice(0, -suffix.length);
+            break;
+        }
+    }
+
+    if (stem.endsWith('i') && stem.length > 3) {
+        stem = `${stem.slice(0, -1)}y`;
+    }
+
+    if (stem.length >= 3 && stem.at(-1) === stem.at(-2) && /[bcdfghjklmnpqrstvwxyz]/.test(stem.at(-1) || '')) {
+        stem = stem.slice(0, -1);
+    }
+
+    return stem;
+}
+
+function extractTokenMatches(text: string): TokenMatch[] {
+    const matches = text.matchAll(/[A-Za-z][A-Za-z'-]*/g);
+    const tokens: TokenMatch[] = [];
+
+    for (const match of matches) {
+        const raw = match[0];
+        const from = match.index ?? 0;
+        const to = from + raw.length;
+        tokens.push({
+            text: raw,
+            normalized: normalizeLexeme(raw),
+            root: stemWord(raw),
+            from,
+            to,
+            index: tokens.length,
+        });
+    }
+
+    return tokens;
+}
+
+function buildSnippet(text: string, from: number, to: number, radius = 28): string {
+    const start = Math.max(0, from - radius);
+    const end = Math.min(text.length, to + radius);
+    const prefix = start > 0 ? '...' : '';
+    const suffix = end < text.length ? '...' : '';
+    return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
+}
+
+function severityFromScore(score: number): 'low' | 'medium' | 'high' {
+    if (score >= 4) return 'high';
+    if (score >= 2) return 'medium';
+    return 'low';
+}
+
+function analyzeRepetition(text: string, tokens: TokenMatch[]): RepetitionAnalysis {
+    const phraseMap = new Map<string, { phrase: string; ranges: AnalyticsHighlightRange[]; tokenStarts: number[] }>();
+
+    for (let size = 2; size <= 5; size++) {
+        for (let index = 0; index + size <= tokens.length; index++) {
+            const slice = tokens.slice(index, index + size);
+            const normalizedParts = slice.map(token => token.normalized);
+            const contentCount = normalizedParts.filter(part => part.length >= 4 && !STOP_WORDS.has(part)).length;
+            if (contentCount < 2) {
+                continue;
+            }
+
+            const phraseKey = normalizedParts.join(' ');
+            const phraseText = slice.map(token => token.text.toLowerCase()).join(' ');
+            const existing = phraseMap.get(phraseKey) ?? { phrase: phraseText, ranges: [], tokenStarts: [] };
+
+            if (existing.tokenStarts.some(start => Math.abs(start - index) < size)) {
+                continue;
+            }
+
+            existing.tokenStarts.push(index);
+            existing.ranges.push({
+                from: slice[0].from,
+                to: slice[slice.length - 1].to,
+                text: text.slice(slice[0].from, slice[slice.length - 1].to),
+            });
+            phraseMap.set(phraseKey, existing);
+        }
+    }
+
+    const items = [...phraseMap.entries()]
+        .filter(([, value]) => value.ranges.length >= 2)
+        .sort((left, right) => {
+            const countDiff = right[1].ranges.length - left[1].ranges.length;
+            if (countDiff !== 0) return countDiff;
+            return right[0].length - left[0].length;
+        })
+        .slice(0, 12)
+        .map(([key, value]) => {
+            const occurrenceCount = value.ranges.length;
+            const score = occurrenceCount + Math.max(0, key.split(' ').length - 2);
+            return {
+                id: `echo:${key.replace(/\s+/g, '-')}`,
+                phrase: value.phrase,
+                occurrenceCount,
+                severity: severityFromScore(score),
+                snippets: value.ranges.slice(0, 3).map(range => buildSnippet(text, range.from, range.to)),
+                highlightRanges: value.ranges,
+            } satisfies PhraseEchoItem;
+        });
+
+    return {
+        items,
+        totalFlags: items.length,
+    };
+}
+
+function analyzeProximity(text: string, tokens: TokenMatch[]): ProximityAnalysis {
+    const byRoot = new Map<string, TokenMatch[]>();
+
+    for (const token of tokens) {
+        if (token.normalized.length < 4 || STOP_WORDS.has(token.normalized) || token.root.length < 3) {
+            continue;
+        }
+
+        const group = byRoot.get(token.root) ?? [];
+        group.push(token);
+        byRoot.set(token.root, group);
+    }
+
+    const items: ProximityConflictItem[] = [];
+
+    for (const [root, group] of byRoot.entries()) {
+        if (group.length < 2) {
+            continue;
+        }
+
+        const highlightRanges: AnalyticsHighlightRange[] = [];
+        let minWordDistance = Number.POSITIVE_INFINITY;
+        let bestPair: [TokenMatch, TokenMatch] | null = null;
+
+        for (let index = 1; index < group.length; index++) {
+            const prev = group[index - 1];
+            const current = group[index];
+            const distance = current.index - prev.index;
+            if (distance > 26) {
+                continue;
+            }
+
+            if (distance < minWordDistance) {
+                minWordDistance = distance;
+                bestPair = [prev, current];
+            }
+
+            for (const token of [prev, current]) {
+                if (!highlightRanges.some(range => range.from === token.from && range.to === token.to)) {
+                    highlightRanges.push({
+                        from: token.from,
+                        to: token.to,
+                        text: text.slice(token.from, token.to),
+                    });
+                }
+            }
+        }
+
+        if (!bestPair || !Number.isFinite(minWordDistance)) {
+            continue;
+        }
+
+        const severityScore = Math.max(1, 6 - Math.min(minWordDistance, 5)) + Math.max(0, highlightRanges.length - 2);
+        items.push({
+            id: `prox:${root}`,
+            root,
+            surfaceForms: [...new Set(group.map(token => token.text.toLowerCase()))].slice(0, 4),
+            partOfSpeech: 'root-family',
+            minWordDistance,
+            severity: severityFromScore(severityScore),
+            snippets: [
+                buildSnippet(text, bestPair[0].from, bestPair[0].to),
+                buildSnippet(text, bestPair[1].from, bestPair[1].to),
+            ],
+            highlightRanges: highlightRanges.sort((left, right) => left.from - right.from),
+        });
+    }
+
+    items.sort((left, right) => left.minWordDistance - right.minWordDistance || right.highlightRanges.length - left.highlightRanges.length);
+
+    return {
+        items: items.slice(0, 12),
+        totalFlags: Math.min(items.length, 12),
+    };
+}
+
+function extractSentenceMatches(text: string): SentenceMatch[] {
+    const sentences: SentenceMatch[] = [];
+    let cursor = 0;
+    let paragraphIndex = 0;
+
+    while (cursor < text.length) {
+        while (cursor < text.length && /\s/.test(text[cursor])) {
+            if (text[cursor] === '\n' && text[cursor + 1] === '\n') {
+                paragraphIndex++;
+            }
+            cursor++;
+        }
+
+        if (cursor >= text.length) {
+            break;
+        }
+
+        const start = cursor;
+        while (cursor < text.length && !/[.!?]/.test(text[cursor])) {
+            cursor++;
+        }
+        while (cursor < text.length && /[.!?]/.test(text[cursor])) {
+            cursor++;
+        }
+
+        const end = cursor;
+        const raw = text.slice(start, end).trim();
+        if (!raw) {
+            continue;
+        }
+
+        const from = text.indexOf(raw, start);
+        const to = from + raw.length;
+        sentences.push({
+            text: raw,
+            from,
+            to,
+            paragraphIndex,
+        });
+    }
+
+    return sentences;
+}
+
+function analyzeCadence(text: string): CadenceAnalysis {
+    const sentenceMatches = extractSentenceMatches(text);
+    const sentences: CadenceSentence[] = sentenceMatches.map((sentence, index) => {
+        const wordCount = getWords(sentence.text).length;
+        return {
+            id: `sentence:${index}`,
+            paragraphIndex: sentence.paragraphIndex,
+            sentenceIndex: index,
+            from: sentence.from,
+            to: sentence.to,
+            wordCount,
+            bucket: getSentenceBucket(wordCount),
+            snippet: buildSnippet(text, sentence.from, sentence.to, 18),
+        };
+    });
+
+    const hotspots: CadenceHotspot[] = [];
+
+    let runStart = 0;
+    while (runStart < sentences.length) {
+        let runEnd = runStart;
+        while (
+            runEnd + 1 < sentences.length &&
+            Math.abs(sentences[runEnd + 1].wordCount - sentences[runEnd].wordCount) <= 3
+        ) {
+            runEnd++;
+        }
+
+        if (runEnd - runStart + 1 >= 5) {
+            const run = sentences.slice(runStart, runEnd + 1);
+            hotspots.push({
+                id: `cadence:monotony:${runStart}`,
+                type: 'monotony',
+                label: `${run.length} similar-length sentences`,
+                severity: severityFromScore(run.length - 1),
+                explanation: 'A long run of similarly sized sentences can flatten the rhythm.',
+                sentenceIds: run.map(sentence => sentence.id),
+                highlightRanges: run.map(sentence => ({
+                    from: sentence.from,
+                    to: sentence.to,
+                    text: text.slice(sentence.from, sentence.to),
+                })),
+            });
+        }
+
+        runStart = runEnd + 1;
+    }
+
+    for (let index = 1; index < sentences.length; index++) {
+        const prev = sentences[index - 1];
+        const current = sentences[index];
+        const diff = Math.abs(current.wordCount - prev.wordCount);
+        if (diff < 12) {
+            continue;
+        }
+
+        hotspots.push({
+            id: `cadence:whiplash:${index}`,
+            type: 'whiplash',
+            label: `${prev.wordCount} -> ${current.wordCount} words`,
+            severity: diff >= 20 ? 'high' : 'medium',
+            explanation: 'A sharp sentence-length jump creates a noticeable pacing snap.',
+            sentenceIds: [prev.id, current.id],
+            highlightRanges: [
+                { from: prev.from, to: prev.to, text: text.slice(prev.from, prev.to) },
+                { from: current.from, to: current.to, text: text.slice(current.from, current.to) },
+            ],
+        });
+    }
+
+    return {
+        sentences,
+        hotspots: hotspots.slice(0, 16),
+    };
+}
+
 export function analyzeText(text: string): TextAnalytics {
     const words = getWords(text);
     const sentences = getSentences(text);
     const paragraphs = getParagraphs(text);
+    const tokens = extractTokenMatches(text);
 
     const wordCount = words.length;
     const characterCount = text.length;
@@ -338,43 +668,28 @@ export function analyzeText(text: string): TextAnalytics {
     const sentenceCount = sentences.length;
     const paragraphCount = paragraphs.length;
 
-    // Calculate syllables for reading level
     const syllableCount = words.reduce((sum, word) => sum + countSyllables(word), 0);
-
-    // Reading level
     const readingLevel = calculateReadingLevel(wordCount, sentenceCount, syllableCount);
 
-    // Reading time (225 words per minute average)
     const readingTimeTotal = Math.ceil((wordCount / 225) * 60);
     const readingTimeMinutes = Math.floor(readingTimeTotal / 60);
     const readingTimeSeconds = readingTimeTotal % 60;
 
-    // Speaking time (150 words per minute average)
     const speakingTimeTotal = Math.ceil((wordCount / 150) * 60);
     const speakingTimeMinutes = Math.floor(speakingTimeTotal / 60);
     const speakingTimeSeconds = speakingTimeTotal % 60;
 
-    // Sentence length analysis
-    const sentenceLengths = sentences.map(s => getWords(s).length);
+    const sentenceLengths = sentences.map(sentence => getWords(sentence).length);
     const averageSentenceLength = sentenceCount > 0
         ? Math.round((wordCount / sentenceCount) * 10) / 10
         : 0;
     const sentenceLengthVariation = calculateStandardDeviation(sentenceLengths);
 
-    // Enhanced flow analysis
     const sentenceLengthDistribution = categorizeSentenceLengths(sentences);
     const flowInsights = analyzeFlowInsights(sentenceLengthDistribution, sentences);
-
-    // Enhanced flow score: combine variation + variety
     const flowScore = sentenceCount > 0
-        ? Math.round(
-            (Math.min(100, (sentenceLengthVariation / 8) * 100) * 0.6) +
-            (flowInsights.varietyScore * 0.4)
-        )
+        ? Math.round((Math.min(100, (sentenceLengthVariation / 8) * 100) * 0.6) + (flowInsights.varietyScore * 0.4))
         : 0;
-
-    // Keyword density
-    const keywordDensity = calculateKeywordDensity(words, wordCount);
 
     return {
         wordCount,
@@ -392,13 +707,13 @@ export function analyzeText(text: string): TextAnalytics {
         flowScore,
         sentenceLengthDistribution,
         flowInsights,
-        keywordDensity,
+        keywordDensity: calculateKeywordDensity(words, wordCount),
+        repetition: analyzeRepetition(text, tokens),
+        proximity: analyzeProximity(text, tokens),
+        cadence: analyzeCadence(text),
     };
 }
 
-/**
- * Get empty analytics for empty state
- */
 export function getEmptyAnalytics(): TextAnalytics {
     return {
         wordCount: 0,
@@ -417,5 +732,8 @@ export function getEmptyAnalytics(): TextAnalytics {
         sentenceLengthDistribution: { '1': 0, '2-6': 0, '7-15': 0, '16-25': 0, '26-39': 0, '40+': 0 },
         flowInsights: { consecutivePatterns: 0, dominantRange: '7-15', varietyScore: 0, hasMonotony: false },
         keywordDensity: [],
+        repetition: { items: [], totalFlags: 0 },
+        proximity: { items: [], totalFlags: 0 },
+        cadence: { sentences: [], hotspots: [] },
     };
 }

@@ -259,7 +259,8 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     async deleteEntity(entity: RegisteredEntity, event: MouseEvent) {
         event.stopPropagation();
-        await smartGraphRegistry.deleteEntity(entity.id);
+        const deleted = await smartGraphRegistry.deleteEntity(entity.id);
+        if (!deleted) return;
         // Entities auto-refresh via computed signal
         if (this.selectedEntity()?.id === entity.id) {
             this.selectedEntity.set(null);
@@ -288,7 +289,8 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     async flushRegistry() {
         if (confirm(`Delete all ${this.totalEntities()} entities? This cannot be undone.`)) {
-            await smartGraphRegistry.clearAll();
+            const cleared = await smartGraphRegistry.clearAll();
+            if (cleared === 0) return;
             this.selectedEntity.set(null);
         }
     }

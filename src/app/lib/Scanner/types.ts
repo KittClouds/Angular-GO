@@ -25,10 +25,12 @@ export type EntityKind =
     | 'CUSTOM'
     | 'UNKNOWN';
 
+export type AnalyticsHighlightKind = 'repetition' | 'proximity' | 'cadence';
+
 /**
  * Types of detected spans
  */
-export type SpanType = 'entity' | 'wikilink' | 'entity_ref' | 'relationship' | 'entity_implicit' | 'predicate' | 'entity_candidate' | 'keyword_focus';
+export type SpanType = 'entity' | 'wikilink' | 'entity_ref' | 'relationship' | 'entity_implicit' | 'predicate' | 'entity_candidate' | 'keyword_focus' | 'analytics_highlight';
 
 /**
  * A decoration span representing a detected element in text
@@ -70,6 +72,10 @@ export interface DecorationSpan {
     candidateLabels?: string[];
     /** Robust anchoring for re-finding this span (Web Annotation model) */
     selector?: TextQuoteSelector;
+    /** Analytics highlight family for transient editor emphasis */
+    highlightKind?: AnalyticsHighlightKind;
+    /** Stable selection id for transient analytics highlights */
+    annotationId?: string;
 }
 
 /**

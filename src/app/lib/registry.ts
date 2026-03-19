@@ -5,6 +5,7 @@
 
 import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
+import { clearAllDecorations } from './dexie/decorations';
 import { getBridge } from './operations';
 import { GoKittStoreService } from '../services/gokitt-store.service';
 
@@ -218,7 +219,7 @@ export class CentralRegistry {
     }
 
     // =========================================================================
-    // SYNC MUTATIONS
+    // MUTATIONS
     // =========================================================================
 
     /**
@@ -336,41 +337,79 @@ export class CentralRegistry {
         return results;
     }
 
-    deleteEntity(id: string): boolean {
+    async deleteEntity(id: string): Promise<boolean> {
         const entity = this.entityCache.get(id);
-        if (entity) {
-            this.labelIndex.delete(entity.label.toLowerCase());
-            this.entityCache.delete(id);
-
-            // Write-through to Dexie (fire-and-forget)
-            db.entities.delete(id).catch(err => {
-                console.warn('[CentralRegistry] Failed to delete entity from Dexie:', id, err);
-            });
-
-            this.notify(true); // Entity deleted
-            return true;
+        if (!entity) {
+            return false;
         }
-        return false;
+
+        const connectedEdgeIds = this.getConnectedEdgeIds(id);
+        const store = getBridge();
+
+        if (store) {
+            try {
+                await Promise.all(connectedEdgeIds.map(edgeId => store.deleteEdge(edgeId)));
+                await store.deleteEntity(id);
+            } catch (err) {
+                console.error('[CentralRegistry] Failed to sync entity delete to SQLite:', id, err);
+                throw err;
+            }
+        }
+
+        this.labelIndex.delete(entity.label.toLowerCase());
+        this.entityCache.delete(id);
+        this.removeEdgesFromCache(connectedEdgeIds);
+
+        try {
+            await Promise.all([
+                db.entities.delete(id),
+                connectedEdgeIds.length > 0 ? db.edges.bulkDelete(connectedEdgeIds) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            console.warn('[CentralRegistry] Failed to delete entity from Dexie:', id, err);
+        }
+
+        await this.clearDerivedHighlightState();
+
+        this.notify(true); // Entity deleted
+        return true;
     }
 
     /**
      * Clear all entities and edges from the registry.
      * Returns the number of entities that were cleared.
      */
-    clearAll(): number {
-        const count = this.entityCache.size;
+    async clearAll(): Promise<number> {
+        const entityIds = Array.from(this.entityCache.keys());
+        const edgeIds = Array.from(this.edgeCache.keys());
+        const count = entityIds.length;
+        const store = getBridge();
+
+        if (store) {
+            try {
+                await Promise.all(edgeIds.map(edgeId => store.deleteEdge(edgeId)));
+                await Promise.all(entityIds.map(entityId => store.deleteEntity(entityId)));
+            } catch (err) {
+                console.error('[CentralRegistry] Failed to sync registry clear to SQLite:', err);
+                throw err;
+            }
+        }
+
         this.entityCache.clear();
         this.labelIndex.clear();
         this.edgeCache.clear();
 
-        // Write-through to Dexie (fire-and-forget)
-        Promise.all([
-            db.entities.clear(),
-            db.edges.clear(),
-            db.entityMetadata.clear(),
-        ]).catch(err => {
+        try {
+            await Promise.all([
+                db.entities.clear(),
+                db.edges.clear(),
+                db.entityMetadata.clear(),
+            ]);
+        } catch (err) {
             console.warn('[CentralRegistry] Failed to clear Dexie tables:', err);
-        });
+        }
+
+        await this.clearDerivedHighlightState();
 
         this.notify(true); // All entities cleared
         return count;
@@ -582,6 +621,26 @@ export class CentralRegistry {
     generateEntityId(label: string, kind: EntityKind): string {
         const normalized = label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
         return `${kind.toLowerCase()}_${normalized}`;
+    }
+
+    private getConnectedEdgeIds(entityId: string): string[] {
+        return Array.from(this.edgeCache.values())
+            .filter(edge => edge.sourceId === entityId || edge.targetId === entityId)
+            .map(edge => edge.id);
+    }
+
+    private removeEdgesFromCache(edgeIds: string[]): void {
+        for (const edgeId of edgeIds) {
+            this.edgeCache.delete(edgeId);
+        }
+    }
+
+    private async clearDerivedHighlightState(): Promise<void> {
+        try {
+            await clearAllDecorations();
+        } catch (err) {
+            console.warn('[CentralRegistry] Failed to clear derived decorations:', err);
+        }
     }
 }
 

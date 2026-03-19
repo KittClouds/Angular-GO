@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getEmptyAnalytics } from '../lib/analytics';
 import { GoKittService } from './gokitt.service';
 
 describe('GoKittService analyzeText bridge', () => {
@@ -28,7 +29,22 @@ describe('GoKittService analyzeText bridge', () => {
     });
 
     it('resolves analyzeText requests from ANALYZE_TEXT_RESULT worker messages', async () => {
-        const payload = { wordCount: 2, characterCount: 11 };
+        const payload = {
+            ...getEmptyAnalytics(),
+            wordCount: 2,
+            characterCount: 11,
+            repetition: {
+                totalFlags: 1,
+                items: [{
+                    id: 'echo:iron-gate',
+                    phrase: 'iron gate',
+                    occurrenceCount: 2,
+                    severity: 'low' as const,
+                    snippets: ['The iron gate rattled again.'],
+                    highlightRanges: [{ from: 4, to: 13, text: 'iron gate' }],
+                }],
+            },
+        };
         const promise = service.analyzeText('hello world');
 
         expect(workerMock.postMessage).toHaveBeenCalledTimes(1);

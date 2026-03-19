@@ -39,6 +39,8 @@ import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { getPrettyTextApi } from '../../api/pretty-text-api';
 import type { Note } from '../../lib/dexie/db';
 import { configurePlainTextClipboard } from './plugins/plain-text-clipboard';
+import { sanitizeEntityMarksInDocJson } from './entity-mark-sanitizer';
+import { smartGraphRegistry } from '../../lib/registry';
 
 @Component({
     selector: 'app-editor',
@@ -250,6 +252,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 }
             }
 
+            const sanitized = sanitizeEntityMarksInDocJson(content, {
+                hasEntityId: (id) => !!smartGraphRegistry.getEntityById(id),
+                hasEntityLabel: (label) => !!smartGraphRegistry.findEntityByLabel(label),
+            });
+            content = sanitized.content;
+
             // Set editor content
             // Milkdown/Crepe uses ProseMirror, so we need to set the document
             const editorView = this.crepe.editor.ctx.get(editorViewCtx);
@@ -267,6 +275,10 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                     // Fallback to clearing
                     this.clearEditor();
                 }
+            }
+
+            if (sanitized.changed) {
+                void this.noteEditorStore.saveContentNow(content, note.markdownContent || '', note.id);
             }
 
             // Update pretty text API with current note context

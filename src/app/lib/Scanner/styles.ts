@@ -66,6 +66,8 @@ export function getDecorationStyle(span: DecorationSpan, mode: HighlightMode): s
       return getCandidateStyle(mode);
     case 'keyword_focus':
       return getKeywordFocusStyle();
+    case 'analytics_highlight':
+      return getAnalyticsHighlightStyle(span.highlightKind);
     default:
       return '';
   }
@@ -75,6 +77,20 @@ function getKeywordFocusStyle(): string {
   return `
     background-color: rgba(45, 212, 191, 0.18);
     box-shadow: inset 0 -1px 0 rgba(45, 212, 191, 0.55);
+    border-radius: 2px;
+  `;
+}
+
+function getAnalyticsHighlightStyle(kind: DecorationSpan['highlightKind']): string {
+  const palette = kind === 'repetition'
+    ? { fill: 'rgba(245, 158, 11, 0.22)', stroke: 'rgba(245, 158, 11, 0.65)' }
+    : kind === 'proximity'
+      ? { fill: 'rgba(244, 63, 94, 0.18)', stroke: 'rgba(244, 63, 94, 0.6)' }
+      : { fill: 'rgba(34, 211, 238, 0.18)', stroke: 'rgba(34, 211, 238, 0.58)' };
+
+  return `
+    background-color: ${palette.fill};
+    box-shadow: inset 0 -2px 0 ${palette.stroke};
     border-radius: 2px;
   `;
 }
@@ -222,6 +238,8 @@ export function getDecorationClass(span: DecorationSpan): string {
       return `entity-candidate`;
     case 'keyword_focus':
       return 'keyword-focus';
+    case 'analytics_highlight':
+      return `analytics-highlight analytics-${span.highlightKind || 'cadence'}`;
     default:
       return '';
   }

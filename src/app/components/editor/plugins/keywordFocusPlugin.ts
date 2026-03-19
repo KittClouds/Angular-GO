@@ -7,10 +7,10 @@ import type { DecorationSpan } from '../../../lib/Scanner/types';
 
 const KEYWORD_FOCUS_PLUGIN_KEY = new PluginKey('KEYWORD_FOCUS');
 
-function buildKeywordDecorationSet(view: EditorView): DecorationSet {
+function buildHighlightDecorationSet(view: EditorView): DecorationSet {
     const prettyTextApi = getPrettyTextApi();
     const keywordSpans = prettyTextApi.getDecorations(view.state.doc)
-        .filter((span: DecorationSpan) => span.type === 'keyword_focus');
+        .filter((span: DecorationSpan) => span.type === 'keyword_focus' || span.type === 'analytics_highlight');
 
     if (keywordSpans.length === 0) {
         return DecorationSet.empty;
@@ -21,7 +21,8 @@ function buildKeywordDecorationSet(view: EditorView): DecorationSet {
         .map(span => Decoration.inline(span.from, span.to, {
             class: prettyTextApi.getClass(span),
             style: prettyTextApi.getStyle(span),
-            'data-keyword-focus': span.label,
+            'data-keyword-focus': span.type === 'keyword_focus' ? span.label : undefined,
+            'data-analytics-highlight': span.type === 'analytics_highlight' ? span.annotationId || span.label : undefined,
         }));
 
     return DecorationSet.create(view.state.doc, decorations);
@@ -53,7 +54,7 @@ export const keywordFocusPlugin = $prose(() => {
 
         view(editorView: EditorView) {
             const refresh = () => {
-                const decorations = buildKeywordDecorationSet(editorView);
+                const decorations = buildHighlightDecorationSet(editorView);
                 const tr = editorView.state.tr.setMeta(KEYWORD_FOCUS_PLUGIN_KEY, { decorations });
                 editorView.dispatch(tr);
             };

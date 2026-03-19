@@ -3,6 +3,7 @@ import { smartGraphRegistry } from '../lib/registry';
 import type { DecorationSpan } from '../lib/Scanner';
 import { db } from '../lib/dexie/db';
 import type { EntityKind } from '../lib/types';
+import type { TextAnalytics } from '../lib/analytics';
 
 // =============================================================================
 // Types for Worker Communication
@@ -733,13 +734,13 @@ export class GoKittService {
      * Compute Text Analytics using Go logic
      * @param text The text to analyze
      */
-    async analyzeText(text: string): Promise<any> {
+    async analyzeText(text: string): Promise<TextAnalytics | null> {
         if (!this.wasmLoaded) {
             return null;
         }
 
         try {
-            const result = await this.sendRequest<any>('ANALYZE_TEXT', { text });
+            const result = await this.sendRequest<TextAnalytics>('ANALYZE_TEXT', { text });
             return result;
         } catch (e) {
             console.error('[GoKittService] Analyze text error:', e);

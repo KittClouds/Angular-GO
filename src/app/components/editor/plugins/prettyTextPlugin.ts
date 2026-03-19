@@ -21,6 +21,7 @@ import type { EditorState, Transaction } from '@milkdown/kit/prose/state';
 
 import { getPrettyTextApi } from '../../../api/pretty-text-api';
 import type { DecorationSpan } from '../../../lib/Scanner/types';
+import { EditorService } from '../../../services/editor.service';
 
 // =============================================================================
 // PLUGIN KEY
@@ -133,7 +134,7 @@ export const prettyTextPlugin = $prose((ctx) => {
             window.addEventListener('gokitt-ready', handleGoKittReady);
 
             // Listen for dictionary-rebuilt to rescan with updated entity list
-            const handleDictRebuilt = () => {
+            const handleDictRebuilt = async () => {
                 console.log('[PrettyTextPlugin] Dictionary rebuilt - stripping old marks and rescanning');
                 // Strip all existing entity marks so scanAndApplyMarks can reapply fresh
                 const entityMarkType = editorView.state.schema.marks['entity'];
@@ -143,7 +144,10 @@ export const prettyTextPlugin = $prose((ctx) => {
                 }
                 // Force the API to re-scan (clear cached context)
                 prettyTextApi.forceRescan();
-                scanAndApplyMarks(editorView);
+                await scanAndApplyMarks(editorView);
+                const injector = (window as any).__angularInjector;
+                const editorService = injector?.get?.(EditorService) as EditorService | undefined;
+                editorService?.save();
             };
             window.addEventListener('dictionary-rebuilt', handleDictRebuilt);
 

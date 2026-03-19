@@ -14,7 +14,7 @@
  *   - ScanPipeline      (sequential orchestrator)
  */
 
-import type { DecorationSpan, HighlighterConfig, HighlightMode } from '../lib/Scanner';
+import type { DecorationSpan, HighlighterConfig, HighlightMode, AnalyticsHighlightKind } from '../lib/Scanner';
 import { getDecorationStyle, getDecorationClass } from '../lib/Scanner';
 import type { EntityKind } from '../lib/Scanner/types';
 import { getScanCoordinator } from '../lib/Scanner/scanCoordinatorInstance';
@@ -35,6 +35,7 @@ import { GraphScanner } from '../lib/Scanner/graph-scanner';
 import { ScanPipeline } from '../lib/Scanner/scan-pipeline';
 
 import { highlightingStore } from '../lib/store/highlightingStore';
+import { analyticsHighlightStore } from '../lib/store/analyticsHighlightStore';
 import { keywordHighlightStore } from '../lib/store/keywordHighlightStore';
 import { searchHighlightStore } from '../lib/store/searchHighlightStore';
 import { GoKittService } from '../services/gokitt.service';
@@ -47,6 +48,8 @@ import {
 import { smartGraphRegistry } from '../lib/registry';
 import { DiscoveryStore } from '../lib/store/discoveryStore';
 import { isFstEnabled } from '../services/ner.service';
+import type { AnalyticsHighlightRange } from '../lib/analytics';
+import { filterCachedEntitySpans } from './pretty-text-cache';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level wiring (legacy bridge — to be replaced with DI over time)
@@ -102,6 +105,9 @@ export interface PrettyTextApi {
     clearKeywordHighlights(noteId: string): void;
     setSearchHighlightTerms(terms: string[]): void;
     clearSearchHighlights(): void;
+    setAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void;
+    toggleAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void;
+    clearAnalyticsHighlights(): void;
     onKeystroke(char: string, cursorPos: number, contextText: string): void;
     forceRescan(): void;
 }
@@ -127,6 +133,7 @@ class PrettyTextAPI implements PrettyTextApi {
     private lastDoc: ProseMirrorDoc | null = null;
     private selectedKeywords: string[] = [];
     private searchHighlightTerms: string[] = [];
+    private analyticsHighlightSpans: DecorationSpan[] = [];
 
     constructor() {
         this.searchHighlightTerms = searchHighlightStore.getTerms();
@@ -167,6 +174,9 @@ class PrettyTextAPI implements PrettyTextApi {
                 this.notifyListeners();
             }
         });
+        analyticsHighlightStore.subscribe(() => {
+            this.notifyListeners();
+        });
     }
 
     // ── Note Context ──────────────────────────────────────────────────────
@@ -182,6 +192,7 @@ class PrettyTextAPI implements PrettyTextApi {
             this.lastSentenceEndPos = 0;
             this.lastContext = '';
             this.lastScannedContext = '';
+            analyticsHighlightStore.clearForNote(prevNoteId);
         }
 
         this.selectedKeywords = keywordHighlightStore.getKeywordsForNote(noteId);
@@ -208,6 +219,18 @@ class PrettyTextAPI implements PrettyTextApi {
         searchHighlightStore.clear();
     }
 
+    setAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void {
+        analyticsHighlightStore.setSelection({ noteId, key, kind, label, ranges });
+    }
+
+    toggleAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void {
+        analyticsHighlightStore.toggleSelection({ noteId, key, kind, label, ranges });
+    }
+
+    clearAnalyticsHighlights(): void {
+        analyticsHighlightStore.clear();
+    }
+
     onKeystroke(char: string, cursorPos: number, contextText: string): void {
         if (!this.currentNoteId) return;
         getScanCoordinator().onKeystroke(char, cursorPos, contextText, this.currentNoteId);
@@ -232,8 +255,9 @@ class PrettyTextAPI implements PrettyTextApi {
         const { segments } = extractText(doc);
         const focusTerms = [...new Set([...this.selectedKeywords, ...this.searchHighlightTerms])];
         const keywordSpans = createKeywordFocusSpans(segments, focusTerms);
+        const analyticsSpans = this.getAnalyticsHighlightSpans(segments);
 
-        if (settings.mode === 'off') return keywordSpans;
+        if (settings.mode === 'off') return [...keywordSpans, ...analyticsSpans];
 
         const text = docContent(doc);
 
@@ -296,7 +320,7 @@ class PrettyTextAPI implements PrettyTextApi {
             return true;
         });
 
-        const combinedSpans = [...filteredSpans, ...keywordSpans];
+        const combinedSpans = [...filteredSpans, ...keywordSpans, ...analyticsSpans];
         combinedSpans.sort((a, b) => a.from - b.from);
 
         // Emit to ScanCoordinator for entity-event tracking
@@ -390,16 +414,30 @@ class PrettyTextAPI implements PrettyTextApi {
             if (cached && cached.length > 0) {
                 const storedHash = await getDecorationContentHash(this.currentNoteId);
                 const currentHash = hashContent(text);
+                const filteredCached = filterCachedEntitySpans(cached, smartGraphRegistry);
+
+                if (filteredCached.length !== cached.length) {
+                    await saveNoteDecorations(this.currentNoteId, filteredCached, storedHash ?? currentHash);
+                }
 
                 if (storedHash === currentHash) {
-                    this.implicitDecorations = cached;
-                    this.notifyListeners();
-                    return;
-                } else {
-                    const realigned = realignSpans(cached, text);
-                    if (realigned.length > 0) {
-                        this.implicitDecorations = realigned;
+                    if (filteredCached.length > 0) {
+                        this.implicitDecorations = filteredCached;
+                        this.implicitDecorationsDocSize = text.length;
                         this.notifyListeners();
+                        return;
+                    }
+                } else {
+                    const realigned = realignSpans(filteredCached, text);
+                    const filteredRealigned = filterCachedEntitySpans(realigned, smartGraphRegistry);
+                    if (filteredRealigned.length > 0) {
+                        if (filteredRealigned.length !== realigned.length) {
+                            await saveNoteDecorations(this.currentNoteId, filteredRealigned, currentHash);
+                        }
+                        this.implicitDecorations = filteredRealigned;
+                        this.implicitDecorationsDocSize = text.length;
+                        this.notifyListeners();
+                        return;
                     }
                 }
             }
@@ -408,6 +446,29 @@ class PrettyTextAPI implements PrettyTextApi {
         }
 
         this.triggerPipelineScan(doc, text);
+    }
+
+    private getAnalyticsHighlightSpans(segments: ReturnType<typeof extractText>['segments']): DecorationSpan[] {
+        const selection = analyticsHighlightStore.getSelection();
+        if (!selection || selection.noteId !== this.currentNoteId || selection.ranges.length === 0) {
+            this.analyticsHighlightSpans = [];
+            return [];
+        }
+
+        const rawSpans = selection.ranges
+            .filter(range => range.to > range.from)
+            .map((range, index) => ({
+                type: 'analytics_highlight' as const,
+                from: range.from,
+                to: range.to,
+                label: selection.label,
+                matchedText: range.text,
+                highlightKind: selection.kind,
+                annotationId: `${selection.key}:${index}`,
+            }));
+
+        this.analyticsHighlightSpans = remapSpans(rawSpans, segments);
+        return this.analyticsHighlightSpans;
     }
 
     private triggerPipelineScan(doc: ProseMirrorDoc, text?: string) {

@@ -21,7 +21,134 @@ export interface FooterStats {
     isSaved: boolean;
 }
 
+function isSeverity(value: unknown): value is 'low' | 'medium' | 'high' {
+    return value === 'low' || value === 'medium' || value === 'high';
+}
+
+function isHighlightRange(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as { from?: unknown; to?: unknown; text?: unknown };
+    return typeof candidate.from === 'number'
+        && typeof candidate.to === 'number'
+        && typeof candidate.text === 'string';
+}
+
+function isRepetitionItem(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as {
+        id?: unknown;
+        phrase?: unknown;
+        occurrenceCount?: unknown;
+        severity?: unknown;
+        snippets?: unknown;
+        highlightRanges?: unknown;
+    };
+
+    return typeof candidate.id === 'string'
+        && typeof candidate.phrase === 'string'
+        && typeof candidate.occurrenceCount === 'number'
+        && isSeverity(candidate.severity)
+        && Array.isArray(candidate.snippets)
+        && candidate.snippets.every(snippet => typeof snippet === 'string')
+        && Array.isArray(candidate.highlightRanges)
+        && candidate.highlightRanges.every(isHighlightRange);
+}
+
+function isProximityItem(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as {
+        id?: unknown;
+        root?: unknown;
+        surfaceForms?: unknown;
+        partOfSpeech?: unknown;
+        minWordDistance?: unknown;
+        severity?: unknown;
+        snippets?: unknown;
+        highlightRanges?: unknown;
+    };
+
+    return typeof candidate.id === 'string'
+        && typeof candidate.root === 'string'
+        && Array.isArray(candidate.surfaceForms)
+        && candidate.surfaceForms.every(form => typeof form === 'string')
+        && typeof candidate.partOfSpeech === 'string'
+        && typeof candidate.minWordDistance === 'number'
+        && isSeverity(candidate.severity)
+        && Array.isArray(candidate.snippets)
+        && candidate.snippets.every(snippet => typeof snippet === 'string')
+        && Array.isArray(candidate.highlightRanges)
+        && candidate.highlightRanges.every(isHighlightRange);
+}
+
+function isCadenceSentence(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as {
+        id?: unknown;
+        paragraphIndex?: unknown;
+        sentenceIndex?: unknown;
+        from?: unknown;
+        to?: unknown;
+        wordCount?: unknown;
+        bucket?: unknown;
+        snippet?: unknown;
+    };
+
+    return typeof candidate.id === 'string'
+        && typeof candidate.paragraphIndex === 'number'
+        && typeof candidate.sentenceIndex === 'number'
+        && typeof candidate.from === 'number'
+        && typeof candidate.to === 'number'
+        && typeof candidate.wordCount === 'number'
+        && typeof candidate.bucket === 'string'
+        && typeof candidate.snippet === 'string';
+}
+
+function isCadenceHotspot(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as {
+        id?: unknown;
+        type?: unknown;
+        label?: unknown;
+        severity?: unknown;
+        explanation?: unknown;
+        sentenceIds?: unknown;
+        highlightRanges?: unknown;
+    };
+
+    return typeof candidate.id === 'string'
+        && (candidate.type === 'monotony' || candidate.type === 'whiplash')
+        && typeof candidate.label === 'string'
+        && isSeverity(candidate.severity)
+        && typeof candidate.explanation === 'string'
+        && Array.isArray(candidate.sentenceIds)
+        && candidate.sentenceIds.every(sentenceId => typeof sentenceId === 'string')
+        && Array.isArray(candidate.highlightRanges)
+        && candidate.highlightRanges.every(isHighlightRange);
+}
+
 function isTextAnalytics(value: unknown): value is TextAnalytics {
+    return isCoreTextAnalytics(value)
+        && hasValidRepetitionSection(value)
+        && hasValidProximitySection(value)
+        && hasValidCadenceSection(value);
+}
+
+function isCoreTextAnalytics(value: unknown): value is Pick<TextAnalytics, 'wordCount' | 'characterCount' | 'characterCountNoSpaces' | 'sentenceCount' | 'paragraphCount' | 'flowScore' | 'keywordDensity'> {
     if (!value || typeof value !== 'object') {
         return false;
     }
@@ -34,6 +161,66 @@ function isTextAnalytics(value: unknown): value is TextAnalytics {
         && typeof candidate.paragraphCount === 'number'
         && typeof candidate.flowScore === 'number'
         && Array.isArray(candidate.keywordDensity);
+}
+
+function hasValidRepetitionSection(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as { repetition?: { items?: unknown; totalFlags?: unknown } };
+    return !!candidate.repetition
+        && Array.isArray(candidate.repetition.items)
+        && candidate.repetition.items.every(isRepetitionItem)
+        && typeof candidate.repetition.totalFlags === 'number';
+}
+
+function hasValidProximitySection(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as { proximity?: { items?: unknown; totalFlags?: unknown } };
+    return !!candidate.proximity
+        && Array.isArray(candidate.proximity.items)
+        && candidate.proximity.items.every(isProximityItem)
+        && typeof candidate.proximity.totalFlags === 'number';
+}
+
+function hasValidCadenceSection(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as { cadence?: { sentences?: unknown; hotspots?: unknown } };
+    return !!candidate.cadence
+        && Array.isArray(candidate.cadence.sentences)
+        && candidate.cadence.sentences.every(isCadenceSentence)
+        && Array.isArray(candidate.cadence.hotspots)
+        && candidate.cadence.hotspots.every(isCadenceHotspot);
+}
+
+function normalizeTextAnalytics(value: unknown): TextAnalytics | null {
+    if (!isCoreTextAnalytics(value)) {
+        return null;
+    }
+
+    const fallback = getEmptyAnalytics();
+    const candidate = value as Partial<TextAnalytics>;
+
+    return {
+        ...fallback,
+        ...candidate,
+        repetition: hasValidRepetitionSection(value)
+            ? candidate.repetition as TextAnalytics['repetition']
+            : fallback.repetition,
+        proximity: hasValidProximitySection(value)
+            ? candidate.proximity as TextAnalytics['proximity']
+            : fallback.proximity,
+        cadence: hasValidCadenceSection(value)
+            ? candidate.cadence as TextAnalytics['cadence']
+            : fallback.cadence,
+    };
 }
 
 @Injectable({
@@ -99,7 +286,7 @@ export class FooterStatsService {
                 return;
             }
 
-            this._liveAnalytics.set(isTextAnalytics(res) ? res : getEmptyAnalytics());
+            this._liveAnalytics.set(normalizeTextAnalytics(res) ?? getEmptyAnalytics());
         });
     }
 

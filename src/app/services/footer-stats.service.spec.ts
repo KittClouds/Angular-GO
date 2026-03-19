@@ -214,6 +214,96 @@ describe('FooterStatsService live analytics', () => {
         expect(service.analytics()).toEqual(getEmptyAnalytics());
     });
 
+    it('accepts enriched analytics payloads and normalizes partial section payloads', async () => {
+        const enriched = makeAnalytics({
+            repetition: {
+                totalFlags: 1,
+                items: [{
+                    id: 'echo:iron-gate',
+                    phrase: 'iron gate',
+                    occurrenceCount: 3,
+                    severity: 'medium',
+                    snippets: ['The iron gate slammed shut.'],
+                    highlightRanges: [{ from: 4, to: 13, text: 'iron gate' }],
+                }],
+            },
+            proximity: {
+                totalFlags: 1,
+                items: [{
+                    id: 'prox:ember',
+                    root: 'ember',
+                    surfaceForms: ['embers', 'ember-lit'],
+                    partOfSpeech: 'noun',
+                    minWordDistance: 4,
+                    severity: 'low',
+                    snippets: ['Bright embers glowed beside the ember-lit grate.'],
+                    highlightRanges: [
+                        { from: 7, to: 13, text: 'embers' },
+                        { from: 32, to: 41, text: 'ember-lit' },
+                    ],
+                }],
+            },
+            cadence: {
+                sentences: [{
+                    id: 'cadence:0',
+                    paragraphIndex: 0,
+                    sentenceIndex: 0,
+                    from: 0,
+                    to: 24,
+                    wordCount: 4,
+                    bucket: '2-6',
+                    snippet: 'Short beat. Tiny pause.',
+                }],
+                hotspots: [{
+                    id: 'cadence:whiplash:0',
+                    type: 'whiplash',
+                    label: '4 -> 22 words',
+                    severity: 'medium',
+                    explanation: 'Abrupt rhythm jump detected.',
+                    sentenceIds: ['cadence:0', 'cadence:1'],
+                    highlightRanges: [{ from: 0, to: 24, text: 'Short beat. Tiny pause.' }],
+                }],
+            },
+        });
+
+        goKittServiceMock.analyzeText.mockResolvedValue(enriched);
+        contentSubject.next({ json: makeDoc('Short beat. Tiny pause.'), markdown: 'Short beat. Tiny pause.' });
+        await vi.advanceTimersByTimeAsync(300);
+
+        expect(service.analytics()).toEqual(enriched);
+
+        const partial = {
+            wordCount: 4,
+            characterCount: 21,
+            characterCountNoSpaces: 18,
+            sentenceCount: 2,
+            paragraphCount: 1,
+            flowScore: 84,
+            keywordDensity: [{ word: 'kai', count: 2, percentage: 50 }],
+        };
+
+        goKittServiceMock.analyzeText.mockResolvedValueOnce(partial);
+        contentSubject.next({ json: makeDoc('Kai moved. Kai spoke.'), markdown: 'Kai moved. Kai spoke.' });
+        await vi.advanceTimersByTimeAsync(300);
+
+        expect(service.analytics()).toEqual({
+            ...getEmptyAnalytics(),
+            ...partial,
+        });
+
+        goKittServiceMock.analyzeText.mockResolvedValueOnce({
+            ...enriched,
+            repetition: { totalFlags: 1 },
+        });
+        contentSubject.next({ json: makeDoc('Broken repetition payload'), markdown: 'Broken repetition payload' });
+        await vi.advanceTimersByTimeAsync(300);
+
+        expect(service.analytics()).toEqual({
+            ...enriched,
+            repetition: getEmptyAnalytics().repetition,
+        });
+    });
+
     it('ignores stale async analytics responses when newer typing arrives', async () => {
         const first = createDeferred<TextAnalytics>();
         const second = createDeferred<TextAnalytics>();

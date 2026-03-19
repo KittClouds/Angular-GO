@@ -4,16 +4,26 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles, Target, X } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
+import { distinctUntilChanged } from 'rxjs';
 
 import { getPrettyTextApi } from '../../api/pretty-text-api';
 import { FlowScoreComponent } from './flow-score/flow-score.component';
-import { TextAnalytics } from '../../lib/analytics';
-import { parseSearchHighlightTerms } from '../../lib/Scanner/keyword-focus';
+import { AnalyticsHighlightRange, parseContentToPlainText, TextAnalytics } from '../../lib/analytics';
+import { createKeywordFocusSpans, parseSearchHighlightTerms } from '../../lib/Scanner/keyword-focus';
+import { AnalyticsHighlightKind } from '../../lib/Scanner/types';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { keywordHighlightStore } from '../../lib/store/keywordHighlightStore';
+import { EditorService } from '../../services/editor.service';
 import { FooterStatsService } from '../../services/footer-stats.service';
 import { GoKittService } from '../../services/gokitt.service';
 import { NotesService } from '../../lib/dexie/notes.service';
+
+interface AnalyticsSearchResult {
+    id: string;
+    score: number;
+    title: string;
+    localMatchCount?: number;
+}
 
 @Component({
     selector: 'app-analytics-panel',
@@ -34,7 +44,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         <lucide-icon [img]="Sparkles" class="h-4 w-4 text-primary"></lucide-icon>
                         <span>Semantic Search</span>
                     </div>
-                    <button 
+                    <button
                         class="ml-auto p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-primary transition-colors"
                         (click)="openEval()"
                         title="Open RAPTOR Evaluation Harness"
@@ -43,9 +53,9 @@ import { NotesService } from '../../lib/dexie/notes.service';
                     </button>
                 </div>
                 <div class="search-box">
-                    <input 
-                        type="text" 
-                        class="search-input" 
+                    <input
+                        type="text"
+                        class="search-input"
                         placeholder="Search notes..."
                         [value]="searchInput()"
                         (input)="updateSearchInput($event)"
@@ -63,7 +73,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         <lucide-icon [img]="X" class="h-3 w-3"></lucide-icon>
                     </button>
                 </div>
-                
+
                 @if (isSearching()) {
                     <div class="text-xs text-muted-foreground animate-pulse px-2">Searching...</div>
                 }
@@ -73,7 +83,11 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         @for (res of searchResults(); track res.id) {
                             <div class="search-result-item" (click)="openNoteResult(res.id)">
                                 <span class="result-title">{{ res.title }}</span>
-                                <span class="result-score">{{ res.score | number:'1.2-2' }}</span>
+                                @if (res.localMatchCount) {
+                                    <span class="result-score">{{ res.localMatchCount }} match{{ res.localMatchCount === 1 ? '' : 'es' }}</span>
+                                } @else {
+                                    <span class="result-score">{{ res.score | number:'1.2-2' }}</span>
+                                }
                             </div>
                         }
                     </div>
@@ -98,7 +112,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                     <div class="stats-grid">
                         <div class="stat-row">
                             <span class="stat-label">Words</span>
-                            <om-number-ticker 
+                            <om-number-ticker
                                 [countTo]="analytics().wordCount"
                                 [countDuration]="300"
                                 styleClass="stat-value"
@@ -106,7 +120,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Characters</span>
-                            <om-number-ticker 
+                            <om-number-ticker
                                 [countTo]="analytics().characterCount"
                                 [countDuration]="300"
                                 styleClass="stat-value"
@@ -114,7 +128,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Characters (no spaces)</span>
-                            <om-number-ticker 
+                            <om-number-ticker
                                 [countTo]="analytics().characterCountNoSpaces"
                                 [countDuration]="300"
                                 styleClass="stat-value"
@@ -122,7 +136,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Sentences</span>
-                            <om-number-ticker 
+                            <om-number-ticker
                                 [countTo]="analytics().sentenceCount"
                                 [countDuration]="300"
                                 styleClass="stat-value"
@@ -130,7 +144,7 @@ import { NotesService } from '../../lib/dexie/notes.service';
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Paragraphs</span>
-                            <om-number-ticker 
+                            <om-number-ticker
                                 [countTo]="analytics().paragraphCount"
                                 [countDuration]="300"
                                 styleClass="stat-value"
@@ -180,63 +194,121 @@ import { NotesService } from '../../lib/dexie/notes.service';
                     />
                 </section>
 
-                <!-- Keyword Density -->
+                <!-- Text Analytics Detail -->
                 <section class="analytics-section">
-                    <div class="section-header">
-                        <lucide-icon [img]="Hash" class="h-4 w-4 text-primary"></lucide-icon>
-                        <span>Keyword Density</span>
-                    </div>
-                    
-                    <!-- Filter buttons -->
-                    <div class="keyword-filters">
-                        @for (count of [1, 2, 3]; track count) {
-                            <button 
-                                class="filter-btn"
-                                [class.active]="minCount() === count"
-                                (click)="minCount.set(count)"
-                            >
-                                ×{{ count }}+
+                    <div class="section-header flex items-center justify-between w-full">
+                        <div class="flex items-center gap-2">
+                            <lucide-icon [img]="Hash" class="h-4 w-4 text-primary"></lucide-icon>
+                            <span class="capitalize">{{ activeAnalyticsView() }}</span>
+                        </div>
+                        @if (activeHighlightId()) {
+                            <button class="text-[0.65rem] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 bg-white/5 hover:bg-white/10 px-1.5 py-0.5 rounded border border-white/5" (click)="clearActiveHighlight()" title="Clear Highlight">
+                                <lucide-icon [img]="X" class="h-3 w-3"></lucide-icon> Clear
                             </button>
                         }
                     </div>
 
-                    <!-- Keyword list -->
+                    <!-- View Selector buttons -->
+                    <div class="keyword-filters">
+                        <button class="filter-btn" [class.active]="activeAnalyticsView() === 'keyword'" (click)="setActiveView('keyword')">Keyword</button>
+                        <button class="filter-btn" [class.active]="activeAnalyticsView() === 'repetition'" (click)="setActiveView('repetition')">Rep.</button>
+                        <button class="filter-btn" [class.active]="activeAnalyticsView() === 'proximity'" (click)="setActiveView('proximity')">Prox.</button>
+                        <button class="filter-btn" [class.active]="activeAnalyticsView() === 'cadence'" (click)="setActiveView('cadence')">Cadence</button>
+                    </div>
+
+                    <!-- Sub-view content -->
                     <div class="keyword-list">
-                        @if (filteredKeywords().length === 0) {
-                            <p class="text-xs text-muted-foreground italic py-2">
-                                No keywords match the filter.
-                            </p>
-                        } @else {
-                            @for (item of displayedKeywords(); track item.word; let i = $index) {
-                                <div class="keyword-row" [class.top-keyword]="i < 3">
-                                    <label class="keyword-label-group">
-                                        <input
-                                            type="checkbox"
-                                            class="keyword-checkbox"
-                                            [checked]="isKeywordChecked(item.word)"
-                                            (change)="toggleKeywordHighlight(item.word)"
-                                        />
-                                        <span class="keyword-word">{{ item.word }}</span>
-                                    </label>
-                                    <span class="keyword-stats">
-                                        {{ item.count }} ({{ item.percentage }}%)
-                                    </span>
-                                </div>
+                        @if (activeAnalyticsView() === 'keyword') {
+                            @if (filteredKeywords().length === 0) {
+                                <p class="text-xs text-muted-foreground italic py-2">
+                                    No keywords found.
+                                </p>
+                            } @else {
+                                @for (item of displayedKeywords(); track item.word; let i = $index) {
+                                    <div class="keyword-row" [class.top-keyword]="i < 3">
+                                        <label class="keyword-label-group">
+                                            <input
+                                                type="checkbox"
+                                                class="keyword-checkbox"
+                                                [checked]="isKeywordChecked(item.word)"
+                                                (change)="toggleKeywordHighlight(item.word)"
+                                            />
+                                            <span class="keyword-word">{{ item.word }}</span>
+                                        </label>
+                                        <span class="keyword-stats shrink-0">
+                                            {{ item.count }} ({{ item.percentage }}%)
+                                        </span>
+                                    </div>
+                                }
+                                @if (filteredKeywords().length > 5) {
+                                    <button class="expand-keywords-btn" (click)="isKeywordsExpanded.set(!isKeywordsExpanded())">
+                                        @if (isKeywordsExpanded()) {
+                                            Show less <lucide-icon [img]="ChevronUp" class="h-3 w-3 ml-1"></lucide-icon>
+                                        } @else {
+                                            Show {{ filteredKeywords().length - 5 }} more <lucide-icon [img]="ChevronDown" class="h-3 w-3 ml-1"></lucide-icon>
+                                        }
+                                    </button>
+                                }
                             }
-                            
-                            @if (filteredKeywords().length > 5) {
-                                <button 
-                                    class="expand-keywords-btn"
-                                    (click)="isKeywordsExpanded.set(!isKeywordsExpanded())"
-                                >
-                                    @if (isKeywordsExpanded()) {
-                                        Show less
-                                        <lucide-icon [img]="ChevronUp" class="h-3 w-3 ml-1"></lucide-icon>
-                                    } @else {
-                                        Show {{ filteredKeywords().length - 5 }} more
-                                        <lucide-icon [img]="ChevronDown" class="h-3 w-3 ml-1"></lucide-icon>
-                                    }
-                                </button>
+                        }
+
+                        @if (activeAnalyticsView() === 'repetition') {
+                            @if (!analytics().repetition?.items?.length) {
+                                <p class="text-xs text-muted-foreground italic py-2">No significant repetitions found.</p>
+                            } @else {
+                                @for (item of analytics().repetition.items; track item.id) {
+                                    <div class="keyword-row cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors group"
+                                         [class.active-highlight]="activeHighlightId() === item.id"
+                                         (click)="toggleAnalyticsHighlight(item.id, 'repetition', item.phrase, item.highlightRanges)">
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <span class="keyword-word truncate group-hover:text-foreground transition-colors" [class.text-amber-400]="item.severity === 'high'">{{ item.phrase }}</span>
+                                        </div>
+                                        <span class="keyword-stats shrink-0">{{ item.occurrenceCount }}x</span>
+                                    </div>
+                                }
+                            }
+                        }
+
+                        @if (activeAnalyticsView() === 'proximity') {
+                            @if (!analytics().proximity?.items?.length) {
+                                <p class="text-xs text-muted-foreground italic py-2">No proximity warnings found.</p>
+                            } @else {
+                                @for (item of analytics().proximity.items; track item.id) {
+                                    <div class="keyword-row cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors group flex-col items-start gap-1"
+                                         [class.active-highlight]="activeHighlightId() === item.id"
+                                         (click)="toggleAnalyticsHighlight(item.id, 'proximity', item.root, item.highlightRanges)">
+                                        <div class="flex items-center justify-between w-full">
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <span class="keyword-word font-medium truncate group-hover:text-foreground transition-colors" [class.text-amber-400]="item.severity === 'high'">{{ item.root }}</span>
+                                                <span class="text-[0.65rem] text-muted-foreground uppercase border border-white/10 border-solid rounded px-1 shrink-0">{{ item.partOfSpeech }}</span>
+                                            </div>
+                                            <span class="keyword-stats shrink-0" title="Min word distance">{{ item.minWordDistance }}d</span>
+                                        </div>
+                                        <div class="text-[0.7rem] text-muted-foreground truncate w-full" title="Forms: {{ item.surfaceForms.join(', ') }}">
+                                            {{ item.surfaceForms.join(', ') }}
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        }
+
+                        @if (activeAnalyticsView() === 'cadence') {
+                            @if (!analytics().cadence?.hotspots?.length) {
+                                <p class="text-xs text-muted-foreground italic py-2">No cadence hotspots detected.</p>
+                            } @else {
+                                @for (hotspot of analytics().cadence.hotspots; track hotspot.id) {
+                                    <div class="keyword-row cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors group flex-col items-start gap-1"
+                                         [class.active-highlight]="activeHighlightId() === hotspot.id"
+                                         (click)="toggleAnalyticsHighlight(hotspot.id, 'cadence', hotspot.label, hotspot.highlightRanges)">
+                                        <div class="flex items-center justify-between w-full">
+                                            <span class="keyword-word font-medium truncate group-hover:text-foreground transition-colors" [class.text-amber-400]="hotspot.severity === 'high'">{{ hotspot.label }}</span>
+                                            <span class="keyword-stats shrink-0 text-[0.65rem] capitalize">{{ hotspot.type }}</span>
+                                        </div>
+                                        <div class="text-[0.7rem] text-muted-foreground line-clamp-2 w-full leading-tight">
+                                            {{ hotspot.explanation }}
+                                        </div>
+                                    </div>
+                                }
                             }
                         }
                     </div>
@@ -501,13 +573,17 @@ import { NotesService } from '../../lib/dexie/notes.service';
         .expand-keywords-btn:hover {
             color: hsl(var(--foreground));
         }
+
+        .active-highlight {
+            background: rgba(255, 255, 255, 0.1) !important;
+        }
     `]
 })
 export class AnalyticsPanelComponent {
-    // Dependencies
     private goKitt = inject(GoKittService);
     private notesService = inject(NotesService);
     private noteStore = inject(NoteEditorStore);
+    private editorService = inject(EditorService);
     private footerStatsService = inject(FooterStatsService);
     private router = inject(Router);
     private prettyTextApi = getPrettyTextApi();
@@ -516,13 +592,17 @@ export class AnalyticsPanelComponent {
     searchInput = signal('');
     searchQuery = signal('');
     isSearching = signal(false);
-    searchResults = signal<any[]>([]);
+    searchResults = signal<AnalyticsSearchResult[]>([]);
 
     // Note Lookup Map (ID -> Title)
     private noteTitleMap = new Map<string, string>();
+    private currentPlainText = signal('');
+
+    // View state
+    activeAnalyticsView = signal<'keyword' | 'repetition' | 'proximity' | 'cadence'>('keyword');
+    activeHighlightId = signal<string | null>(null);
 
     // existing state
-    minCount = signal(1);
     isKeywordsExpanded = signal(false);
     keywordSelectionVersion = signal(0);
 
@@ -546,6 +626,18 @@ export class AnalyticsPanelComponent {
             notes.forEach(n => this.noteTitleMap.set(n.id, n.title || 'Untitled'));
         });
 
+        this.noteStore.activeNote$.pipe(
+            distinctUntilChanged((a, b) => a?.id === b?.id && a?.content === b?.content)
+        ).subscribe(note => {
+            const fallbackContent = note?.content || note?.markdownContent || '';
+            this.currentPlainText.set(parseContentToPlainText(fallbackContent));
+            this.activeHighlightId.set(null);
+        });
+
+        this.editorService.content$.subscribe(({ json }) => {
+            this.currentPlainText.set(parseContentToPlainText(JSON.stringify(json)));
+        });
+
         keywordHighlightStore.subscribe(() => {
             this.keywordSelectionVersion.update(version => version + 1);
         });
@@ -558,7 +650,7 @@ export class AnalyticsPanelComponent {
     hasActiveSearchHighlight = computed(() => this.searchQuery().trim().length > 0);
 
     filteredKeywords = computed(() => {
-        return this.analytics().keywordDensity.filter(k => k.count >= this.minCount());
+        return this.analytics().keywordDensity || [];
     });
 
     displayedKeywords = computed(() => {
@@ -586,25 +678,27 @@ export class AnalyticsPanelComponent {
 
         this.prettyTextApi.setSearchHighlightTerms(parseSearchHighlightTerms(query));
         this.isSearching.set(true);
+        const openNoteResult = this.buildOpenNoteMatchResult(query);
+        let rawResults: any[] = [];
+
         try {
             // Search via WASM
-            const rawResults = await this.goKitt.search(query, 10);
-            if (!rawResults) {
-                this.searchResults.set([]);
-                return;
-            }
-
-            // Map results to display format
+            const response = await this.goKitt.search(query, 10);
+            rawResults = Array.isArray(response) ? response : [];
+        } catch (err) {
+            console.error('[AnalyticsPanel] Search failed:', err);
+        } finally {
             const mapped = rawResults.map(r => ({
                 id: r.DocID || r.docID || r.id, // Handle Go capitalization variance
                 score: r.Score || r.score || 0,
                 title: this.noteTitleMap.get(r.DocID || r.docID || r.id) || 'Unknown Note'
             }));
 
+            if (openNoteResult && !mapped.some(result => result.id === openNoteResult.id)) {
+                mapped.unshift(openNoteResult);
+            }
+
             this.searchResults.set(mapped);
-        } catch (err) {
-            console.error('[AnalyticsPanel] Search failed:', err);
-        } finally {
             this.isSearching.set(false);
         }
     }
@@ -635,6 +729,73 @@ export class AnalyticsPanelComponent {
         }
 
         keywordHighlightStore.toggleKeyword(noteId, keyword);
+    }
+
+    setActiveView(view: 'keyword' | 'repetition' | 'proximity' | 'cadence') {
+        this.activeAnalyticsView.set(view);
+        this.clearActiveHighlight();
+    }
+
+    clearActiveHighlight() {
+        this.prettyTextApi.clearAnalyticsHighlights();
+        this.activeHighlightId.set(null);
+    }
+
+    toggleAnalyticsHighlight(id: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[] | null | undefined) {
+        const noteId = this.noteStore.activeNoteId();
+        if (!noteId || !ranges?.length) return;
+
+        if (this.activeHighlightId() !== id) {
+            this.prettyTextApi.clearAnalyticsHighlights();
+        }
+
+        this.prettyTextApi.toggleAnalyticsHighlights(noteId, id, kind, label, ranges);
+
+        if (this.activeHighlightId() === id) {
+            this.activeHighlightId.set(null);
+        } else {
+            this.activeHighlightId.set(id);
+        }
+    }
+
+    private buildOpenNoteMatchResult(query: string): AnalyticsSearchResult | null {
+        const noteId = this.noteStore.activeNoteId();
+        const currentNote = typeof this.noteStore.currentNote === 'function'
+            ? this.noteStore.currentNote()
+            : undefined;
+        const textCandidates = [
+            this.currentPlainText(),
+            parseContentToPlainText(currentNote?.content || ''),
+            currentNote?.markdownContent || '',
+        ];
+        const text = textCandidates.find(candidate => candidate.trim().length > 0) || '';
+
+        if (!noteId || !text.trim()) {
+            return null;
+        }
+
+        const terms = parseSearchHighlightTerms(query);
+        if (terms.length === 0) {
+            return null;
+        }
+
+        const matches = createKeywordFocusSpans([{
+            pmPos: 0,
+            concatStart: 0,
+            length: text.length,
+            text,
+        }], terms);
+
+        if (matches.length === 0) {
+            return null;
+        }
+
+        return {
+            id: noteId,
+            score: matches.length,
+            title: currentNote?.title || this.noteTitleMap.get(noteId) || 'Open Note',
+            localMatchCount: matches.length,
+        };
     }
 
     // ... formatTime ...
