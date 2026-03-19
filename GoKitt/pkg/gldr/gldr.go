@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/kittclouds/gokitt/internal/graphstore"
 	"github.com/kittclouds/gokitt/pkg/gdr"
-	"github.com/kittclouds/gokitt/pkg/graptor"
 	"github.com/kittclouds/gokitt/pkg/qgram"
 )
 
@@ -267,63 +266,81 @@ func (idx *GLDRIndex) AddGraphEdgeBidirectional(sourceID, targetID, relType stri
 	// Note: GraphStore stores bidirectional in warmCache automatically
 }
 
-// LoadCooccurrences bulk-loads graph edges from graptor CooccurrenceStats.
-func (idx *GLDRIndex) LoadCooccurrences(cooc *graptor.CooccurrenceStats, minCount int) {
-	pairs := cooc.GetAllPairs(minCount)
-	if len(pairs) == 0 {
-		return
-	}
+// CooccurrencePair is a cycle-safe bulk load input for co-occurrence edges.
+type CooccurrencePair struct {
+	Entity1ID string
+	Entity2ID string
+	Count     int
+}
 
-	// Find max count for normalization
+// StructuredEdge is a cycle-safe bulk load input for semantic graph edges.
+type StructuredEdge struct {
+	SourceID   string
+	TargetID   string
+	RelType    string
+	Confidence float64
+	Source     string
+	ValidFrom  *TemporalMarker
+	ValidUntil *TemporalMarker
+}
+
+// LoadCooccurrencePairs bulk-loads co-occurrence relationships without depending on Graptor types.
+func (idx *GLDRIndex) LoadCooccurrencePairs(pairs []CooccurrencePair, minCount int) {
+	filtered := make([]CooccurrencePair, 0, len(pairs))
 	maxCount := 0
+
 	for _, pair := range pairs {
+		if pair.Count < minCount || pair.Entity1ID == "" || pair.Entity2ID == "" || pair.Entity1ID == pair.Entity2ID {
+			continue
+		}
+		filtered = append(filtered, pair)
 		if pair.Count > maxCount {
 			maxCount = pair.Count
 		}
+	}
+
+	if len(filtered) == 0 || maxCount <= 0 {
+		return
 	}
 
 	idx.mu.Lock()
 	idx.MaxEdgeWeight = float64(maxCount)
 	idx.mu.Unlock()
 
-	for _, pair := range pairs {
+	for _, pair := range filtered {
 		confidence := float64(pair.Count) / float64(maxCount)
 		idx.AddGraphEdgeBidirectional(pair.Entity1ID, pair.Entity2ID, "cooccurs", confidence, "cooccurrence")
 	}
 }
 
-// LoadGraphEdges bulk-loads semantic graph edges from Graptor ConceptGraphs.
-func (idx *GLDRIndex) LoadGraphEdges(docGraph *graptor.DocumentGraph) {
-	chapters := docGraph.GetChapters()
-
-	for _, chapter := range chapters {
-		if chapter.Graph == nil {
+// LoadStructuredEdges bulk-loads semantic graph edges without depending on Graptor types.
+func (idx *GLDRIndex) LoadStructuredEdges(edges []StructuredEdge) {
+	for _, edge := range edges {
+		if edge.SourceID == "" || edge.TargetID == "" {
 			continue
 		}
 
-		// First, ensure all vertices exist
-		for _, node := range chapter.Graph.AllNodes() {
-			idx.ensureVertex(node.ID)
+		relType := edge.RelType
+		if relType == "" {
+			relType = "related_to"
 		}
 
-		// Then, insert explicit edges (Event linkages, Subject/Object bindings)
-		for _, edge := range chapter.Graph.AllEdges() {
-			// Skip internal edges if they map identically to co-occurrence (e.g., plain cooccurs)
-			// But for Causal inference, we WANT these edges: CAUSES, PRECEDES, HAS_SUBJECT, HAS_OBJECT
-
-			// Build temporal marker based on the chapter
-			marker := &TemporalMarker{
-				Source:  TemporalSourceChapter,
-				Chapter: &chapter.ChapterID,
-			}
-
-			idx.AddGraphEdgeWithTemporal(edge.Source.ID, GraphEdge{
-				TargetID:   edge.Target.ID,
-				RelType:    edge.Edge.Relation,
-				Confidence: edge.Edge.Weight,
-				Source:     "narrative_projection",
-			}, marker, nil)
+		confidence := edge.Confidence
+		if confidence <= 0 {
+			confidence = 1.0
 		}
+
+		source := edge.Source
+		if source == "" {
+			source = "structured"
+		}
+
+		idx.AddGraphEdgeWithTemporal(edge.SourceID, GraphEdge{
+			TargetID:   edge.TargetID,
+			RelType:    relType,
+			Confidence: confidence,
+			Source:     source,
+		}, edge.ValidFrom, edge.ValidUntil)
 	}
 }
 

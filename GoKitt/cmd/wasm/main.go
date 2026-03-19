@@ -135,11 +135,11 @@ func main() {
 		"storeUpsertDiscoveryCandidate": js.FuncOf(storeUpsertDiscoveryCandidate),
 		"storeListDiscoveryCandidates":  js.FuncOf(storeListDiscoveryCandidates),
 		// Store Fact Sheets
-		"storeUpsertEntityCard":   js.FuncOf(storeUpsertEntityCard),
-		"storeUpsertEntityCards":  js.FuncOf(storeUpsertEntityCards),
-		"storeGetEntityCards":     js.FuncOf(storeGetEntityCards),
-		"storeUpsertFolderSchema": js.FuncOf(storeUpsertFolderSchema),
-		"storeGetFolderSchema":    js.FuncOf(storeGetFolderSchema),
+		"storeUpsertEntityCard":        js.FuncOf(storeUpsertEntityCard),
+		"storeUpsertEntityCards":       js.FuncOf(storeUpsertEntityCards),
+		"storeGetEntityCards":          js.FuncOf(storeGetEntityCards),
+		"storeUpsertFolderSchema":      js.FuncOf(storeUpsertFolderSchema),
+		"storeGetFolderSchema":         js.FuncOf(storeGetFolderSchema),
 		"storeUpsertScopedDocument":    js.FuncOf(storeUpsertScopedDocument),
 		"storeGetScopedDocument":       js.FuncOf(storeGetScopedDocument),
 		"storeListScopedDocuments":     js.FuncOf(storeListScopedDocuments),
@@ -225,6 +225,14 @@ func main() {
 		"gldrSearchNodes":       js.FuncOf(gldrSearchNodes),
 		"gldrSearchNodesSAB":    js.FuncOf(gldrSearchNodesSAB),
 		"gldrStats":             js.FuncOf(gldrStats),
+		"systemCreateSession":   js.FuncOf(systemCreateSession),
+		"systemIngest":          js.FuncOf(systemIngest),
+		"systemSearch":          js.FuncOf(systemSearch),
+		"systemCommit":          js.FuncOf(systemCommit),
+		"systemGetState":        js.FuncOf(systemGetState),
+		"systemGetStats":        js.FuncOf(systemGetStats),
+		"systemClose":           js.FuncOf(systemClose),
+		"systemRun":             js.FuncOf(systemRun),
 	}))
 
 	select {}

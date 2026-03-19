@@ -332,6 +332,16 @@ func (r *GlobalEntityRegistry) RegisterWithID(name, specifiedID string, kind Ent
 // RegisterMention records a mention of an entity.
 // If the entity doesn't exist, it will be created with KindUnknown.
 func (r *GlobalEntityRegistry) RegisterMention(text string, kind EntityKind, chapterID, chunkID uint32, start, end int) string {
+	return r.registerMentionWithSpecifiedID(text, "", kind, chapterID, chunkID, start, end)
+}
+
+// RegisterMentionWithID records a mention and preserves a caller-supplied entity ID
+// when the entity needs to be created from a seeded dictionary or external source.
+func (r *GlobalEntityRegistry) RegisterMentionWithID(text, specifiedID string, kind EntityKind, chapterID, chunkID uint32, start, end int) string {
+	return r.registerMentionWithSpecifiedID(text, specifiedID, kind, chapterID, chunkID, start, end)
+}
+
+func (r *GlobalEntityRegistry) registerMentionWithSpecifiedID(text, specifiedID string, kind EntityKind, chapterID, chunkID uint32, start, end int) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -350,7 +360,11 @@ func (r *GlobalEntityRegistry) RegisterMention(text string, kind EntityKind, cha
 		if kind == "" {
 			kind = KindUnknown
 		}
-		entityID = GenerateEntityID(text, kind)
+		entityID = specifiedID
+		if entityID == "" {
+			entityID = GenerateEntityID(text, kind)
+		}
+		entityID = r.interner.Intern(entityID)
 		now := time.Now().Unix()
 
 		entity := &Entity{

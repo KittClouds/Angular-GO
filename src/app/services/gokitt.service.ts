@@ -179,6 +179,14 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_STATS'; id: number }
+    | { type: 'SYSTEM_CREATE_SESSION'; payload: { configJSON?: string }; id: number }
+    | { type: 'SYSTEM_INGEST'; payload: { sessionId: string; requestJSON: string }; id: number }
+    | { type: 'SYSTEM_SEARCH'; payload: { sessionId: string; requestJSON: string }; id: number }
+    | { type: 'SYSTEM_COMMIT'; payload: { sessionId: string; requestJSON?: string }; id: number }
+    | { type: 'SYSTEM_GET_STATE'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_GET_STATS'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_CLOSE'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_RUN'; payload: { requestJSON: string }; id: number }
     | { type: 'GO_STREAM_CHAT'; payload: { messagesJSON: string; systemPrompt?: string; requestOptionsJSON?: string }; id: number };
 
 type GoKittWorkerResponse =
@@ -320,6 +328,14 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: string }
     | { type: 'GLDR_SEARCH_NODES_SAB_RESULT'; id: number; payload: string }
     | { type: 'GLDR_STATS_RESULT'; id: number; payload: string }
+    | { type: 'SYSTEM_CREATE_SESSION_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_INGEST_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_SEARCH_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_COMMIT_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_GET_STATE_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_GET_STATS_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_CLOSE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'SYSTEM_RUN_RESULT'; id: number; payload: any }
     | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
@@ -1167,6 +1183,14 @@ export class GoKittService {
                         case 'GLDR_SEARCH_NODES_RESULT':
                         case 'GLDR_SEARCH_NODES_SAB_RESULT':
                         case 'GLDR_STATS_RESULT':
+                        case 'SYSTEM_CREATE_SESSION_RESULT':
+                        case 'SYSTEM_INGEST_RESULT':
+                        case 'SYSTEM_SEARCH_RESULT':
+                        case 'SYSTEM_COMMIT_RESULT':
+                        case 'SYSTEM_GET_STATE_RESULT':
+                        case 'SYSTEM_GET_STATS_RESULT':
+                        case 'SYSTEM_CLOSE_RESULT':
+                        case 'SYSTEM_RUN_RESULT':
                             this.pendingRequests.delete(msg.id);
                             pending.resolve(msg.payload);
                             break;
@@ -2019,6 +2043,79 @@ export class GoKittService {
     async gldrStats(): Promise<string> {
         if (!this.wasmLoaded) return '{"entities":0,"chunks":0,"edges":0}';
         return this.sendRequest('GLDR_STATS', {});
+    }
+
+    // ==========================================================================
+    // Unified Full-System Session API
+    // ==========================================================================
+
+    async systemCreateSession(config: Record<string, unknown> = {}): Promise<{ sessionId: string }> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        const configJSON = Object.keys(config).length > 0 ? JSON.stringify(config) : undefined;
+        return this.sendRequest('SYSTEM_CREATE_SESSION', { configJSON });
+    }
+
+    async systemIngest<T = any>(sessionId: string, request: Record<string, unknown>): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_INGEST', {
+            sessionId,
+            requestJSON: JSON.stringify(request),
+        });
+    }
+
+    async systemSearch<T = any>(sessionId: string, request: Record<string, unknown>): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_SEARCH', {
+            sessionId,
+            requestJSON: JSON.stringify(request),
+        });
+    }
+
+    async systemCommit<T = any>(sessionId: string, request: Record<string, unknown> = {}): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        const requestJSON = Object.keys(request).length > 0 ? JSON.stringify(request) : undefined;
+        return this.sendRequest('SYSTEM_COMMIT', {
+            sessionId,
+            requestJSON,
+        });
+    }
+
+    async systemGetState<T = any>(sessionId: string): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_GET_STATE', { sessionId });
+    }
+
+    async systemGetStats<T = any>(sessionId: string): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_GET_STATS', { sessionId });
+    }
+
+    async systemClose(sessionId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_CLOSE', { sessionId });
+    }
+
+    async systemRun<T = any>(request: Record<string, unknown>): Promise<T> {
+        if (!this.wasmLoaded) {
+            throw new Error('WASM not loaded');
+        }
+        return this.sendRequest('SYSTEM_RUN', {
+            requestJSON: JSON.stringify(request),
+        });
     }
 }
 

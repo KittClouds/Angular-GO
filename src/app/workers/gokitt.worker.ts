@@ -178,7 +178,15 @@ type GoKittWorkerMessage =
     | { type: 'GLDR_SEARCH_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
     | { type: 'GLDR_SEARCH_NODES'; payload: { query: string; configJSON: string }; id: number }
     | { type: 'GLDR_SEARCH_NODES_SAB'; payload: { query: string; configJSON: string; count: number; dim: number; embeddings: Float32Array }; id: number }
-    | { type: 'GLDR_STATS'; id: number };
+    | { type: 'GLDR_STATS'; id: number }
+    | { type: 'SYSTEM_CREATE_SESSION'; payload: { configJSON?: string }; id: number }
+    | { type: 'SYSTEM_INGEST'; payload: { sessionId: string; requestJSON: string }; id: number }
+    | { type: 'SYSTEM_SEARCH'; payload: { sessionId: string; requestJSON: string }; id: number }
+    | { type: 'SYSTEM_COMMIT'; payload: { sessionId: string; requestJSON?: string }; id: number }
+    | { type: 'SYSTEM_GET_STATE'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_GET_STATS'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_CLOSE'; payload: { sessionId: string }; id: number }
+    | { type: 'SYSTEM_RUN'; payload: { requestJSON: string }; id: number };
 
 /** Outgoing messages to main thread */
 type GoKittWorkerResponse =
@@ -338,6 +346,14 @@ type GoKittWorkerResponse =
     | { type: 'GLDR_SEARCH_NODES_RESULT'; id: number; payload: string }
     | { type: 'GLDR_SEARCH_NODES_SAB_RESULT'; id: number; payload: string }
     | { type: 'GLDR_STATS_RESULT'; id: number; payload: string }
+    | { type: 'SYSTEM_CREATE_SESSION_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_INGEST_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_SEARCH_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_COMMIT_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_GET_STATE_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_GET_STATS_RESULT'; id: number; payload: any }
+    | { type: 'SYSTEM_CLOSE_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'SYSTEM_RUN_RESULT'; id: number; payload: any }
     | { type: 'GO_STREAM_CHAT_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_REASONING_CHUNK'; id: number; payload: { chunk: string } }
     | { type: 'GO_STREAM_CHAT_RESULT'; id: number; payload: { response: string; error?: string } }
@@ -560,6 +576,14 @@ declare const GoKitt: {
     gldrSearchNodes: (query: string, configJSON?: string) => string;
     gldrSearchNodesSAB: (query: string, configJSON: string, count: number, dim: number) => string;
     gldrStats: () => string;
+    systemCreateSession: (configJSON?: string) => string;
+    systemIngest: (sessionId: string, requestJSON: string) => string;
+    systemSearch: (sessionId: string, requestJSON: string) => string;
+    systemCommit: (sessionId: string, requestJSON?: string) => string;
+    systemGetState: (sessionId: string) => string;
+    systemGetStats: (sessionId: string) => string;
+    systemClose: (sessionId: string) => string;
+    systemRun: (requestJSON: string) => string;
 };
 
 /**
@@ -3315,6 +3339,102 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 }
                 const res = GoKitt.gldrStats();
                 self.postMessage({ type: 'GLDR_STATS_RESULT', id: msg.id, payload: res });
+                break;
+            }
+
+            // =================================================================
+            // Unified Full-System Session API Handlers
+            // =================================================================
+
+            case 'SYSTEM_CREATE_SESSION': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_CREATE_SESSION_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemCreateSession(msg.payload.configJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_CREATE_SESSION_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_INGEST': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_INGEST_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemIngest(msg.payload.sessionId, msg.payload.requestJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_INGEST_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_SEARCH': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_SEARCH_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemSearch(msg.payload.sessionId, msg.payload.requestJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_SEARCH_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_COMMIT': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_COMMIT_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemCommit(msg.payload.sessionId, msg.payload.requestJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_COMMIT_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_GET_STATE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_GET_STATE_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemGetState(msg.payload.sessionId);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_GET_STATE_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_GET_STATS': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_GET_STATS_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemGetStats(msg.payload.sessionId);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_GET_STATS_RESULT', id: msg.id, payload: parsed });
+                break;
+            }
+
+            case 'SYSTEM_CLOSE': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_CLOSE_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemClose(msg.payload.sessionId);
+                const parsed = JSON.parse(res);
+                self.postMessage({
+                    type: 'SYSTEM_CLOSE_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                });
+                break;
+            }
+
+            case 'SYSTEM_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'SYSTEM_RUN_RESULT', id: msg.id, payload: { error: 'WASM not loaded' } });
+                    return;
+                }
+                const res = GoKitt.systemRun(msg.payload.requestJSON);
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'SYSTEM_RUN_RESULT', id: msg.id, payload: parsed });
                 break;
             }
         }

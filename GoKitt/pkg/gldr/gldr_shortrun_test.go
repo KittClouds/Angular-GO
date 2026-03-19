@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -173,10 +174,44 @@ func buildGLDR(t *testing.T, docGraph *graptor.DocumentGraph, chapters []chapter
 	}
 
 	// 2. Load co-occurrence edges from Graptor.
-	idx.LoadCooccurrences(docGraph.Cooccurrence, 2)
+	rawPairs := docGraph.Cooccurrence.GetAllPairs(2)
+	pairs := make([]gldr.CooccurrencePair, 0, len(rawPairs))
+	for _, pair := range rawPairs {
+		pairs = append(pairs, gldr.CooccurrencePair{
+			Entity1ID: pair.Entity1ID,
+			Entity2ID: pair.Entity2ID,
+			Count:     pair.Count,
+		})
+	}
+	idx.LoadCooccurrencePairs(pairs, 2)
 
-	// 2.5 Load structural / event semantic edges from Graptor.
-	idx.LoadGraphEdges(docGraph)
+	// 2.5 Load structural and event edges from Graptor.
+	structuredEdges := make([]gldr.StructuredEdge, 0)
+	chapterGraphs := docGraph.GetChapters()
+	chapterIDs := make([]uint32, 0, len(chapterGraphs))
+	for chapterID := range chapterGraphs {
+		chapterIDs = append(chapterIDs, chapterID)
+	}
+	sort.Slice(chapterIDs, func(i, j int) bool { return chapterIDs[i] < chapterIDs[j] })
+
+	for _, chapterID := range chapterIDs {
+		chapter := chapterGraphs[chapterID]
+		if chapter == nil || chapter.Graph == nil {
+			continue
+		}
+
+		for _, edge := range chapter.Graph.AllEdges() {
+			structuredEdges = append(structuredEdges, gldr.StructuredEdge{
+				SourceID:   edge.Source.ID,
+				TargetID:   edge.Target.ID,
+				RelType:    edge.Edge.Relation,
+				Confidence: edge.Edge.Weight,
+				Source:     "narrative_projection",
+				ValidFrom:  gldr.NewChapterMarker(chapterID),
+			})
+		}
+	}
+	idx.LoadStructuredEdges(structuredEdges)
 
 	// 3. Register entity names for anchor resolution.
 	allEntities := registry.GetAllEntities()

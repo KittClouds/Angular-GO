@@ -79,4 +79,30 @@ describe('GoKittService analyzeText bridge', () => {
         expect(rejected).not.toHaveBeenCalled();
         expect((service as any).pendingRequests.has(request.id)).toBe(true);
     });
+
+    it('routes unified full-system systemRun requests through the worker bridge', async () => {
+        const payload = {
+            sessionId: 'fs_test',
+            ingest: { sessionId: 'fs_test' },
+            stats: { retrievalSummary: { qgramDocuments: 3, gldrChunks: 3 } },
+        };
+
+        const promise = service.systemRun({
+            ingest: {
+                documents: [{ documentId: 'doc-1', text: 'Ryan entered New Rome.' }],
+            },
+        });
+
+        expect(workerMock.postMessage).toHaveBeenCalledTimes(1);
+        const request = workerMock.postMessage.mock.calls[0][0];
+        expect(request.type).toBe('SYSTEM_RUN');
+
+        (service as any).handleWorkerMessage({
+            type: 'SYSTEM_RUN_RESULT',
+            id: request.id,
+            payload,
+        });
+
+        await expect(promise).resolves.toEqual(payload);
+    });
 });

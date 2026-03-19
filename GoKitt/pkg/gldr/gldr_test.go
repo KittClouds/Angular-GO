@@ -6,7 +6,6 @@ import (
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
 
-	"github.com/kittclouds/gokitt/pkg/graptor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,14 +101,13 @@ func TestAddGraphEdgeBidirectional(t *testing.T) {
 func TestLoadCooccurrences(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
 
-	cooc := graptor.NewCooccurrenceStats(3)
-	cooc.RecordCooccurrence([]string{"entity-fiora", "entity-castle"}, 1)
-	cooc.RecordCooccurrence([]string{"entity-fiora", "entity-castle"}, 1)
-	cooc.RecordCooccurrence([]string{"entity-fiora", "entity-castle"}, 1)
-	cooc.RecordCooccurrence([]string{"entity-fiora", "entity-sword"}, 1)
+	pairs := []CooccurrencePair{
+		{Entity1ID: "entity-fiora", Entity2ID: "entity-castle", Count: 3},
+		{Entity1ID: "entity-fiora", Entity2ID: "entity-sword", Count: 1},
+	}
 
 	// Load with minCount=2 → only fiora↔castle should appear
-	idx.LoadCooccurrences(cooc, 2)
+	idx.LoadCooccurrencePairs(pairs, 2)
 
 	// MaxEdgeWeight should track the raw max
 	assert.Equal(t, 3.0, idx.MaxEdgeWeight)
@@ -127,21 +125,16 @@ func TestLoadCooccurrences(t *testing.T) {
 func TestLoadCooccurrencesNormalization(t *testing.T) {
 	idx := NewGLDR(DefaultGLDRConfig())
 
-	cooc := graptor.NewCooccurrenceStats(3)
+	pairs := []CooccurrencePair{
+		{Entity1ID: "entity-fiora", Entity2ID: "entity-castle", Count: 6},
+		{Entity1ID: "entity-fiora", Entity2ID: "entity-sword", Count: 3},
+		{Entity1ID: "entity-castle", Entity2ID: "entity-sword", Count: 2},
+	}
 	// fiora ↔ castle: 6 times
-	for i := 0; i < 6; i++ {
-		cooc.RecordCooccurrence([]string{"entity-fiora", "entity-castle"}, 1)
-	}
 	// fiora ↔ sword: 3 times
-	for i := 0; i < 3; i++ {
-		cooc.RecordCooccurrence([]string{"entity-fiora", "entity-sword"}, 1)
-	}
 	// castle ↔ sword: 2 times
-	for i := 0; i < 2; i++ {
-		cooc.RecordCooccurrence([]string{"entity-castle", "entity-sword"}, 1)
-	}
 
-	idx.LoadCooccurrences(cooc, 2)
+	idx.LoadCooccurrencePairs(pairs, 2)
 
 	// Max count is 6 (fiora↔castle)
 	assert.Equal(t, 6.0, idx.MaxEdgeWeight)

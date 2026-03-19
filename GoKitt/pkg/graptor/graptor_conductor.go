@@ -354,7 +354,7 @@ func (gc *GraptorConductor) processLeaf(leaf LeafInput, chapterID uint32, ctx *C
 	result.Chunks = scanResult.Chunks
 
 	// Extract entities from scan result
-	entities := gc.extractEntities(scanResult, chapterID)
+	entities := gc.extractEntities(scanResult, chapterID, leaf.ChunkID)
 	result.Entities = entities
 
 	// Register entities in registry and chapter context
@@ -399,7 +399,7 @@ func (gc *GraptorConductor) processLeaf(leaf LeafInput, chapterID uint32, ctx *C
 }
 
 // extractEntities extracts entities from a scan result.
-func (gc *GraptorConductor) extractEntities(scanResult conductor.ScanResult, chapterID uint32) []EntityMatch {
+func (gc *GraptorConductor) extractEntities(scanResult conductor.ScanResult, chapterID, chunkID uint32) []EntityMatch {
 	var entities []EntityMatch
 
 	for _, sm := range scanResult.Syntax {
@@ -412,8 +412,8 @@ func (gc *GraptorConductor) extractEntities(scanResult conductor.ScanResult, cha
 			// Entity exists - update chapter tracking via RegisterMention
 			id = entity.ID
 			kind = entity.Kind
-			// This will update chapter tracking if this entity appears in a new chapter
-			gc.registry.RegisterMention(sm.Text, kind, chapterID, uint32(sm.Start), sm.Start, sm.End)
+			// This will update chapter tracking if this entity appears in a new chapter.
+			gc.registry.RegisterMention(sm.Text, kind, chapterID, chunkID, sm.Start, sm.End)
 		} else {
 			// Check if this entity has a dictionary ID (from seeded entities)
 			if dictID := sm.ID; dictID != "" {
@@ -421,17 +421,17 @@ func (gc *GraptorConductor) extractEntities(scanResult conductor.ScanResult, cha
 					// Use the seeded registry ID
 					id = registryID
 					kind = gc.inferKindFromSyntax(sm)
-					// Update chapter tracking for this entity
-					gc.registry.RegisterMention(sm.Text, kind, chapterID, uint32(sm.Start), sm.Start, sm.End)
+					// Update chapter tracking for this entity using the stable seeded ID.
+					id = gc.registry.RegisterMentionWithID(sm.Text, registryID, kind, chapterID, chunkID, sm.Start, sm.End)
 				} else {
 					// Register new entity
 					kind = gc.inferKindFromSyntax(sm)
-					id = gc.registry.Register(sm.Text, kind, GenderUnknown, chapterID, uint32(sm.Start))
+					id = gc.registry.RegisterMention(sm.Text, kind, chapterID, chunkID, sm.Start, sm.End)
 				}
 			} else {
 				// Register new entity
 				kind = gc.inferKindFromSyntax(sm)
-				id = gc.registry.Register(sm.Text, kind, GenderUnknown, chapterID, uint32(sm.Start))
+				id = gc.registry.RegisterMention(sm.Text, kind, chapterID, chunkID, sm.Start, sm.End)
 			}
 		}
 

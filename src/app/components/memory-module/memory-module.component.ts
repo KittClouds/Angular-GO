@@ -97,7 +97,7 @@ interface ToolEvent {
           icon="pi pi-bolt"
           (onClick)="runProcessWithWorkspace()"
           [loading]="processing()"
-          [disabled]="!threadId.trim() || !promptText.trim() || !goKitt.isReady"
+          [disabled]="!threadId.trim() || !promptText.trim() || !wasmReady()"
           size="small">
         </p-button>
         <p-button
@@ -105,7 +105,7 @@ interface ToolEvent {
           icon="pi pi-eye"
           (onClick)="getContext()"
           [loading]="loadingCtx()"
-          [disabled]="!threadId.trim() || !goKitt.isReady"
+          [disabled]="!threadId.trim() || !wasmReady()"
           severity="secondary"
           size="small">
         </p-button>
@@ -154,7 +154,7 @@ interface ToolEvent {
         </p-timeline>
       }
 
-      @if (!goKitt.isReady) {
+      @if (!wasmReady()) {
         <div class="not-ready-banner">
           <i class="pi pi-info-circle"></i>
           GoKitt WASM not ready — start the main app first.
@@ -199,6 +199,7 @@ export class MemoryModuleComponent implements OnInit {
     protected readonly goKitt = inject(GoKittService);
     private readonly logService = inject(PlaygroundLogService);
 
+    readonly wasmReady = signal(this.goKitt.isReady);
     readonly processing = signal(false);
     readonly loadingCtx = signal(false);
     readonly snapshot = signal<OMSnapshot | null>(null);
@@ -211,6 +212,15 @@ export class MemoryModuleComponent implements OnInit {
 
     private log = (level: 'info' | 'warn' | 'error' | 'success', msg: string) =>
         this.logService.log(level, 'memory', msg);
+
+    constructor() {
+        setTimeout(() => {
+            this.wasmReady.set(this.goKitt.isReady);
+            if (!this.goKitt.isReady) {
+                this.goKitt.onReady(() => this.wasmReady.set(true));
+            }
+        });
+    }
 
     ngOnInit(): void {
         this.logService.info('memory', 'Memory/OM module ready');
