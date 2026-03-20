@@ -22,6 +22,7 @@ import (
 	"github.com/kittclouds/gokitt/pkg/graph"
 	"github.com/kittclouds/gokitt/pkg/hierarchy"
 	implicitmatcher "github.com/kittclouds/gokitt/pkg/implicit-matcher"
+	"github.com/kittclouds/gokitt/pkg/memory"
 	"github.com/kittclouds/gokitt/pkg/qgram"
 	"github.com/kittclouds/gokitt/pkg/reality/builder"
 	"github.com/kittclouds/gokitt/pkg/reality/merger"
@@ -202,6 +203,7 @@ func main() {
 		// Knowledge Graph (Phase 4: Unification)
 		"knowledgeInit":            js.FuncOf(knowledgeInit),
 		"knowledgeLoad":            js.FuncOf(knowledgeLoad),
+		"knowledgeSync":            js.FuncOf(knowledgeSync),
 		"knowledgeSave":            js.FuncOf(knowledgeSave),
 		"knowledgeAddNode":         js.FuncOf(knowledgeAddNode),
 		"knowledgeAddEdge":         js.FuncOf(knowledgeAddEdge),
@@ -971,7 +973,7 @@ func storeInit(this js.Value, args []js.Value) interface{} {
 	// [BUG FIX] If ChatService or AgentService already initialized with an old pointer, rebind them!
 	if chatSvc != nil {
 		fmt.Println("[GoKitt] 🔄 Re-wiring ChatService to new SQLite store instance")
-		chatSvc = chat.NewChatService(sqlStore, agentSvc)
+		chatSvc = chat.NewChatService(sqlStore, agentSvc, memory.DefaultConfig())
 	}
 
 	fmt.Println("[GoKitt] ✅ SQLite Store initialized")
@@ -2709,7 +2711,7 @@ func jsGoStreamChat(this js.Value, args []js.Value) interface{} {
 // =============================================================================
 
 // jsChatInit initializes the chat service.
-// Args: configJSON (string) - JSON with apiKey, model (optional, for future use)
+// Args: configJSON (string) - JSON with apiKey, model, omEnabled, observeThreshold, reflectThreshold
 func jsChatInit(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return ErrorResult("missing arguments")
@@ -2719,12 +2721,45 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
+	// Parse configuration
+	var configInput struct {
+		APIKey           string `json:"apiKey"`
+		Model            string `json:"model"`
+		OMEnabled        *bool  `json:"omEnabled"`
+		ObserveThreshold int    `json:"observeThreshold"`
+		ReflectThreshold int    `json:"reflectThreshold"`
+		// Other reasoning fields are handled in batchInit
+	}
+
+	// Read from JSON string
+	jsonStr := args[0].String()
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &configInput); err != nil {
+			fmt.Printf("[GoKitt] Warning: failed to parse chatInit config: %v\n", err)
+		}
+	}
+
+	// Construct memory config
+	memConfig := memory.DefaultConfig()
+	if configInput.OMEnabled != nil {
+		memConfig.Enabled = *configInput.OMEnabled
+	}
+	if configInput.Model != "" {
+		memConfig.Model = configInput.Model
+	}
+	if configInput.ObserveThreshold > 0 {
+		memConfig.ObservationThreshold = configInput.ObserveThreshold
+	}
+	if configInput.ReflectThreshold > 0 {
+		memConfig.ReflectionThreshold = configInput.ReflectThreshold
+	}
+
 	// Initialize Chat Service
 	// We need agentSvc for the Observational Memory
 	if agentSvc == nil {
 		fmt.Println("[GoKitt] Warning: Agent service not initialized before Chat service. OM disabled.")
 	}
-	chatSvc = chat.NewChatService(sqlStore, agentSvc)
+	chatSvc = chat.NewChatService(sqlStore, agentSvc, memConfig)
 
 	return SuccessResult("Chat service initialized")
 }

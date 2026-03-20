@@ -10,9 +10,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { LucideAngularModule, ArrowLeft, RefreshCw, Settings, Maximize2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-angular';
-import { GraphVizService, type ForceGraphData, type GraphQueryOptions } from '../../services/graph-viz.service';
-import { GoKittService } from '../../services/gokitt.service';
-import { KnowledgeService } from '../../services/knowledge.service';
+import { type ForceGraphData } from '../../services/graph-viz.service';
+import { GraphPipelineService } from '../../services/graph-pipeline.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Graph Settings Interface
@@ -288,9 +287,7 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
     @ViewChild('graphContainer', { static: true }) graphContainer!: ElementRef<HTMLDivElement>;
 
     private router = inject(Router);
-    private graphViz = inject(GraphVizService);
-    private goKitt = inject(GoKittService);
-    private knowledgeService = inject(KnowledgeService);
+    private graphPipeline = inject(GraphPipelineService);
 
     // Icons
     readonly ArrowLeft = ArrowLeft;
@@ -345,19 +342,7 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
             const ForceGraph3DModule = await import('3d-force-graph');
             const ForceGraph3D = ForceGraph3DModule.default;
 
-            // PRIMARY: Use KnowledgeService (Phase 4)
-            const kgData = await this.knowledgeService.getGraph();
-            console.log('[GraphPage] KG Data:', kgData);
-
-            if (kgData && Object.keys(kgData.nodes).length > 0) {
-                console.log('[GraphPage] Using GoKitt Knowledge Graph');
-                this.graphData = this.graphViz.fromGoKittData(kgData);
-            } else {
-                console.log('[GraphPage] Knowledge Graph empty - no data to display');
-                this.graphData = { nodes: [], links: [], stats: { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} } };
-            }
-
-            this.stats.set(this.graphData.stats || { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} });
+            await this.loadGraphData(true);
             console.log('[GraphPage] Graph data loaded:', this.graphData.stats);
 
             // Create the graph instance - ForceGraph3D is a factory function
@@ -410,6 +395,12 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
             console.error('[GraphPage] Failed to initialize graph:', error);
             this.loading.set(false);
         }
+    }
+
+    private async loadGraphData(sync = false): Promise<void> {
+        const result = await this.graphPipeline.loadPersistedGraph({ sync });
+        this.graphData = result.graphData;
+        this.stats.set(this.graphData.stats || { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} });
     }
 
     private getNodeColor(node: any): string {
@@ -509,17 +500,20 @@ export class GraphPageComponent implements OnInit, OnDestroy, AfterViewInit {
         this.showSettings.update(v => !v);
     }
 
-    refreshGraph(): void {
+    async refreshGraph(): Promise<void> {
         this.loading.set(true);
-        this.graphData = this.graphViz.getFullGraph();
-        this.stats.set(this.graphData.stats || { totalNodes: 0, totalLinks: 0, kindCounts: {}, typeCounts: {} });
+        try {
+            await this.loadGraphData(true);
 
-        if (this.graph) {
-            this.graph.graphData(this.graphData);
+            if (this.graph) {
+                this.graph.graphData(this.graphData);
+            }
+        } catch (error) {
+            console.error('[GraphPage] Refresh failed:', error);
+        } finally {
+            this.loading.set(false);
+            setTimeout(() => this.fitToCanvas(), 300);
         }
-
-        this.loading.set(false);
-        setTimeout(() => this.fitToCanvas(), 300);
     }
 
     updateGraph(): void {

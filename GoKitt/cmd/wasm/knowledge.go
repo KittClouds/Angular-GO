@@ -6,27 +6,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"syscall/js"
 
 	"github.com/dominikbraun/graph"
 	"github.com/google/uuid"
 	"github.com/kittclouds/gokitt/internal/graphstore"
+	"github.com/kittclouds/gokitt/internal/store"
 	"github.com/kittclouds/gokitt/pkg/knowledge"
 )
 
-// Global Knowledge Graph instance (SQLite Backed)
-// We use KnowledgeNode as the value type T
+// Global Knowledge Graph instance (SQLite backed).
 var knowledgeGraph *graphstore.SQLiteStore[knowledge.KnowledgeNode]
 
-// Helper to generate stable UUIDs from string IDs
+// Helper to generate stable UUIDs from string IDs.
 func toUUID(id string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(id))
 }
 
 // knowledgeInit initializes the persistent graph store.
-// Args: []
 func knowledgeInit(this js.Value, args []js.Value) interface{} {
-	fmt.Println("[GoKitt] 🧠 Knowledge Graph initializing (SQLite-backed)...")
+	fmt.Println("[GoKitt] Knowledge Graph initializing (SQLite-backed)...")
 
 	if sqlStore == nil {
 		return ErrorResult("unified store not initialized")
@@ -37,24 +37,24 @@ func knowledgeInit(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("failed to get underlying DB")
 	}
 
-	// Ensure Graph Tables exist
 	if err := graphstore.Migrate(context.Background(), db); err != nil {
 		return ErrorResult("failed to migrate graph store: " + err.Error())
 	}
 
-	// Initialize Graph Store
-	// Value type is KnowledgeNode, using JSON encoding for the whole node object as value
 	knowledgeGraph = graphstore.NewJSON[knowledge.KnowledgeNode](db)
 
-	fmt.Println("[GoKitt] 🧠 Knowledge Graph initialized")
+	fmt.Println("[GoKitt] Knowledge Graph initialized")
 	return SuccessResult("knowledge graph initialized")
 }
 
-// knowledgeLoad hydrates the graph from the unified store tables (entities/edges).
-// Since the graph store is persistent, this effectively syncs legacy tables to graph tables if needed.
-// However, if the graph tables (vertices/edges) already exist, this might duplicate?
-// We will use AddVertex/AddEdge which error on conflict. We ignore conflicts.
+// knowledgeLoad remains as a compatibility alias for the canonical sync path.
 func knowledgeLoad(this js.Value, args []js.Value) interface{} {
+	return knowledgeSync(this, args)
+}
+
+// knowledgeSync projects canonical entities and edges from the unified store
+// into the graphstore used by visualization and traversal.
+func knowledgeSync(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
 	}
@@ -62,113 +62,23 @@ func knowledgeLoad(this js.Value, args []js.Value) interface{} {
 		return ErrorResult("store not initialized")
 	}
 
-	fmt.Println("[GoKitt] 📚 Loading knowledge graph from Unified Store...")
+	fmt.Println("[GoKitt] Syncing knowledge graph from Unified Store...")
 
-	// Load entities as nodes
-	entities, err := sqlStore.ListEntities("")
+	nodeCount, edgeCount, err := syncKnowledgeGraphFromStore()
 	if err != nil {
-		return ErrorResult("failed to list entities: " + err.Error())
+		return ErrorResult("failed to sync knowledge graph: " + err.Error())
 	}
 
-	nodeCount := 0
-	existingCount := 0
-
-	for _, e := range entities {
-		uid := toUUID(e.ID)
-
-		// Map Entity to KnowledgeNode
-		node := knowledge.KnowledgeNode{
-			ID:    e.ID,
-			Kind:  e.Kind,
-			Label: e.Label,
-			Props: make(map[string]interface{}),
-		}
-		if len(e.Aliases) > 0 {
-			node.Props["aliases"] = e.Aliases
-		}
-
-		// Map Props to VertexAttributes for search
-		attrs := make(map[string]string)
-		attrs["label"] = e.Label
-		attrs["kind"] = e.Kind
-
-		// Add to Graph Store
-		err := knowledgeGraph.AddVertex(uid, node, graph.VertexProperties{
-			Attributes: attrs,
-		})
-
-		if err == nil {
-			nodeCount++
-		} else if err == graph.ErrVertexAlreadyExists {
-			existingCount++
-			// Optional: Update?
-		}
-	}
-
-	// Load edges
-	edgeCount := 0
-
-	// Collect all unique edges
-	// Note: ListEdgesForEntity is inefficient for bulk load, but sqlStore doesn't expose ListEdges global?
-	// Wait, internal/store has ListEdges?
-	// The WASM export has "storeListEdges". Let's assume sqlStore has ListEdges.
-	// Checking store API... ListEdgesForEntity exists. ListEdges exists?
-	// If not, we iterate entities.
-
-	// Optimization: If sqlStore has ListEdges, use it.
-	// internal/store/sqlite_store.go usually has CRUD.
-	// Assuming logic similar to previous implementation: iterate entities.
-
-	edgeSet := make(map[string]*knowledge.KnowledgeEdge)
-	for _, e := range entities {
-		edges, err := sqlStore.ListEdgesForEntity(e.ID)
-		if err != nil {
-			continue
-		}
-		for _, edge := range edges {
-			key := fmt.Sprintf("%s-%s-%s", edge.SourceID, edge.RelType, edge.TargetID)
-			if _, exists := edgeSet[key]; !exists {
-				edgeSet[key] = &knowledge.KnowledgeEdge{
-					SourceID: edge.SourceID,
-					TargetID: edge.TargetID,
-					Relation: edge.RelType,
-					Weight:   edge.Confidence,
-					Props:    make(map[string]interface{}),
-				}
-			}
-		}
-	}
-
-	for _, e := range edgeSet {
-		srcUID := toUUID(e.SourceID)
-		tgtUID := toUUID(e.TargetID)
-
-		// Add Edge
-		err := knowledgeGraph.AddEdge(srcUID, tgtUID, graph.Edge[uuid.UUID]{
-			Properties: graph.EdgeProperties{
-				Attributes: map[string]string{"relation": e.Relation},
-				Weight:     int(e.Weight), // Graph store uses Int weight usually? No, AddEdge uses int weight in graph library.
-				// Wait, dominikbraun/graph AddEdge takes functional options for weight/attrs.
-				// But Store.AddEdge takes graph.Edge struct which has Properties.
-			},
-		})
-		// wait, CreateEdge takes source, target, Edge[K]
-
-		if err == nil {
-			edgeCount++
-		}
-	}
-
-	fmt.Printf("[GoKitt] 📚 Loaded %d new nodes (%d existing) and %d edges\n", nodeCount, existingCount, edgeCount)
-	return SuccessResult(fmt.Sprintf("loaded %d nodes, %d edges", nodeCount, edgeCount))
+	fmt.Printf("[GoKitt] Synced %d nodes and %d edges\n", nodeCount, edgeCount)
+	return SuccessResult(fmt.Sprintf("synced %d nodes, %d edges", nodeCount, edgeCount))
 }
 
-// knowledgeSave is now a no-op as the store is fully persistent.
+// knowledgeSave is a no-op because the graphstore is already persistent.
 func knowledgeSave(this js.Value, args []js.Value) interface{} {
 	return SuccessResult("graph is persistent, save not required")
 }
 
-// knowledgeAddNode adds a node directly to the graph store.
+// knowledgeAddNode adds or updates a node directly in the graphstore.
 func knowledgeAddNode(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
@@ -183,29 +93,14 @@ func knowledgeAddNode(this js.Value, args []js.Value) interface{} {
 	}
 
 	uid := toUUID(node.ID)
-
-	// Convert props to string attributes
-	attrs := make(map[string]string)
-	attrs["label"] = node.Label
-	attrs["kind"] = node.Kind
-	// Flatten props?
-	for k, v := range node.Props {
-		attrs[k] = fmt.Sprintf("%v", v)
+	props := graph.VertexProperties{
+		Attributes: buildKnowledgeNodeAttributes(node),
 	}
 
-	err := knowledgeGraph.AddVertex(uid, node, graph.VertexProperties{
-		Attributes: attrs,
-	})
-
-	if err != nil {
-		// Try Update if exists?
-		if err == graph.ErrVertexAlreadyExists {
-			err = knowledgeGraph.UpdateVertex(uid, node, graph.VertexProperties{
-				Attributes: attrs,
-			})
-		}
+	err := knowledgeGraph.AddVertex(uid, node, props)
+	if err == graph.ErrVertexAlreadyExists {
+		err = knowledgeGraph.UpdateVertex(uid, node, props)
 	}
-
 	if err != nil {
 		return ErrorResult("failed to add/update node: " + err.Error())
 	}
@@ -213,7 +108,7 @@ func knowledgeAddNode(this js.Value, args []js.Value) interface{} {
 	return SuccessResult("node added: " + node.ID)
 }
 
-// knowledgeAddEdge adds a directed edge.
+// knowledgeAddEdge adds or updates a directed edge in the graphstore.
 func knowledgeAddEdge(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
@@ -229,17 +124,17 @@ func knowledgeAddEdge(this js.Value, args []js.Value) interface{} {
 
 	srcUID := toUUID(edge.SourceID)
 	tgtUID := toUUID(edge.TargetID)
-
-	err := knowledgeGraph.AddEdge(srcUID, tgtUID, graph.Edge[uuid.UUID]{
+	props := graph.Edge[uuid.UUID]{
 		Properties: graph.EdgeProperties{
-			Attributes: map[string]string{
-				"relation": edge.Relation,
-				"type":     edge.Relation, // For edge typing
-			},
-			Weight: int(edge.Weight),
+			Attributes: buildKnowledgeEdgeAttributes(edge),
+			Weight:     graphWeightFromFloat64(edge.Weight),
 		},
-	})
+	}
 
+	err := knowledgeGraph.AddEdge(srcUID, tgtUID, props)
+	if err == graph.ErrEdgeAlreadyExists {
+		err = knowledgeGraph.UpdateEdge(srcUID, tgtUID, props)
+	}
 	if err != nil {
 		return ErrorResult("failed to add edge: " + err.Error())
 	}
@@ -268,7 +163,7 @@ func knowledgeGetNode(this js.Value, args []js.Value) interface{} {
 	return string(bytes)
 }
 
-// knowledgeGetNeighborhood returns immediate neighbors via Traversal.
+// knowledgeGetNeighborhood returns immediate neighbors via traversal.
 func knowledgeGetNeighborhood(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
@@ -280,7 +175,6 @@ func knowledgeGetNeighborhood(this js.Value, args []js.Value) interface{} {
 	id := args[0].String()
 	uid := toUUID(id)
 
-	// Traversal: Depth 1, Both directions
 	ch := knowledgeGraph.Traverse(context.Background(), graphstore.TraversalOptions{
 		Root:      uid,
 		Direction: graphstore.DirectionBoth,
@@ -288,26 +182,14 @@ func knowledgeGetNeighborhood(this js.Value, args []js.Value) interface{} {
 	})
 
 	var neighbors []knowledge.KnowledgeNode
-	// First result is self, skip or include? Usually neighborhood implies others.
-	// But Traverse result stream logic: usually visits start first.
-
 	for res := range ch {
 		if len(res.Path) == 0 {
 			continue
 		}
 		nodeID := res.Path[len(res.Path)-1]
-
 		if nodeID == uid {
-			continue // Skip self
+			continue
 		}
-
-		// Retrieve full node data
-		// Optimized: If Traverse returned the Value, Use it.
-		// Our TraverseResult contains ID.
-		// Does it contain Value? TraversalResult struct definition?
-		// internal/graphstore/traversal.go: public TraverseResult: ID uuid.UUID
-		// It does NOT have Value.
-		// We must fetch value.
 
 		val, _, err := knowledgeGraph.Vertex(nodeID)
 		if err == nil {
@@ -319,53 +201,16 @@ func knowledgeGetNeighborhood(this js.Value, args []js.Value) interface{} {
 	return string(bytes)
 }
 
-// knowledgeGetGraph returns the entire knowledge graph (dump).
-// Warning: Expensive on large graphs.
+// knowledgeGetGraph returns the entire knowledge graph dump.
 func knowledgeGetGraph(this js.Value, args []js.Value) interface{} {
 	if knowledgeGraph == nil {
 		return ErrorResult("knowledge graph not initialized")
 	}
 
-	uids, err := knowledgeGraph.ListVertices()
+	nodes, edges, err := dumpKnowledgeGraph()
 	if err != nil {
-		return ErrorResult("failed to list vertices: " + err.Error())
+		return ErrorResult("failed to dump knowledge graph: " + err.Error())
 	}
-
-	nodes := make(map[string]knowledge.KnowledgeNode)
-	var edges []knowledge.KnowledgeEdge
-
-	// Load Nodes
-	for _, u := range uids {
-		val, _, err := knowledgeGraph.Vertex(u)
-		if err == nil {
-			nodes[val.ID] = val
-
-			// Load Outbound Edges for this node?
-			// graphstore doesn't expose "ListOutboundEdges(u)".
-			// But we can Traverse Depth 1 Outbound.
-			// Or iterate ALL edges if ListEdges is available.
-			// ListEdges logic?
-			// Check store_edge.go: ListEdges() implementation iterates all edges in table?
-			// Step 600 showed ListEdges implementation.
-			// Let's assume we can ListAllEdges if implemented or iterate nodes.
-		}
-	}
-
-	// Using ListEdges from Store if available.
-	// If not, we have to reconstruct.
-	// Let's rely on traversing outbound 1-hop for each node to build edges? Slow.
-	// Or check if ListEdges is available on SQLiteStore.
-	// Checked: ListEdges IS available in Store interface and implemented.
-
-	// Wait, SQLiteStore method ListEdges(ctx context.Context?) or just ListEdges()?
-	// dominikbraun/graph Store: `ListEdges() ([]K, []K, error)` ? Not standard.
-	// Our implementation: `ListEdges() ([]graph.Edge[K], error)` ?
-	// Let's assume we'll use a traversal approach or just skip edges for now if unsure.
-	// ACTUALLY: The user showed `knowledge.go` using `ToJSON` which iterates maps.
-	// I should probably Implement `ListEdges` on SQLiteStore if I haven't exposed it fully.
-	// But `store.ListEdges` works?
-	// `knowledgeGetGraph` is rarely used for full dumps except debug.
-	// I'll return basics.
 
 	data := struct {
 		Nodes map[string]knowledge.KnowledgeNode `json:"nodes"`
@@ -400,14 +245,6 @@ func traverseRelation(args []js.Value, dir graphstore.TraversalDirection) interf
 	id := args[0].String()
 	uid := toUUID(id)
 
-	// Filter by relation?
-	// TraversalOptions has EdgeFilter?
-	// Not yet exposed fully in Traverse API I designed?
-	// Step 602: "Implement NodeFilter and EdgeFilter logic within the Traverse method...".
-	// I marked it as Next Steps.
-	// So EdgeFilter might not works yet.
-	// I will fetch all and filter in memory.
-
 	relation := ""
 	if len(args) > 1 {
 		relation = args[1].String()
@@ -431,20 +268,18 @@ func traverseRelation(args []js.Value, dir graphstore.TraversalDirection) interf
 
 		val, _, _ := knowledgeGraph.Vertex(nodeID)
 
-		// If relation filter needed, we need to check the EDGE that connected them.
 		if relation == "" {
 			results = append(results, val)
-		} else {
-			// Check edge relation.
-			e, err := knowledgeGraph.Edge(uid, nodeID)
-			if err != nil {
-				// Try reverse if inbound?
-				e, err = knowledgeGraph.Edge(nodeID, uid)
-			}
-			if err == nil {
-				if rel, ok := e.Properties.Attributes["relation"]; ok && rel == relation {
-					results = append(results, val)
-				}
+			continue
+		}
+
+		e, err := knowledgeGraph.Edge(uid, nodeID)
+		if err != nil {
+			e, err = knowledgeGraph.Edge(nodeID, uid)
+		}
+		if err == nil {
+			if rel, ok := e.Properties.Attributes["relation"]; ok && rel == relation {
+				results = append(results, val)
 			}
 		}
 	}
@@ -474,7 +309,7 @@ func traverseRecursive(args []js.Value, dir graphstore.TraversalDirection) inter
 	id := args[0].String()
 	uid := toUUID(id)
 
-	maxDepth := 10 // Default
+	maxDepth := 10
 	if len(args) > 2 {
 		maxDepth = args[2].Int()
 	}
@@ -501,4 +336,250 @@ func traverseRecursive(args []js.Value, dir graphstore.TraversalDirection) inter
 
 	bytes, _ := json.Marshal(results)
 	return string(bytes)
+}
+
+func syncKnowledgeGraphFromStore() (int, int, error) {
+	entities, err := sqlStore.ListEntities("")
+	if err != nil {
+		return 0, 0, fmt.Errorf("list entities: %w", err)
+	}
+
+	nodeCount := 0
+	entityIDs := make(map[string]bool, len(entities))
+	for _, entity := range entities {
+		if entity == nil {
+			continue
+		}
+
+		entityIDs[entity.ID] = true
+
+		node := buildKnowledgeNodeFromEntity(entity)
+		uid := toUUID(node.ID)
+		props := graph.VertexProperties{
+			Attributes: buildKnowledgeNodeAttributes(node),
+		}
+
+		err := knowledgeGraph.AddVertex(uid, node, props)
+		if err == graph.ErrVertexAlreadyExists {
+			err = knowledgeGraph.UpdateVertex(uid, node, props)
+		}
+		if err != nil {
+			return 0, 0, fmt.Errorf("upsert vertex %q: %w", node.ID, err)
+		}
+		nodeCount++
+	}
+
+	edgeSet := make(map[string]*store.Edge)
+	for _, entity := range entities {
+		if entity == nil {
+			continue
+		}
+
+		edges, err := sqlStore.ListEdgesForEntity(entity.ID)
+		if err != nil {
+			return 0, 0, fmt.Errorf("list edges for entity %q: %w", entity.ID, err)
+		}
+
+		for _, edge := range edges {
+			if edge == nil {
+				continue
+			}
+			key := fmt.Sprintf("%s|%s|%s", edge.SourceID, edge.RelType, edge.TargetID)
+			if _, exists := edgeSet[key]; !exists {
+				edgeSet[key] = edge
+			}
+		}
+	}
+
+	edgeCount := 0
+	for _, edgeRecord := range edgeSet {
+		if !entityIDs[edgeRecord.SourceID] || !entityIDs[edgeRecord.TargetID] {
+			continue
+		}
+
+		edge := buildKnowledgeEdgeFromStoreEdge(edgeRecord)
+		props := graph.Edge[uuid.UUID]{
+			Properties: graph.EdgeProperties{
+				Attributes: buildKnowledgeEdgeAttributes(edge),
+				Weight:     graphWeightFromFloat64(edge.Weight),
+			},
+		}
+
+		srcUID := toUUID(edge.SourceID)
+		tgtUID := toUUID(edge.TargetID)
+		err := knowledgeGraph.AddEdge(srcUID, tgtUID, props)
+		if err == graph.ErrEdgeAlreadyExists {
+			err = knowledgeGraph.UpdateEdge(srcUID, tgtUID, props)
+		}
+		if err != nil {
+			return 0, 0, fmt.Errorf("upsert edge %q->%q (%s): %w", edge.SourceID, edge.TargetID, edge.Relation, err)
+		}
+		edgeCount++
+	}
+
+	return nodeCount, edgeCount, nil
+}
+
+func dumpKnowledgeGraph() (map[string]knowledge.KnowledgeNode, []knowledge.KnowledgeEdge, error) {
+	uids, err := knowledgeGraph.ListVertices()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list vertices: %w", err)
+	}
+
+	nodes := make(map[string]knowledge.KnowledgeNode, len(uids))
+	uuidToNode := make(map[uuid.UUID]knowledge.KnowledgeNode, len(uids))
+	for _, vertexID := range uids {
+		val, _, err := knowledgeGraph.Vertex(vertexID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load vertex %q: %w", vertexID.String(), err)
+		}
+		nodes[val.ID] = val
+		uuidToNode[vertexID] = val
+	}
+
+	rawEdges, err := knowledgeGraph.ListEdges()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list edges: %w", err)
+	}
+
+	edges := make([]knowledge.KnowledgeEdge, 0, len(rawEdges))
+	for _, raw := range rawEdges {
+		sourceNode, ok := uuidToNode[raw.Source]
+		if !ok {
+			val, _, err := knowledgeGraph.Vertex(raw.Source)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve edge source %q: %w", raw.Source.String(), err)
+			}
+			sourceNode = val
+			uuidToNode[raw.Source] = val
+		}
+
+		targetNode, ok := uuidToNode[raw.Target]
+		if !ok {
+			val, _, err := knowledgeGraph.Vertex(raw.Target)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve edge target %q: %w", raw.Target.String(), err)
+			}
+			targetNode = val
+			uuidToNode[raw.Target] = val
+		}
+
+		weight := float64(raw.Properties.Weight)
+		if confidence, ok := raw.Properties.Attributes["confidence"]; ok {
+			if parsed, err := strconv.ParseFloat(confidence, 64); err == nil {
+				weight = parsed
+			}
+		}
+
+		props := make(map[string]interface{})
+		for key, value := range raw.Properties.Attributes {
+			switch key {
+			case "relation", "type", "confidence":
+				continue
+			default:
+				props[key] = value
+			}
+		}
+		if len(props) == 0 {
+			props = nil
+		}
+
+		relation := raw.Properties.Attributes["relation"]
+		if relation == "" {
+			relation = raw.Properties.Attributes["type"]
+		}
+		if relation == "" {
+			relation = knowledge.RelRelated
+		}
+
+		edges = append(edges, knowledge.KnowledgeEdge{
+			SourceID: sourceNode.ID,
+			TargetID: targetNode.ID,
+			Relation: relation,
+			Weight:   weight,
+			Props:    props,
+		})
+	}
+
+	return nodes, edges, nil
+}
+
+func buildKnowledgeNodeFromEntity(entity *store.Entity) knowledge.KnowledgeNode {
+	node := knowledge.KnowledgeNode{
+		ID:    entity.ID,
+		Kind:  entity.Kind,
+		Label: entity.Label,
+		Props: make(map[string]interface{}),
+	}
+	if len(entity.Aliases) > 0 {
+		node.Props["aliases"] = append([]string{}, entity.Aliases...)
+	}
+	if entity.NarrativeID != "" {
+		node.Props["narrativeId"] = entity.NarrativeID
+	}
+	if entity.FirstNote != "" {
+		node.Props["firstNote"] = entity.FirstNote
+	}
+	if entity.CreatedBy != "" {
+		node.Props["createdBy"] = entity.CreatedBy
+	}
+	if len(node.Props) == 0 {
+		node.Props = nil
+	}
+	return node
+}
+
+func buildKnowledgeNodeAttributes(node knowledge.KnowledgeNode) map[string]string {
+	attrs := map[string]string{
+		"label": node.Label,
+		"kind":  node.Kind,
+	}
+	for key, value := range node.Props {
+		attrs[key] = fmt.Sprintf("%v", value)
+	}
+	return attrs
+}
+
+func buildKnowledgeEdgeFromStoreEdge(edge *store.Edge) knowledge.KnowledgeEdge {
+	props := make(map[string]interface{})
+	if edge.SourceNote != "" {
+		props["sourceNote"] = edge.SourceNote
+	}
+	if edge.Bidirectional {
+		props["bidirectional"] = "true"
+	}
+	if len(props) == 0 {
+		props = nil
+	}
+
+	return knowledge.KnowledgeEdge{
+		SourceID: edge.SourceID,
+		TargetID: edge.TargetID,
+		Relation: edge.RelType,
+		Weight:   edge.Confidence,
+		Props:    props,
+	}
+}
+
+func buildKnowledgeEdgeAttributes(edge knowledge.KnowledgeEdge) map[string]string {
+	attrs := map[string]string{
+		"relation":   edge.Relation,
+		"type":       edge.Relation,
+		"confidence": strconv.FormatFloat(edge.Weight, 'f', -1, 64),
+	}
+	for key, value := range edge.Props {
+		attrs[key] = fmt.Sprintf("%v", value)
+	}
+	return attrs
+}
+
+func graphWeightFromFloat64(weight float64) int {
+	switch {
+	case weight <= 0:
+		return 1
+	case weight < 1:
+		return int(weight*1000 + 0.5)
+	default:
+		return int(weight + 0.5)
+	}
 }

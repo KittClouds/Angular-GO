@@ -24,6 +24,7 @@ import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note } from '../../lib/dexie/db';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 import { GoChatService } from '../../lib/services/go-chat.service';
+import { GraphPipelineService } from '../../services/graph-pipeline.service';
 
 interface EntityFolderOption {
     entityKind: string;
@@ -87,6 +88,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private goKittService = inject(GoKittService);
     private documentIngestionService = inject(DocumentIngestionService);
     private router = inject(Router);
+    private graphPipeline = inject(GraphPipelineService);
     goChatService = inject(GoChatService);
 
     isChatRoute = signal(false);
@@ -572,18 +574,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.isScanning.set(true);
 
         try {
-            const result = await this.goKittService.scan(note.markdownContent || '', {
-                worldId: note.narrativeId || 'global',
-                parentPath: note.folderId || undefined,
-            });
-
-            if (result && !result.error) {
-                await this.goKittService.persistGraph(
-                    result,
-                    note.id,
-                    note.narrativeId || undefined
-                );
-            }
+            await this.graphPipeline.runNoteGraphPipeline(note);
         } catch (error) {
             console.error('[Sidebar] Graph scan failed:', error);
         } finally {

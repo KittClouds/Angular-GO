@@ -61,7 +61,8 @@ export interface ChatConfig {
     structuredOutput?: OpenRouterStructuredOutputConfig;
     plugins?: OpenRouterPlugin[];
     // Observational Memory settings
-    omEnabled?: boolean;
+    omEnabled: boolean;
+    omModel?: string;
     observeThreshold?: number;
     reflectThreshold?: number;
     temperature?: number;
@@ -182,6 +183,7 @@ export class GoChatService {
                 apiKey: config?.apiKey || '',
                 model: config?.model || 'meta-llama/llama-3.3-70b-instruct:free',
                 omEnabled: config?.omEnabled ?? true,
+                omModel: config?.omModel || 'nvidia/nemotron-3-super-120b-a12b:free',
                 observeThreshold: config?.observeThreshold ?? 1000,
                 reflectThreshold: config?.reflectThreshold ?? 4000,
                 reasoningEnabled: config?.reasoningEnabled ?? false,
@@ -223,31 +225,36 @@ export class GoChatService {
         }
 
         try {
-            const batchResult = await this.goKittService.batchInit({
-                provider: 'openrouter',
-                openRouterApiKey: config.apiKey,
-                openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
-                temperature: config.temperature,
-                maxTokens: config.maxTokens,
-                reasoningEnabled: config.reasoningEnabled,
-                reasoningEffort: config.reasoningEffort,
-                reasoningMaxTokens: config.reasoningMaxTokens,
-                includeReasoning: config.includeReasoning,
-                structuredOutput: config.structuredOutput,
-                plugins: config.plugins
-            });
+            if (config.apiKey) {
+                const batchResult = await this.goKittService.batchInit({
+                    provider: 'openrouter',
+                    openRouterApiKey: config.apiKey,
+                    openRouterModel: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
+                    temperature: config.temperature,
+                    maxTokens: config.maxTokens,
+                    reasoningEnabled: config.reasoningEnabled,
+                    reasoningEffort: config.reasoningEffort,
+                    reasoningMaxTokens: config.reasoningMaxTokens,
+                    includeReasoning: config.includeReasoning,
+                    structuredOutput: config.structuredOutput,
+                    plugins: config.plugins
+                });
 
-            if (batchResult.error) {
-                console.warn('[GoChatService] Batch re-init failed:', batchResult.error);
+                if (batchResult.error) {
+                    console.warn('[GoChatService] Batch re-init failed:', batchResult.error);
+                } else {
+                    console.log('[GoChatService] Backend LLM model updated to', config.model);
+                }
             } else {
-                console.log('[GoChatService] Backend LLM model updated to', config.model);
+                console.log('[GoChatService] OpenRouter API key cleared; skipping batch re-init');
             }
 
             // Re-apply chat runtime config (including reasoning controls).
             const chatConfigJSON = JSON.stringify({
                 apiKey: config.apiKey || '',
                 model: config.model || 'meta-llama/llama-3.3-70b-instruct:free',
-                omEnabled: config.omEnabled ?? true,
+                omEnabled: config.omEnabled,
+                omModel: config.omModel || 'nvidia/nemotron-3-super-120b-a12b:free',
                 observeThreshold: config.observeThreshold ?? 1000,
                 reflectThreshold: config.reflectThreshold ?? 4000,
                 reasoningEnabled: config.reasoningEnabled ?? false,

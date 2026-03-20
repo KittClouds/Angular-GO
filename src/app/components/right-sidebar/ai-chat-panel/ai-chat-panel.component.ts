@@ -1,7 +1,6 @@
 /**
  * AI Chat Panel Component
- *
- * Wraps quikchat vanilla JS library with Angular integration.
+// Native UI replaces quikchat vanilla JS library with Angular integration.
  * Uses GoChatService for Go/SQLite persistence + memory extraction.
  *
  * Architecture:
@@ -17,20 +16,18 @@ import {
     ElementRef,
     ViewChild,
     signal,
-    computed,
+    effect,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw } from 'lucide-angular';
+import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw, Bot, User, Sparkles } from 'lucide-angular';
+import { computed, untracked } from '@angular/core';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
 import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage } from '../../../lib/services/go-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
 import type { ActivationResult } from '../../../lib/rlm';
-
-// Import quikchat (vanilla JS lib)
-declare const quikchat: any;
 
 interface SessionInfo {
     id: string;
@@ -47,6 +44,16 @@ interface ActivityTraceStep {
     status: 'running' | 'done' | 'error';
     latencyMs?: number;
 }
+interface DisplayMessage {
+    id: string;
+    content: string;
+    role: 'user' | 'assistant' | 'system';
+    timestamp: Date;
+    isStreaming?: boolean;
+    activitySteps?: ActivityTraceStep[];
+    statusText?: string;
+}
+
 const KAMMI_SYSTEM_PROMPT = `You are Kammi, a spunky and helpful AI assistant for KittClouds, a world-building and narrative design application.
 
 Your personality:
@@ -310,6 +317,70 @@ Keep responses concise but helpful. If you don't know something specific about t
                         </div>
                     }
 
+                    <!-- Observational Memory -->
+                    <div class="mt-2 p-2 rounded-md border border-teal-500/20 bg-teal-950/10 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <label class="text-xs font-medium">Observational Memory</label>
+                                <p class="text-[10px] text-muted-foreground">Keep observer and reflector agents available for shared thread memory.</p>
+                            </div>
+                            <button
+                                class="relative w-11 h-6 rounded-full transition-colors"
+                                [class.bg-teal-600]="omEnabledInput()"
+                                [class.bg-muted]="!omEnabledInput()"
+                                (click)="omEnabledInput.set(!omEnabledInput())"
+                            >
+                                <span
+                                    class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm"
+                                    [class.translate-x-5]="omEnabledInput()"
+                                ></span>
+                            </button>
+                        </div>
+
+                        @if (omEnabledInput()) {
+                            <div class="space-y-2">
+                                <div class="space-y-1">
+                                    <label class="text-[10px] text-muted-foreground">OM Model</label>
+                                    <input
+                                        type="text"
+                                        class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500 font-mono placeholder:text-muted-foreground/60"
+                                        placeholder="provider/model-id"
+                                        [value]="omModelInput()"
+                                        (input)="omModelInput.set($any($event.target).value)"
+                                    />
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] text-muted-foreground flex justify-between">
+                                            <span>Observe Threshold</span>
+                                            <span>{{ observeThresholdInput() }}</span>
+                                        </label>
+                                        <input
+                                            type="range"
+                                            min="100" max="10000" step="100"
+                                            class="w-full"
+                                            [value]="observeThresholdInput()"
+                                            (input)="observeThresholdInput.set(+$any($event.target).value)"
+                                        />
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] text-muted-foreground flex justify-between">
+                                            <span>Reflect Threshold</span>
+                                            <span>{{ reflectThresholdInput() }}</span>
+                                        </label>
+                                        <input
+                                            type="range"
+                                            min="500" max="20000" step="100"
+                                            class="w-full"
+                                            [value]="reflectThresholdInput()"
+                                            (input)="reflectThresholdInput.set(+$any($event.target).value)"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
                     <!-- Index Mode Toggle -->
                     <div class="flex items-center justify-between py-1">
                         <div class="flex items-center gap-2">
@@ -427,11 +498,81 @@ Keep responses concise but helpful. If you don't know something specific about t
                 </div>
             }
 
-            <!-- Chat Container (always rendered but hidden when history showing) -->
-            <div #chatContainer 
-                class="chat-container"
-                [class.hidden]="showHistory()"
-            ></div>
+            <!-- Chat Area -->
+            <div class="flex-1 flex flex-col min-w-0" [class.hidden]="showHistory()">
+                <div #messagesContainer class="flex-1 overflow-y-auto px-3 py-4 space-y-4 custom-scrollbar">
+                    @if (displayMessages().length === 0) {
+                        <div class="flex flex-col items-center justify-center h-full text-center mt-6">
+                            <div class="w-16 h-16 rounded-2xl bg-teal-500/10 flex items-center justify-center mb-4 border border-teal-500/20">
+                                <lucide-icon [img]="SparklesIcon" class="h-8 w-8 text-teal-400"></lucide-icon>
+                            </div>
+                            <h2 class="text-xl font-semibold text-foreground mb-2">Kammi AI</h2>
+                        </div>
+                    }
+
+                    @for (msg of displayMessages(); track msg.id) {
+                        @if (msg.role === 'system' && msg.activitySteps) {
+                            <div class="inline-trace my-2 max-w-[95%] mx-auto">
+                                <div class="inline-trace-header">
+                                    <div class="inline-trace-title"><span class="brain-mark">*</span><span>Thinking</span></div>
+                                    <div class="inline-trace-status">{{ msg.statusText }}</div>
+                                </div>
+                                <div class="inline-trace-steps">
+                                    @for (step of msg.activitySteps; track step.id) {
+                                        <div class="inline-trace-step" [class]="step.status">
+                                            <div class="inline-trace-dot"></div>
+                                            <div>
+                                                <div class="inline-trace-step-title">{{ step.label }}</div>
+                                                @if (step.detail) { <div class="inline-trace-step-detail">{{ step.detail }}</div> }
+                                            </div>
+                                            @if (step.latencyMs !== undefined) { <span class="inline-trace-step-latency">{{ step.latencyMs }}ms</span> }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        } @else if (msg.role !== 'system') {
+                            <div class="flex gap-2 w-full max-w-[95%] mx-auto" [class.flex-row-reverse]="msg.role === 'user'">
+                                <div class="w-6 h-6 rounded-md shrink-0 flex items-center justify-center border"
+                                    [class.bg-teal-500/20]="msg.role === 'assistant'" [class.border-teal-500/30]="msg.role === 'assistant'"
+                                    [class.bg-muted]="msg.role === 'user'" [class.border-border]="msg.role === 'user'">
+                                    <lucide-icon [img]="msg.role === 'user' ? UserIcon : BotIcon" class="h-3.5 w-3.5"
+                                        [class.text-teal-400]="msg.role === 'assistant'" [class.text-muted-foreground]="msg.role === 'user'">
+                                    </lucide-icon>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-1 mb-1" [class.justify-end]="msg.role === 'user'">
+                                        <span class="text-[9px] font-medium" [class.text-teal-400]="msg.role === 'assistant'" [class.text-muted-foreground]="msg.role === 'user'">
+                                            {{ msg.role === 'user' ? 'You' : 'Kammi' }}
+                                        </span>
+                                        <span class="text-[9px] text-muted-foreground/70">{{ formatTime(msg.timestamp) }}</span>
+                                    </div>
+                                    <div class="message-bubble px-3 py-2 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap"
+                                        [class.user-bubble]="msg.role === 'user'" [class.assistant-bubble]="msg.role === 'assistant'">
+                                        {{ msg.content }}
+                                        @if (msg.isStreaming) {
+                                            <span class="inline-flex gap-0.5 ml-1 align-middle">
+                                                <span class="w-1 h-1 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 0ms"></span>
+                                                <span class="w-1 h-1 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 150ms"></span>
+                                                <span class="w-1 h-1 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 300ms"></span>
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="shrink-0 border-t border-border/50 p-3 chat-input-area bg-gradient-to-t from-teal-900/10 to-transparent">
+                    <div class="flex items-end gap-2 relative">
+                        <textarea #messageInput class="w-full pl-3 pr-10 py-2.5 text-[13px] rounded-xl border border-border bg-background focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 resize-none transition-all placeholder:text-muted-foreground/60 shadow-sm"
+                            placeholder="Ask Kammi anything..." [(ngModel)]="currentMessage" (keydown.enter)="onEnterKey($event)" [disabled]="isStreaming()" rows="1" style="max-height: 120px"></textarea>
+                        <button class="absolute right-1.5 bottom-1.5 w-7 h-7 rounded-lg flex items-center justify-center transition-all send-btn"
+                            [class.active]="currentMessage.trim() && !isStreaming()" [disabled]="!currentMessage.trim() || isStreaming()" (click)="sendMessage()">
+                            <lucide-icon [img]="SendIcon" class="h-3.5 w-3.5"></lucide-icon>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     `,
     styles: [`
@@ -850,8 +991,12 @@ Keep responses concise but helpful. If you don't know something specific about t
     `]
 })
 export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
-    @ViewChild('chatContainer', { static: true })
-    chatContainer!: ElementRef<HTMLDivElement>;
+    @ViewChild('messagesContainer') messagesContainer!: ElementRef<HTMLDivElement>;
+    @ViewChild('messageInput') messageInput!: ElementRef<HTMLTextAreaElement>;
+
+    displayMessages = signal<DisplayMessage[]>([]);
+    isStreaming = signal(false);
+    currentMessage = '';
 
     // GoChatService for persistence, memory, and Go OpenRouter streaming
     goChatService = inject(GoChatService);
@@ -871,10 +1016,32 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     readonly DatabaseIcon = Database;
     readonly BrainIcon = Brain;
     readonly RotateCcwIcon = RotateCcw;
+    readonly BotIcon = Bot;
+    readonly UserIcon = User;
+    readonly SparklesIcon = Sparkles;
+    readonly SendIcon = Send;
 
     // Settings panel state
     showSettings = signal(false);
     activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter'); // Go-first
+    constructor() {
+        effect(() => {
+            this.goChatService.currentThread();
+            this.goChatService.messages();
+            this.goChatService.threads();
+            untracked(() => {
+                this.restoreHistory();
+            });
+        });
+    }
+
+    onEnterKey(event: Event): void {
+        const kbEvent = event as KeyboardEvent;
+        if (kbEvent.shiftKey) return;
+        kbEvent.preventDefault();
+        this.sendMessage();
+    }
+
 
     // Custom Instructions
     showSystemPrompt = signal(false);
@@ -888,12 +1055,16 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     reasoningEnabledInput = signal(true);
     reasoningEffortInput = signal<'low' | 'medium' | 'high'>('medium');
     reasoningMaxTokensInput = signal(1024);
+    omEnabledInput = signal(true);
+    omModelInput = signal('nvidia/nemotron-3-super-120b-a12b:free');
+    observeThresholdInput = signal(1000);
+    reflectThresholdInput = signal(4000);
 
     // Per-message activity/timeline state (inline chat trace)
     activitySteps = signal<ActivityTraceStep[]>([]);
     private traceCounter = 0;
     private readonly traceStartedAt = new Map<string, number>();
-    private currentTraceMsgId: number | null = null;
+    private currentTraceMsgId: string | null = null;
 
 
     // Persisted model list — seed + user-added models
@@ -931,7 +1102,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private scriptLoaded = false;
 
     ngAfterViewInit(): void {
-        this.loadQuikChat();
 
         // Pre-fill Go OpenRouter config from saved openrouter:config (shared key store)
         const savedOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
@@ -949,6 +1119,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             this.reasoningEnabledInput.set(savedOrConfig.reasoningEnabled ?? true);
             this.reasoningEffortInput.set(savedOrConfig.reasoningEffort ?? 'medium');
             this.reasoningMaxTokensInput.set(savedOrConfig.reasoningMaxTokens ?? 1024);
+            this.omEnabledInput.set(savedOrConfig.omEnabled ?? true);
+            this.omModelInput.set(savedOrConfig.omModel || 'nvidia/nemotron-3-super-120b-a12b:free');
+            this.observeThresholdInput.set(savedOrConfig.observeThreshold ?? 1000);
+            this.reflectThresholdInput.set(savedOrConfig.reflectThreshold ?? 4000);
         }
 
         const googleConfig = this.googleGenAI.config();
@@ -982,19 +1156,14 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private async initGoChatService(): Promise<void> {
         if (this.goChatInitialized) return;
         // init() reads openrouter:config from Dexie internally when no arg provided
-        await this.goChatService.init();
+
+        await this.goChatService.init();
         this.goChatInitialized = true;
         console.log('[AiChatPanel] Go chat service initialized');
     }
 
     ngOnDestroy(): void {
-        if (this.chat && typeof this.chat.destroy === 'function') {
-            this.chat.destroy();
-        }
-        if (this.chatContainer?.nativeElement) {
-            this.chatContainer.nativeElement.innerHTML = '';
-        }
-        this.chat = null;
+        this.displayMessages.set([]);
     }
 
     // -------------------------------------------------------------------------
@@ -1020,6 +1189,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 includeReasoning: this.reasoningEnabledInput(),
                 structuredOutput: existingOrConfig?.structuredOutput,
                 plugins: existingOrConfig?.plugins,
+                omEnabled: this.omEnabledInput(),
+                omModel: this.omModelInput(),
+                observeThreshold: this.observeThresholdInput(),
+                reflectThreshold: this.reflectThresholdInput(),
             };
             setSetting('openrouter:config', orConfig);
 
@@ -1035,7 +1208,10 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 includeReasoning: orConfig.includeReasoning,
                 structuredOutput: orConfig.structuredOutput,
                 plugins: orConfig.plugins,
-                omEnabled: true,
+                omEnabled: orConfig.omEnabled,
+                omModel: orConfig.omModel,
+                observeThreshold: orConfig.observeThreshold,
+                reflectThreshold: orConfig.reflectThreshold,
             });
         }
 
@@ -1149,15 +1325,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         this.activitySteps.set([]);
 
         // Reload chat with new session messages
-        this.reloadChatFromService();
-    }
-
-    private reloadChatFromService(): void {
-        if (!this.chat) return;
-
-        // Clear current chat - reinitialize to fully reset
-        this.chatContainer.nativeElement.innerHTML = '';
-        this.initializeChat();
+        this.restoreHistory();
     }
 
     formatSessionDate(timestamp: number): string {
@@ -1181,128 +1349,68 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // QuikChat Setup
     // -------------------------------------------------------------------------
 
-    private async loadQuikChat(): Promise<void> {
-        if ((window as any).quikchat) {
-            this.initializeChat();
-            return;
-        }
-
-        // NOTE: Not loading quikchat CSS - we style everything ourselves
-        // This gives us full control over the appearance
-
-        // Load JS
-        if (!this.scriptLoaded) {
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/quikchat';
-            script.crossOrigin = 'anonymous';
-            script.onload = () => {
-                this.scriptLoaded = true;
-                this.initializeChat();
-            };
-            script.onerror = () => {
-                console.error('[AiChatPanel] Failed to load quikchat');
-            };
-            document.body.appendChild(script);
-        }
-    }
-
-    private initializeChat(): void {
-        const container = this.chatContainer.nativeElement;
-
-        this.chat = new (window as any).quikchat(container, (instance: any, message: string) => {
-            this.onUserMessage(instance, message);
-        }, {
-            placeholder: 'Ask Kammi anything...',
-            sendButtonText: '→',
-        });
-
-        this.applyChatInputAccessibilityFix(container);
-
-        // Restore history
-        this.restoreHistory();
-
-        // Welcome message if empty
-        if (this.goChatService.messageCount() === 0) {
-            this.chat.messageAddNew(
-                'Hello! I\'m Kammi, your AI assistant. How can I help you with your world-building today? ✨',
-                'Kammi',
-                'left'
-            );
-        }
-    }
-
-    private applyChatInputAccessibilityFix(container: HTMLElement): void {
-        requestAnimationFrame(() => {
-            const input = container.querySelector<HTMLInputElement>('input.input-area');
-            if (!input) return;
-
-            if (!input.id) {
-                input.id = 'kammi-chat-input';
-            }
-            if (!input.name) {
-                input.name = 'kammi-chat-input';
-            }
-            if (!input.getAttribute('aria-label')) {
-                input.setAttribute('aria-label', 'Ask Kammi anything');
-            }
-
-            const existingLabel = container.querySelector(`label[for="${input.id}"][data-kammi-chat-label="true"]`);
-            if (existingLabel) return;
-
-            const label = document.createElement('label');
-            label.htmlFor = input.id;
-            label.textContent = 'Ask Kammi anything';
-            label.setAttribute('data-kammi-chat-label', 'true');
-            label.style.position = 'absolute';
-            label.style.width = '1px';
-            label.style.height = '1px';
-            label.style.padding = '0';
-            label.style.margin = '-1px';
-            label.style.overflow = 'hidden';
-            label.style.clip = 'rect(0, 0, 0, 0)';
-            label.style.whiteSpace = 'nowrap';
-            label.style.border = '0';
-            input.parentElement?.insertBefore(label, input);
-        });
-    }
-
     private restoreHistory(): void {
-        const messages = this.goChatService.messages();
-        for (const msg of messages) {
-            const side = msg.role === 'user' ? 'right' : 'left';
-            const sender = msg.role === 'user' ? 'You' : 'Kammi';
-            this.chat.messageAddNew(msg.content, sender, side);
+        const storedMessages: DisplayMessage[] = this.goChatService.messages().map((m: any) => ({
+            id: m.id || this.generateId(),
+            content: m.content,
+            role: m.role as 'user' | 'assistant' | 'system',
+            timestamp: new Date(m.created_at || m.timestamp || Date.now()),
+            isStreaming: !!m.is_streaming
+        }));
+        const traceMessages: DisplayMessage[] = this.displayMessages().filter((message) => message.role === 'system');
+        const mergedMessages: DisplayMessage[] = [...storedMessages];
+        for (const traceMessage of traceMessages) {
+            const insertAt = mergedMessages.length > 0 ? mergedMessages.length - 1 : mergedMessages.length;
+            mergedMessages.splice(insertAt, 0, traceMessage);
         }
+        this.displayMessages.set(mergedMessages);
+        this.scrollToBottom();
     }
 
-    // -------------------------------------------------------------------------
-    // Message Handling
-    // -------------------------------------------------------------------------
+    private generateId(): string {
+        return Math.random().toString(36).substring(2, 11);
+    }
 
-    private async onUserMessage(instance: any, text: string): Promise<void> {
-        if (!text.trim()) return;
+    formatTime(date: Date): string {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
 
-        instance.messageAddNew(text, 'You', 'right');
+    private scrollToBottom(): void {
+        setTimeout(() => {
+            if (this.messagesContainer) {
+                const el = this.messagesContainer.nativeElement;
+                el.scrollTop = el.scrollHeight;
+            }
+        }, 50);
+    }
+
+    async sendMessage(): Promise<void> {
+        const text = this.currentMessage.trim();
+        if (!text || this.isStreaming()) return;
+
+        this.currentMessage = '';
+        this.isStreaming.set(true);
+
         await this.goChatService.addUserMessage(text);
+        this.scrollToBottom();
 
-        const thinkingStepId = this.startActivityTrace(instance);
+        const traceId = this.startActivityTrace();
 
         const googleConfigured = this.googleGenAI.isConfigured();
         const openRouterConfigured = this.isGoConfigured();
 
         if (!googleConfigured && !openRouterConfigured) {
-            this.finishActivityStep(thinkingStepId, 'error', 'AI provider is not configured.');
-            instance.messageAddNew(
-                '[Warning] Please configure an API key in settings (gear icon) to enable AI responses.',
-                'Kammi',
-                'left'
-            );
+            this.finishActivityStep(traceId, 'error', 'AI provider is not configured.');
+            this.displayMessages.update(msgs => [...msgs, {
+                id: this.generateId(), content: '[Warning] Please configure an API key in settings to enable responses.', role: 'assistant', timestamp: new Date()
+            }]);
+            this.isStreaming.set(false);
+            this.scrollToBottom();
             return;
         }
 
         let contextBlock = '';
         let activation: ActivationResult | null = null;
-
         if (this.indexEnabled()) {
             const indexStepId = this.addActivityStep('tool', 'Reading notes', 'Searching the workspace for note context...');
             try {
@@ -1319,88 +1427,113 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         const highlightedClips = this.chatContextClipStore.consumeAll();
         const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
         if (highlightedClips.length > 0) {
-            this.addCompletedStep(
-                'tool',
-                highlightedClips.length === 1 ? 'Using highlighted text' : `Using ${highlightedClips.length} highlighted passages`,
-                'Injected highlighted note snippets into this turn.'
-            );
+            this.addCompletedStep('tool', 'Using highlighted text', 'Injected highlighted note snippets.');
         }
 
         const history = this.buildConversationHistory();
         const effectiveSystemPrompt = this.systemPromptInput()
             + (contextBlock ? '\n\n' + contextBlock : '')
             + (highlightedContext ? '\n\n' + highlightedContext : '');
+
         const thinkingSummary = this.buildThinkingSummary(contextBlock, highlightedClips.length, activation);
         const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
             ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
             : null;
-        this.finishActivityStep(thinkingStepId, 'done', thinkingSummary);
+        this.finishActivityStep(traceId, 'done', thinkingSummary);
 
-        const botMsgId = instance.messageAddNew('', 'Kammi', 'left');
-        this.currentBotMsgId = botMsgId;
+        const streamingMessage = await this.goChatService.startStreamingMessage();
+        if (!streamingMessage) {
+            this.finishActivityStep(traceId, 'error', 'Failed to start assistant response.');
+            this.isStreaming.set(false);
+            return;
+        }
 
         const streamStepId = this.addActivityStep('stream', 'Responding', 'Writing the answer...');
         await this.handleStreamingChat(
-            instance,
-            botMsgId,
+            streamingMessage.id,
             history,
             effectiveSystemPrompt,
-            (event) => {
-                this.applyProgressEvent(streamStepId, event);
-            },
+            (event) => this.applyProgressEvent(streamStepId, event),
             reasoningStepId ? (chunk) => this.appendActivityStepDetail(reasoningStepId, chunk) : undefined
         );
-        if (reasoningStepId) {
-            this.finalizeReasoningStep(reasoningStepId);
-        }
+
+        if (reasoningStepId) this.finalizeReasoningStep(reasoningStepId);
+
+        this.finishActivityStep(streamStepId, "done", "Done");
+        this.isStreaming.set(false);
+        this.scrollToBottom();
     }
 
     private async handleStreamingChat(
-        instance: any,
         botMsgId: string,
         history: OpenRouterMessage[],
         systemPrompt: string,
-        onEvent?: (event: ChatProgressEvent) => void,
-        onReasoningChunk?: (chunk: string) => void
+        onProgress: (event: ChatProgressEvent) => void,
+        onReasoning?: (chunk: string) => void
     ): Promise<void> {
-        if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
-            const googleHistory: GoogleGenAIMessage[] = history
-                .filter(msg => msg.role !== 'system')
-                .map(msg => ({
-                    role: msg.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: msg.content || '' }]
-                }));
+        try {
+            if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
+                const googleHistory: GoogleGenAIMessage[] = history
+                    .filter((m: any) => m.role !== 'system')
+                    .map((m: any) => ({
+                        role: m.role === 'assistant' ? 'model' : 'user',
+                        parts: [{ text: m.content || '' }]
+                    }));
 
-            onEvent?.({ stage: 'stream', status: 'running', detail: 'Generating answer...' });
-            await this.googleGenAI.streamChat(googleHistory, {
-                onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
-                onComplete: async (response) => {
-                    await this.goChatService.addAssistantMessage(response);
-                    this.currentBotMsgId = null;
-                    onEvent?.({ stage: 'stream', status: 'done', detail: 'Answer complete.' });
+                await this.googleGenAI.streamChat(
+                    googleHistory,
+                    {
+                        onChunk: (chunk: string) => {
+                            if (onProgress) onProgress({ stage: 'stream', status: 'running' });
+                            void this.goChatService.appendMessage(botMsgId, chunk);
+                        },
+                        onComplete: async (response: string) => {
+                            if (onProgress) onProgress({ stage: 'stream', status: 'done', detail: 'Completed successfully.' });
+                            await this.goChatService.updateMessage(botMsgId, response);
+                            this.currentBotMsgId = null;
+                        },
+                        onError: (err: any) => {
+                            const errStr = err instanceof Error ? err.message : String(err);
+                            if (onProgress) onProgress({ stage: 'stream', status: 'error', detail: errStr });
+                            void this.goChatService.updateMessage(botMsgId, `Error: ${errStr}`);
+                            this.currentBotMsgId = null;
+                        }
+                    },
+                    systemPrompt
+                );
+                return;
+            }
+
+            // Otherwise, use openrouter (WASM)
+            await this.goChatService.streamChat(
+                history,
+                {
+                    onChunk: (chunk: string) => {
+                        void this.goChatService.appendMessage(botMsgId, chunk);
+                    },
+                    onComplete: async (response: string) => {
+                        await this.goChatService.updateMessage(botMsgId, response);
+                        this.currentBotMsgId = null;
+                    },
+                    onError: (err: any) => {
+                        const errStr = err instanceof Error ? err.message : String(err);
+                        void this.goChatService.updateMessage(botMsgId, `Error: ${errStr}`);
+                        this.currentBotMsgId = null;
+                    },
+                    onEvent: onProgress,
+                    onReasoningChunk: onReasoning
                 },
-                onError: (error) => {
-                    console.error('[AiChatPanel] Google GenAI error:', error);
-                    instance.messageReplaceContent(botMsgId, `Error: ${error.message}`);
-                    this.currentBotMsgId = null;
-                    onEvent?.({ stage: 'stream', status: 'error', detail: error.message });
-                },
-            }, systemPrompt);
-        } else {
-            await this.goChatService.streamChat(history, {
-                onChunk: (chunk) => instance.messageAppendContent(botMsgId, chunk),
-                onReasoningChunk,
-                onComplete: async (response) => {
-                    await this.goChatService.addAssistantMessage(response);
-                    this.currentBotMsgId = null;
-                },
-                onError: (error) => {
-                    console.error('[AiChatPanel] Go stream error:', error);
-                    instance.messageReplaceContent(botMsgId, `Error from Go: ${error.message}`);
-                    this.currentBotMsgId = null;
-                },
-                onEvent,
-            }, systemPrompt);
+                systemPrompt
+            );
+
+        } catch (err: unknown) {
+            console.error('[AiChatPanel] Error calling provider:', err);
+            const errStr = err instanceof Error ? err.message : String(err);
+            if (onProgress) {
+                onProgress({ stage: 'stream', status: 'error', detail: errStr });
+            }
+            void this.goChatService.updateMessage(botMsgId, `System Error: ${errStr}`);
+            this.currentBotMsgId = null;
         }
     }
 
@@ -1411,11 +1544,21 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     }
 
-    private startActivityTrace(instance: any): string {
+    private startActivityTrace(): string {
         this.traceCounter = 0;
         this.traceStartedAt.clear();
         this.activitySteps.set([]);
-        this.currentTraceMsgId = instance.messageAddNew(this.renderActivityTraceMarkup(), 'Kammi', 'left');
+        const traceMsgId = this.generateId();
+        this.currentTraceMsgId = traceMsgId;
+        this.displayMessages.update(msgs => [...msgs, {
+            id: traceMsgId,
+            content: '',
+            role: 'system',
+            timestamp: new Date(),
+            activitySteps: [],
+            statusText: 'Starting'
+        }]);
+        this.scrollToBottom();
         return this.addActivityStep(
             'reasoning',
             'Thinking',
@@ -1579,37 +1722,14 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     private syncActivityTrace(): void {
-        if (!this.chat || this.currentTraceMsgId === null) return;
-        this.chat.messageReplaceContent(this.currentTraceMsgId, this.renderActivityTraceMarkup());
-    }
-
-    private renderActivityTraceMarkup(): string {
-        const steps = this.activitySteps();
+        const id = this.currentTraceMsgId;
+        if (!id) return;
+        const currentSteps = [...this.activitySteps()];
         const statusText = this.getActivityStatusText();
-        const stepMarkup = steps.map((step) => {
-            const detail = step.detail ? `<div class="inline-trace-step-detail">${this.escapeHtml(step.detail)}</div>` : '';
-            const latency = step.latencyMs !== undefined ? `<span class="inline-trace-step-latency">${step.latencyMs}ms</span>` : '';
-            return [
-                `<div class="inline-trace-step ${step.status}">`,
-                '<div class="inline-trace-dot"></div>',
-                '<div>',
-                `<div class="inline-trace-step-title">${this.escapeHtml(step.label)}</div>`,
-                detail,
-                '</div>',
-                latency,
-                '</div>'
-            ].join('');
-        }).join('');
-
-        return [
-            '<div class="inline-trace">',
-            '<div class="inline-trace-header">',
-            '<div class="inline-trace-title"><span class="brain-mark">*</span><span>Thinking</span></div>',
-            `<div class="inline-trace-status">${this.escapeHtml(statusText)}</div>`,
-            '</div>',
-            `<div class="inline-trace-steps">${stepMarkup}</div>`,
-            '</div>'
-        ].join('');
+        this.displayMessages.update(msgs =>
+            msgs.map(m => m.id === id ? { ...m, activitySteps: currentSteps, statusText } : m)
+        );
+        this.scrollToBottom();
     }
 
     private getActivityStatusText(): string {
@@ -1652,20 +1772,16 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         await this.goChatService.newSession();
         this.currentTraceMsgId = null;
         this.activitySteps.set([]);
-        if (this.chat) {
-            this.chatContainer.nativeElement.innerHTML = '';
-            this.initializeChat();
-        }
+        this.displayMessages.set([]);
+        this.restoreHistory();
     }
 
     async clearChat(): Promise<void> {
         await this.goChatService.clearThread();
         this.currentTraceMsgId = null;
         this.activitySteps.set([]);
-        if (this.chat) {
-            this.chatContainer.nativeElement.innerHTML = '';
-            this.initializeChat();
-        }
+        this.displayMessages.set([]);
+        this.restoreHistory();
     }
 
     async exportChat(): Promise<void> {

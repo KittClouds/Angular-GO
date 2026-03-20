@@ -21,9 +21,9 @@ type ChatService struct {
 }
 
 // NewChatService creates a new chat service.
-func NewChatService(s *store.SQLiteStore, a *agent.Service) *ChatService {
+func NewChatService(s *store.SQLiteStore, a *agent.Service, cfg memory.Config) *ChatService {
 	// Initialize Observational Memory
-	obs := memory.NewObserver(s, a, memory.DefaultConfig())
+	obs := memory.NewObserver(s, a, cfg)
 
 	return &ChatService{
 		store:    s,
@@ -90,13 +90,15 @@ func (s *ChatService) AddMessage(threadID, role, content, narrativeID string) (*
 	}
 
 	// Trigger Observational Memory Loop (Async)
-	go func() {
-		// Create a background context for the async op
-		ctx := context.Background()
-		if err := s.observer.ProcessLoop(ctx, threadID); err != nil {
-			fmt.Printf("[OM] Error processing loop for thread %s: %v\n", threadID, err)
-		}
-	}()
+	if s.observer != nil && s.observer.IsEnabled() {
+		go func() {
+			// Create a background context for the async op
+			ctx := context.Background()
+			if err := s.observer.ProcessLoop(ctx, threadID); err != nil {
+				fmt.Printf("[OM] Error processing loop for thread %s: %v\n", threadID, err)
+			}
+		}()
+	}
 
 	return msg, nil
 }
@@ -192,6 +194,9 @@ func (s *ChatService) GetOMRecord(threadID string) (*store.OMRecord, error) {
 // Returns a JSON-serializable result describing whether workspace activated,
 // what tools were called, and the new observation that was injected.
 func (s *ChatService) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, userPrompt string) (*memory.ActivationResult, error) {
+	if s.observer == nil {
+		return &memory.ActivationResult{Triggered: false}, nil
+	}
 	return s.observer.ProcessWithWorkspace(ctx, threadID, scopeID, userPrompt)
 }
 

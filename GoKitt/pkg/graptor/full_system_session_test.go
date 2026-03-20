@@ -188,6 +188,24 @@ Meta-Gang scouts followed Ryan through the market.`
 		t.Fatalf("expected at least 2 scoped manifests, got %d", commitResult.ScopedManifestsWritten)
 	}
 
+	entities, err := sqlStore.ListEntities("")
+	if err != nil {
+		t.Fatalf("list committed entities: %v", err)
+	}
+	if len(entities) == 0 {
+		t.Fatalf("expected committed entities to be readable from store")
+	}
+	foundScopedEntity := false
+	for _, entity := range entities {
+		if entity.NarrativeID == scope.NarrativeID {
+			foundScopedEntity = true
+			break
+		}
+	}
+	if !foundScopedEntity {
+		t.Fatalf("expected committed entities to preserve narrative scope %q", scope.NarrativeID)
+	}
+
 	repeatCommit, err := manager.Commit(sessionID, CommitRequest{})
 	if err != nil {
 		t.Fatalf("repeat commit: %v", err)

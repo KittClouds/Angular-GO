@@ -20,6 +20,26 @@ export interface GoKittGraphData {
     }>;
 }
 
+export interface KnowledgeGraphNode {
+    id: string;
+    kind: string;
+    label: string;
+    props?: Record<string, any>;
+}
+
+export interface KnowledgeGraphEdge {
+    source: string;
+    target: string;
+    relation: string;
+    weight: number;
+    props?: Record<string, any>;
+}
+
+export interface KnowledgeGraphData {
+    nodes: Record<string, KnowledgeGraphNode>;
+    edges: KnowledgeGraphEdge[];
+}
+
 /** Provenance context for folder-aware graph projection */
 export interface ProvenanceContext {
     vaultId?: string;
@@ -156,6 +176,7 @@ type GoKittWorkerMessage =
     // Knowledge Graph requests
     | { type: 'KNOWLEDGE_INIT'; id: number }
     | { type: 'KNOWLEDGE_LOAD'; id: number }
+    | { type: 'KNOWLEDGE_SYNC'; id: number }
     | { type: 'KNOWLEDGE_SAVE'; id: number }
     | { type: 'KNOWLEDGE_ADD_NODE'; payload: { nodeJSON: string }; id: number }
     | { type: 'KNOWLEDGE_ADD_EDGE'; payload: { edgeJSON: string }; id: number }
@@ -302,6 +323,7 @@ type GoKittWorkerResponse =
     // Knowledge Graph responses
     | { type: 'KNOWLEDGE_INIT_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
     | { type: 'KNOWLEDGE_LOAD_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
+    | { type: 'KNOWLEDGE_SYNC_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
     | { type: 'KNOWLEDGE_SAVE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
     | { type: 'KNOWLEDGE_ADD_NODE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
     | { type: 'KNOWLEDGE_ADD_EDGE_RESULT'; id: number; payload: { success: boolean; message?: string; error?: string } }
@@ -531,18 +553,6 @@ export class GoKittService {
 
         const entitiesJSON = JSON.stringify(entities);
         console.log(`[GoKittService] refreshDictionary: Rebuilding with ${entities.length} entities...`);
-
-        // DEBUG: Check for key entities
-        const checkEntities = ["Yellow Dragon", "Belys Vorona", "Kai"];
-        checkEntities.forEach(name => {
-            const found = entities.find(e => e.Label === name);
-            if (found) {
-                console.log(`[GoKittService] Dictionary Payload contains "${name}":`, found);
-            } else {
-                console.log(`[GoKittService] Dictionary Payload MISSING "${name}"`);
-            }
-        });
-
 
         const result = await this.sendRequest<{ success: boolean; error?: string }>('REBUILD_DICTIONARY', { entitiesJSON });
 
@@ -1001,18 +1011,6 @@ export class GoKittService {
         try {
             const entitiesJSON = JSON.stringify(entities);
 
-            // DEBUG: Check for key entities in rebuildDictionary (Public API)
-            console.log(`[GoKittService.rebuildDictionary] Checking payload for critical entities...`);
-            const checkEntities = ["Yellow Dragon", "Belys Vorona", "Kai"];
-            checkEntities.forEach(name => {
-                const found = entities.find(e => e.label === name);
-                if (found) {
-                    console.log(`[GoKittService.rebuildDictionary] Payload contains "${name}":`, JSON.stringify(found));
-                } else {
-                    console.log(`[GoKittService.rebuildDictionary] Payload MISSING "${name}"`);
-                }
-            });
-
             const result = await this.sendRequest<{ success: boolean; error?: string }>('REBUILD_DICTIONARY', { entitiesJSON });
             if (!result.success) {
                 console.error('[GoKittService.rebuildDictionary] Failed:', result.error);
@@ -1160,6 +1158,7 @@ export class GoKittService {
                         // Knowledge Graph Responses
                         case 'KNOWLEDGE_INIT_RESULT':
                         case 'KNOWLEDGE_LOAD_RESULT':
+                        case 'KNOWLEDGE_SYNC_RESULT':
                         case 'KNOWLEDGE_SAVE_RESULT':
                         case 'KNOWLEDGE_ADD_NODE_RESULT':
                         case 'KNOWLEDGE_ADD_EDGE_RESULT':
@@ -1816,6 +1815,12 @@ export class GoKittService {
         return this.sendRequest('KNOWLEDGE_LOAD', {});
     }
 
+    /** Sync the graphstore from canonical persisted entities and edges */
+    async knowledgeSync(): Promise<{ success: boolean; message?: string; error?: string }> {
+        if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
+        return this.sendRequest('KNOWLEDGE_SYNC', {});
+    }
+
     /** Save in-memory graph to SQLite persistent store */
     async knowledgeSave(): Promise<{ success: boolean; message?: string; error?: string }> {
         if (!this.wasmLoaded) return { success: false, error: 'WASM not loaded' };
@@ -1873,7 +1878,7 @@ export class GoKittService {
     }
 
     /** Get the full knowledge graph (for visualization) */
-    async knowledgeGetGraph(): Promise<{ nodes: any; edges: any[] }> {
+    async knowledgeGetGraph(): Promise<KnowledgeGraphData> {
         if (!this.wasmLoaded) return { nodes: {}, edges: [] };
         return this.sendRequest('KNOWLEDGE_GET_GRAPH', {});
     }

@@ -7,10 +7,10 @@
  * Uses EntityColorStore for consistent entity coloring across the app.
  */
 
-import { Injectable, inject } from '@angular/core';
-import type { GoKittGraphData } from './gokitt.service';
+import { Injectable } from '@angular/core';
+import type { GoKittGraphData, KnowledgeGraphData } from './gokitt.service';
 import { smartGraphRegistry } from '../lib/registry';
-import { entityColorStore, DEFAULT_ENTITY_COLORS } from '../lib/store/entityColorStore';
+import { entityColorStore } from '../lib/store/entityColorStore';
 import type { EntityKind } from '../lib/Scanner/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,10 +258,22 @@ export class GraphVizService {
     }
 
     /**
-     * Transform GoKittGraphData (from signal) directly into ForceGraphData
-     * This is the PRIMARY method for graph visualization
+     * Transform a graphstore dump into 3d-force-graph format.
+     * This is the canonical visualization path for the knowledge graph page.
+     */
+    fromKnowledgeGraph(graphData: KnowledgeGraphData): ForceGraphData {
+        return this.fromRawGraphData(graphData);
+    }
+
+    /**
+     * Transform legacy GoKitt graph data into 3d-force-graph format.
+     * Kept for compatibility with older scanner-based callers.
      */
     fromGoKittData(graphData: GoKittGraphData): ForceGraphData {
+        return this.fromRawGraphData(graphData);
+    }
+
+    private fromRawGraphData(graphData: { nodes: Record<string, any>; edges: any[] }): ForceGraphData {
         const nodes: GraphNode[] = [];
         const links: GraphLink[] = [];
         const kindCounts: Record<string, number> = {};
@@ -320,7 +332,7 @@ export class GraphVizService {
             typeCounts,
         };
 
-        console.log('[GraphVizService.fromGoKittData] Transformed:', stats);
+        console.log('[GraphVizService.fromRawGraphData] Transformed:', stats);
 
         return { nodes, links, stats };
     }

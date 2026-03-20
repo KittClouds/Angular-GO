@@ -156,6 +156,7 @@ type GoKittWorkerMessage =
     // Knowledge Graph API
     | { type: 'KNOWLEDGE_INIT'; id: number }
     | { type: 'KNOWLEDGE_LOAD'; id: number }
+    | { type: 'KNOWLEDGE_SYNC'; id: number }
     | { type: 'KNOWLEDGE_SAVE'; id: number }
     | { type: 'KNOWLEDGE_ADD_NODE'; payload: { nodeJSON: string }; id: number }
     | { type: 'KNOWLEDGE_ADD_EDGE'; payload: { edgeJSON: string }; id: number }
@@ -324,6 +325,7 @@ type GoKittWorkerResponse =
     // Knowledge Graph Responses
     | { type: 'KNOWLEDGE_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'KNOWLEDGE_LOAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'KNOWLEDGE_SYNC_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'KNOWLEDGE_SAVE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'KNOWLEDGE_ADD_NODE_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'KNOWLEDGE_ADD_EDGE_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -553,6 +555,7 @@ declare const GoKitt: {
     // Knowledge Graph API
     knowledgeInit: () => string;
     knowledgeLoad: () => string;
+    knowledgeSync: () => string;
     knowledgeSave: () => string;
     knowledgeAddNode: (nodeJSON: string) => string;
     knowledgeAddEdge: (edgeJSON: string) => string;
@@ -3015,7 +3018,7 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 }
                 const res = GoKitt.knowledgeInit();
                 const parsed = JSON.parse(res);
-                self.postMessage({ type: 'KNOWLEDGE_INIT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                self.postMessage({ type: 'KNOWLEDGE_INIT_RESULT', id: msg.id, payload: { success: !parsed.error, message: parsed.message, error: parsed.error } });
                 break;
             }
 
@@ -3026,7 +3029,18 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 }
                 const res = GoKitt.knowledgeLoad();
                 const parsed = JSON.parse(res);
-                self.postMessage({ type: 'KNOWLEDGE_LOAD_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                self.postMessage({ type: 'KNOWLEDGE_LOAD_RESULT', id: msg.id, payload: { success: !parsed.error, message: parsed.message, error: parsed.error } });
+                break;
+            }
+
+            case 'KNOWLEDGE_SYNC': {
+                if (!wasmLoaded) {
+                    self.postMessage({ type: 'KNOWLEDGE_SYNC_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } as any });
+                    return;
+                }
+                const res = GoKitt.knowledgeSync();
+                const parsed = JSON.parse(res);
+                self.postMessage({ type: 'KNOWLEDGE_SYNC_RESULT', id: msg.id, payload: { success: !parsed.error, message: parsed.message, error: parsed.error } });
                 break;
             }
 
@@ -3037,7 +3051,7 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                 }
                 const res = GoKitt.knowledgeSave();
                 const parsed = JSON.parse(res);
-                self.postMessage({ type: 'KNOWLEDGE_SAVE_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
+                self.postMessage({ type: 'KNOWLEDGE_SAVE_RESULT', id: msg.id, payload: { success: !parsed.error, message: parsed.message, error: parsed.error } });
                 break;
             }
 

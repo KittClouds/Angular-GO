@@ -41,6 +41,7 @@ import {
     GoogleGenAIMessage,
 } from '../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../lib/store/chat-context-clip.store';
+import { KammiChatUiService } from '../../lib/services/kammi-chat-ui.service';
 import type { ActivationResult } from '../../lib/rlm';
 
 // Re-export types from the installed package for compatibility
@@ -210,42 +211,61 @@ Keep responses concise but helpful. If you don't know something specific about t
                         }
 
                         @for (msg of displayMessages(); track msg.id) {
-                            <div class="flex gap-3 max-w-3xl mx-auto w-full" [class.flex-row-reverse]="msg.role === 'user'">
-                                <!-- Avatar -->
-                                <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center border"
-                                    [class.bg-teal-500/20]="msg.role === 'assistant'"
-                                    [class.border-teal-500/30]="msg.role === 'assistant'"
-                                    [class.bg-zinc-800]="msg.role === 'user'"
-                                    [class.border-zinc-700]="msg.role === 'user'">
-                                    <lucide-icon
-                                        [img]="msg.role === 'user' ? UserIcon : BotIcon"
-                                        size="16"
-                                        [class.text-teal-400]="msg.role === 'assistant'"
-                                        [class.text-zinc-400]="msg.role === 'user'">
-                                    </lucide-icon>
-                                </div>
-                                <!-- Content -->
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1" [class.justify-end]="msg.role === 'user'">
-                                        <span class="text-xs font-medium" [class.text-teal-400]="msg.role === 'assistant'" [class.text-zinc-400]="msg.role === 'user'">
-                                            {{ msg.role === 'user' ? 'You' : 'Kammi' }}
-                                        </span>
-                                        <span class="text-[10px] text-slate-600">{{ formatTime(msg.timestamp) }}</span>
+                            @if (msg.role === 'system' && msg.activitySteps) {
+                                <div class="inline-trace max-w-3xl mx-auto w-full">
+                                    <div class="inline-trace-header">
+                                        <div class="inline-trace-title"><span class="brain-mark">*</span><span>Thinking</span></div>
+                                        <div class="inline-trace-status">{{ msg.statusText }}</div>
                                     </div>
-                                    <div class="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap"
-                                        [class.user-bubble]="msg.role === 'user'"
-                                        [class.assistant-bubble]="msg.role === 'assistant'">
-                                        {{ msg.content }}
-                                        @if (msg.isStreaming) {
-                                            <span class="inline-flex gap-1 ml-1 align-middle">
-                                                <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 0ms"></span>
-                                                <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 150ms"></span>
-                                                <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 300ms"></span>
-                                            </span>
+                                    <div class="inline-trace-steps">
+                                        @for (step of msg.activitySteps; track step.id) {
+                                            <div class="inline-trace-step" [class]="step.status">
+                                                <div class="inline-trace-dot"></div>
+                                                <div>
+                                                    <div class="inline-trace-step-title">{{ step.label }}</div>
+                                                    @if (step.detail) { <div class="inline-trace-step-detail">{{ step.detail }}</div> }
+                                                </div>
+                                                @if (step.latencyMs !== undefined) { <span class="inline-trace-step-latency">{{ step.latencyMs }}ms</span> }
+                                            </div>
                                         }
                                     </div>
                                 </div>
-                            </div>
+                            } @else if (msg.role !== 'system') {
+                                <div class="flex gap-3 max-w-3xl mx-auto w-full" [class.flex-row-reverse]="msg.role === 'user'">
+                                    <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center border"
+                                        [class.bg-teal-500/20]="msg.role === 'assistant'"
+                                        [class.border-teal-500/30]="msg.role === 'assistant'"
+                                        [class.bg-zinc-800]="msg.role === 'user'"
+                                        [class.border-zinc-700]="msg.role === 'user'">
+                                        <lucide-icon
+                                            [img]="msg.role === 'user' ? UserIcon : BotIcon"
+                                            size="16"
+                                            [class.text-teal-400]="msg.role === 'assistant'"
+                                            [class.text-zinc-400]="msg.role === 'user'">
+                                        </lucide-icon>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2 mb-1" [class.justify-end]="msg.role === 'user'">
+                                            <span class="text-xs font-medium" [class.text-teal-400]="msg.role === 'assistant'" [class.text-zinc-400]="msg.role === 'user'">
+                                                {{ msg.role === 'user' ? 'You' : 'Kammi' }}
+                                            </span>
+                                            <span class="text-[10px] text-slate-600">{{ formatTime(msg.timestamp) }}</span>
+                                        </div>
+                                        <div class="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap"
+                                            [class.user-bubble]="msg.role === 'user'"
+                                            [class.assistant-bubble]="msg.role === 'assistant'">
+                                            {{ msg.content }}
+                                            @if (msg.isStreaming) {
+                                                <span class="inline-flex gap-1 ml-1 align-middle">
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 0ms"></span>
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 150ms"></span>
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-bounce" style="animation-delay: 300ms"></span>
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            }
                         }
                     </div>
 
@@ -418,6 +438,48 @@ Keep responses concise but helpful. If you don't know something specific about t
                                 </div>
                             }
 
+                            <!-- Observational Memory -->
+                            <div class="p-3 rounded-lg border border-teal-500/20 bg-teal-950/10 space-y-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <label class="text-xs font-medium text-slate-200">Observational Memory</label>
+                                        <p class="text-[10px] text-slate-400">Keep observer and reflector agents available for shared thread memory.</p>
+                                    </div>
+                                    <button class="relative w-10 h-5 rounded-full transition-colors"
+                                        [class.bg-teal-600]="omEnabledInput()"
+                                        [class.bg-white/10]="!omEnabledInput()"
+                                        (click)="omEnabledInput.set(!omEnabledInput())">
+                                        <span class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm"
+                                            [class.translate-x-5]="omEnabledInput()"></span>
+                                    </button>
+                                </div>
+
+                                @if (omEnabledInput()) {
+                                    <div class="space-y-3">
+                                        <div class="space-y-1">
+                                            <label class="text-xs font-medium text-slate-400">OM Model</label>
+                                            <input type="text"
+                                                class="settings-input"
+                                                placeholder="provider/model-id"
+                                                [value]="omModelInput()"
+                                                (input)="omModelInput.set($any($event.target).value)" />
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <div class="space-y-1">
+                                                <label class="text-[10px] text-slate-400 flex justify-between"><span>Observe Threshold</span><span>{{ observeThresholdInput() }}</span></label>
+                                                <input type="range" min="100" max="10000" step="100" class="w-full accent-teal-500"
+                                                    [value]="observeThresholdInput()" (input)="observeThresholdInput.set(+$any($event.target).value)" />
+                                            </div>
+                                            <div class="space-y-1">
+                                                <label class="text-[10px] text-slate-400 flex justify-between"><span>Reflect Threshold</span><span>{{ reflectThresholdInput() }}</span></label>
+                                                <input type="range" min="500" max="20000" step="100" class="w-full accent-teal-500"
+                                                    [value]="reflectThresholdInput()" (input)="reflectThresholdInput.set(+$any($event.target).value)" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
                             <!-- System Prompt -->
                             <div class="space-y-2">
                                 <div class="flex items-center justify-between">
@@ -503,6 +565,98 @@ Keep responses concise but helpful. If you don't know something specific about t
             box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.15);
         }
 
+        .inline-trace {
+            display: grid;
+            gap: 10px;
+        }
+
+        .inline-trace-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .inline-trace-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #67e8f9;
+        }
+
+        .brain-mark {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 9999px;
+            background: rgba(20, 184, 166, 0.14);
+            border: 1px solid rgba(45, 212, 191, 0.2);
+            color: #5eead4;
+            font-size: 12px;
+        }
+
+        .inline-trace-status {
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .inline-trace-steps {
+            display: grid;
+            gap: 8px;
+        }
+
+        .inline-trace-step {
+            display: grid;
+            grid-template-columns: 10px 1fr auto;
+            gap: 8px;
+            align-items: start;
+            padding: 10px 12px;
+            border: 1px solid rgba(39, 39, 42, 0.9);
+            border-radius: 14px;
+            background: rgba(9, 9, 11, 0.52);
+        }
+
+        .inline-trace-dot {
+            width: 8px;
+            height: 8px;
+            margin-top: 4px;
+            border-radius: 9999px;
+            background: rgba(20, 184, 166, 0.55);
+        }
+
+        .inline-trace-step.done .inline-trace-dot {
+            background: #2dd4bf;
+        }
+
+        .inline-trace-step.error .inline-trace-dot {
+            background: #f87171;
+        }
+
+        .inline-trace-step-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .inline-trace-step-detail {
+            margin-top: 3px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #94a3b8;
+            white-space: pre-wrap;
+        }
+
+        .inline-trace-step-latency {
+            font-size: 11px;
+            color: #64748b;
+        }
+
         .custom-scrollbar {
             scrollbar-width: thin;
             scrollbar-color: rgba(20, 184, 166, 0.2) transparent;
@@ -518,11 +672,9 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     @ViewChild('messageInput') messageInput!: ElementRef<HTMLTextAreaElement>;
 
     private router = inject(Router);
-    goChatService = inject(GoChatService);
-    googleGenAI = inject(GoogleGenAIService);
-    private orchestrator = inject(OrchestratorService);
-    private chatContextClipStore = inject(ChatContextClipStore);
-    private goChatInitialized = false;
+    private readonly chatUi = inject(KammiChatUiService);
+    goChatService = this.chatUi.goChatService;
+    googleGenAI = this.chatUi.googleGenAI;
 
     // Icons
     readonly ArrowLeft = ArrowLeft;
@@ -544,48 +696,46 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     // UI state
     showSettings = signal(false);
     showHistory = signal(false);
-    isStreaming = signal(false);
+    isStreaming = this.chatUi.isStreaming;
     currentMessage = '';
 
     // Provider
-    activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter');
+    activeProvider = this.chatUi.activeProvider;
 
     // OpenRouter settings
-    apiKeyInput = signal('');
-    selectedModel = signal('nvidia/nemotron-3-nano-30b-a3b:free');
-    temperatureInput = signal(0.7);
-    maxTokensInput = signal(2048);
-    reasoningEnabledInput = signal(true);
-    reasoningEffortInput = signal<'low' | 'medium' | 'high'>('medium');
-    reasoningMaxTokensInput = signal(1024);
+    apiKeyInput = this.chatUi.apiKeyInput;
+    selectedModel = this.chatUi.selectedModel;
+    temperatureInput = this.chatUi.temperatureInput;
+    maxTokensInput = this.chatUi.maxTokensInput;
+    reasoningEnabledInput = this.chatUi.reasoningEnabledInput;
+    reasoningEffortInput = this.chatUi.reasoningEffortInput;
+    reasoningMaxTokensInput = this.chatUi.reasoningMaxTokensInput;
+    omEnabledInput = this.chatUi.omEnabledInput;
+
+    // OM Settings
+    omModelInput = this.chatUi.omModelInput;
+    observeThresholdInput = this.chatUi.observeThresholdInput;
+    reflectThresholdInput = this.chatUi.reflectThresholdInput;
 
     // Google settings
-    googleApiKeyInput = signal('');
-    googleModelInput = signal('gemini-3-flash-preview');
+    googleApiKeyInput = this.chatUi.googleApiKeyInput;
+    googleModelInput = this.chatUi.googleModelInput;
 
     // System prompt
-    systemPromptInput = signal(KAMMI_SYSTEM_PROMPT);
+    systemPromptInput = this.chatUi.systemPromptInput;
 
     // Index mode
-    indexEnabled = signal(false);
+    indexEnabled = this.chatUi.indexEnabled;
 
     // Models
-    private readonly MODELS_KEY = 'openrouter:models';
-    private readonly MODEL_SEEDS = [
-        'nvidia/nemotron-3-nano-30b-a3b:free',
-        'meta-llama/llama-3.3-70b-instruct:free',
-        'google/gemini-3-flash-preview',
-        'deepseek/deepseek-r1:free',
-        'mistralai/mistral-nemo:free',
-    ];
-    savedModels = signal<string[]>(this.loadSavedModels());
-    customModelInput = signal('');
+    savedModels = this.chatUi.savedModels;
+    customModelInput = this.chatUi.customModelInput;
 
     // History
-    sessions = signal<SessionInfo[]>([]);
+    sessions = this.chatUi.sessions;
 
     // Display messages synced locally during streaming, globally when thread changes
-    displayMessages = signal<DisplayMessage[]>([]);
+    displayMessages = this.chatUi.displayMessages;
 
     // Suggestions
     readonly suggestions = [
@@ -595,24 +745,18 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
         '🏰 Describe a fantasy city in detail',
     ];
 
-    readonly isGoConfigured = computed(() => !!this.apiKeyInput());
+    readonly isGoConfigured = this.chatUi.isGoConfigured;
 
     constructor() {
         effect(() => {
-            // Re-sync local message state whenever the global active thread pointer changes
-            const thread = this.goChatService.currentThread();
-            if (thread || !thread) { // Trigger on thread change or initial null
-                untracked(() => {
-                    this.restoreHistory();
-                    this.scrollToBottom();
-                });
-            }
+            this.displayMessages();
+            this.isStreaming();
+            this.scrollToBottom();
         });
     }
 
     ngOnInit(): void {
-        this.loadSettings();
-        this.initGoChatService();
+        void this.chatUi.init();
     }
 
     ngAfterViewInit(): void {
@@ -628,78 +772,17 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
 
     // ---- Settings ----
     private loadSettings(): void {
-        const savedOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
-        if (savedOrConfig) {
-            this.apiKeyInput.set(savedOrConfig.apiKey || '');
-            this.selectedModel.set(savedOrConfig.model || 'nvidia/nemotron-3-nano-30b-a3b:free');
-            this.temperatureInput.set(savedOrConfig.temperature ?? 0.7);
-            this.maxTokensInput.set(savedOrConfig.maxTokens ?? 2048);
-            this.reasoningEnabledInput.set(savedOrConfig.reasoningEnabled ?? true);
-            this.reasoningEffortInput.set(savedOrConfig.reasoningEffort ?? 'medium');
-            this.reasoningMaxTokensInput.set(savedOrConfig.reasoningMaxTokens ?? 1024);
-        }
-
-        const googleConfig = this.googleGenAI.config();
-        if (googleConfig) {
-            this.googleApiKeyInput.set(googleConfig.apiKey || '');
-            this.googleModelInput.set(googleConfig.model || 'gemini-2.0-flash');
-        }
-
-        if (this.googleGenAI.isConfigured() && !savedOrConfig?.apiKey) {
-            this.activeProvider.set('google');
-        }
-
-        const savedPrompt = getSetting<string | null>('chat:systemPrompt', null);
-        if (savedPrompt) this.systemPromptInput.set(savedPrompt);
-
-        this.indexEnabled.set(getSetting<boolean>('chat:indexMode', false));
+        void this.chatUi.init();
     }
 
     toggleSettings(): void { this.showSettings.update(v => !v); }
 
-    saveSettings(): void {
-        if (this.apiKeyInput()) {
-            const existing = getSetting<ChatConfig | null>('openrouter:config', null);
-            const orConfig: ChatConfig = {
-                apiKey: this.apiKeyInput(),
-                model: this.selectedModel(),
-                temperature: this.temperatureInput(),
-                maxTokens: this.maxTokensInput(),
-                reasoningEnabled: this.reasoningEnabledInput(),
-                reasoningEffort: this.reasoningEffortInput(),
-                reasoningMaxTokens: this.reasoningMaxTokensInput(),
-                includeReasoning: this.reasoningEnabledInput(),
-                structuredOutput: existing?.structuredOutput,
-                plugins: existing?.plugins,
-            };
-            setSetting('openrouter:config', orConfig);
-            this.goChatService.updateConfig({
-                apiKey: orConfig.apiKey, model: orConfig.model,
-                temperature: orConfig.temperature, maxTokens: orConfig.maxTokens,
-                reasoningEnabled: orConfig.reasoningEnabled,
-                reasoningEffort: orConfig.reasoningEffort,
-                reasoningMaxTokens: orConfig.reasoningMaxTokens,
-                includeReasoning: orConfig.includeReasoning,
-                structuredOutput: orConfig.structuredOutput,
-                plugins: orConfig.plugins, omEnabled: true,
-            });
-        }
-
-        if (this.googleApiKeyInput()) {
-            this.googleGenAI.saveConfig({
-                apiKey: this.googleApiKeyInput(),
-                model: this.googleModelInput(),
-                temperature: 0.7,
-                maxOutputTokens: 2048,
-                systemPrompt: this.systemPromptInput(),
-            });
-        }
-
-        setSetting('chat:systemPrompt', this.systemPromptInput());
+    async saveSettings(): Promise<void> {
+        await this.chatUi.saveSettings();
         this.showSettings.set(false);
     }
 
-    resetSystemPrompt(): void { this.systemPromptInput.set(KAMMI_SYSTEM_PROMPT); }
+    resetSystemPrompt(): void { this.chatUi.resetSystemPrompt(); }
 
     getActiveProviderName(): string {
         if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
@@ -710,155 +793,69 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     }
 
     toggleIndexMode(): void {
-        this.indexEnabled.update(v => !v);
-        setSetting('chat:indexMode', this.indexEnabled());
+        this.chatUi.toggleIndexMode();
     }
 
     // ---- Models ----
     private loadSavedModels(): string[] {
-        const stored = getSetting<string[] | null>(this.MODELS_KEY, null);
-        if (stored && stored.length > 0) return stored;
-        setSetting(this.MODELS_KEY, this.MODEL_SEEDS);
-        return [...this.MODEL_SEEDS];
+        return this.savedModels();
     }
 
     addCustomModel(): void {
-        const id = this.customModelInput().trim();
-        if (!id) return;
-        if (!this.savedModels().includes(id)) {
-            const updated = [id, ...this.savedModels()];
-            this.savedModels.set(updated);
-            setSetting(this.MODELS_KEY, updated);
-        }
-        this.selectedModel.set(id);
-        this.customModelInput.set('');
+        this.chatUi.addCustomModel();
     }
 
     removeModel(id: string): void {
-        const updated = this.savedModels().filter(m => m !== id);
-        this.savedModels.set(updated);
-        setSetting(this.MODELS_KEY, updated);
-        if (this.selectedModel() === id) this.selectedModel.set(updated[0] ?? '');
+        this.chatUi.removeModel(id);
     }
 
     // ---- Go Chat Service ----
     private async initGoChatService(): Promise<void> {
-        if (this.goChatInitialized) return;
-        await this.goChatService.init();
-        this.goChatInitialized = true;
+        await this.chatUi.init();
     }
 
     // ---- History ----
     toggleHistory(): void {
-        if (!this.showHistory()) {
-            this.loadSessions();
-        }
         this.showHistory.update(v => !v);
     }
 
     private loadSessions(): void {
-        const threads = this.goChatService.threads();
-        this.sessions.set(threads.map((t: Thread) => ({
-            id: t.id,
-            messageCount: 0,
-            createdAt: t.created_at,
-            preview: t.title || undefined,
-        })));
+        return;
     }
 
     async selectSession(sessionId: string): Promise<void> {
-        await this.goChatService.loadThread(sessionId);
+        await this.chatUi.selectSession(sessionId);
         this.showHistory.set(false);
     }
 
     formatSessionDate(timestamp: number): string {
-        const date = new Date(timestamp);
-        const diff = Date.now() - date.getTime();
-        if (diff < 86400000) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        if (diff < 604800000) return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        return this.chatUi.formatSessionDate(timestamp);
     }
 
     // ---- Messages ----
     
     private restoreHistory(): void {
-        const messages = this.goChatService.messages();
-        this.displayMessages.set(messages.map((m: any) => ({
-            id: m.id || this.generateId(),
-            content: m.content,
-            role: m.role as 'user' | 'assistant' | 'system',
-            timestamp: new Date(m.created_at || m.timestamp || Date.now()),
-            isStreaming: m.is_streaming || false
-        })));
+        return;
     }
 
     sendSuggestion(text: string): void {
-        const clean = text.replace(/^[^\s]+\s/, ''); // Strip emoji prefix
+        const clean = this.chatUi.stripSuggestionPrefix(text);
         this.currentMessage = clean;
-        this.sendMessage();
+        void this.sendMessage();
     }
 
     onEnterKey(event: Event): void {
         const kbEvent = event as KeyboardEvent;
         if (kbEvent.shiftKey) return; // Allow shift+enter for newlines
         kbEvent.preventDefault();
-        this.sendMessage();
+        void this.sendMessage();
     }
 
     async sendMessage(): Promise<void> {
-        const text = this.currentMessage.trim();
-        if (!text || this.isStreaming()) return;
-
+        const text = this.currentMessage;
+        if (!text.trim()) return;
         this.currentMessage = '';
-        this.isStreaming.set(true);
-
-        // Add user message to display
-        const userMsg: DisplayMessage = {
-            id: this.generateId(), content: text, role: 'user', timestamp: new Date(),
-        };
-        this.displayMessages.update(msgs => [...msgs, userMsg]);
-        await this.goChatService.addUserMessage(text);
-        this.scrollToBottom();
-
-        // Check provider config
-        const googleConfigured = this.googleGenAI.isConfigured();
-        const orConfigured = this.isGoConfigured();
-        if (!googleConfigured && !orConfigured) {
-            this.addBotMessage('[Warning] Please configure an API key in settings to enable AI responses.');
-            this.isStreaming.set(false);
-            return;
-        }
-
-        // Build context
-        let contextBlock = '';
-        let activation: ActivationResult | null = null;
-        if (this.indexEnabled()) {
-            try {
-                const threadId = this.goChatService.currentThread()?.id || 'default';
-                contextBlock = await this.orchestrator.orchestrate(text, threadId);
-                activation = this.orchestrator.lastActivation();
-            } catch (err) {
-                console.error('[AiChatPage] Orchestrator error:', err);
-            }
-        }
-
-        const highlightedClips = this.chatContextClipStore.consumeAll();
-        const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
-
-        const history = this.buildConversationHistory();
-        const effectiveSystemPrompt = this.systemPromptInput()
-            + (contextBlock ? '\n\n' + contextBlock : '')
-            + (highlightedContext ? '\n\n' + highlightedContext : '');
-
-        // Create streaming bot message
-        const botMsg: DisplayMessage = {
-            id: this.generateId(), content: '', role: 'assistant', timestamp: new Date(), isStreaming: true,
-        };
-        this.displayMessages.update(msgs => [...msgs, botMsg]);
-        this.scrollToBottom();
-
-        // Stream response
-        await this.streamResponse(botMsg, history, effectiveSystemPrompt);
+        await this.chatUi.sendMessage(text);
     }
 
     private async streamResponse(
@@ -866,90 +863,42 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
         history: OpenRouterMessage[],
         systemPrompt: string,
     ): Promise<void> {
-        const updateContent = (chunk: string) => {
-            this.displayMessages.update(msgs =>
-                msgs.map(m => m.id === botMsg.id ? { ...m, content: m.content + chunk } : m)
-            );
-            this.scrollToBottom();
-        };
-
-        const finalize = async (fullText: string) => {
-            this.displayMessages.update(msgs =>
-                msgs.map(m => m.id === botMsg.id ? { ...m, content: fullText, isStreaming: false } : m)
-            );
-            await this.goChatService.addAssistantMessage(fullText);
-            this.isStreaming.set(false);
-            this.scrollToBottom();
-        };
-
-        const onError = (error: Error) => {
-            this.displayMessages.update(msgs =>
-                msgs.map(m => m.id === botMsg.id ? { ...m, content: `Error: ${error.message}`, isStreaming: false } : m)
-            );
-            this.isStreaming.set(false);
-        };
-
-        try {
-            if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
-                const googleHistory: GoogleGenAIMessage[] = history
-                    .filter(m => m.role !== 'system')
-                    .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content || '' }] }));
-
-                await this.googleGenAI.streamChat(googleHistory, {
-                    onChunk: updateContent,
-                    onComplete: finalize,
-                    onError,
-                }, systemPrompt);
-            } else {
-                await this.goChatService.streamChat(history, {
-                    onChunk: updateContent,
-                    onComplete: finalize,
-                    onError,
-                }, systemPrompt);
-            }
-        } catch (err) {
-            onError(err instanceof Error ? err : new Error(String(err)));
-        }
+        void botMsg;
+        void history;
+        void systemPrompt;
     }
 
     private buildConversationHistory(): OpenRouterMessage[] {
-        return this.goChatService.messages()
-            .slice(-10)
-            .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-            .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+        return [];
     }
 
     private addBotMessage(content: string): void {
-        this.displayMessages.update(msgs => [...msgs, {
-            id: this.generateId(), content, role: 'assistant', timestamp: new Date(),
-        }]);
-        this.scrollToBottom();
+        void content;
     }
 
     // ---- Actions ----
     async newSession(): Promise<void> {
-        await this.goChatService.newSession();
+        await this.chatUi.newSession();
     }
 
     async clearChat(): Promise<void> {
-        await this.goChatService.clearThread();
-        this.displayMessages.set([]);
+        await this.chatUi.clearChat();
     }
 
     async exportChat(): Promise<void> {
-        const json = await this.goChatService.exportThread();
+        const { json, threadId } = await this.chatUi.exportCurrentThread();
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `chat-${this.goChatService.currentThread()?.id || 'unknown'}.json`;
+        a.download = `chat-${threadId}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
 
     // ---- Helpers ----
     formatTime(date: Date): string {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return this.chatUi.formatTime(date);
     }
 
     private scrollToBottom(): void {

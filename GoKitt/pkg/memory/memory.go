@@ -16,6 +16,7 @@ import (
 
 // Config defines the thresholds for observation and reflection.
 type Config struct {
+	Enabled              bool
 	ObservationThreshold int // Tokens in unobserved messages before triggering observation
 	ReflectionThreshold  int // Tokens in active observations before triggering reflection
 	Model                string
@@ -25,6 +26,7 @@ type Config struct {
 // DefaultConfig returns the standard configuration.
 func DefaultConfig() Config {
 	return Config{
+		Enabled:              true,
 		ObservationThreshold: 2000,
 		ReflectionThreshold:  4000,
 		Model:                "google/gemini-2.0-flash", // Default fast model
@@ -47,6 +49,11 @@ func NewObserver(s *store.SQLiteStore, a *agent.Service, cfg Config) *Observer {
 		agent: a,
 		cfg:   cfg,
 	}
+}
+
+// IsEnabled reports whether observational memory work should run.
+func (o *Observer) IsEnabled() bool {
+	return o != nil && o.cfg.Enabled
 }
 
 // NewObserverWithGDR creates an Observer with GDR-backed workspace tools.
@@ -74,6 +81,10 @@ func (o *Observer) SetGDR(g *gdr.GateDrivenRetriever) {
 //
 // scopeID is the world/narrative scope used for episode searches.
 func (o *Observer) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, userPrompt string) (*ActivationResult, error) {
+	if !o.cfg.Enabled {
+		return &ActivationResult{Triggered: false}, nil
+	}
+
 	// 1. Run the normal observation loop first.
 	if err := o.ProcessLoop(ctx, threadID); err != nil {
 		return nil, fmt.Errorf("observation loop failed: %w", err)
@@ -122,6 +133,10 @@ func (o *Observer) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, 
 // ProcessLoop is the main entry point to check and update memory for a thread.
 // It should be called asynchronously after messages are added to the thread.
 func (o *Observer) ProcessLoop(ctx context.Context, threadID string) error {
+	if !o.cfg.Enabled {
+		return nil
+	}
+
 	// 1. Load Context
 	record, err := o.store.GetOMRecord(threadID)
 	if err != nil {

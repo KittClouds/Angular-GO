@@ -1490,6 +1490,7 @@ func (s *FullSystemSession) Commit(req CommitRequest) (*CommitResult, error) {
 			Aliases:       append([]string{}, entity.Aliases...),
 			FirstNote:     findEntityFirstNote(entity.ID, s.documents),
 			TotalMentions: entity.TotalMentions,
+			NarrativeID:   findEntityNarrativeID(entity.ID, s.documents),
 			CreatedBy:     "graptor",
 			CreatedAt:     entity.CreatedAt,
 			UpdatedAt:     now,
@@ -2330,6 +2331,27 @@ func findEntityFirstNote(entityID string, docs map[string]*fullSystemDocument) s
 		for _, entity := range doc.DocumentGraph.Registry.GetAllEntities() {
 			if entity.ID == entityID {
 				return doc.NoteID
+			}
+		}
+	}
+	return ""
+}
+
+func findEntityNarrativeID(entityID string, docs map[string]*fullSystemDocument) string {
+	docIDs := make([]string, 0, len(docs))
+	for docID := range docs {
+		docIDs = append(docIDs, docID)
+	}
+	sort.Strings(docIDs)
+
+	for _, docID := range docIDs {
+		doc := docs[docID]
+		if doc.DocumentGraph == nil || doc.DocumentGraph.Registry == nil {
+			continue
+		}
+		for _, entity := range doc.DocumentGraph.Registry.GetAllEntities() {
+			if entity.ID == entityID {
+				return doc.Scope.NarrativeID
 			}
 		}
 	}
