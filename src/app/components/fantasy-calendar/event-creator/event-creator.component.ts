@@ -12,6 +12,7 @@ import { FolderService } from '../../../lib/services/folder.service';
 import { AllowedSubfolderDef, Folder } from '../../../lib/dexie/db';
 import { CalendarEvent, EventImportance, EventCategory } from '../../../lib/fantasy-calendar/types';
 import { getEventTypesForScale, getEventTypeById, DEFAULT_EVENT_TYPE_ID, EventTypeDefinition } from '../../../lib/fantasy-calendar/event-type-registry';
+import { EventTargetPickerComponent } from '../event-target-picker/event-target-picker.component';
 
 const COLOR_PRESETS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e',
@@ -27,7 +28,7 @@ type CreationMode = 'event' | 'entity';
 @Component({
   selector: 'app-event-creator',
   standalone: true,
-  imports: [CommonModule, FormsModule, NgIcon],
+  imports: [CommonModule, FormsModule, NgIcon, EventTargetPickerComponent],
   providers: [provideIcons({
     lucideChevronDown, lucideChevronUp, lucidePlus, lucideCalendar,
     lucideTag, lucidePalette, lucideClock, lucideX, lucideFolder, lucideFolderPlus
@@ -228,6 +229,13 @@ type CreationMode = 'event' | 'entity';
           {{ getAddButtonLabel() }}
         </button>
       </div>
+
+      <app-event-target-picker
+        [(visible)]="isTargetPickerVisible"
+        [targets]="eligibleTargets()"
+        [eventCount]="pendingTargetEvents.length"
+        (confirmTarget)="handleTargetSelected($event)"
+      ></app-event-target-picker>
     </div>
   `,
   styles: [`
@@ -268,6 +276,8 @@ export class EventCreatorComponent {
   tags = signal<string[]>([]);
   newTag = '';
   pendingEvents = signal<PendingEvent[]>([]);
+  isTargetPickerVisible = false;
+  pendingTargetEvents: Omit<CalendarEvent, 'id' | 'calendarId'>[] = [];
 
   // Calendar context
   readonly calendar = this.calendarService.calendar;
@@ -277,6 +287,7 @@ export class EventCreatorComponent {
   readonly viewYearFormatted = this.calendarService.viewYearFormatted;
 
   readonly eventTypes = computed(() => getEventTypesForScale('month'));
+  readonly eligibleTargets = this.calendarService.eligibleOpenNoteTargets;
   readonly dayOptions = computed(() =>
     Array.from({ length: this.daysInCurrentMonth() }, (_, i) => String(i + 1))
   );
@@ -383,15 +394,16 @@ export class EventCreatorComponent {
     if (currentEvt) all.push(currentEvt);
     if (all.length === 0) return;
 
-    await Promise.all(all.map(evt => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { tempId, ...data } = evt;
-      return this.calendarService.addEvent(data);
-    }));
+    if (this.eligibleTargets().length === 0) {
+      window.alert('Open a note in the current scope first.');
+      return;
+    }
 
-    this.pendingEvents.set([]);
-    this.resetForm();
-    this.isExpanded.set(false);
+    this.pendingTargetEvents = all.map(evt => {
+      const { tempId, ...data } = evt;
+      return data;
+    });
+    this.isTargetPickerVisible = true;
   }
 
   async handleAddEntityFolder() {
@@ -422,6 +434,17 @@ export class EventCreatorComponent {
 
   removePending(tempId: string) {
     this.pendingEvents.update(p => p.filter(x => x.tempId !== tempId));
+  }
+
+  async handleTargetSelected(noteId: string) {
+    for (const event of this.pendingTargetEvents) {
+      await this.calendarService.addEvent(event, noteId);
+    }
+
+    this.pendingTargetEvents = [];
+    this.pendingEvents.set([]);
+    this.resetForm();
+    this.isExpanded.set(false);
   }
 
   resetForm() {

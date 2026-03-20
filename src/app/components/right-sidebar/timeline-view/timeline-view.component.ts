@@ -4,28 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { NgxTimelineComponent, NgxTimelineEntryComponent } from '@omnedia/ngx-timeline';
 import { LucideAngularModule, Plus, Trash2, Link } from 'lucide-angular';
 import { ScopeService } from '../../../lib/services/scope.service';
-import { ScopedDocumentService } from '../../../lib/services/scoped-document.service';
 import { db } from '../../../lib/dexie/db';
-
-interface TimelineEventRecord {
-  id: string;
-  title: string;
-  description: string;
-  order: number;
-  entityIds: string[];
-  displayTime?: string;
-  linkedNoteId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface TimelineDocument {
-  events: TimelineEventRecord[];
-}
-
-const TIMELINE_NAMESPACE = 'timeline';
-const TIMELINE_KEY = 'events';
-const DEFAULT_TIMELINE_DOC: TimelineDocument = { events: [] };
+import { NoteEditorStore } from '../../../lib/store/note-editor.store';
+import { CalendarService } from '../../../services/calendar.service';
+import { formatFantasyDate } from '../../../lib/fantasy-calendar/utils';
+import {
+  ScopedTimelineEventRecord,
+  ScopedTimelineEventStoreService,
+} from '../../../lib/services/scoped-timeline-event-store.service';
 
 @Component({
   selector: 'app-timeline-view',
@@ -92,7 +78,7 @@ const DEFAULT_TIMELINE_DOC: TimelineDocument = { events: [] };
               <div class="flex items-center justify-between w-full group">
                 <span class="text-sm font-bold text-teal-300">{{ event.title }}</span>
                 <div class="flex items-center gap-1">
-                  <span *ngIf="event.displayTime" class="text-[10px] text-muted-foreground font-mono">{{ event.displayTime }}</span>
+                  <span *ngIf="getEventDisplayTime(event) as displayTime" class="text-[10px] text-muted-foreground font-mono">{{ displayTime }}</span>
                   <button
                     (click)="deleteEvent(event.id)"
                     class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded transition-opacity">
@@ -155,17 +141,18 @@ const DEFAULT_TIMELINE_DOC: TimelineDocument = { events: [] };
 })
 export class TimelineViewComponent {
   private scopeService = inject(ScopeService);
-  private scopedDocuments = inject(ScopedDocumentService);
+  private timelineEventsStore = inject(ScopedTimelineEventStoreService);
+  private noteEditorStore = inject(NoteEditorStore);
+  private calendarService = inject(CalendarService);
 
   PlusIcon = Plus;
   TrashIcon = Trash2;
   LinkIcon = Link;
 
-  events = signal<TimelineEventRecord[]>([]);
+  readonly events = this.timelineEventsStore.events;
   isAddingEvent = signal(false);
   newEventTitle = '';
   newEventDescription = '';
-  private refreshTick = signal(0);
   private entityCache = new Map<string, string>();
 
   scopeLabel = computed(() => {
@@ -176,71 +163,12 @@ export class TimelineViewComponent {
 
   constructor() {
     effect(() => {
-      this.scopeService.resolvedScope();
-      this.refreshTick();
-      void this.loadEvents();
+      const events = this.events();
+      void this.cacheEntityLabels(events);
     });
   }
 
-  private async loadEvents(): Promise<void> {
-    const scope = this.scopeService.resolvedScope();
-    const narrativeId = scope.narrativeId;
-    if (!narrativeId || scope.scopeFolderId === 'vault:global') {
-      this.events.set([]);
-      return;
-    }
-
-    const doc = await this.getTimelineDocument(scope.scopeFolderId, narrativeId);
-    const events = [...doc.events].sort((a, b) => a.order - b.order);
-    this.events.set(events);
-    await this.cacheEntityLabels(events);
-  }
-
-  private async getTimelineDocument(scopeFolderId: string, narrativeId: string): Promise<TimelineDocument> {
-    const exact = await this.scopedDocuments.findPayload(scopeFolderId, TIMELINE_NAMESPACE, TIMELINE_KEY, DEFAULT_TIMELINE_DOC);
-    if (exact) return exact;
-
-    if (scopeFolderId !== narrativeId) {
-      return this.getTimelineDocument(narrativeId, narrativeId);
-    }
-
-    return this.scopedDocuments.getPayload(
-      narrativeId,
-      narrativeId,
-      TIMELINE_NAMESPACE,
-      TIMELINE_KEY,
-      DEFAULT_TIMELINE_DOC,
-      async () => {
-        const legacy = await db.codexEntries
-          .where('[narrativeId+entryType]')
-          .equals([narrativeId, 'event'])
-          .sortBy('order');
-
-        if (legacy.length === 0) return undefined;
-
-        return {
-          events: legacy.map(entry => ({
-            id: entry.id,
-            title: entry.title,
-            description: entry.description,
-            order: entry.order,
-            entityIds: entry.entityIds,
-            displayTime: entry.displayTime,
-            linkedNoteId: entry.linkedNoteId,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
-          })),
-        } satisfies TimelineDocument;
-      }
-    );
-  }
-
-  private async saveTimelineDocument(scopeFolderId: string, narrativeId: string, doc: TimelineDocument): Promise<void> {
-    await this.scopedDocuments.savePayload(scopeFolderId, narrativeId, TIMELINE_NAMESPACE, TIMELINE_KEY, doc);
-    this.refreshTick.update(value => value + 1);
-  }
-
-  private async cacheEntityLabels(events: TimelineEventRecord[]) {
+  private async cacheEntityLabels(events: ScopedTimelineEventRecord[]) {
     const allIds = new Set<string>();
     events.forEach(e => e.entityIds.forEach(id => allIds.add(id)));
 
@@ -277,37 +205,24 @@ export class TimelineViewComponent {
     if (!this.newEventTitle.trim()) return;
 
     const scope = this.scopeService.resolvedScope();
-    const narrativeId = scope.narrativeId;
-    if (!narrativeId || scope.scopeFolderId === 'vault:global') {
+    if (!scope.narrativeId || scope.scopeFolderId === 'vault:global') {
       console.warn('Cannot create event: No active narrative scope');
       return;
     }
 
-    const doc = await this.getTimelineDocument(scope.scopeFolderId, narrativeId);
-    const nextOrder = doc.events.reduce((max, event) => Math.max(max, event.order), 0) + 1;
-    doc.events.push({
-      id: crypto.randomUUID(),
+    await this.timelineEventsStore.createEvent({
       title: this.newEventTitle.trim(),
-      description: this.newEventDescription.trim(),
-      order: nextOrder,
+      description: this.newEventDescription.trim() || undefined,
       entityIds: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      source: 'timeline',
     });
 
-    await this.saveTimelineDocument(scope.scopeFolderId, narrativeId, doc);
     this.isAddingEvent.set(false);
     this.resetForm();
   }
 
   async deleteEvent(id: string) {
-    const scope = this.scopeService.resolvedScope();
-    const narrativeId = scope.narrativeId;
-    if (!narrativeId || scope.scopeFolderId === 'vault:global') return;
-
-    const doc = await this.getTimelineDocument(scope.scopeFolderId, narrativeId);
-    doc.events = doc.events.filter(event => event.id !== id);
-    await this.saveTimelineDocument(scope.scopeFolderId, narrativeId, doc);
+    await this.timelineEventsStore.deleteEvent(id);
   }
 
   openEntity(entityId: string) {
@@ -315,10 +230,18 @@ export class TimelineViewComponent {
   }
 
   openNote(noteId: string) {
-    console.log('[Timeline] Open note:', noteId);
+    this.noteEditorStore.openNote(noteId);
   }
 
-  trackEvent(_index: number, event: TimelineEventRecord): string {
+  getEventDisplayTime(event: ScopedTimelineEventRecord): string | undefined {
+    if (event.calendarDate) {
+      return formatFantasyDate(this.calendarService.calendar(), event.calendarDate);
+    }
+
+    return event.displayTime;
+  }
+
+  trackEvent(_index: number, event: ScopedTimelineEventRecord): string {
     return event.id;
   }
 
@@ -343,25 +266,18 @@ export class TimelineViewComponent {
 
   private async createEventFromNote(noteId: string, noteTitle: string) {
     const scope = this.scopeService.resolvedScope();
-    const narrativeId = scope.narrativeId;
-    if (!narrativeId || scope.scopeFolderId === 'vault:global') {
+    if (!scope.narrativeId || scope.scopeFolderId === 'vault:global') {
       console.warn('[Timeline] Cannot create linked event: No active narrative scope');
       return;
     }
 
-    const doc = await this.getTimelineDocument(scope.scopeFolderId, narrativeId);
-    const nextOrder = doc.events.reduce((max, event) => Math.max(max, event.order), 0) + 1;
-    doc.events.push({
-      id: crypto.randomUUID(),
+    await this.timelineEventsStore.createEvent({
       title: `Event: ${noteTitle}`,
       description: `Linked to ${noteTitle}`,
-      order: nextOrder,
       entityIds: [],
       linkedNoteId: noteId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      linkedNoteTitle: noteTitle,
+      source: 'timeline',
     });
-
-    await this.saveTimelineDocument(scope.scopeFolderId, narrativeId, doc);
   }
 }

@@ -1,11 +1,11 @@
 import { Injectable, computed, signal, effect, inject } from '@angular/core';
 import { getSetting, setSetting } from '../lib/dexie/settings.service';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { map } from 'rxjs/operators';
-import { combineLatest } from 'rxjs';
 import { NotesService } from '../lib/dexie/notes.service';
 import { FolderService } from '../lib/services/folder.service';
 import { Note, Folder } from '../lib/dexie/db';
+import { ScopeService, type ResolvedScope } from '../lib/services/scope.service';
+import { TabStore } from '../lib/store/tab.store';
 import {
     CalendarDefinition,
     FantasyDate,
@@ -26,11 +26,23 @@ import {
 export type { EditorScope } from '../lib/fantasy-calendar/types';
 import {
     getDaysInMonth,
+    formatFantasyDate,
     formatYearWithEra,
     navigateYear as utilNavigateYear,
     generateUUID
 } from '../lib/fantasy-calendar/utils';
 import { generateOrbitalCalendar } from '../lib/fantasy-calendar/orbital';
+import { ScopedTimelineEventStoreService } from '../lib/services/scoped-timeline-event-store.service';
+import { CalendarNoteSnapshotService } from '../lib/services/calendar-note-snapshot.service';
+import * as ops from '../lib/operations';
+
+export interface CalendarEventTargetNote {
+    noteId: string;
+    title: string;
+    folderId: string;
+    narrativeId: string;
+    active: boolean;
+}
 
 // Config interface for creating a calendar
 export interface CalendarConfig {
@@ -77,26 +89,62 @@ export class CalendarService {
     // === STATE SIGNALS ===
     private notesService = inject(NotesService);
     private folderService = inject(FolderService);
+    private scopeService = inject(ScopeService);
+    private tabStore = inject(TabStore);
+    private scopedTimelineEvents = inject(ScopedTimelineEventStoreService);
+    private noteSnapshotService = inject(CalendarNoteSnapshotService);
 
     // === STATE SIGNALS ===
     readonly calendar = signal<CalendarDefinition>(DEFAULT_CALENDAR);
+    private readonly allNotes = toSignal(this.notesService.getAllNotes$(), { initialValue: [] as Note[] });
+    private readonly legacyEventNotes = toSignal(this.notesService.getNotesByEntityKind$('EVENT'), { initialValue: [] as Note[] });
+    private readonly allFolders = toSignal(this.folderService.getAllFolders$(), { initialValue: [] as Folder[] });
 
-    // Derived events from NotesService (Single Source of Truth)
-    readonly events = toSignal(
-        combineLatest([
-            this.notesService.getNotesByEntityKind$('EVENT'),
-            this.folderService.getAllFolders$()
-        ]).pipe(
-            map(([notes, folders]) => {
-                const noteEvents = notes.map(note => this.mapNoteToEvent(note));
-                const folderEvents = folders
-                    .filter(f => f.metadata?.date)
-                    .map(f => this.mapFolderToEvent(f));
-                return [...noteEvents, ...folderEvents];
-            })
-        ),
-        { initialValue: [] }
-    );
+    // Derived events from scoped timeline events + legacy event notes + dated folders.
+    readonly events = computed(() => {
+        const scope = this.scopeService.resolvedScope();
+        const folders = this.allFolders();
+        const folderMap = new Map(folders.map(folder => [folder.id, folder] as const));
+        const scopedEvents = this.scopedTimelineEvents.events()
+            .filter(event => !!event.calendarDate)
+            .map(event => this.mapScopedEventToCalendarEvent(event.id));
+        const legacyEvents = this.legacyEventNotes()
+            .filter(note => this.isNoteInScope(note, scope, folderMap))
+            .map(note => this.mapNoteToEvent(note));
+        const folderEvents = folders
+            .filter(folder => !!folder.metadata?.date && this.isFolderInScope(folder, scope, folderMap))
+            .map(folder => this.mapFolderToEvent(folder));
+
+        return [
+            ...scopedEvents.filter((event): event is CalendarEvent => !!event),
+            ...legacyEvents,
+            ...folderEvents,
+        ];
+    });
+
+    readonly eligibleOpenNoteTargets = computed<CalendarEventTargetNote[]>(() => {
+        const scope = this.scopeService.resolvedScope();
+        if (!scope.narrativeId || scope.scopeFolderId === 'vault:global') {
+            return [];
+        }
+
+        const folderMap = new Map(this.allFolders().map(folder => [folder.id, folder] as const));
+        const notesById = new Map(this.allNotes().map(note => [note.id, note] as const));
+        const activeNoteId = this.tabStore.tabs().find(tab => tab.active)?.noteId || null;
+
+        return this.tabStore.tabs()
+            .map(tab => notesById.get(tab.noteId))
+            .filter((note): note is Note => !!note)
+            .filter(note => note.entityKind !== 'EVENT')
+            .filter(note => this.isNoteInScope(note, scope, folderMap))
+            .map(note => ({
+                noteId: note.id,
+                title: note.title || 'Untitled Note',
+                folderId: note.folderId,
+                narrativeId: note.narrativeId,
+                active: note.id === activeNoteId,
+            }));
+    });
 
 
     readonly periods = signal<Period[]>([]);
@@ -257,48 +305,98 @@ export class CalendarService {
 
     // === EVENT CRUD ===
 
-    async addEvent(eventData: Omit<CalendarEvent, 'id' | 'calendarId'>): Promise<string> {
-        const tempId = generateUUID();
-        const fullEvent: CalendarEvent = {
-            ...eventData,
-            id: tempId,
-            calendarId: this.calendar().id,
-            createdAt: new Date().toISOString()
-        };
+    async addEvent(eventData: Omit<CalendarEvent, 'id' | 'calendarId'>, targetNoteId: string): Promise<string> {
+        const note = await ops.getNote(targetNoteId);
+        if (!note) {
+            throw new Error(`Target note ${targetNoteId} was not found`);
+        }
 
-        const note = this.mapEventToNote(fullEvent);
-        // We use the ID from generateUUID mostly, but createNote generates a new ID.
-        // Actually, createNote ignores the ID passed in Omit<..., 'id'>.
-        // But we want to ensure the link. 
-        // NotesService.createNote returns a Promise<string> of the new ID.
-        // So we should probably let NotesService handle the ID, or if we need to control it, we might need a different method.
-        // For now, let's just create it and let the signal update the UI.
+        const createdEvent = await this.scopedTimelineEvents.createEvent({
+            title: eventData.title,
+            description: eventData.description || '',
+            entityIds: [],
+            displayTime: formatFantasyDate(this.calendar(), eventData.date),
+            linkedNoteId: targetNoteId,
+            linkedNoteTitle: note.title || 'Untitled Note',
+            calendarDate: { ...eventData.date },
+            source: 'calendar',
+            status: eventData.status || 'todo',
+            color: eventData.color,
+            eventTypeId: eventData.eventTypeId,
+            importance: eventData.importance,
+            category: eventData.category,
+            type: eventData.type,
+            tags: eventData.tags,
+        });
 
-        return this.notesService.createNote(note);
+        if (!createdEvent) {
+            throw new Error('Cannot create event without an active narrative scope');
+        }
+
+        try {
+            await this.noteSnapshotService.appendEventSnapshot({
+                noteId: targetNoteId,
+                calendar: this.calendar(),
+                date: eventData.date,
+                title: eventData.title,
+                description: eventData.description,
+            });
+        } catch (error) {
+            await this.scopedTimelineEvents.deleteEvent(createdEvent.id);
+            throw error;
+        }
+
+        return createdEvent.id;
     }
 
     async updateEvent(id: string, updates: Partial<CalendarEvent>) {
-        // We need to fetch the existing note to merge the content
-        // Since we don't have direct sync access to the note object here easily without subscription,
-        // we can assume the 'events' signal has the latest data, or we can just fetch the note.
-        // But 'updates' might contain 'date' which is inside the JSON content.
+        const scopedEvent = this.scopedTimelineEvents.events().find(event => event.id === id && !!event.calendarDate);
+        if (scopedEvent?.calendarDate) {
+            const nextDate = updates.date || scopedEvent.calendarDate;
+            await this.scopedTimelineEvents.updateEvent(id, {
+                title: updates.title ?? scopedEvent.title,
+                description: updates.description ?? scopedEvent.description,
+                displayTime: formatFantasyDate(this.calendar(), nextDate),
+                calendarDate: { ...nextDate },
+                status: updates.status ?? scopedEvent.status,
+                color: updates.color ?? scopedEvent.color,
+                eventTypeId: updates.eventTypeId ?? scopedEvent.eventTypeId,
+                importance: updates.importance ?? scopedEvent.importance,
+                category: updates.category ?? scopedEvent.category,
+                type: updates.type ?? scopedEvent.type,
+                tags: updates.tags ?? scopedEvent.tags,
+            });
+            return;
+        }
 
-        const currentEvent = this.events().find(e => e.id === id);
-        if (!currentEvent) return;
+        const legacyNote = this.legacyEventNotes().find(note => note.id === id);
+        if (!legacyNote) {
+            return;
+        }
 
+        const currentEvent = this.mapNoteToEvent(legacyNote);
         const updatedEvent = { ...currentEvent, ...updates, updatedAt: new Date().toISOString() };
         const noteUpdates: Partial<Note> = {
             title: updatedEvent.title,
             updatedAt: Date.now(),
             content: JSON.stringify(updatedEvent),
-            markdownContent: updatedEvent.description || '' // Keep description visible in markdown preview
+            markdownContent: updatedEvent.description || '',
         };
 
         await this.notesService.updateNote(id, noteUpdates);
     }
 
     async removeEvent(id: string) {
-        await this.notesService.deleteNote(id);
+        const scopedEvent = this.scopedTimelineEvents.events().find(event => event.id === id && !!event.calendarDate);
+        if (scopedEvent?.calendarDate) {
+            await this.scopedTimelineEvents.deleteEvent(id);
+            return;
+        }
+
+        const legacyNote = this.legacyEventNotes().find(note => note.id === id);
+        if (legacyNote) {
+            await this.notesService.deleteNote(id);
+        }
     }
 
     async toggleEventStatus(id: string) {
@@ -345,21 +443,28 @@ export class CalendarService {
         };
     }
 
-    private mapEventToNote(event: CalendarEvent): Omit<Note, 'id' | 'createdAt' | 'updatedAt'> {
+    private mapScopedEventToCalendarEvent(id: string): CalendarEvent | null {
+        const event = this.scopedTimelineEvents.events().find(item => item.id === id && !!item.calendarDate);
+        if (!event?.calendarDate) {
+            return null;
+        }
+
         return {
-            worldId: 'default', // TODO: support multiple worlds
+            id: event.id,
+            calendarId: this.calendar().id,
             title: event.title,
-            content: JSON.stringify(event),
-            markdownContent: event.description || '',
-            folderId: '', // Root or specific events folder?
-            entityKind: 'EVENT',
-            entitySubtype: event.type || '',
-            isEntity: true, // It shows up in the file tree
-            isPinned: false,
-            favorite: false,
-            ownerId: 'local',
-            narrativeId: '',
-            order: 0 // Default order
+            description: event.description || undefined,
+            date: { ...event.calendarDate },
+            color: event.color,
+            importance: event.importance,
+            category: event.category,
+            type: event.type,
+            eventTypeId: event.eventTypeId,
+            tags: event.tags,
+            status: this.normalizeCalendarStatus(event.status),
+            sourceNoteId: event.linkedNoteId,
+            createdAt: new Date(event.createdAt).toISOString(),
+            updatedAt: new Date(event.updatedAt).toISOString(),
         };
     }
 
@@ -419,6 +524,91 @@ export class CalendarService {
             createdAt: new Date(folder.createdAt).toISOString(),
             updatedAt: new Date(folder.updatedAt).toISOString()
         };
+    }
+
+    private normalizeCalendarStatus(status: string | undefined): 'todo' | 'in-progress' | 'completed' | undefined {
+        switch (status) {
+            case 'todo':
+            case 'in-progress':
+            case 'completed':
+                return status;
+            default:
+                return undefined;
+        }
+    }
+
+    private isFolderInScope(
+        folder: Folder,
+        scope: ResolvedScope,
+        folderMap: Map<string, Folder>
+    ): boolean {
+        if (scope.type === 'global') {
+            return true;
+        }
+
+        if (!scope.narrativeId) {
+            return this.isFolderDescendantOf(folder.id, scope.scopeFolderId, folderMap);
+        }
+
+        if (folder.narrativeId !== scope.narrativeId) {
+            return false;
+        }
+
+        switch (scope.type) {
+            case 'narrative':
+                return true;
+            case 'act':
+            case 'folder':
+                return this.isFolderDescendantOf(folder.id, scope.scopeFolderId, folderMap);
+            case 'note':
+                return scope.selectedNoteId ? folder.id === scope.scopeFolderId : false;
+            default:
+                return false;
+        }
+    }
+
+    private isNoteInScope(
+        note: Note,
+        scope: ResolvedScope,
+        folderMap: Map<string, Folder>
+    ): boolean {
+        if (scope.type === 'global') {
+            return true;
+        }
+
+        if (!scope.narrativeId) {
+            return !!note.folderId && this.isFolderDescendantOf(note.folderId, scope.scopeFolderId, folderMap);
+        }
+
+        if (note.narrativeId !== scope.narrativeId) {
+            return false;
+        }
+
+        switch (scope.type) {
+            case 'narrative':
+                return true;
+            case 'act':
+            case 'folder':
+                return !!note.folderId && this.isFolderDescendantOf(note.folderId, scope.scopeFolderId, folderMap);
+            case 'note':
+                return note.id === (scope.selectedNoteId || scope.id);
+            default:
+                return false;
+        }
+    }
+
+    private isFolderDescendantOf(folderId: string, ancestorId: string, folderMap: Map<string, Folder>): boolean {
+        let currentId = folderId;
+
+        while (currentId) {
+            if (currentId === ancestorId) {
+                return true;
+            }
+
+            currentId = folderMap.get(currentId)?.parentId || '';
+        }
+
+        return false;
     }
 
     async createCalendar(config: CalendarConfig) {

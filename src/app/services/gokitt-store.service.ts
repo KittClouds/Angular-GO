@@ -327,8 +327,8 @@ export class GoKittStoreService {
     private handleMessage(msg: any): void {
         // WAL_EVENT handler REMOVED - Snapshot Native
 
-        // Only handle store-related responses
-        if (!msg.type?.startsWith('STORE_')) return;
+        // Handle store responses and generic worker errors tied to a store request.
+        if (msg.type !== 'ERROR' && !msg.type?.startsWith('STORE_')) return;
 
 
         if ('id' in msg && msg.id !== undefined) {

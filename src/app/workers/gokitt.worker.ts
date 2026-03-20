@@ -633,6 +633,20 @@ async function loadWasm(): Promise<void> {
 }
 
 
+function hasGoKittMethod(methodName: keyof typeof GoKitt): boolean {
+    return typeof GoKitt !== 'undefined' && typeof (GoKitt as any)[methodName] === 'function';
+}
+
+function postMissingGoKittMethod(id: number, methodName: keyof typeof GoKitt): void {
+    self.postMessage({
+        type: 'ERROR',
+        id,
+        payload: {
+            message: `Loaded gokitt.wasm does not export ${String(methodName)}. The served WASM asset is likely stale relative to gokitt.worker.ts.`
+        }
+    } as GoKittWorkerResponse);
+}
+
 function ensureSharedArrayBuffer(requiredSize: number): { success: true; sab: SharedArrayBuffer } | { success: false; error: string } {
     if (!(self as any).__sabBuffer || (self as any).__sabBuffer.byteLength < requiredSize) {
         const allocSize = Math.max(requiredSize * 2, 65536);
@@ -1040,6 +1054,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                         id: msg.id,
                         payload: null
                     } as GoKittWorkerResponse);
+                    return;
+                }
+                if (!hasGoKittMethod('analyzeText')) {
+                    postMissingGoKittMethod(msg.id, 'analyzeText');
                     return;
                 }
 
@@ -1889,6 +1907,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     self.postMessage({ type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
                     return;
                 }
+                if (!hasGoKittMethod('storeUpsertScopedDocument')) {
+                    postMissingGoKittMethod(msg.id, 'storeUpsertScopedDocument');
+                    return;
+                }
                 const res = GoKitt.storeUpsertScopedDocument(msg.payload.documentJSON);
                 const parsed = JSON.parse(res);
                 self.postMessage({ type: 'STORE_UPSERT_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
@@ -1898,6 +1920,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
             case 'STORE_GET_SCOPED_DOCUMENT': {
                 if (!wasmLoaded) {
                     self.postMessage({ type: 'STORE_GET_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                if (!hasGoKittMethod('storeGetScopedDocument')) {
+                    postMissingGoKittMethod(msg.id, 'storeGetScopedDocument');
                     return;
                 }
                 const res = GoKitt.storeGetScopedDocument(msg.payload.scopeFolderId, msg.payload.namespace, msg.payload.documentKey);
@@ -1915,6 +1941,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     self.postMessage({ type: 'STORE_LIST_SCOPED_DOCUMENTS_RESULT', id: msg.id, payload: [] });
                     return;
                 }
+                if (!hasGoKittMethod('storeListScopedDocuments')) {
+                    postMissingGoKittMethod(msg.id, 'storeListScopedDocuments');
+                    return;
+                }
                 const res = GoKitt.storeListScopedDocuments(msg.payload.scopeFolderId, msg.payload.namespace || '');
                 let parsed = [];
                 try { parsed = JSON.parse(res); } catch { }
@@ -1925,6 +1955,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
             case 'STORE_DELETE_SCOPED_DOCUMENT': {
                 if (!wasmLoaded) {
                     self.postMessage({ type: 'STORE_DELETE_SCOPED_DOCUMENT_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                if (!hasGoKittMethod('storeDeleteScopedDocument')) {
+                    postMissingGoKittMethod(msg.id, 'storeDeleteScopedDocument');
                     return;
                 }
                 const res = GoKitt.storeDeleteScopedDocument(msg.payload.scopeFolderId, msg.payload.namespace, msg.payload.documentKey);

@@ -11,6 +11,7 @@ import { CalendarService, EditorScope } from '../../../services/calendar.service
 import { CalendarEvent } from '../../../lib/fantasy-calendar/types';
 import { getEventTypeById } from '../../../lib/fantasy-calendar/event-type-registry';
 import { EventEditDialogComponent } from '../event-edit-dialog/event-edit-dialog.component';
+import { EventTargetPickerComponent } from '../event-target-picker/event-target-picker.component';
 
 const SCOPE_CONFIG: Record<EditorScope, { icon: string; label: string; description: string }> = {
   day: { icon: 'lucideCalendar', label: 'Day', description: 'Events for selected day' },
@@ -30,7 +31,7 @@ type StatusKey = keyof typeof STATUS_CONFIG;
 @Component({
   selector: 'app-narrative-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, NgIcon, EventEditDialogComponent],
+  imports: [CommonModule, FormsModule, NgIcon, EventEditDialogComponent, EventTargetPickerComponent],
   providers: [provideIcons({
     lucideSearch, lucideCalendar, lucideCalendarDays, lucideCalendarRange,
     lucideLayers, lucideCircle, lucideClock, lucideCheckCircle2, lucidePlus,
@@ -208,6 +209,12 @@ type StatusKey = keyof typeof STATUS_CONFIG;
         [eventId]="selectedEventId()"
         (visibleChange)="onDialogClose($event)"
       ></app-event-edit-dialog>
+
+      <app-event-target-picker
+        [(visible)]="isTargetPickerVisible"
+        [targets]="eligibleTargets()"
+        (confirmTarget)="handleTargetSelected($event)"
+      ></app-event-target-picker>
     </div>
   `,
   styles: [`
@@ -223,6 +230,8 @@ export class NarrativeEditorComponent {
   showCompleted = true;
   quickAddColumn: StatusKey | null = null;
   quickAddTitle = '';
+  isTargetPickerVisible = false;
+  pendingQuickAddEvent: Omit<CalendarEvent, 'id' | 'calendarId'> | null = null;
 
   // Dialog State
   isDialogOpen = false;
@@ -231,6 +240,7 @@ export class NarrativeEditorComponent {
   readonly editorScope = this.calendarService.editorScope;
   readonly viewDate = this.calendarService.viewDate;
   readonly currentMonth = this.calendarService.currentMonth;
+  readonly eligibleTargets = this.calendarService.eligibleOpenNoteTargets;
 
   readonly scopedEvents = computed(() => this.calendarService.getEventsForScope());
 
@@ -330,13 +340,28 @@ export class NarrativeEditorComponent {
   async quickAdd(col: StatusKey) {
     if (!this.quickAddTitle.trim()) return;
 
-    await this.calendarService.addEvent({
+    if (this.eligibleTargets().length === 0) {
+      window.alert('Open a note in the current scope first.');
+      return;
+    }
+
+    this.pendingQuickAddEvent = {
       title: this.quickAddTitle.trim(),
       date: { ...this.viewDate() },
       status: col,
       importance: 'moderate',
-    });
+    };
+    this.isTargetPickerVisible = true;
+  }
 
+  async handleTargetSelected(noteId: string) {
+    if (!this.pendingQuickAddEvent) {
+      return;
+    }
+
+    await this.calendarService.addEvent(this.pendingQuickAddEvent, noteId);
+
+    this.pendingQuickAddEvent = null;
     this.quickAddTitle = '';
     this.quickAddColumn = null;
   }

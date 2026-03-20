@@ -1,17 +1,18 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NgIconComponent, provideIcons } from '@ng-icons/core';
 import { lucideChevronLeft, lucideChevronRight } from '@ng-icons/lucide';
 import { CalendarService } from '../../../services/calendar.service';
 import { DayCellComponent } from '../day-cell/day-cell.component';
 import { EventEditDialogComponent } from '../event-edit-dialog/event-edit-dialog.component';
-import { FantasyDate } from '../../../lib/fantasy-calendar/types';
+import { CalendarEvent, FantasyDate } from '../../../lib/fantasy-calendar/types';
 import { getWeekdayIndex } from '../../../lib/fantasy-calendar/utils';
+import { EventTargetPickerComponent } from '../event-target-picker/event-target-picker.component';
 
 @Component({
   selector: 'app-fantasy-calendar-grid',
   standalone: true,
-  imports: [CommonModule, NgIconComponent, DayCellComponent, EventEditDialogComponent],
+  imports: [CommonModule, NgIconComponent, DayCellComponent, EventEditDialogComponent, EventTargetPickerComponent],
   providers: [provideIcons({ lucideChevronLeft, lucideChevronRight })],
   template: `
     <div class="flex flex-col h-full bg-background border rounded-lg overflow-hidden shadow-sm">
@@ -111,6 +112,12 @@ import { getWeekdayIndex } from '../../../lib/fantasy-calendar/utils';
         [(visible)]="isDialogOpen"
         [eventId]="selectedEventId()"
       ></app-event-edit-dialog>
+
+      <app-event-target-picker
+        [(visible)]="isTargetPickerVisible"
+        [targets]="eligibleTargets()"
+        (confirmTarget)="handleTargetSelected($event)"
+      ></app-event-target-picker>
     </div>
   `,
   styles: [`
@@ -128,7 +135,10 @@ export class FantasyCalendarGridComponent {
 
   // Dialog State
   isDialogOpen = false;
+  isTargetPickerVisible = false;
   selectedEventId = computed(() => this.calendarService.highlightedEventId());
+  private _pendingEvent = signal<Omit<CalendarEvent, 'id' | 'calendarId'> | null>(null);
+  readonly eligibleTargets = this.calendarService.eligibleOpenNoteTargets;
 
   readonly era = computed(() =>
     this.calendar().eras.find(e => e.id === this.calendar().defaultEraId)
@@ -182,19 +192,35 @@ export class FantasyCalendarGridComponent {
     return this.events().filter(e => e.date.dayIndex === dayIndex);
   }
 
-  // Make handleAddEvent async to await service call
-  async handleAddEvent(dayIndex: number) {
-    const newEventId = await this.calendarService.addEvent({
+  handleAddEvent(dayIndex: number) {
+    const pending = {
       title: 'New Event',
       date: { ...this.viewDate(), dayIndex },
       status: 'todo'
-    });
-    // Optional: Open dialog immediately for new event?
-    // for now just add it, user can click to edit
+    } as const;
+
+    if (this.eligibleTargets().length === 0) {
+      window.alert('Open a note in the current scope first.');
+      return;
+    }
+
+    this._pendingEvent.set({ ...pending });
+    this.isTargetPickerVisible = true;
   }
 
   handleEventClick(id: string) {
     this.calendarService.highlightedEventId.set(id);
     this.isDialogOpen = true;
   }
+
+  async handleTargetSelected(noteId: string) {
+    const pending = this._pendingEvent();
+    if (!pending) {
+      return;
+    }
+
+    await this.calendarService.addEvent(pending, noteId);
+    this._pendingEvent.set(null);
+  }
+
 }
