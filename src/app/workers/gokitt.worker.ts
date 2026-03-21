@@ -111,6 +111,15 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
+    | { type: 'CHAT_START_RUN'; payload: { threadId: string; prompt: string; optionsJSON: string }; id: number }
+    | { type: 'CHAT_POLL_RUN'; payload: { runId: string }; id: number }
+    | { type: 'CHAT_SUBMIT_TOOL_RESULTS'; payload: { runId: string; resultsJSON: string }; id: number }
+    | { type: 'CHAT_SUBMIT_APPROVAL'; payload: { runId: string; approvalId: string; approved: boolean; decisionJSON?: string }; id: number }
+    | { type: 'CHAT_CANCEL_RUN'; payload: { runId: string }; id: number }
+    | { type: 'CHAT_RESUME_RUN'; payload: { runId: string }; id: number }
+    | { type: 'CHAT_LIST_RUN_EVENTS'; payload: { threadId: string; limit?: number }; id: number }
+    | { type: 'CHAT_MARK_RUN_STREAMING'; payload: { runId: string; assistantMessageId: string }; id: number }
+    | { type: 'CHAT_COMPLETE_RUN'; payload: { runId: string; assistantMessageId: string; finalResponse: string; finalError?: string }; id: number }
     | { type: 'CHAT_PROCESS_WITH_WORKSPACE'; payload: { threadId: string; scopeId: string; userPrompt: string }; id: number }
     // Store: Spans & Links
     | { type: 'STORE_UPSERT_SPAN'; payload: { spanJSON: string }; id: number }
@@ -282,6 +291,15 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
+    | { type: 'CHAT_START_RUN_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_POLL_RUN_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_SUBMIT_TOOL_RESULTS_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_SUBMIT_APPROVAL_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_CANCEL_RUN_RESULT'; id: number; payload: { success: boolean; error?: string } }
+    | { type: 'CHAT_RESUME_RUN_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_LIST_RUN_EVENTS_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_MARK_RUN_STREAMING_RESULT'; id: number; payload: any }
+    | { type: 'CHAT_COMPLETE_RUN_RESULT'; id: number; payload: any }
     | { type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT'; id: number; payload: string }
     // Store Results
     | { type: 'STORE_UPSERT_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
@@ -547,6 +565,15 @@ declare const GoKitt: {
     chatGetContext: (threadId: string) => string;
     chatClearThread: (threadId: string) => string;
     chatExportThread: (threadId: string) => string;
+    chatStartRun: (threadId: string, prompt: string, optionsJSON: string) => string;
+    chatPollRun: (runId: string) => string;
+    chatSubmitToolResults: (runId: string, resultsJSON: string) => string;
+    chatSubmitApproval: (runId: string, approvalId: string, approved: boolean, decisionJSON?: string) => string;
+    chatCancelRun: (runId: string) => string;
+    chatResumeRun: (runId: string) => string;
+    chatListRunEvents: (threadId: string, limit: number) => string;
+    chatMarkRunStreaming: (runId: string, assistantMessageId: string) => string;
+    chatCompleteRun: (runId: string, assistantMessageId: string, finalResponse: string, finalError?: string) => string;
     chatProcessWithWorkspace: (threadId: string, scopeId: string, userPrompt: string) => string;
     // RAPTOR API
     raptorInit: (configJSON?: string) => string;
@@ -2794,6 +2821,187 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     type: 'CHAT_EXPORT_THREAD_RESULT',
                     id: msg.id,
                     payload: res
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_START_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_START_RUN_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatStartRun(msg.payload.threadId, msg.payload.prompt, msg.payload.optionsJSON);
+                self.postMessage({
+                    type: 'CHAT_START_RUN_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_POLL_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_POLL_RUN_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatPollRun(msg.payload.runId);
+                self.postMessage({
+                    type: 'CHAT_POLL_RUN_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_SUBMIT_TOOL_RESULTS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_SUBMIT_TOOL_RESULTS_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatSubmitToolResults(msg.payload.runId, msg.payload.resultsJSON);
+                self.postMessage({
+                    type: 'CHAT_SUBMIT_TOOL_RESULTS_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_SUBMIT_APPROVAL': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_SUBMIT_APPROVAL_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatSubmitApproval(
+                    msg.payload.runId,
+                    msg.payload.approvalId,
+                    msg.payload.approved,
+                    msg.payload.decisionJSON
+                );
+                self.postMessage({
+                    type: 'CHAT_SUBMIT_APPROVAL_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_CANCEL_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_CANCEL_RUN_RESULT',
+                        id: msg.id,
+                        payload: { success: false, error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const parsed = JSON.parse(GoKitt.chatCancelRun(msg.payload.runId));
+                self.postMessage({
+                    type: 'CHAT_CANCEL_RUN_RESULT',
+                    id: msg.id,
+                    payload: { success: !parsed.error, error: parsed.error }
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_RESUME_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_RESUME_RUN_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatResumeRun(msg.payload.runId);
+                self.postMessage({
+                    type: 'CHAT_RESUME_RUN_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_LIST_RUN_EVENTS': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_LIST_RUN_EVENTS_RESULT',
+                        id: msg.id,
+                        payload: []
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatListRunEvents(msg.payload.threadId, msg.payload.limit ?? 100);
+                self.postMessage({
+                    type: 'CHAT_LIST_RUN_EVENTS_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_MARK_RUN_STREAMING': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_MARK_RUN_STREAMING_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatMarkRunStreaming(msg.payload.runId, msg.payload.assistantMessageId);
+                self.postMessage({
+                    type: 'CHAT_MARK_RUN_STREAMING_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
+                } as GoKittWorkerResponse);
+                break;
+            }
+
+            case 'CHAT_COMPLETE_RUN': {
+                if (!wasmLoaded) {
+                    self.postMessage({
+                        type: 'CHAT_COMPLETE_RUN_RESULT',
+                        id: msg.id,
+                        payload: { error: 'WASM not loaded' }
+                    } as GoKittWorkerResponse);
+                    return;
+                }
+
+                const res = GoKitt.chatCompleteRun(
+                    msg.payload.runId,
+                    msg.payload.assistantMessageId,
+                    msg.payload.finalResponse,
+                    msg.payload.finalError
+                );
+                self.postMessage({
+                    type: 'CHAT_COMPLETE_RUN_RESULT',
+                    id: msg.id,
+                    payload: JSON.parse(res)
                 } as GoKittWorkerResponse);
                 break;
             }

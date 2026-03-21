@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kittclouds/gokitt/internal/store"
@@ -16,19 +17,41 @@ import (
 
 // ChatService manages AI chat sessions.
 type ChatService struct {
-	store    *store.SQLiteStore
-	observer *memory.Observer
+	store           *store.SQLiteStore
+	observer        *memory.Observer
+	planner         plannerClient
+	blockSearcher   blockSearchFunc
+	graptorSearcher blockSearchFunc
+
+	runMu      sync.Mutex
+	runCancels map[string]context.CancelFunc
+	runActive  map[string]bool
 }
 
 // NewChatService creates a new chat service.
 func NewChatService(s *store.SQLiteStore, a *agent.Service, cfg memory.Config) *ChatService {
-	// Initialize Observational Memory
-	obs := memory.NewObserver(s, a, cfg)
+	var obs *memory.Observer
+	if a != nil && cfg.Enabled {
+		obs = memory.NewObserver(s, a, cfg)
+	}
 
 	return &ChatService{
-		store:    s,
-		observer: obs,
+		store:      s,
+		observer:   obs,
+		planner:    a,
+		runCancels: make(map[string]context.CancelFunc),
+		runActive:  make(map[string]bool),
 	}
+}
+
+// SetBlockSearcher wires a GLDR-backed block search callback into the chat orchestrator.
+func (s *ChatService) SetBlockSearcher(fn blockSearchFunc) {
+	s.blockSearcher = fn
+}
+
+// SetGraptorSearcher wires a Graptor-backed block search callback into the chat orchestrator.
+func (s *ChatService) SetGraptorSearcher(fn blockSearchFunc) {
+	s.graptorSearcher = fn
 }
 
 // =============================================================================

@@ -91,6 +91,153 @@ export interface ChatProgressEvent {
     detail?: string;
 }
 
+export type ChatRunStatus =
+    | 'queued'
+    | 'gathering'
+    | 'planning'
+    | 'executing_tools'
+    | 'awaiting_tool_host'
+    | 'awaiting_approval'
+    | 'ready_to_answer'
+    | 'streaming'
+    | 'completed'
+    | 'degraded'
+    | 'failed'
+    | 'cancelled';
+
+export interface RunOptions {
+    finalProvider: string;
+    finalModel: string;
+    plannerModel?: string;
+    omModel?: string;
+    plannerEnabled: boolean;
+    omEnabled: boolean;
+    workspaceEnabled: boolean;
+    mutationsEnabled: boolean;
+    deadlineMs: number;
+    mutationPolicy: 'confirm' | 'trusted_auto_edit' | 'full_autonomy';
+    narrativeId?: string;
+    folderId?: string;
+    scopeId?: string;
+    baseSystemPrompt?: string;
+    initialExternalContext?: string;
+}
+
+export interface CapabilityProfile {
+    omEnabled: boolean;
+    workspaceEnabled: boolean;
+    plannerEnabled: boolean;
+    goToolHost: boolean;
+    tsToolHost: boolean;
+    blockSearch: boolean;
+}
+
+export interface EvidenceItem {
+    id: string;
+    source: string;
+    title?: string;
+    content: string;
+    score?: number;
+    metadata?: Record<string, unknown>;
+}
+
+export interface ChatRun {
+    id: string;
+    threadId: string;
+    userPrompt: string;
+    status: ChatRunStatus;
+    options: RunOptions;
+    capabilities: CapabilityProfile;
+    preparedContext: string;
+    preparedSystemPrompt: string;
+    plannerMessagesJson: string;
+    evidenceJson: string;
+    missingCapabilitiesJson: string;
+    error?: string;
+    finalResponse?: string;
+    assistantMessageId?: string;
+    deadlineAt: number;
+    completedAt?: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface ChatRunEvent {
+    id: string;
+    runId: string;
+    phase: string;
+    kind: string;
+    label: string;
+    detail?: string;
+    status?: string;
+    payload?: string;
+    latencyMs?: number;
+    createdAt: number;
+}
+
+export interface ChatToolCall {
+    id: string;
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    host: 'go' | 'typescript';
+    class: 'read' | 'proposal' | 'write';
+    status: string;
+    argumentsJson: string;
+    resultJson?: string;
+    error?: string;
+    idempotencyKey?: string;
+    approvalId?: string;
+    startedAt?: number;
+    completedAt?: number;
+    latencyMs?: number;
+}
+
+export interface ToolProposal {
+    proposalId: string;
+    toolName: string;
+    affectedNoteId?: string;
+    summary: string;
+    diffPreview?: string;
+    expectedRevision?: number;
+    rollbackToken?: string;
+    payloadJson?: string;
+}
+
+export interface ChatApprovalRequest {
+    id: string;
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    status: string;
+    affectedNoteId?: string;
+    summary: string;
+    diffPreview?: string;
+    expectedRevision?: number;
+    rollbackToken?: string;
+    proposalJson?: string;
+    decisionJson?: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface ChatRunSnapshot {
+    run: ChatRun;
+    events: ChatRunEvent[];
+    toolCalls: ChatToolCall[];
+    approvals: ChatApprovalRequest[];
+    evidence: EvidenceItem[];
+    missingCapabilities: string[];
+}
+
+export interface ToolResultSubmission {
+    callId?: string;
+    toolCallId?: string;
+    resultJson?: string;
+    error?: string;
+    proposal?: ToolProposal;
+}
+
 // =============================================================================
 // Service Implementation
 // =============================================================================
@@ -698,6 +845,144 @@ export class GoChatService {
         } catch (err) {
             console.error('[GoChatService] Export thread error:', err);
             return '{}';
+        }
+    }
+
+    async startRun(prompt: string, options: RunOptions): Promise<ChatRun | null> {
+        const thread = await this.getOrCreateThread();
+        if (!thread) return null;
+
+        const normalized: RunOptions = {
+            ...options,
+            narrativeId: options.narrativeId || (thread as any).narrativeId || (thread as any).narrative_id || '',
+            scopeId: options.scopeId || options.narrativeId || (thread as any).narrativeId || (thread as any).narrative_id || '',
+        };
+
+        try {
+            const result = await this.goKittService.chatStartRun(thread.id, prompt, JSON.stringify(normalized));
+            if (result?.error) {
+                console.error('[GoChatService] Start run failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRun;
+        } catch (err) {
+            console.error('[GoChatService] Start run error:', err);
+            return null;
+        }
+    }
+
+    async pollRun(runId: string): Promise<ChatRunSnapshot | null> {
+        try {
+            const result = await this.goKittService.chatPollRun(runId);
+            if (result?.error) {
+                console.error('[GoChatService] Poll run failed:', result.error);
+                return null;
+            }
+            return result as ChatRunSnapshot;
+        } catch (err) {
+            console.error('[GoChatService] Poll run error:', err);
+            return null;
+        }
+    }
+
+    async submitToolResults(runId: string, results: ToolResultSubmission[]): Promise<ChatRunSnapshot | null> {
+        try {
+            const result = await this.goKittService.chatSubmitToolResults(runId, JSON.stringify(results));
+            if (result?.error) {
+                console.error('[GoChatService] Submit tool results failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRunSnapshot;
+        } catch (err) {
+            console.error('[GoChatService] Submit tool results error:', err);
+            return null;
+        }
+    }
+
+    async submitApproval(runId: string, approvalId: string, approved: boolean, decisionJSON?: string): Promise<ChatRunSnapshot | null> {
+        try {
+            const result = await this.goKittService.chatSubmitApproval(runId, approvalId, approved, decisionJSON);
+            if (result?.error) {
+                console.error('[GoChatService] Submit approval failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRunSnapshot;
+        } catch (err) {
+            console.error('[GoChatService] Submit approval error:', err);
+            return null;
+        }
+    }
+
+    async resumeRun(runId: string): Promise<ChatRun | null> {
+        try {
+            const result = await this.goKittService.chatResumeRun(runId);
+            if (result?.error) {
+                console.error('[GoChatService] Resume run failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRun;
+        } catch (err) {
+            console.error('[GoChatService] Resume run error:', err);
+            return null;
+        }
+    }
+
+    async cancelRun(runId: string): Promise<boolean> {
+        try {
+            const result = await this.goKittService.chatCancelRun(runId);
+            if (result?.error) {
+                console.error('[GoChatService] Cancel run failed:', result.error);
+                return false;
+            }
+            void this.saveDbState();
+            return true;
+        } catch (err) {
+            console.error('[GoChatService] Cancel run error:', err);
+            return false;
+        }
+    }
+
+    async listRunEvents(threadId: string, limit = 100): Promise<ChatRunEvent[]> {
+        try {
+            const result = await this.goKittService.chatListRunEvents(threadId, limit);
+            return Array.isArray(result) ? result as ChatRunEvent[] : [];
+        } catch (err) {
+            console.error('[GoChatService] List run events error:', err);
+            return [];
+        }
+    }
+
+    async markRunStreaming(runId: string, assistantMessageId: string): Promise<ChatRunSnapshot | null> {
+        try {
+            const result = await this.goKittService.chatMarkRunStreaming(runId, assistantMessageId);
+            if (result?.error) {
+                console.error('[GoChatService] Mark run streaming failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRunSnapshot;
+        } catch (err) {
+            console.error('[GoChatService] Mark run streaming error:', err);
+            return null;
+        }
+    }
+
+    async completeRun(runId: string, assistantMessageId: string, finalResponse: string, finalError?: string): Promise<ChatRunSnapshot | null> {
+        try {
+            const result = await this.goKittService.chatCompleteRun(runId, assistantMessageId, finalResponse, finalError);
+            if (result?.error) {
+                console.error('[GoChatService] Complete run failed:', result.error);
+                return null;
+            }
+            void this.saveDbState();
+            return result as ChatRunSnapshot;
+        } catch (err) {
+            console.error('[GoChatService] Complete run error:', err);
+            return null;
         }
     }
 

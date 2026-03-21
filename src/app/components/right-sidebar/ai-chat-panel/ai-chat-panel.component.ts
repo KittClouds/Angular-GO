@@ -23,10 +23,11 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw, Bot, User, Sparkles } from 'lucide-angular';
 import { computed, untracked } from '@angular/core';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
-import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage } from '../../../lib/services/go-chat.service';
+import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage, type ChatApprovalRequest, type ChatRunSnapshot, type RunOptions } from '../../../lib/services/go-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
+import { ChatToolHostService } from '../../../lib/services/chat-tool-host.service';
 import type { ActivationResult } from '../../../lib/rlm';
 
 interface SessionInfo {
@@ -561,6 +562,34 @@ Keep responses concise but helpful. If you don't know something specific about t
                             </div>
                         }
                     }
+
+                    @if (pendingApprovals().length > 0) {
+                        <div class="max-w-[95%] mx-auto space-y-3">
+                            @for (approval of pendingApprovals(); track approval.id) {
+                                <div class="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3">
+                                    <div class="text-[11px] font-semibold text-amber-300 mb-1">Approval Required</div>
+                                    <div class="text-[13px] text-foreground mb-2">{{ approval.summary }}</div>
+                                    @if (approval.diffPreview) {
+                                        <pre class="text-[11px] whitespace-pre-wrap rounded-lg bg-black/20 border border-white/5 p-2 text-amber-100/90 max-h-48 overflow-auto">{{ approval.diffPreview }}</pre>
+                                    }
+                                    <div class="flex gap-2 mt-3">
+                                        <button
+                                            class="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
+                                            [disabled]="approvalBusy() === approval.id"
+                                            (click)="handleApprovalDecision(approval, true)">
+                                            Approve
+                                        </button>
+                                        <button
+                                            class="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-rose-600/80 hover:bg-rose-500 text-white disabled:opacity-50"
+                                            [disabled]="approvalBusy() === approval.id"
+                                            (click)="handleApprovalDecision(approval, false)">
+                                            Reject
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="shrink-0 border-t border-border/50 p-3 chat-input-area bg-gradient-to-t from-teal-900/10 to-transparent">
                     <div class="flex items-end gap-2 relative">
@@ -1004,6 +1033,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     googleGenAI = inject(GoogleGenAIService);
     private orchestrator = inject(OrchestratorService);
     private readonly chatContextClipStore = inject(ChatContextClipStore);
+    private readonly toolHost = inject(ChatToolHostService);
     private goChatInitialized = false;
 
     // Icon references for template
@@ -1062,6 +1092,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     // Per-message activity/timeline state (inline chat trace)
     activitySteps = signal<ActivityTraceStep[]>([]);
+    pendingApprovals = signal<ChatApprovalRequest[]>([]);
+    currentRunId = signal<string | null>(null);
+    approvalBusy = signal<string | null>(null);
     private traceCounter = 0;
     private readonly traceStartedAt = new Map<string, number>();
     private currentTraceMsgId: string | null = null;
@@ -1323,6 +1356,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         this.showHistory.set(false);
         this.currentTraceMsgId = null;
         this.activitySteps.set([]);
+        this.pendingApprovals.set([]);
+        this.currentRunId.set(null);
+        this.approvalBusy.set(null);
 
         // Reload chat with new session messages
         this.restoreHistory();
@@ -1386,10 +1422,11 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     async sendMessage(): Promise<void> {
         const text = this.currentMessage.trim();
-        if (!text || this.isStreaming()) return;
+        if (!text || this.isStreaming() || (this.currentRunId() && this.pendingApprovals().length > 0)) return;
 
         this.currentMessage = '';
         this.isStreaming.set(true);
+        this.pendingApprovals.set([]);
 
         await this.goChatService.addUserMessage(text);
         this.scrollToBottom();
@@ -1409,62 +1446,48 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        let contextBlock = '';
-        let activation: ActivationResult | null = null;
-        if (this.indexEnabled()) {
-            const indexStepId = this.addActivityStep('tool', 'Reading notes', 'Searching the workspace for note context...');
-            try {
-                const threadId = this.goChatService.currentThread()?.id || 'default';
-                contextBlock = await this.orchestrator.orchestrate(text, threadId);
-                activation = this.orchestrator.lastActivation();
-                this.mapActivationToActivity(indexStepId, activation, contextBlock);
-            } catch (err) {
-                console.error('[AiChatPanel] Orchestrator error:', err);
-                this.finishActivityStep(indexStepId, 'error', this.toErrorMessage(err));
-            }
-        }
-
         const highlightedClips = this.chatContextClipStore.consumeAll();
         const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
         if (highlightedClips.length > 0) {
             this.addCompletedStep('tool', 'Using highlighted text', 'Injected highlighted note snippets.');
         }
 
-        const history = this.buildConversationHistory();
-        const effectiveSystemPrompt = this.systemPromptInput()
-            + (contextBlock ? '\n\n' + contextBlock : '')
-            + (highlightedContext ? '\n\n' + highlightedContext : '');
-
-        const thinkingSummary = this.buildThinkingSummary(contextBlock, highlightedClips.length, activation);
-        const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
-            ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
-            : null;
-        this.finishActivityStep(traceId, 'done', thinkingSummary);
-
-        const streamingMessage = await this.goChatService.startStreamingMessage();
-        if (!streamingMessage) {
-            this.finishActivityStep(traceId, 'error', 'Failed to start assistant response.');
+        const appContext = await this.orchestrator.getAppContext();
+        const runOptions = this.buildRunOptions(highlightedContext, appContext);
+        const run = await this.goChatService.startRun(text, runOptions);
+        if (!run) {
+            this.finishActivityStep(traceId, 'error', 'Failed to start chat run.');
             this.isStreaming.set(false);
             return;
         }
 
-        const streamStepId = this.addActivityStep('stream', 'Responding', 'Writing the answer...');
-        await this.handleStreamingChat(
-            streamingMessage.id,
-            history,
-            effectiveSystemPrompt,
-            (event) => this.applyProgressEvent(streamStepId, event),
-            reasoningStepId ? (chunk) => this.appendActivityStepDetail(reasoningStepId, chunk) : undefined
-        );
+        this.currentRunId.set(run.id);
+        const snapshot = await this.waitForRunReady(run.id);
+        if (!snapshot) {
+            this.finishActivityStep(traceId, 'error', 'Run did not return a snapshot.');
+            this.currentRunId.set(null);
+            this.isStreaming.set(false);
+            return;
+        }
 
-        if (reasoningStepId) this.finalizeReasoningStep(reasoningStepId);
+        if (snapshot.run.status === 'awaiting_approval') {
+            this.finishActivityStep(traceId, 'done', 'Waiting for approval.');
+            this.isStreaming.set(false);
+            return;
+        }
 
-        this.finishActivityStep(streamStepId, "done", "Done");
-        this.isStreaming.set(false);
-        this.scrollToBottom();
+        if (snapshot.run.status === 'failed' || snapshot.run.status === 'cancelled') {
+            this.finishActivityStep(traceId, 'error', snapshot.run.error || `Run ${snapshot.run.status}.`);
+            this.currentRunId.set(null);
+            this.isStreaming.set(false);
+            return;
+        }
+
+        await this.streamPreparedRun(snapshot);
     }
 
     private async handleStreamingChat(
+        runId: string,
         botMsgId: string,
         history: OpenRouterMessage[],
         systemPrompt: string,
@@ -1490,12 +1513,14 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                         onComplete: async (response: string) => {
                             if (onProgress) onProgress({ stage: 'stream', status: 'done', detail: 'Completed successfully.' });
                             await this.goChatService.updateMessage(botMsgId, response);
+                            await this.goChatService.completeRun(runId, botMsgId, response);
                             this.currentBotMsgId = null;
                         },
                         onError: (err: any) => {
                             const errStr = err instanceof Error ? err.message : String(err);
                             if (onProgress) onProgress({ stage: 'stream', status: 'error', detail: errStr });
                             void this.goChatService.updateMessage(botMsgId, `Error: ${errStr}`);
+                            void this.goChatService.completeRun(runId, botMsgId, '', errStr);
                             this.currentBotMsgId = null;
                         }
                     },
@@ -1513,11 +1538,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                     },
                     onComplete: async (response: string) => {
                         await this.goChatService.updateMessage(botMsgId, response);
+                        await this.goChatService.completeRun(runId, botMsgId, response);
                         this.currentBotMsgId = null;
                     },
                     onError: (err: any) => {
                         const errStr = err instanceof Error ? err.message : String(err);
                         void this.goChatService.updateMessage(botMsgId, `Error: ${errStr}`);
+                        void this.goChatService.completeRun(runId, botMsgId, '', errStr);
                         this.currentBotMsgId = null;
                     },
                     onEvent: onProgress,
@@ -1533,8 +1560,175 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 onProgress({ stage: 'stream', status: 'error', detail: errStr });
             }
             void this.goChatService.updateMessage(botMsgId, `System Error: ${errStr}`);
+            void this.goChatService.completeRun(runId, botMsgId, '', errStr);
             this.currentBotMsgId = null;
         }
+    }
+
+    private buildRunOptions(highlightedContext: string, appContext: any): RunOptions {
+        const currentThread = this.goChatService.currentThread() as any;
+        const narrativeId = appContext?.narrativeId || currentThread?.narrativeId || currentThread?.narrative_id || '';
+        const folderId = appContext?.folderId || '';
+
+        const externalParts: string[] = [];
+        if (appContext?.activeNoteTitle || appContext?.activeNoteSnippet) {
+            externalParts.push(
+                `Active note: ${appContext.activeNoteTitle || appContext.activeNoteId || 'Untitled'}\n${appContext.activeNoteSnippet || ''}`.trim()
+            );
+        }
+        if (highlightedContext) {
+            externalParts.push(highlightedContext);
+        }
+
+        return {
+            finalProvider: this.activeProvider(),
+            finalModel: this.activeProvider() === 'google' ? this.googleModelInput() : this.selectedModel(),
+            plannerModel: this.selectedModel(),
+            omModel: this.omModelInput(),
+            plannerEnabled: this.indexEnabled() && this.isGoConfigured(),
+            omEnabled: this.omEnabledInput(),
+            workspaceEnabled: this.indexEnabled(),
+            mutationsEnabled: true,
+            deadlineMs: 8000,
+            mutationPolicy: 'confirm',
+            narrativeId,
+            folderId,
+            scopeId: narrativeId,
+            baseSystemPrompt: this.systemPromptInput(),
+            initialExternalContext: externalParts.join('\n\n'),
+        };
+    }
+
+    private async waitForRunReady(runId: string): Promise<ChatRunSnapshot | null> {
+        for (let attempt = 0; attempt < 80; attempt++) {
+            const snapshot = await this.goChatService.pollRun(runId);
+            if (!snapshot) return null;
+
+            this.pendingApprovals.set((snapshot.approvals || []).filter((approval) => approval.status === 'pending'));
+            this.syncRunTrace(snapshot);
+
+            switch (snapshot.run.status) {
+                case 'awaiting_tool_host': {
+                    const pendingCalls = (snapshot.toolCalls || []).filter((call) => call.host === 'typescript' && call.status === 'pending_host');
+                    if (pendingCalls.length === 0) {
+                        await this.sleep(200);
+                        continue;
+                    }
+
+                    const submissions = await Promise.all(pendingCalls.map((call) => this.toolHost.executeCall(call)));
+                    const afterSubmit = await this.goChatService.submitToolResults(runId, submissions);
+                    if (!afterSubmit) return snapshot;
+
+                    this.pendingApprovals.set((afterSubmit.approvals || []).filter((approval) => approval.status === 'pending'));
+                    this.syncRunTrace(afterSubmit);
+
+                    if (afterSubmit.run.status === 'planning') {
+                        await this.goChatService.resumeRun(runId);
+                    }
+                    if (afterSubmit.run.status === 'awaiting_approval' || afterSubmit.run.status === 'ready_to_answer' || afterSubmit.run.status === 'degraded' || afterSubmit.run.status === 'failed' || afterSubmit.run.status === 'cancelled') {
+                        return afterSubmit;
+                    }
+                    await this.sleep(150);
+                    continue;
+                }
+                case 'queued':
+                case 'gathering':
+                case 'planning':
+                case 'executing_tools':
+                case 'streaming':
+                    await this.sleep(200);
+                    continue;
+                default:
+                    return snapshot;
+            }
+        }
+
+        return this.goChatService.pollRun(runId);
+    }
+
+    private async streamPreparedRun(snapshot: ChatRunSnapshot): Promise<void> {
+        const runId = snapshot.run.id;
+        const history = this.buildConversationHistory();
+        const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
+            ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
+            : null;
+
+        const streamingMessage = await this.goChatService.startStreamingMessage();
+        if (!streamingMessage) {
+            this.isStreaming.set(false);
+            this.currentRunId.set(null);
+            return;
+        }
+
+        await this.goChatService.markRunStreaming(runId, streamingMessage.id);
+
+        const streamStepId = this.addActivityStep('stream', 'Responding', 'Writing the answer...');
+        await this.handleStreamingChat(
+            runId,
+            streamingMessage.id,
+            history,
+            snapshot.run.preparedSystemPrompt || this.systemPromptInput(),
+            (event) => this.applyProgressEvent(streamStepId, event),
+            reasoningStepId ? (chunk) => this.appendActivityStepDetail(reasoningStepId, chunk) : undefined
+        );
+
+        if (reasoningStepId) this.finalizeReasoningStep(reasoningStepId);
+        this.finishActivityStep(streamStepId, 'done', 'Done');
+        this.pendingApprovals.set([]);
+        this.currentRunId.set(null);
+        this.isStreaming.set(false);
+        this.scrollToBottom();
+    }
+
+    async handleApprovalDecision(approval: ChatApprovalRequest, approved: boolean): Promise<void> {
+        const runId = this.currentRunId();
+        if (!runId) return;
+
+        this.approvalBusy.set(approval.id);
+        try {
+            const decisionJSON = approved
+                ? await this.toolHost.applyApproval(approval, true)
+                : JSON.stringify({ approved: false, applied: false, reason: 'User rejected proposal.' });
+
+            const snapshot = await this.goChatService.submitApproval(runId, approval.id, approved, decisionJSON);
+            if (!snapshot) return;
+
+            this.pendingApprovals.set((snapshot.approvals || []).filter((item) => item.status === 'pending'));
+            this.syncRunTrace(snapshot);
+
+            if (snapshot.run.status === 'planning') {
+                await this.goChatService.resumeRun(runId);
+                const resumed = await this.waitForRunReady(runId);
+                if (!resumed) return;
+                if (resumed.run.status === 'awaiting_approval') {
+                    this.isStreaming.set(false);
+                    return;
+                }
+                if (resumed.run.status === 'ready_to_answer' || resumed.run.status === 'degraded') {
+                    this.isStreaming.set(true);
+                    await this.streamPreparedRun(resumed);
+                }
+            }
+        } finally {
+            this.approvalBusy.set(null);
+        }
+    }
+
+    private syncRunTrace(snapshot: ChatRunSnapshot): void {
+        const steps: ActivityTraceStep[] = (snapshot.events || []).map((event) => ({
+            id: event.id,
+            kind: event.kind === 'tool' ? 'tool' : 'status',
+            label: event.label,
+            detail: event.detail || undefined,
+            status: event.status === 'error' ? 'error' : event.status === 'running' ? 'running' : 'done',
+            latencyMs: event.latencyMs,
+        }));
+        this.activitySteps.set(steps);
+        this.syncActivityTrace();
+    }
+
+    private sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     private buildConversationHistory(): OpenRouterMessage[] {
@@ -1772,6 +1966,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         await this.goChatService.newSession();
         this.currentTraceMsgId = null;
         this.activitySteps.set([]);
+        this.pendingApprovals.set([]);
+        this.currentRunId.set(null);
+        this.approvalBusy.set(null);
         this.displayMessages.set([]);
         this.restoreHistory();
     }
@@ -1780,6 +1977,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         await this.goChatService.clearThread();
         this.currentTraceMsgId = null;
         this.activitySteps.set([]);
+        this.pendingApprovals.set([]);
+        this.currentRunId.set(null);
+        this.approvalBusy.set(null);
         this.displayMessages.set([]);
         this.restoreHistory();
     }

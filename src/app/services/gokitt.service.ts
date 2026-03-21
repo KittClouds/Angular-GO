@@ -1632,6 +1632,69 @@ export class GoKittService {
         return this.sendRequest('CHAT_EXPORT_THREAD', { threadId });
     }
 
+    async chatStartRun(threadId: string, prompt: string, optionsJSON: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_START_RUN', { threadId, prompt, optionsJSON });
+    }
+
+    async chatPollRun(runId: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_POLL_RUN', { runId });
+    }
+
+    async chatSubmitToolResults(runId: string, resultsJSON: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_SUBMIT_TOOL_RESULTS', { runId, resultsJSON });
+    }
+
+    async chatSubmitApproval(runId: string, approvalId: string, approved: boolean, decisionJSON?: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_SUBMIT_APPROVAL', { runId, approvalId, approved, decisionJSON });
+    }
+
+    async chatCancelRun(runId: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.wasmLoaded) {
+            return { success: false, error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_CANCEL_RUN', { runId });
+    }
+
+    async chatResumeRun(runId: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_RESUME_RUN', { runId });
+    }
+
+    async chatListRunEvents(threadId: string, limit = 100): Promise<any> {
+        if (!this.wasmLoaded) {
+            return [];
+        }
+        return this.sendRequest('CHAT_LIST_RUN_EVENTS', { threadId, limit });
+    }
+
+    async chatMarkRunStreaming(runId: string, assistantMessageId: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_MARK_RUN_STREAMING', { runId, assistantMessageId });
+    }
+
+    async chatCompleteRun(runId: string, assistantMessageId: string, finalResponse: string, finalError?: string): Promise<any> {
+        if (!this.wasmLoaded) {
+            return { error: 'WASM not loaded' };
+        }
+        return this.sendRequest('CHAT_COMPLETE_RUN', { runId, assistantMessageId, finalResponse, finalError });
+    }
+
     /**
      * Run the OM loop + workspace miss-signal check.
      * If a miss fires, the workspace activates: searches notes/episodes,

@@ -53,7 +53,7 @@ func NewObserver(s *store.SQLiteStore, a *agent.Service, cfg Config) *Observer {
 
 // IsEnabled reports whether observational memory work should run.
 func (o *Observer) IsEnabled() bool {
-	return o != nil && o.cfg.Enabled
+	return o != nil && o.cfg.Enabled && o.agent != nil
 }
 
 // NewObserverWithGDR creates an Observer with GDR-backed workspace tools.

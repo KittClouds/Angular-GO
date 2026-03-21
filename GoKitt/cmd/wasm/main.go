@@ -188,6 +188,15 @@ func main() {
 		"chatGetContext":           js.FuncOf(jsChatGetContext),
 		"chatClearThread":          js.FuncOf(jsChatClearThread),
 		"chatExportThread":         js.FuncOf(jsChatExportThread),
+		"chatStartRun":             js.FuncOf(jsChatStartRun),
+		"chatPollRun":              js.FuncOf(jsChatPollRun),
+		"chatSubmitToolResults":    js.FuncOf(jsChatSubmitToolResults),
+		"chatSubmitApproval":       js.FuncOf(jsChatSubmitApproval),
+		"chatCancelRun":            js.FuncOf(jsChatCancelRun),
+		"chatResumeRun":            js.FuncOf(jsChatResumeRun),
+		"chatListRunEvents":        js.FuncOf(jsChatListRunEvents),
+		"chatMarkRunStreaming":     js.FuncOf(jsChatMarkRunStreaming),
+		"chatCompleteRun":          js.FuncOf(jsChatCompleteRun),
 		"chatProcessWithWorkspace": js.FuncOf(jsChatProcessWithWorkspace),
 		// RAPTOR: Hierarchical Document Retrieval
 		"raptorInit":             js.FuncOf(raptorInit),
@@ -2760,6 +2769,7 @@ func jsChatInit(this js.Value, args []js.Value) interface{} {
 		fmt.Println("[GoKitt] Warning: Agent service not initialized before Chat service. OM disabled.")
 	}
 	chatSvc = chat.NewChatService(sqlStore, agentSvc, memConfig)
+	wireChatSearchers()
 
 	return SuccessResult("Chat service initialized")
 }

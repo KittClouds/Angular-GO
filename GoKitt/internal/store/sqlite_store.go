@@ -235,6 +235,90 @@ CREATE INDEX IF NOT EXISTS idx_ws_scope
     ON workspace_artifacts(thread_id, narrative_id, folder_id);
 
 -- =============================================================================
+-- Chat Run Orchestration
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS chat_runs (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    user_prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '{}',
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    prepared_context TEXT NOT NULL DEFAULT '',
+    prepared_system_prompt TEXT NOT NULL DEFAULT '',
+    planner_messages_json TEXT NOT NULL DEFAULT '[]',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    missing_capabilities_json TEXT NOT NULL DEFAULT '[]',
+    error TEXT NOT NULL DEFAULT '',
+    final_response TEXT NOT NULL DEFAULT '',
+    assistant_message_id TEXT NOT NULL DEFAULT '',
+    deadline_at INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_runs_thread ON chat_runs(thread_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_runs_status ON chat_runs(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS chat_run_events (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '',
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_run_events_run ON chat_run_events(run_id, created_at);
+
+CREATE TABLE IF NOT EXISTS chat_tool_calls (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    class TEXT NOT NULL,
+    status TEXT NOT NULL,
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL DEFAULT '',
+    approval_id TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL DEFAULT 0,
+    completed_at INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_tool_calls_run ON chat_tool_calls(run_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_chat_tool_calls_status ON chat_tool_calls(status, started_at);
+
+CREATE TABLE IF NOT EXISTS chat_approval_requests (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    affected_note_id TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    diff_preview TEXT NOT NULL DEFAULT '',
+    expected_revision INTEGER NOT NULL DEFAULT 0,
+    rollback_token TEXT NOT NULL DEFAULT '',
+    proposal_json TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_approvals_run ON chat_approval_requests(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_approvals_status ON chat_approval_requests(status, updated_at DESC);
+
+-- =============================================================================
 -- Phase 9: HNSW Vector Index Persistence
 -- =============================================================================
 
@@ -550,6 +634,8 @@ func NewSQLiteStoreWithDSN(dsn string) (*SQLiteStore, error) {
 	db.Exec("PRAGMA synchronous=OFF")
 	db.Exec("PRAGMA temp_store=MEMORY")
 	db.Exec("PRAGMA locking_mode=EXCLUSIVE")
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Create schema
 	if _, err := db.Exec(schema); err != nil {
@@ -2019,15 +2105,19 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	type ExportData struct {
-		Notes              []*Note              `json:"notes"`
-		Entities           []*Entity            `json:"entities"`
-		Edges              []*Edge              `json:"edges"`
-		Folders            []*Folder            `json:"folders"`
-		Threads            []*Thread            `json:"threads"`
-		ThreadMessages     []*ThreadMessage     `json:"thread_messages"`
-		ScopedDocuments    []*ScopedDocument    `json:"scoped_documents"`
-		ScopedEntityFields []*ScopedEntityField `json:"scoped_entity_fields"`
-		ScopedDefinitions  []*ScopedDefinition  `json:"scoped_definitions"`
+		Notes              []*Note                `json:"notes"`
+		Entities           []*Entity              `json:"entities"`
+		Edges              []*Edge                `json:"edges"`
+		Folders            []*Folder              `json:"folders"`
+		Threads            []*Thread              `json:"threads"`
+		ThreadMessages     []*ThreadMessage       `json:"thread_messages"`
+		ChatRuns           []*ChatRun             `json:"chat_runs"`
+		ChatRunEvents      []*ChatRunEvent        `json:"chat_run_events"`
+		ChatToolCalls      []*ChatToolCall        `json:"chat_tool_calls"`
+		ChatApprovals      []*ChatApprovalRequest `json:"chat_approval_requests"`
+		ScopedDocuments    []*ScopedDocument      `json:"scoped_documents"`
+		ScopedEntityFields []*ScopedEntityField   `json:"scoped_entity_fields"`
+		ScopedDefinitions  []*ScopedDefinition    `json:"scoped_definitions"`
 	}
 
 	var data ExportData
@@ -2180,6 +2270,94 @@ func (s *SQLiteStore) Export() ([]byte, error) {
 		data.ThreadMessages = append(data.ThreadMessages, &m)
 	}
 
+	runRows, err := s.db.Query(`
+		SELECT id, thread_id, user_prompt, status, options_json, capabilities_json, prepared_context,
+		       prepared_system_prompt, planner_messages_json, evidence_json, missing_capabilities_json,
+		       error, final_response, assistant_message_id, deadline_at, completed_at, created_at, updated_at
+		FROM chat_runs
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export chat runs: %w", err)
+	}
+	defer runRows.Close()
+	for runRows.Next() {
+		var run ChatRun
+		var optionsJSON, capabilitiesJSON string
+		if err := runRows.Scan(
+			&run.ID, &run.ThreadID, &run.UserPrompt, &run.Status, &optionsJSON, &capabilitiesJSON,
+			&run.PreparedContext, &run.PreparedSystemPrompt, &run.PlannerMessagesJSON, &run.EvidenceJSON,
+			&run.MissingCapabilities, &run.Error, &run.FinalResponse, &run.AssistantMessageID,
+			&run.DeadlineAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan chat run: %w", err)
+		}
+		_ = json.Unmarshal([]byte(optionsJSON), &run.Options)
+		_ = json.Unmarshal([]byte(capabilitiesJSON), &run.Capabilities)
+		data.ChatRuns = append(data.ChatRuns, &run)
+	}
+
+	eventRows, err := s.db.Query(`
+		SELECT id, run_id, phase, kind, label, detail, status, payload, latency_ms, created_at
+		FROM chat_run_events
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export chat run events: %w", err)
+	}
+	defer eventRows.Close()
+	for eventRows.Next() {
+		var event ChatRunEvent
+		if err := eventRows.Scan(
+			&event.ID, &event.RunID, &event.Phase, &event.Kind, &event.Label, &event.Detail,
+			&event.Status, &event.Payload, &event.LatencyMs, &event.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan chat run event: %w", err)
+		}
+		data.ChatRunEvents = append(data.ChatRunEvents, &event)
+	}
+
+	toolRows, err := s.db.Query(`
+		SELECT id, run_id, tool_call_id, tool_name, host, class, status, arguments_json, result_json,
+		       error, idempotency_key, approval_id, started_at, completed_at, latency_ms
+		FROM chat_tool_calls
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export chat tool calls: %w", err)
+	}
+	defer toolRows.Close()
+	for toolRows.Next() {
+		var toolCall ChatToolCall
+		if err := toolRows.Scan(
+			&toolCall.ID, &toolCall.RunID, &toolCall.ToolCallID, &toolCall.ToolName,
+			&toolCall.Host, &toolCall.Class, &toolCall.Status, &toolCall.ArgumentsJSON,
+			&toolCall.ResultJSON, &toolCall.Error, &toolCall.IdempotencyKey, &toolCall.ApprovalID,
+			&toolCall.StartedAt, &toolCall.CompletedAt, &toolCall.LatencyMs,
+		); err != nil {
+			return nil, fmt.Errorf("scan chat tool call: %w", err)
+		}
+		data.ChatToolCalls = append(data.ChatToolCalls, &toolCall)
+	}
+
+	approvalRows, err := s.db.Query(`
+		SELECT id, run_id, tool_call_id, tool_name, status, affected_note_id, summary, diff_preview,
+		       expected_revision, rollback_token, proposal_json, decision_json, created_at, updated_at
+		FROM chat_approval_requests
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export chat approvals: %w", err)
+	}
+	defer approvalRows.Close()
+	for approvalRows.Next() {
+		var approval ChatApprovalRequest
+		if err := approvalRows.Scan(
+			&approval.ID, &approval.RunID, &approval.ToolCallID, &approval.ToolName, &approval.Status,
+			&approval.AffectedNoteID, &approval.Summary, &approval.DiffPreview, &approval.ExpectedRevision,
+			&approval.RollbackToken, &approval.ProposalJSON, &approval.DecisionJSON, &approval.CreatedAt, &approval.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan chat approval: %w", err)
+		}
+		data.ChatApprovals = append(data.ChatApprovals, &approval)
+	}
+
 	// Export scoped documents
 	scopedDocRows, err := s.db.Query(`
 		SELECT id, scope_folder_id, narrative_id, namespace, document_key, payload,
@@ -2263,15 +2441,19 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	type ExportData struct {
-		Notes              []*Note              `json:"notes"`
-		Entities           []*Entity            `json:"entities"`
-		Edges              []*Edge              `json:"edges"`
-		Folders            []*Folder            `json:"folders"`
-		Threads            []*Thread            `json:"threads"`
-		ThreadMessages     []*ThreadMessage     `json:"thread_messages"`
-		ScopedDocuments    []*ScopedDocument    `json:"scoped_documents"`
-		ScopedEntityFields []*ScopedEntityField `json:"scoped_entity_fields"`
-		ScopedDefinitions  []*ScopedDefinition  `json:"scoped_definitions"`
+		Notes              []*Note                `json:"notes"`
+		Entities           []*Entity              `json:"entities"`
+		Edges              []*Edge                `json:"edges"`
+		Folders            []*Folder              `json:"folders"`
+		Threads            []*Thread              `json:"threads"`
+		ThreadMessages     []*ThreadMessage       `json:"thread_messages"`
+		ChatRuns           []*ChatRun             `json:"chat_runs"`
+		ChatRunEvents      []*ChatRunEvent        `json:"chat_run_events"`
+		ChatToolCalls      []*ChatToolCall        `json:"chat_tool_calls"`
+		ChatApprovals      []*ChatApprovalRequest `json:"chat_approval_requests"`
+		ScopedDocuments    []*ScopedDocument      `json:"scoped_documents"`
+		ScopedEntityFields []*ScopedEntityField   `json:"scoped_entity_fields"`
+		ScopedDefinitions  []*ScopedDefinition    `json:"scoped_definitions"`
 	}
 
 	var importData ExportData
@@ -2280,7 +2462,21 @@ func (s *SQLiteStore) Import(data []byte) error {
 	}
 
 	// Clear all tables
-	for _, table := range []string{"scoped_definitions", "scoped_entity_fields", "scoped_documents", "edges", "entities", "folders", "notes", "threads", "thread_messages"} {
+	for _, table := range []string{
+		"chat_approval_requests",
+		"chat_tool_calls",
+		"chat_run_events",
+		"chat_runs",
+		"scoped_definitions",
+		"scoped_entity_fields",
+		"scoped_documents",
+		"edges",
+		"entities",
+		"folders",
+		"notes",
+		"threads",
+		"thread_messages",
+	} {
 		if _, err := s.db.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("clear %s: %w", table, err)
 		}
@@ -2372,6 +2568,60 @@ func (s *SQLiteStore) Import(data []byte) error {
 		`, m.ID, m.ThreadID, m.Role, m.Content, m.NarrativeID, m.CreatedAt, updated, boolToInt(m.IsStreaming))
 		if err != nil {
 			return fmt.Errorf("import thread message %s: %w", m.ID, err)
+		}
+	}
+
+	for _, run := range importData.ChatRuns {
+		optionsJSON, _ := json.Marshal(run.Options)
+		capabilitiesJSON, _ := json.Marshal(run.Capabilities)
+		_, err := s.db.Exec(`
+			INSERT INTO chat_runs (id, thread_id, user_prompt, status, options_json, capabilities_json,
+				prepared_context, prepared_system_prompt, planner_messages_json, evidence_json,
+				missing_capabilities_json, error, final_response, assistant_message_id, deadline_at,
+				completed_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, run.ID, run.ThreadID, run.UserPrompt, run.Status, string(optionsJSON), string(capabilitiesJSON),
+			run.PreparedContext, run.PreparedSystemPrompt, run.PlannerMessagesJSON, run.EvidenceJSON,
+			run.MissingCapabilities, run.Error, run.FinalResponse, run.AssistantMessageID, run.DeadlineAt,
+			run.CompletedAt, run.CreatedAt, run.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import chat run %s: %w", run.ID, err)
+		}
+	}
+
+	for _, event := range importData.ChatRunEvents {
+		_, err := s.db.Exec(`
+			INSERT INTO chat_run_events (id, run_id, phase, kind, label, detail, status, payload, latency_ms, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, event.ID, event.RunID, event.Phase, event.Kind, event.Label, event.Detail, event.Status, event.Payload, event.LatencyMs, event.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("import chat run event %s: %w", event.ID, err)
+		}
+	}
+
+	for _, toolCall := range importData.ChatToolCalls {
+		_, err := s.db.Exec(`
+			INSERT INTO chat_tool_calls (id, run_id, tool_call_id, tool_name, host, class, status,
+				arguments_json, result_json, error, idempotency_key, approval_id, started_at, completed_at, latency_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, toolCall.ID, toolCall.RunID, toolCall.ToolCallID, toolCall.ToolName, toolCall.Host, toolCall.Class, toolCall.Status,
+			toolCall.ArgumentsJSON, toolCall.ResultJSON, toolCall.Error, toolCall.IdempotencyKey, toolCall.ApprovalID,
+			toolCall.StartedAt, toolCall.CompletedAt, toolCall.LatencyMs)
+		if err != nil {
+			return fmt.Errorf("import chat tool call %s: %w", toolCall.ID, err)
+		}
+	}
+
+	for _, approval := range importData.ChatApprovals {
+		_, err := s.db.Exec(`
+			INSERT INTO chat_approval_requests (id, run_id, tool_call_id, tool_name, status, affected_note_id,
+				summary, diff_preview, expected_revision, rollback_token, proposal_json, decision_json, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, approval.ID, approval.RunID, approval.ToolCallID, approval.ToolName, approval.Status,
+			approval.AffectedNoteID, approval.Summary, approval.DiffPreview, approval.ExpectedRevision,
+			approval.RollbackToken, approval.ProposalJSON, approval.DecisionJSON, approval.CreatedAt, approval.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("import chat approval %s: %w", approval.ID, err)
 		}
 	}
 
