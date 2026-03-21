@@ -21,7 +21,6 @@ import type { EditorState, Transaction } from '@milkdown/kit/prose/state';
 
 import { getPrettyTextApi } from '../../../api/pretty-text-api';
 import type { DecorationSpan } from '../../../lib/Scanner/types';
-import { EditorService } from '../../../services/editor.service';
 
 // =============================================================================
 // PLUGIN KEY
@@ -145,9 +144,6 @@ export const prettyTextPlugin = $prose((ctx) => {
                 // Force the API to re-scan (clear cached context)
                 prettyTextApi.forceRescan();
                 await scanAndApplyMarks(editorView);
-                const injector = (window as any).__angularInjector;
-                const editorService = injector?.get?.(EditorService) as EditorService | undefined;
-                editorService?.save();
             };
             window.addEventListener('dictionary-rebuilt', handleDictRebuilt);
 

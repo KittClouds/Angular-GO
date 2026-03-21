@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { MainLayoutComponent } from './components/layout/main-layout/main-layout.component';
 import { NgxSpinnerModule, NgxSpinnerService } from 'ngx-spinner';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Subscription } from 'rxjs';
 
 import { smartGraphRegistry } from './lib/registry';
 import { entityColorStore } from './lib/store/entityColorStore';
@@ -42,7 +42,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private discoveryStore = inject(DiscoveryStore);
   private factSheetService = inject(FactSheetService);
 
-
   // Navigation API subscriptions
   private notesSub: Subscription | null = null;
   private navUnsubscribe: (() => void) | null = null;
@@ -54,7 +53,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // Export orchestrator for non-DI contexts
     setAppOrchestrator(this.orchestrator);
 
-    // Wire up GoKitt to Highlighter API (doesn't start WASM yet)
+    // Wire up GoKitt to Highlighter API
     setGoKittService(this.goKitt);
     setDiscoveryStore(this.discoveryStore);
 
@@ -67,60 +66,51 @@ export class AppComponent implements OnInit, OnDestroy {
     console.log('[AppComponent] Starting orchestrated boot...');
 
     try {
-      // Phase 1: Seed schemas (fast, sync)
-      await seedDefaultSchemas();
-      console.log('[AppComponent] ✓ Seed complete');
+      const seedPromise = seedDefaultSchemas();
+      const wasmLoadPromise = this.goKitt.loadWasm();
 
-      // Phase 2: WASM Load & SQLite Init
-      await this.goKitt.loadWasm();
-      console.log('[AppComponent] ✓ WASM module loaded');
+      await seedPromise;
+      console.log('[AppComponent] Seed complete');
+
+      await wasmLoadPromise;
+      console.log('[AppComponent] WASM module loaded');
       this.orchestrator.completePhase('wasm_load');
 
       await this.goKittStore.initialize();
-      console.log('[AppComponent] ✓ GoKitt Store (SQLite) initialized');
+      console.log('[AppComponent] GoKitt Store (SQLite) initialized');
 
-      // Phase 3: Hydrate Dexie from SQLite (One-Way Push)
-      // SQLite is the SOLE source of truth. Dexie gets wiped and rebuilt.
+      // SQLite is the sole source of truth. Dexie gets wiped and rebuilt.
       await this.hydrateDexieFromSqlite();
 
-      // Connect operations module to GoKittStoreService directly
+      // Connect operations after Dexie mirrors SQLite.
       setGoSqliteBridge(this.goKittStore);
-      console.log('[AppComponent] ✓ Dexie hydrated from SQLite (Pure OPFS Mode)');
+      console.log('[AppComponent] Dexie hydrated from SQLite (Pure OPFS Mode)');
 
-      // Phase 3.5: Restore active note AFTER Dexie is populated and bridge is wired.
-      // Previously this ran in NoteEditorStore's constructor (too early — Dexie was empty).
-      await this.noteEditorStore.restoreActiveNote();
-      console.log('[AppComponent] ✓ Active note restored');
-
-      // Phase 4: Registry Hydration
-      // Dexie is now guaranteed to mirror SQLite exactly
-      await smartGraphRegistry.init();
-      console.log('[AppComponent] ✓ SmartGraphRegistry hydrated');
+      await Promise.all([
+        this.noteEditorStore.restoreActiveNote().then(() => {
+          console.log('[AppComponent] Active note restored');
+        }),
+        smartGraphRegistry.init().then(() => {
+          console.log('[AppComponent] SmartGraphRegistry hydrated');
+        })
+      ]);
       this.orchestrator.completePhase('registry');
 
-      // Phase 5: WASM Entity Hydration (Aho-Corasick)
       await this.goKitt.hydrateWithEntities();
-      console.log('[AppComponent] ✓ WASM hydrated with entities');
+      console.log('[AppComponent] WASM hydrated with entities');
       this.orchestrator.completePhase('wasm_hydrate');
 
-      // 🚀 APP IS INTERACTIVE
       this.orchestrator.completePhase('ready');
 
-      // ======================================================================
-      // Background tasks (non-blocking, after first paint)
-      // ======================================================================
-
-      // Knowledge Graph (SQLite restore) — doesn't block editing
       const knowledgePromise = (async () => {
         try {
           await this.knowledgeService.init();
-          console.log('[AppComponent] ✓ Knowledge Graph hydrated (background)');
+          console.log('[AppComponent] Knowledge Graph hydrated (background)');
         } catch (err) {
           console.error('[AppComponent] Knowledge Graph hydration failed:', err);
         }
       })();
 
-      // DocStore hydrate (search index) — doesn't block editing
       const docStorePromise = (async () => {
         try {
           const allNotes = await this.goKittStore.listNotes();
@@ -132,7 +122,7 @@ export class AppComponent implements OnInit, OnDestroy {
                 try {
                   const json = JSON.parse(n.content);
                   text = extractTextFromContent(json);
-                } catch (e) {
+                } catch {
                   text = n.content;
                 }
               } else {
@@ -144,7 +134,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
             return {
               id: n.id,
-              text: text,
+              text,
               version: n.updatedAt ?? 0,
               narrativeId: n.narrativeId || '',
               folderPath: n.folderId || ''
@@ -152,26 +142,24 @@ export class AppComponent implements OnInit, OnDestroy {
           });
 
           await this.goKitt.hydrateNotes(noteData);
-          console.log(`[AppComponent] ✓ DocStore hydrated with ${noteData.length} notes (from SQLite)`);
+          console.log(`[AppComponent] DocStore hydrated with ${noteData.length} notes (from SQLite)`);
         } catch (err) {
           console.error('[AppComponent] DocStore hydration failed:', err);
         }
       })();
 
-      // FactSheet schema sync (batched TX to GoKitt) — doesn't block editing
       const factSheetPromise = (async () => {
         try {
           await this.factSheetService.syncToBackend();
-          console.log('[AppComponent] ✓ FactSheet schemas synced (background)');
+          console.log('[AppComponent] FactSheet schemas synced (background)');
         } catch (err) {
           console.error('[AppComponent] FactSheet sync failed:', err);
         }
       })();
 
-      // Wait for all background tasks
-      await Promise.all([knowledgePromise, docStorePromise, factSheetPromise]);
-      this.orchestrator.completePhase('background');
-
+      void Promise.all([knowledgePromise, docStorePromise, factSheetPromise]).then(() => {
+        this.orchestrator.completePhase('background');
+      });
     } catch (err) {
       console.error('[AppComponent] Boot failed:', err);
     } finally {
@@ -182,19 +170,18 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * One-way hydration: SQLite → Dexie.
+   * One-way hydration: SQLite -> Dexie.
    * Dexie is wiped clean and rebuilt from SQLite's data.
    * This replaces what DataSyncService.init() used to do.
    */
   private async hydrateDexieFromSqlite(): Promise<void> {
-    console.log('[AppComponent] 🔄 Hydrating Dexie from SQLite...');
+    console.log('[AppComponent] Hydrating Dexie from SQLite...');
     const start = Date.now();
 
     // Pause snapshots during hydration to prevent pointless OPFS writes
     this.goKittStore.pauseSnapshots();
 
     try {
-      // Fetch all data from SQLite (The Truth)
       const [notes, entities, edges, folders] = await Promise.all([
         this.goKittStore.listNotes(),
         this.goKittStore.listEntities(),
@@ -202,7 +189,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.goKittStore.listFolders()
       ]);
 
-      // Wipe Dexie clean and repopulate
       await db.transaction('rw', db.notes, db.entities, db.edges, db.folders, async () => {
         await Promise.all([
           db.notes.clear(),
@@ -217,14 +203,14 @@ export class AppComponent implements OnInit, OnDestroy {
         if (folders.length > 0) await db.folders.bulkPut(folders.map(f => this.toFolder(f)));
       });
 
-      console.log(`[AppComponent] ✅ Dexie hydrated in ${Date.now() - start}ms: ${notes.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
+      console.log(`[AppComponent] Dexie hydrated in ${Date.now() - start}ms: ${notes.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
     } finally {
       this.goKittStore.resumeSnapshots();
     }
   }
 
   // =========================================================================
-  // Mappers (Store → Dexie)
+  // Mappers (Store -> Dexie)
   // =========================================================================
 
   private toNote(n: any): any {
@@ -290,12 +276,12 @@ export class AppComponent implements OnInit, OnDestroy {
       console.log('[AppComponent] Navigation handler triggered:', noteId);
       this.noteEditorStore.openNote(noteId);
     });
-    console.log('[AppComponent] ✓ Navigation API wired up');
+    console.log('[AppComponent] Navigation API wired up');
   }
 }
 
 /**
- * Helper to recursively extract plain text from Prosemirror JSON
+ * Helper to recursively extract plain text from Prosemirror JSON.
  */
 function extractTextFromContent(content: any): string {
   if (!content) return '';

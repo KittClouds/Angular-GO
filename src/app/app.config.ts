@@ -1,4 +1,4 @@
-import { ApplicationConfig, provideBrowserGlobalErrorListeners, importProvidersFrom } from '@angular/core';
+import { ApplicationConfig, provideBrowserGlobalErrorListeners, importProvidersFrom, inject, provideAppInitializer } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { providePrimeNG } from 'primeng/config';
@@ -7,10 +7,17 @@ import { LucideAngularModule, User, Zap, BarChart3, Sparkles, Package, Users, St
 import { NgxSpinnerModule } from 'ngx-spinner';
 
 import { routes } from './app.routes';
+import { GoKittService } from './services/gokitt.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    provideAppInitializer(() => {
+      const goKitt = inject(GoKittService);
+      void goKitt.loadWasm().catch((err) => {
+        console.error('[Boot] GoKitt warmup failed:', err);
+      });
+    }),
     provideRouter(routes),
     provideAnimations(),
     providePrimeNG({

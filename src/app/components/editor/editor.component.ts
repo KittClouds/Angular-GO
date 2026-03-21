@@ -1,7 +1,7 @@
 ﻿import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LucideAngularModule, FileText, Plus } from 'lucide-angular';
-import { Subscription, skip, filter } from 'rxjs';
+import { Subscription } from 'rxjs';
 import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/prosemirror.css';
 import '@milkdown/crepe/theme/common/reset.css';
@@ -53,8 +53,13 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     @ViewChild('editorContainer') editorContainer!: ElementRef<HTMLDivElement>;
     private crepe?: Crepe;
     private noteSubscription?: Subscription;
+    private saveRequestSubscription?: Subscription;
     private currentNoteId: string | null = null;
     private isLoadingContent = false; // Prevent save during load
+    private readonly beforeUnloadHandler = () => {
+        this.saveCurrentContent();
+        this.saveEditorPosition();
+    };
 
     noteEditorStore = inject(NoteEditorStore);
 
@@ -165,15 +170,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Save position before page unload (refresh/close)
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        window.addEventListener('beforeunload', () => {
-            this.saveCurrentContent();
-            this.saveEditorPosition();
-        });
+        window.addEventListener('beforeunload', this.beforeUnloadHandler);
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Listen for Manual Save Requests (Header Button)
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        this.editorService.saveRequest$.subscribe(() => {
+        this.saveRequestSubscription = this.editorService.saveRequest$.subscribe(() => {
             this.saveCurrentContent();
         });
 
@@ -199,7 +201,10 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         console.log(`[EditorComponent] saving content for ${this.currentNoteId}`);
 
         try {
-            const editorView = this.crepe.editor.ctx.get(editorViewCtx);
+            const editorView = this.getEditorView();
+            if (!editorView) {
+                return;
+            }
             const json = editorView.state.doc.toJSON();
             const markdown = this.crepe.getMarkdown();
 
@@ -260,7 +265,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
             // Set editor content
             // Milkdown/Crepe uses ProseMirror, so we need to set the document
-            const editorView = this.crepe.editor.ctx.get(editorViewCtx);
+            const editorView = this.getEditorView();
             if (editorView) {
                 const { state } = editorView;
                 try {
@@ -343,7 +348,10 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         if (!this.crepe || !this.currentNoteId) return;
 
         try {
-            const editorView = this.crepe.editor.ctx.get(editorViewCtx);
+            const editorView = this.getEditorView();
+            if (!editorView) {
+                return;
+            }
             const scrollContainer = this.editorContainer?.nativeElement?.querySelector('.ProseMirror') as HTMLElement;
 
             const scrollTop = scrollContainer?.scrollTop ?? 0;
@@ -366,7 +374,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         this.isLoadingContent = true;
 
         try {
-            const editorView = this.crepe.editor.ctx.get(editorViewCtx);
+            const editorView = this.getEditorView();
             if (editorView) {
                 const { state } = editorView;
                 const emptyDoc = state.schema.node('doc', null, [
@@ -386,7 +394,22 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     ngOnDestroy() {
         this.noteSubscription?.unsubscribe();
+        this.saveRequestSubscription?.unsubscribe();
+        window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+        this.editorService.unregisterEditor(this.crepe);
         this.crepe?.destroy();
+    }
+
+    private getEditorView(): any | null {
+        if (!this.crepe) {
+            return null;
+        }
+
+        try {
+            return this.crepe.editor.ctx.get(editorViewCtx);
+        } catch {
+            return null;
+        }
     }
 
     undo() {

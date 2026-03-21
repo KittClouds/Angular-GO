@@ -254,6 +254,9 @@ export class GoKittStoreService {
             this.handleMessage(e.data);
         });
 
+        // Warm OPFS snapshot loading in parallel with in-memory SQLite init.
+        const persistenceLoadPromise = this.persistence.load();
+
         // Initialize the SQLite store
         const result = await this.sendRequest<{ success: boolean; error?: string }>('STORE_INIT', {});
 
@@ -276,15 +279,15 @@ export class GoKittStoreService {
 
 
         // [PERSISTENCE] Restore State (Snapshot Only - Snapshot Native)
-        await this._restoreState();
+        await this._restoreState(persistenceLoadPromise);
 
         // WAL Handler, Auto-Compaction REMOVED - Snapshot Native
     }
 
 
-    private async _restoreState(): Promise<void> {
+    private async _restoreState(snapshotLoadPromise?: Promise<{ snapshot: Uint8Array | null }>): Promise<void> {
         console.log('[GoKittStoreService] Restoring state from persistence...');
-        const { snapshot } = await this.persistence.load();
+        const { snapshot } = await (snapshotLoadPromise ?? this.persistence.load());
 
         // Load Snapshot (Binary) — the only persistence source now
         if (snapshot) {

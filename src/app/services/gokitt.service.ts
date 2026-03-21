@@ -492,9 +492,6 @@ export class GoKittService {
         this.wasmHydrated = true;
         console.log(`[GoKittService] ✅ Hydrated with ${entities.length} entities`);
 
-        // Force dictionary rebuild to ensure Aho-Corasick is ready
-        await this.refreshDictionary();
-
         // After hydration, init search index
         this.initSearchIndex().catch(err => console.error('[GoKittService] Search Init Error:', err));
 

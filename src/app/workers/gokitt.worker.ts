@@ -1,4 +1,10 @@
 /// <reference lib="webworker" />
+import {
+    formatGoKittCompatibilityError,
+    getMissingGoKittMethods,
+    GOKITT_WASM_MISMATCH_CODE,
+    REQUIRED_GOKITT_METHODS,
+} from './gokitt-worker-compat';
 /**
  * GoKitt WASM Worker
  *
@@ -418,6 +424,7 @@ type GoKittWorkerResponse =
 
 let wasmLoaded = false;
 let goInstance: any = null;
+let wasmCompatibilityMissingMethods: string[] = [];
 
 // Declare GoKitt global (created by Go WASM)
 declare const GoKitt: {
@@ -592,6 +599,19 @@ declare const GoKitt: {
 /**
  * Load wasm_exec.js and instantiate the Go WASM module
  */
+async function waitForGoKittRegistration(timeoutMs = 2000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (typeof GoKitt !== 'undefined') {
+            return;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    throw new Error('[GoKittWorker] GoKitt global not found after WASM init');
+}
+
 async function loadWasm(): Promise<void> {
     if (wasmLoaded) return;
 
@@ -614,18 +634,24 @@ async function loadWasm(): Promise<void> {
 
     console.log('[GoKittWorker] Loading gokitt.wasm...');
 
-    const wasmUrl = `/assets/gokitt.wasm?v=${Date.now()}`;
+    const wasmUrl = '/assets/gokitt.wasm';
     const result = await WebAssembly.instantiateStreaming(fetch(wasmUrl), goInstance.importObject);
 
     // Run Go main (non-blocking - runs event loop in background)
     goInstance.run(result.instance);
 
-    // Wait for exports to be registered
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    // Wait for exports to be registered.
+    await waitForGoKittRegistration();
 
-    // Verify GoKitt is available
-    if (typeof GoKitt === 'undefined') {
-        throw new Error('[GoKittWorker] GoKitt global not found after WASM init');
+    wasmCompatibilityMissingMethods = getMissingGoKittMethods(
+        GoKitt as unknown as Record<string, unknown>,
+        REQUIRED_GOKITT_METHODS
+    );
+    if (wasmCompatibilityMissingMethods.length > 0) {
+        console.error(
+            '[GoKittWorker] ' +
+            formatGoKittCompatibilityError(wasmCompatibilityMissingMethods)
+        );
     }
 
     wasmLoaded = true;
@@ -637,14 +663,24 @@ function hasGoKittMethod(methodName: keyof typeof GoKitt): boolean {
     return typeof GoKitt !== 'undefined' && typeof (GoKitt as any)[methodName] === 'function';
 }
 
-function postMissingGoKittMethod(id: number, methodName: keyof typeof GoKitt): void {
+function postGoKittCompatibilityError(id: number, missingMethods: readonly string[]): void {
     self.postMessage({
         type: 'ERROR',
         id,
         payload: {
-            message: `Loaded gokitt.wasm does not export ${String(methodName)}. The served WASM asset is likely stale relative to gokitt.worker.ts.`
+            code: GOKITT_WASM_MISMATCH_CODE,
+            missingMethods: [...missingMethods],
+            message: formatGoKittCompatibilityError(missingMethods),
         }
     } as GoKittWorkerResponse);
+}
+
+function postMissingGoKittMethod(id: number, methodName: keyof typeof GoKitt): void {
+    postGoKittCompatibilityError(id, [String(methodName)]);
+}
+
+function hasRequiredGoKittExports(): boolean {
+    return wasmCompatibilityMissingMethods.length === 0;
 }
 
 function ensureSharedArrayBuffer(requiredSize: number): { success: true; sab: SharedArrayBuffer } | { success: false; error: string } {
@@ -686,6 +722,12 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
         switch (msg.type) {
             case 'INIT': {
                 await loadWasm();
+                if (!hasRequiredGoKittExports()) {
+                    console.warn(
+                        '[GoKittWorker] Running with partial WASM compatibility:',
+                        wasmCompatibilityMissingMethods
+                    );
+                }
                 self.postMessage({ type: 'INIT_COMPLETE' } as GoKittWorkerResponse);
                 break;
             }
@@ -2021,6 +2063,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     self.postMessage({ type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
                     return;
                 }
+                if (!hasGoKittMethod('storeUpsertScopedDefinition')) {
+                    postMissingGoKittMethod(msg.id, 'storeUpsertScopedDefinition');
+                    return;
+                }
                 const res = GoKitt.storeUpsertScopedDefinition(msg.payload.definitionJSON);
                 const parsed = JSON.parse(res);
                 self.postMessage({ type: 'STORE_UPSERT_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: !parsed.error, error: parsed.error } });
@@ -2030,6 +2076,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
             case 'STORE_GET_SCOPED_DEFINITION': {
                 if (!wasmLoaded) {
                     self.postMessage({ type: 'STORE_GET_SCOPED_DEFINITION_RESULT', id: msg.id, payload: null });
+                    return;
+                }
+                if (!hasGoKittMethod('storeGetScopedDefinition')) {
+                    postMissingGoKittMethod(msg.id, 'storeGetScopedDefinition');
                     return;
                 }
                 const res = GoKitt.storeGetScopedDefinition(msg.payload.narrativeId, msg.payload.namespace, msg.payload.definitionKey);
@@ -2047,6 +2097,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     self.postMessage({ type: 'STORE_LIST_SCOPED_DEFINITIONS_RESULT', id: msg.id, payload: [] });
                     return;
                 }
+                if (!hasGoKittMethod('storeListScopedDefinitions')) {
+                    postMissingGoKittMethod(msg.id, 'storeListScopedDefinitions');
+                    return;
+                }
                 const res = GoKitt.storeListScopedDefinitions(msg.payload.narrativeId, msg.payload.namespace || '');
                 let parsed = [];
                 try { parsed = JSON.parse(res); } catch { }
@@ -2057,6 +2111,10 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
             case 'STORE_DELETE_SCOPED_DEFINITION': {
                 if (!wasmLoaded) {
                     self.postMessage({ type: 'STORE_DELETE_SCOPED_DEFINITION_RESULT', id: msg.id, payload: { success: false, error: 'WASM not loaded' } });
+                    return;
+                }
+                if (!hasGoKittMethod('storeDeleteScopedDefinition')) {
+                    postMissingGoKittMethod(msg.id, 'storeDeleteScopedDefinition');
                     return;
                 }
                 const res = GoKitt.storeDeleteScopedDefinition(msg.payload.narrativeId, msg.payload.namespace, msg.payload.definitionKey);

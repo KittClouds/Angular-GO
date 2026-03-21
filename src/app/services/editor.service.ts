@@ -24,6 +24,12 @@ export class EditorService {
         this.crepe = crepe;
     }
 
+    unregisterEditor(crepe?: Crepe) {
+        if (!crepe || this.crepe === crepe) {
+            this.crepe = undefined;
+        }
+    }
+
     /**
      * Get the Crepe editor instance
      */
@@ -59,6 +65,9 @@ export class EditorService {
     }
 
     save() {
+        if (!this.crepe) {
+            return;
+        }
         this.saveRequestSubject.next();
     }
 
