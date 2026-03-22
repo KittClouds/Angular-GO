@@ -740,6 +740,36 @@
     "type": "static"
   },
   {
+    "source": "npm:@angular/material",
+    "target": "npm:@angular/common",
+    "type": "static"
+  },
+  {
+    "source": "npm:@angular/material",
+    "target": "npm:@angular/core",
+    "type": "static"
+  },
+  {
+    "source": "npm:@angular/material",
+    "target": "npm:@angular/forms",
+    "type": "static"
+  },
+  {
+    "source": "npm:@angular/material",
+    "target": "npm:@angular/platform-browser",
+    "type": "static"
+  },
+  {
+    "source": "npm:@angular/material",
+    "target": "npm:rxjs",
+    "type": "static"
+  },
+  {
+    "source": "npm:@angular/material",
+    "target": "npm:tslib",
+    "type": "static"
+  },
+  {
     "source": "npm:@angular/platform-browser",
     "target": "npm:@angular/animations",
     "type": "static"
@@ -6785,6 +6815,31 @@
     "type": "static"
   },
   {
+    "source": "npm:@neurodevworks/angular-chatbot",
+    "target": "npm:@neurodevworks/chatbot-core",
+    "type": "static"
+  },
+  {
+    "source": "npm:@neurodevworks/angular-chatbot",
+    "target": "npm:rxjs",
+    "type": "static"
+  },
+  {
+    "source": "npm:@neurodevworks/chatbot-core",
+    "target": "npm:rxjs",
+    "type": "static"
+  },
+  {
+    "source": "npm:@neurodevworks/chatbot-core",
+    "target": "npm:eventsource-parser@1.1.2",
+    "type": "static"
+  },
+  {
+    "source": "npm:@neurodevworks/chatbot-core",
+    "target": "npm:tslib",
+    "type": "static"
+  },
+  {
     "source": "npm:@ng-icons/core",
     "target": "npm:@angular/common",
     "type": "static"
@@ -11897,6 +11952,11 @@
   {
     "source": "npm:caniuse-api",
     "target": "npm:lodash.uniq",
+    "type": "static"
+  },
+  {
+    "source": "npm:chart.js",
+    "target": "npm:@kurkle/color",
     "type": "static"
   },
   {

@@ -162,7 +162,6 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_GET_CONTEXT'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_CLEAR_THREAD'; payload: { threadId: string }; id: number }
     | { type: 'CHAT_EXPORT_THREAD'; payload: { threadId: string }; id: number }
-    | { type: 'CHAT_PROCESS_WITH_WORKSPACE'; payload: { threadId: string; scopeId: string; userPrompt: string }; id: number }
     // RAPTOR requests
     | { type: 'RAPTOR_INIT'; payload: { configJSON?: string }; id: number }
     | { type: 'RAPTOR_BUILD_TREE'; payload: { embeddingsJSON?: string }; id: number }
@@ -309,7 +308,6 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_GET_CONTEXT_RESULT'; id: number; payload: string }
     | { type: 'CHAT_CLEAR_THREAD_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'CHAT_EXPORT_THREAD_RESULT'; id: number; payload: string }
-    | { type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT'; id: number; payload: string }
     // RAPTOR responses
     | { type: 'RAPTOR_INIT_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'RAPTOR_BUILD_TREE_RESULT'; id: number; payload: any }
@@ -1141,7 +1139,6 @@ export class GoKittService {
                         case 'CHAT_GET_CONTEXT_RESULT':
                         case 'CHAT_CLEAR_THREAD_RESULT':
                         case 'CHAT_EXPORT_THREAD_RESULT':
-                        case 'CHAT_PROCESS_WITH_WORKSPACE_RESULT':
                         // RAPTOR responses
                         case 'RAPTOR_INIT_RESULT':
                         case 'RAPTOR_CHUNK_RESULT':
@@ -1693,23 +1690,6 @@ export class GoKittService {
             return { error: 'WASM not loaded' };
         }
         return this.sendRequest('CHAT_COMPLETE_RUN', { runId, assistantMessageId, finalResponse, finalError });
-    }
-
-    /**
-     * Run the OM loop + workspace miss-signal check.
-     * If a miss fires, the workspace activates: searches notes/episodes,
-     * then injects resurfaced context back into the OM observations.
-     *
-     * @param threadId   Chat thread ID (source of OM record)
-     * @param scopeId    Narrative/world scope for episode search
-     * @param userPrompt The user's latest message (miss-signal query)
-     * @returns JSON-encoded ActivationResult from Go
-     */
-    async chatProcessWithWorkspace(threadId: string, scopeId: string, userPrompt: string): Promise<string> {
-        if (!this.wasmLoaded) {
-            return JSON.stringify({ triggered: false, error: 'WASM not loaded' });
-        }
-        return this.sendRequest('CHAT_PROCESS_WITH_WORKSPACE', { threadId, scopeId, userPrompt });
     }
 
     // =========================================================================

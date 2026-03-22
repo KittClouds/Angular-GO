@@ -8,9 +8,7 @@ import {
     type Thread,
 } from './go-chat.service';
 import { GoogleGenAIService, type GoogleGenAIMessage } from './google-genai.service';
-import { OrchestratorService } from '../../services/orchestrator.service';
 import { ChatContextClipStore } from '../store/chat-context-clip.store';
-import type { ActivationResult } from '../rlm';
 
 export interface SessionInfo {
     id: string;
@@ -70,7 +68,6 @@ export class KammiChatUiService {
     readonly goChatService = inject(GoChatService);
     readonly googleGenAI = inject(GoogleGenAIService);
 
-    private readonly orchestrator = inject(OrchestratorService);
     private readonly chatContextClipStore = inject(ChatContextClipStore);
 
     readonly activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter');
@@ -323,20 +320,6 @@ export class KammiChatUiService {
             return;
         }
 
-        let contextBlock = '';
-        let activation: ActivationResult | null = null;
-        if (this.indexEnabled()) {
-            const indexStepId = this.addActivityStep('tool', 'Reading notes', 'Searching the workspace for note context...');
-            try {
-                const threadId = this.goChatService.currentThread()?.id || 'default';
-                contextBlock = await this.orchestrator.orchestrate(text, threadId);
-                activation = this.orchestrator.lastActivation();
-                this.mapActivationToActivity(indexStepId, activation, contextBlock);
-            } catch (error) {
-                this.finishActivityStep(indexStepId, 'error', this.toErrorMessage(error));
-            }
-        }
-
         const highlightedClips = this.chatContextClipStore.consumeAll();
         const highlightedContext = this.chatContextClipStore.formatForPrompt(highlightedClips);
         if (highlightedClips.length > 0) {
@@ -345,14 +328,13 @@ export class KammiChatUiService {
 
         const history = this.buildConversationHistory();
         const effectiveSystemPrompt = this.systemPromptInput()
-            + (contextBlock ? '\n\n' + contextBlock : '')
             + (highlightedContext ? '\n\n' + highlightedContext : '');
 
         const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
             ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
             : null;
 
-        const thinkingSummary = this.buildThinkingSummary(contextBlock, highlightedClips.length, activation);
+        const thinkingSummary = this.buildThinkingSummary(highlightedClips.length);
         this.finishActivityStep(traceId, 'done', thinkingSummary);
 
         const streamingMessage = await this.goChatService.startStreamingMessage();
@@ -652,65 +634,11 @@ export class KammiChatUiService {
         return steps.some((step) => step.status === 'error') ? 'Completed with issues' : 'Done';
     }
 
-    private mapActivationToActivity(
-        indexStepId: string,
-        activation: ActivationResult | null,
-        contextBlock: string
-    ): void {
-        if (!activation) {
-            this.finishActivityStep(
-                indexStepId,
-                'done',
-                contextBlock ? 'Relevant note context was found.' : 'Workspace check complete.'
-            );
-            return;
-        }
-
-        if (activation.error) {
-            this.finishActivityStep(indexStepId, 'error', activation.error);
-            return;
-        }
-
-        if (!activation.triggered) {
-            this.finishActivityStep(indexStepId, 'done', activation.miss_reason || 'No extra note context was needed.');
-            return;
-        }
-
-        const summary = activation.summary
-            || activation.miss_reason
-            || (contextBlock ? 'Relevant note context was injected.' : 'Context was injected from index mode.');
-
-        this.finishActivityStep(indexStepId, 'done', summary);
-
-        for (const toolCall of activation.tool_calls || []) {
-            this.addCompletedStep(
-                'tool',
-                `Tool: ${this.prettyToolName(toolCall.tool)}`,
-                toolCall.ok ? 'Completed successfully.' : (toolCall.error || 'Tool failed.'),
-                toolCall.ok ? 'done' : 'error',
-                toolCall.lat_ms
-            );
-        }
-    }
-
-    private buildThinkingSummary(
-        contextBlock: string,
-        highlightedCount: number,
-        activation: ActivationResult | null
-    ): string {
+    private buildThinkingSummary(highlightedCount: number): string {
         const parts: string[] = [];
-
-        if (contextBlock || activation?.triggered) {
-            parts.push('used note context');
-        }
 
         if (highlightedCount > 0) {
             parts.push(highlightedCount === 1 ? 'included highlighted text' : `included ${highlightedCount} highlighted passages`);
-        }
-
-        const toolCount = activation?.tool_calls?.length ?? 0;
-        if (toolCount > 0) {
-            parts.push(toolCount === 1 ? 'ran 1 tool' : `ran ${toolCount} tools`);
         }
 
         if (parts.length === 0) {
@@ -801,14 +729,6 @@ export class KammiChatUiService {
 
     private clampInsertIndex(index: number, length: number): number {
         return Math.max(0, Math.min(index, length));
-    }
-
-    private prettyToolName(name: string): string {
-        return name
-            .replace(/[_-]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .replace(/\b\w/g, (match) => match.toUpperCase());
     }
 
     private toErrorMessage(error: unknown): string {

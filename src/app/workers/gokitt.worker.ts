@@ -120,7 +120,6 @@ type GoKittWorkerMessage =
     | { type: 'CHAT_LIST_RUN_EVENTS'; payload: { threadId: string; limit?: number }; id: number }
     | { type: 'CHAT_MARK_RUN_STREAMING'; payload: { runId: string; assistantMessageId: string }; id: number }
     | { type: 'CHAT_COMPLETE_RUN'; payload: { runId: string; assistantMessageId: string; finalResponse: string; finalError?: string }; id: number }
-    | { type: 'CHAT_PROCESS_WITH_WORKSPACE'; payload: { threadId: string; scopeId: string; userPrompt: string }; id: number }
     // Store: Spans & Links
     | { type: 'STORE_UPSERT_SPAN'; payload: { spanJSON: string }; id: number }
     | { type: 'STORE_GET_SPAN'; payload: { id: string }; id: number }
@@ -300,7 +299,6 @@ type GoKittWorkerResponse =
     | { type: 'CHAT_LIST_RUN_EVENTS_RESULT'; id: number; payload: any }
     | { type: 'CHAT_MARK_RUN_STREAMING_RESULT'; id: number; payload: any }
     | { type: 'CHAT_COMPLETE_RUN_RESULT'; id: number; payload: any }
-    | { type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT'; id: number; payload: string }
     // Store Results
     | { type: 'STORE_UPSERT_SPAN_RESULT'; id: number; payload: { success: boolean; error?: string } }
     | { type: 'STORE_GET_SPAN_RESULT'; id: number; payload: any | null }
@@ -574,7 +572,6 @@ declare const GoKitt: {
     chatListRunEvents: (threadId: string, limit: number) => string;
     chatMarkRunStreaming: (runId: string, assistantMessageId: string) => string;
     chatCompleteRun: (runId: string, assistantMessageId: string, finalResponse: string, finalError?: string) => string;
-    chatProcessWithWorkspace: (threadId: string, scopeId: string, userPrompt: string) => string;
     // RAPTOR API
     raptorInit: (configJSON?: string) => string;
     raptorBuildTree: (embeddingsJSON?: string) => string;
@@ -3002,27 +2999,6 @@ self.onmessage = async (e: MessageEvent<GoKittWorkerMessage>) => {
                     type: 'CHAT_COMPLETE_RUN_RESULT',
                     id: msg.id,
                     payload: JSON.parse(res)
-                } as GoKittWorkerResponse);
-                break;
-            }
-
-            case 'CHAT_PROCESS_WITH_WORKSPACE': {
-                if (!wasmLoaded) {
-                    self.postMessage({
-                        type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT',
-                        id: msg.id,
-                        payload: JSON.stringify({ triggered: false, error: 'WASM not loaded' })
-                    } as GoKittWorkerResponse);
-                    return;
-                }
-
-                const { threadId, scopeId, userPrompt } = msg.payload;
-                const res = GoKitt.chatProcessWithWorkspace(threadId, scopeId, userPrompt);
-
-                self.postMessage({
-                    type: 'CHAT_PROCESS_WITH_WORKSPACE_RESULT',
-                    id: msg.id,
-                    payload: res
                 } as GoKittWorkerResponse);
                 break;
             }

@@ -403,6 +403,15 @@
         "hash": "sha512-NBbJOynLOeMsPo03+3dfdxE0P7SB7SXRqoFJ7WP2sOgOIxODna/huo2blmRlnZAVPTn1iQEB9Q+UeyP5c4/1+w=="
       }
     },
+    "npm:@angular/material": {
+      "type": "npm",
+      "name": "npm:@angular/material",
+      "data": {
+        "version": "21.2.2",
+        "packageName": "@angular/material",
+        "hash": "sha512-yY7kdmltNd28Tw8bHvoSFuoO8jMJSicSU9gB9r4jSLHPWAI9Y3V2qvLEimfPLRmzEaWwSoqKda95k/646lgg6A=="
+      }
+    },
     "npm:@angular/platform-browser": {
       "type": "npm",
       "name": "npm:@angular/platform-browser",
@@ -3202,6 +3211,15 @@
         "hash": "sha512-pLuQo+VPRnN8hfPqUTLTHk126wuYdXVxE6aDmjSeV4NCAgyxWbiOIeNJVtID3h1Vzpoi9m4jXezf73I6LgabgQ=="
       }
     },
+    "npm:@kurkle/color": {
+      "type": "npm",
+      "name": "npm:@kurkle/color",
+      "data": {
+        "version": "0.3.4",
+        "packageName": "@kurkle/color",
+        "hash": "sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w=="
+      }
+    },
     "npm:@leichtgewicht/ip-codec": {
       "type": "npm",
       "name": "npm:@leichtgewicht/ip-codec",
@@ -4289,6 +4307,42 @@
         "version": "0.2.4",
         "packageName": "@napi-rs/wasm-runtime",
         "hash": "sha512-9zESzOO5aDByvhIAsOy9TbpZ0Ur2AJbUI7UT73kcUTS2mxAMHOBaa1st/jAymNoCtvrit99kkzT1FZuXVcgfIQ=="
+      }
+    },
+    "npm:@neurodevworks/angular-chatbot": {
+      "type": "npm",
+      "name": "npm:@neurodevworks/angular-chatbot",
+      "data": {
+        "version": "1.0.0",
+        "packageName": "@neurodevworks/angular-chatbot",
+        "hash": "sha512-T2XZkJOnL3G2LNqeVyoR05/PO8NPfOeMfSthIzAT8/PRUmvFUMiJ5r6aUZ7mtb++DR/q+7Js6SpUvjETaA/clA=="
+      }
+    },
+    "npm:@neurodevworks/chatbot-core": {
+      "type": "npm",
+      "name": "npm:@neurodevworks/chatbot-core",
+      "data": {
+        "version": "1.0.1",
+        "packageName": "@neurodevworks/chatbot-core",
+        "hash": "sha512-tgNuETQmhiQ3mSMyZaKTKSDXje+v3buTf9pdgPcxa9NBbiCXblmQFBbENhOjppfkdKyTv3C3mvtIHO6OS5aclw=="
+      }
+    },
+    "npm:eventsource-parser@1.1.2": {
+      "type": "npm",
+      "name": "npm:eventsource-parser@1.1.2",
+      "data": {
+        "version": "1.1.2",
+        "packageName": "eventsource-parser",
+        "hash": "sha512-v0eOBUbiaFojBu2s2NPBfYUoRR9GjcDNvCXVaqEf5vVfpIAh9f8RCo4vXTP8c63QRKCFwoLpMpTdPwwhEKVgzA=="
+      }
+    },
+    "npm:eventsource-parser": {
+      "type": "npm",
+      "name": "npm:eventsource-parser",
+      "data": {
+        "version": "3.0.6",
+        "packageName": "eventsource-parser",
+        "hash": "sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg=="
       }
     },
     "npm:@ng-icons/core": {
@@ -8350,6 +8404,15 @@
         "hash": "sha512-PsezH1rqdV9VvyNhxxOW32/d75r01NY7TQCmOqomRo15ZSOKbpTFVsfjghxo6JloQUCGnH4k1LGu0R4yCLlWQQ=="
       }
     },
+    "npm:chart.js": {
+      "type": "npm",
+      "name": "npm:chart.js",
+      "data": {
+        "version": "4.5.1",
+        "packageName": "chart.js",
+        "hash": "sha512-GIjfiT9dbmHRiYi6Nl2yFCq7kkwdkp1W/lp2J99rX0yo9tgJGn3lKQATztIjb5tVtevcBtIdICNWqlq5+E8/Pw=="
+      }
+    },
     "npm:chownr": {
       "type": "npm",
       "name": "npm:chownr",
@@ -8771,15 +8834,6 @@
         "version": "2.8.2",
         "packageName": "yaml",
         "hash": "sha512-mplynKqc1C2hTVYxd0PU2xQAc22TI1vShAYGksCCfxbn/dFwnHTNi1bvYsBTkhdUNtGIf5xNOg938rrSSYvS9A=="
-      }
-    },
-    "npm:cozo-lib-wasm": {
-      "type": "npm",
-      "name": "npm:cozo-lib-wasm",
-      "data": {
-        "version": "0.7.6",
-        "packageName": "cozo-lib-wasm",
-        "hash": "sha512-JxM0JHF2EVY7/S+100FKHB1h+fBgcmtqbs/9gSka0TgD9YutDYFCgIE5I80fRmbjh0h2e+THEe2HooRIbML7dw=="
       }
     },
     "npm:crelt": {
@@ -9860,15 +9914,6 @@
         "version": "3.0.7",
         "packageName": "eventsource",
         "hash": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA=="
-      }
-    },
-    "npm:eventsource-parser": {
-      "type": "npm",
-      "name": "npm:eventsource-parser",
-      "data": {
-        "version": "3.0.6",
-        "packageName": "eventsource-parser",
-        "hash": "sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg=="
       }
     },
     "npm:expand-template": {
@@ -16678,6 +16723,38 @@
         "type": "static"
       }
     ],
+    "npm:@angular/material": [
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:@angular/common",
+        "type": "static"
+      },
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:@angular/core",
+        "type": "static"
+      },
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:@angular/forms",
+        "type": "static"
+      },
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:@angular/platform-browser",
+        "type": "static"
+      },
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:rxjs",
+        "type": "static"
+      },
+      {
+        "source": "npm:@angular/material",
+        "target": "npm:tslib",
+        "type": "static"
+      }
+    ],
     "npm:@angular/platform-browser": [
       {
         "source": "npm:@angular/platform-browser",
@@ -23114,6 +23191,35 @@
         "type": "static"
       }
     ],
+    "npm:@neurodevworks/angular-chatbot": [
+      {
+        "source": "npm:@neurodevworks/angular-chatbot",
+        "target": "npm:@neurodevworks/chatbot-core",
+        "type": "static"
+      },
+      {
+        "source": "npm:@neurodevworks/angular-chatbot",
+        "target": "npm:rxjs",
+        "type": "static"
+      }
+    ],
+    "npm:@neurodevworks/chatbot-core": [
+      {
+        "source": "npm:@neurodevworks/chatbot-core",
+        "target": "npm:rxjs",
+        "type": "static"
+      },
+      {
+        "source": "npm:@neurodevworks/chatbot-core",
+        "target": "npm:eventsource-parser@1.1.2",
+        "type": "static"
+      },
+      {
+        "source": "npm:@neurodevworks/chatbot-core",
+        "target": "npm:tslib",
+        "type": "static"
+      }
+    ],
     "npm:@ng-icons/core": [
       {
         "source": "npm:@ng-icons/core",
@@ -27658,6 +27764,13 @@
       {
         "source": "npm:caniuse-api",
         "target": "npm:lodash.uniq",
+        "type": "static"
+      }
+    ],
+    "npm:chart.js": [
+      {
+        "source": "npm:chart.js",
+        "target": "npm:@kurkle/color",
         "type": "static"
       }
     ],
@@ -37783,5 +37896,5 @@
   },
   "version": "6.0",
   "errors": [],
-  "computedAt": 1771652656716
+  "computedAt": 1774150702351
 }

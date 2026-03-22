@@ -73,63 +73,6 @@ func (o *Observer) SetGDR(g *gdr.GateDrivenRetriever) {
 	o.workspace = NewWorkspace(o.store, g, o.cfg.Workspace)
 }
 
-// ProcessWithWorkspace is the main entry point for RLM-aware memory processing.
-// It runs the normal observer loop, then checks whether the incoming user prompt
-// represents a "miss" against the current observations. If so, the workspace
-// activates: it searches notes/blocks/episodes and injects a resurfaced
-// observation back into the OMRecord.
-//
-// scopeID is the world/narrative scope used for episode searches.
-func (o *Observer) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, userPrompt string) (*ActivationResult, error) {
-	if !o.cfg.Enabled {
-		return &ActivationResult{Triggered: false}, nil
-	}
-
-	// 1. Run the normal observation loop first.
-	if err := o.ProcessLoop(ctx, threadID); err != nil {
-		return nil, fmt.Errorf("observation loop failed: %w", err)
-	}
-
-	// 2. If workspace not wired, bail early.
-	if o.workspace == nil {
-		return &ActivationResult{Triggered: false}, nil
-	}
-
-	// 3. Load current observations to check miss signal.
-	record, err := o.store.GetOMRecord(threadID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load OM record: %w", err)
-	}
-
-	var currentObs string
-	if record != nil {
-		currentObs = record.Observations
-	}
-
-	// 4. Check miss signal.
-	activate, reason := o.workspace.ShouldActivate(userPrompt, currentObs)
-	if !activate {
-		return &ActivationResult{Triggered: false}, nil
-	}
-
-	// 5. Run workspace tools.
-	scope := &store.ScopeKey{ThreadID: threadID}
-	activationResult := o.workspace.Activate(threadID, scopeID, userPrompt, scope)
-	activationResult.MissReason = reason
-
-	// 6. Inject resurfaced context back into OMRecord.
-	if activationResult.NewObservation != "" && record != nil {
-		record.Observations += "\n\n" + activationResult.NewObservation
-		record.UpdatedAt = time.Now().UnixMilli()
-		record.ObsTokenCount = o.approxTokenCount(record.Observations)
-		if err := o.store.UpsertOMRecord(record); err != nil {
-			return &activationResult, fmt.Errorf("failed to persist workspace observation: %w", err)
-		}
-	}
-
-	return &activationResult, nil
-}
-
 // ProcessLoop is the main entry point to check and update memory for a thread.
 // It should be called asynchronously after messages are added to the thread.
 func (o *Observer) ProcessLoop(ctx context.Context, threadID string) error {
@@ -198,15 +141,10 @@ func (o *Observer) performObservation(ctx context.Context, record *store.OMRecor
 	// Construct the prompt
 	prompt := o.buildObserverPrompt(record, newMessages)
 
-	// Call LLM
-	msgs := []agent.Message{
-		{Role: "user", Content: &prompt},
-	}
-
 	// Use the new system prompt from prompts.go
 	sysPrompt := BuildObserverSystemPrompt()
 
-	resp, err := o.agent.ChatWithTools(ctx, msgs, nil, sysPrompt)
+	resp, err := o.agent.Chat(ctx, prompt, sysPrompt)
 	if err != nil {
 		return err
 	}
@@ -241,14 +179,10 @@ func (o *Observer) performObservation(ctx context.Context, record *store.OMRecor
 func (o *Observer) performReflection(ctx context.Context, record *store.OMRecord) error {
 	prompt := o.buildReflectorPrompt(record.Observations)
 
-	msgs := []agent.Message{
-		{Role: "user", Content: &prompt},
-	}
-
 	// Use the new Reflector system prompt
 	sysPrompt := BuildReflectorSystemPrompt()
 
-	resp, err := o.agent.ChatWithTools(ctx, msgs, nil, sysPrompt)
+	resp, err := o.agent.Chat(ctx, prompt, sysPrompt)
 	if err != nil {
 		return err
 	}

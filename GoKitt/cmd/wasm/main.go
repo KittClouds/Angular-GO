@@ -197,7 +197,6 @@ func main() {
 		"chatListRunEvents":        js.FuncOf(jsChatListRunEvents),
 		"chatMarkRunStreaming":     js.FuncOf(jsChatMarkRunStreaming),
 		"chatCompleteRun":          js.FuncOf(jsChatCompleteRun),
-		"chatProcessWithWorkspace": js.FuncOf(jsChatProcessWithWorkspace),
 		// RAPTOR: Hierarchical Document Retrieval
 		"raptorInit":             js.FuncOf(raptorInit),
 		"raptorBuildTree":        js.FuncOf(raptorBuildTree),
@@ -3035,33 +3034,4 @@ func jsChatExportThread(this js.Value, args []js.Value) interface{} {
 	}
 
 	return jsonStr
-}
-
-// jsChatProcessWithWorkspace runs the OM loop and, if a miss signal fires,
-// activates the workspace to resurface lost context from notes/episodes.
-// Args: threadID (string), scopeID (string), userPrompt (string)
-// Returns: JSON-encoded ActivationResult
-func jsChatProcessWithWorkspace(this js.Value, args []js.Value) interface{} {
-	if chatSvc == nil {
-		return ErrorResult("chat service not initialized")
-	}
-	if len(args) < 3 {
-		return ErrorResult("missing arguments: threadID, scopeID, userPrompt")
-	}
-
-	threadID := args[0].String()
-	scopeID := args[1].String()
-	userPrompt := args[2].String()
-
-	result, err := chatSvc.ProcessWithWorkspace(context.Background(), threadID, scopeID, userPrompt)
-	if err != nil {
-		fmt.Printf("[WASM] ProcessWithWorkspace error: %v\n", err)
-		return ErrorResult(err.Error())
-	}
-
-	jsonBytes, err := json.Marshal(result)
-	if err != nil {
-		return ErrorResult("json marshal: " + err.Error())
-	}
-	return string(jsonBytes)
 }

@@ -761,7 +761,17 @@ func (s *FullSystemSession) Search(req SearchRequest) (*SearchResult, error) {
 				result.Warnings = append(result.Warnings, "gldr chunk index is not available in this session")
 				continue
 			}
-			result.GLDRChunks = s.gldrIndex.Search(req.Query, limit, qgramScope)
+			rawChunks := s.gldrIndex.Search(req.Query, limit, qgramScope)
+			result.GLDRChunks = make([]fullsystemindex.ChunkResult, len(rawChunks))
+			for i, hit := range rawChunks {
+				enriched := hit
+				if doc, chunk := s.lookupSearchChunkLocked(hit.ChunkID); chunk != nil {
+					enriched.DocumentID = doc.Input.DocumentID
+					enriched.NoteID = doc.NoteID
+					enriched.Text = chunk.Text
+				}
+				result.GLDRChunks[i] = enriched
+			}
 		case SearchTargetGLDRNodes:
 			if s.gldrIndex == nil {
 				result.Warnings = append(result.Warnings, "gldr node index is not available in this session")
@@ -803,6 +813,17 @@ func (s *FullSystemSession) Search(req SearchRequest) (*SearchResult, error) {
 	}
 
 	return result, nil
+}
+
+func (s *FullSystemSession) lookupSearchChunkLocked(searchID string) (*fullSystemDocument, *fullSystemChunk) {
+	for _, doc := range s.documents {
+		for i := range doc.SearchChunks {
+			if doc.SearchChunks[i].SearchID == searchID {
+				return doc, &doc.SearchChunks[i]
+			}
+		}
+	}
+	return nil, nil
 }
 
 // GetState returns the current lifecycle state.

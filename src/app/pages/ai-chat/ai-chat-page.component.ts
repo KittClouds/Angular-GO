@@ -35,14 +35,12 @@ import {
     type ChatProgressEvent,
     type OpenRouterMessage,
 } from '../../lib/services/go-chat.service';
-import { OrchestratorService } from '../../services/orchestrator.service';
 import {
     GoogleGenAIService,
     GoogleGenAIMessage,
 } from '../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../lib/store/chat-context-clip.store';
 import { KammiChatUiService } from '../../lib/services/kammi-chat-ui.service';
-import type { ActivationResult } from '../../lib/rlm';
 
 // Re-export types from the installed package for compatibility
 import type { ChatMessage, ChatOptions, ChatConfig as PkgChatConfig } from '@neurodevworks/angular-chatbot';

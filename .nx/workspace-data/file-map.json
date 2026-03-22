@@ -40,7 +40,7 @@
         },
         {
           "file": ".gitignore",
-          "hash": "15157911861797426828"
+          "hash": "5772071575585627315"
         },
         {
           "file": ".tmp/reference_repo/.agent/artifacts/plan_app_orchestration.md",
@@ -67,36 +67,8 @@
           "hash": "5614358347545230099"
         },
         {
-          "file": ".tmp/reference_repo/build_error.txt",
-          "hash": "9465186370400790303"
-        },
-        {
-          "file": ".tmp/reference_repo/build_log.txt",
-          "hash": "6528309320453174165"
-        },
-        {
-          "file": ".tmp/reference_repo/build_output.txt",
-          "hash": "7272837888885408767"
-        },
-        {
           "file": ".tmp/reference_repo/bun.lockb",
           "hash": "12028872747687587549"
-        },
-        {
-          "file": ".tmp/reference_repo/check2.txt",
-          "hash": "4752595083186619575"
-        },
-        {
-          "file": ".tmp/reference_repo/check_errors.txt",
-          "hash": "13434799576373049970"
-        },
-        {
-          "file": ".tmp/reference_repo/check_errors_2.txt",
-          "hash": "2043417286764027151"
-        },
-        {
-          "file": ".tmp/reference_repo/check_registry.txt",
-          "hash": "12246065798192260336"
         },
         {
           "file": ".tmp/reference_repo/components.json",
@@ -109,10 +81,6 @@
         {
           "file": ".tmp/reference_repo/eslint.config.js",
           "hash": "11538576952126058721"
-        },
-        {
-          "file": ".tmp/reference_repo/eslint_output.txt",
-          "hash": "9300756465791868494"
         },
         {
           "file": ".tmp/reference_repo/implicit_stress_test.md",
@@ -149,10 +117,6 @@
         {
           "file": ".tmp/reference_repo/public/placeholder.svg",
           "hash": "8334994000532407949"
-        },
-        {
-          "file": ".tmp/reference_repo/public/robots.txt",
-          "hash": "4096381737550925494"
         },
         {
           "file": ".tmp/reference_repo/scanner_test_doc.md",
@@ -2239,146 +2203,6 @@
           "hash": "14787951250487867851"
         },
         {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build.txt",
-          "hash": "15840403458918762195"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build_error.txt",
-          "hash": "1944114603764298443"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build_errors.txt",
-          "hash": "13536172831369542526"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build_output.txt",
-          "hash": "10444193445212661434"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build_wasm.txt",
-          "hash": "10625258852393598008"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/build_wasm2.txt",
-          "hash": "14204215186072373510"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/cargo_error.txt",
-          "hash": "6917859112033480334"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/cargo_errors.txt",
-          "hash": "18003362532124751881"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check.txt",
-          "hash": "4532542969317338895"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_clean.txt",
-          "hash": "12963347880952771295"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_error.txt",
-          "hash": "17802834908781984159"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_errors.txt",
-          "hash": "17594631629442480258"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_fail.txt",
-          "hash": "11177690064585035642"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_final.txt",
-          "hash": "11184446336690007198"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_latest.txt",
-          "hash": "10444888150307830409"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_log.txt",
-          "hash": "16032848287735747230"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_no_embed.txt",
-          "hash": "5650840554736814303"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_output.txt",
-          "hash": "412407943645663744"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_phase1.txt",
-          "hash": "9268837232361061551"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/check_phase1b.txt",
-          "hash": "8805319432802266741"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/compile_error.txt",
-          "hash": "6854577482331767557"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/daach_error.txt",
-          "hash": "11253542510102905390"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/daach_test_output.txt",
-          "hash": "10273563592327855330"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/diag_test.txt",
-          "hash": "18118895230300966563"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/errors.txt",
-          "hash": "9368842232777058512"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/native_check.txt",
-          "hash": "17306479150729652134"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/native_test_output.txt",
-          "hash": "9678933677334992396"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output.txt",
-          "hash": "379361329086524778"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output_lib.txt",
-          "hash": "2260551802879663264"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output_lib_2.txt",
-          "hash": "17658574310437054081"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output_native.txt",
-          "hash": "5724391764386199015"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output_scanner.txt",
-          "hash": "4056349400057766823"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/output_scope.txt",
-          "hash": "8531829612232528486"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/pagerank_test.txt",
-          "hash": "12809916745739339804"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/short_error.txt",
-          "hash": "4772545330552359308"
-        },
-        {
           "file": ".tmp/reference_repo/src/rust/kittcore/src/alex/fuzzy.rs",
           "hash": "3418127275022836826"
         },
@@ -2839,52 +2663,8 @@
           "hash": "10155174510357577256"
         },
         {
-          "file": ".tmp/reference_repo/src/rust/kittcore/test_build_error.txt",
-          "hash": "3912205239086017816"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/test_fail.txt",
-          "hash": "3352541839940151689"
-        },
-        {
           "file": ".tmp/reference_repo/src/rust/kittcore/test_harness.html",
           "hash": "13951316118253699077"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/test_output2.txt",
-          "hash": "286101877059556244"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/test_output3.txt",
-          "hash": "7190414582361125586"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/test_output4.txt",
-          "hash": "13039561831020590805"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test.txt",
-          "hash": "3695252562317884021"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_output.txt",
-          "hash": "11952183260118007574"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_phase2.txt",
-          "hash": "12450070773893550773"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/triple_test_phase2b.txt",
-          "hash": "8898235133679301614"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/wasm_build.txt",
-          "hash": "14864310950069626736"
-        },
-        {
-          "file": ".tmp/reference_repo/src/rust/kittcore/wasm_pack_output.txt",
-          "hash": "5960962889559470152"
         },
         {
           "file": ".tmp/reference_repo/src/types/attributes.ts",
@@ -2955,10 +2735,6 @@
           "hash": "5290920166260177639"
         },
         {
-          "file": ".tmp/reference_repo/test-output.txt",
-          "hash": "2081619910101617307"
-        },
-        {
           "file": ".tmp/reference_repo/tsconfig.app.json",
           "hash": "6314735070403023646"
         },
@@ -2991,10 +2767,6 @@
           "hash": "11080398893561185157"
         },
         {
-          "file": "GoKitt/bench_results.txt",
-          "hash": "13654835352852927404"
-        },
-        {
           "file": "GoKitt/build_error.log",
           "hash": "4678882821062058266"
         },
@@ -3011,20 +2783,44 @@
           "hash": "301571880401255929"
         },
         {
+          "file": "GoKitt/cmd/wasm/chat_runs.go",
+          "hash": "3352378270247844207"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/chat_runtime.go",
+          "hash": "10983024891022838853"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/gldr.go",
+          "hash": "10729873165537840623"
+        },
+        {
           "file": "GoKitt/cmd/wasm/gokitt.wasm",
-          "hash": "15685628643952448374"
+          "hash": "14324835170555715554"
         },
         {
           "file": "GoKitt/cmd/wasm/knowledge.go",
-          "hash": "815990483995951044"
+          "hash": "8886901420180692868"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/knowledge_test.go",
+          "hash": "17222860234219485074"
         },
         {
           "file": "GoKitt/cmd/wasm/main.go",
-          "hash": "4867077042962943011"
+          "hash": "13203830176380459839"
         },
         {
           "file": "GoKitt/cmd/wasm/raptor.go",
           "hash": "7445412396625140341"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/scan_mentions.go",
+          "hash": "10454059272284605295"
+        },
+        {
+          "file": "GoKitt/cmd/wasm/system.go",
+          "hash": "14083490282762006509"
         },
         {
           "file": "GoKitt/cmd/wasm/wal_replay.go",
@@ -3039,12 +2835,16 @@
           "hash": "11975688912943350065"
         },
         {
-          "file": "GoKitt/debug_windows.exe",
-          "hash": "16398001777054145209"
+          "file": "GoKitt/debug_threads.exe",
+          "hash": "7119800311843345623"
         },
         {
-          "file": "GoKitt/doc_vector.txt",
-          "hash": "14743460017765350381"
+          "file": "GoKitt/debug_threads.go",
+          "hash": "12148718003426107684"
+        },
+        {
+          "file": "GoKitt/debug_windows.exe",
+          "hash": "16398001777054145209"
         },
         {
           "file": "GoKitt/docs/ARCHITECTURE_DEFENSE.md",
@@ -3055,48 +2855,40 @@
           "hash": "14574874173270110104"
         },
         {
-          "file": "GoKitt/error.txt",
-          "hash": "16671569342068757026"
-        },
-        {
-          "file": "GoKitt/fields.txt",
-          "hash": "15724889310918404570"
-        },
-        {
           "file": "GoKitt/go.mod",
-          "hash": "1619286746059863451"
+          "hash": "15557295252948461434"
         },
         {
           "file": "GoKitt/go.sum",
-          "hash": "13116249917431110049"
+          "hash": "8406224008770518660"
         },
         {
           "file": "GoKitt/gokitt.wasm",
-          "hash": "8135184833781460158"
+          "hash": "5883077503093568340"
         },
         {
           "file": "GoKitt/internal/graphstore/algo_components.go",
-          "hash": "3029935457999183013"
+          "hash": "15226359897134940763"
         },
         {
           "file": "GoKitt/internal/graphstore/algo_paths.go",
-          "hash": "8627993289618548897"
+          "hash": "10400015540363644252"
         },
         {
           "file": "GoKitt/internal/graphstore/algo_ranking.go",
-          "hash": "2272410872195012627"
+          "hash": "2434999217802683543"
         },
         {
           "file": "GoKitt/internal/graphstore/algo_structural.go",
-          "hash": "10522976096838015768"
+          "hash": "14674548080522757724"
         },
         {
           "file": "GoKitt/internal/graphstore/algo_test.go",
-          "hash": "8380816002224013770"
+          "hash": "6797898373640178771"
         },
         {
           "file": "GoKitt/internal/graphstore/cache.go",
-          "hash": "11574246664156111009"
+          "hash": "17012291102769457613"
         },
         {
           "file": "GoKitt/internal/graphstore/codec.go",
@@ -3104,7 +2896,7 @@
         },
         {
           "file": "GoKitt/internal/graphstore/index.go",
-          "hash": "7099893268562161673"
+          "hash": "2300786506935915701"
         },
         {
           "file": "GoKitt/internal/graphstore/migrate.go",
@@ -3116,7 +2908,7 @@
         },
         {
           "file": "GoKitt/internal/graphstore/query_engine.go",
-          "hash": "5159775330322797133"
+          "hash": "16963912397196280734"
         },
         {
           "file": "GoKitt/internal/graphstore/query_types.go",
@@ -3128,7 +2920,7 @@
         },
         {
           "file": "GoKitt/internal/graphstore/store.go",
-          "hash": "14117574572000304326"
+          "hash": "1336116292229625498"
         },
         {
           "file": "GoKitt/internal/graphstore/store_bitmap_test.go",
@@ -3136,7 +2928,7 @@
         },
         {
           "file": "GoKitt/internal/graphstore/store_edge.go",
-          "hash": "1836438414363953513"
+          "hash": "12966394981192885155"
         },
         {
           "file": "GoKitt/internal/graphstore/store_label.go",
@@ -3168,11 +2960,19 @@
         },
         {
           "file": "GoKitt/internal/graphstore/store_vertex.go",
-          "hash": "15427077908390577251"
+          "hash": "14575379633333144665"
         },
         {
           "file": "GoKitt/internal/graphstore/traversal.go",
-          "hash": "6587487002376940257"
+          "hash": "13865982837949794238"
+        },
+        {
+          "file": "GoKitt/internal/store/chat_run_models.go",
+          "hash": "7147487762457877986"
+        },
+        {
+          "file": "GoKitt/internal/store/chat_runs.go",
+          "hash": "14918606578598421820"
         },
         {
           "file": "GoKitt/internal/store/integration_test.go",
@@ -3184,7 +2984,7 @@
         },
         {
           "file": "GoKitt/internal/store/models.go",
-          "hash": "12847288244284234345"
+          "hash": "8383018579080872745"
         },
         {
           "file": "GoKitt/internal/store/phase9_test.go",
@@ -3192,11 +2992,11 @@
         },
         {
           "file": "GoKitt/internal/store/sqlite_store.go",
-          "hash": "2660108326650495403"
+          "hash": "7078321804283281740"
         },
         {
           "file": "GoKitt/internal/store/sqlite_store_test.go",
-          "hash": "11167955631122759829"
+          "hash": "544735544998617534"
         },
         {
           "file": "GoKitt/internal/store/store_test.go",
@@ -3208,7 +3008,7 @@
         },
         {
           "file": "GoKitt/pkg/agent/service.go",
-          "hash": "7181031943135392060"
+          "hash": "11724136989467978470"
         },
         {
           "file": "GoKitt/pkg/agent/service_test.go",
@@ -3223,6 +3023,14 @@
           "hash": "6661613169906600640"
         },
         {
+          "file": "GoKitt/pkg/analytics/text_analytics.go",
+          "hash": "2809197774606784483"
+        },
+        {
+          "file": "GoKitt/pkg/analytics/text_analytics_test.go",
+          "hash": "1128551367087389717"
+        },
+        {
           "file": "GoKitt/pkg/batch/google.go",
           "hash": "16721059543020139819"
         },
@@ -3232,27 +3040,63 @@
         },
         {
           "file": "GoKitt/pkg/batch/openrouter.go",
-          "hash": "17982736803961191909"
+          "hash": "1224462977698160709"
         },
         {
           "file": "GoKitt/pkg/batch/openrouter_stub.go",
-          "hash": "16094423439272947887"
+          "hash": "15894808779649863238"
+        },
+        {
+          "file": "GoKitt/pkg/batch/reasoning.go",
+          "hash": "9809236822556910163"
+        },
+        {
+          "file": "GoKitt/pkg/batch/request_options.go",
+          "hash": "1226951542706978380"
+        },
+        {
+          "file": "GoKitt/pkg/batch/request_options_test.go",
+          "hash": "14899078340256098855"
         },
         {
           "file": "GoKitt/pkg/batch/service.go",
-          "hash": "13255127360938484251"
+          "hash": "14470990149978643378"
+        },
+        {
+          "file": "GoKitt/pkg/batch/stream.go",
+          "hash": "9196399408453423447"
+        },
+        {
+          "file": "GoKitt/pkg/batch/stream_stub.go",
+          "hash": "2805765732417447659"
+        },
+        {
+          "file": "GoKitt/pkg/chat/runs.go",
+          "hash": "7136093825779147964"
+        },
+        {
+          "file": "GoKitt/pkg/chat/runs_test.go",
+          "hash": "11482306001582138351"
         },
         {
           "file": "GoKitt/pkg/chat/service.go",
-          "hash": "14800073696724035125"
+          "hash": "10336657061354549148"
         },
         {
           "file": "GoKitt/pkg/chunker/chunker.go",
-          "hash": "773469990684821758"
+          "hash": "12812241019807110777"
         },
         {
           "file": "GoKitt/pkg/chunker/chunker_test.go",
           "hash": "10962928851061727781"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/chunkerx.go",
+          "hash": "10940573763774548896"
+        },
+        {
+          "file": "GoKitt/pkg/chunker/chunkerx_test.go",
+          "hash": "2471242689986851829"
         },
         {
           "file": "GoKitt/pkg/chunker/semantic_chunker.go",
@@ -3272,11 +3116,19 @@
         },
         {
           "file": "GoKitt/pkg/extraction/prompts.go",
-          "hash": "11802219779739042585"
+          "hash": "16350264240617623796"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/schema.go",
+          "hash": "13296596295695567012"
+        },
+        {
+          "file": "GoKitt/pkg/extraction/schema_test.go",
+          "hash": "1851174715375900328"
         },
         {
           "file": "GoKitt/pkg/extraction/service.go",
-          "hash": "4710878299201640664"
+          "hash": "594016093589659623"
         },
         {
           "file": "GoKitt/pkg/extraction/service_test.go",
@@ -3343,12 +3195,16 @@
           "hash": "4598417116758552026"
         },
         {
+          "file": "GoKitt/pkg/fullsystemindex/gldr_bridge.go",
+          "hash": "15827580427380677142"
+        },
+        {
           "file": "GoKitt/pkg/gdr/benchmark_test.go",
           "hash": "7784994930720328116"
         },
         {
           "file": "GoKitt/pkg/gdr/dimension_router.go",
-          "hash": "8451464082698412823"
+          "hash": "12364963438045972020"
         },
         {
           "file": "GoKitt/pkg/gdr/dimension_router_test.go",
@@ -3360,11 +3216,11 @@
         },
         {
           "file": "GoKitt/pkg/gdr/gdr.go",
-          "hash": "5587760969864752588"
+          "hash": "14311194853898298232"
         },
         {
           "file": "GoKitt/pkg/gdr/gdr_test.go",
-          "hash": "6896034637902963190"
+          "hash": "16259247911058172577"
         },
         {
           "file": "GoKitt/pkg/gdr/metrics.go",
@@ -3376,23 +3232,151 @@
         },
         {
           "file": "GoKitt/pkg/gdr/scorer.go",
-          "hash": "14474430693248556060"
+          "hash": "10572409483154581745"
         },
         {
           "file": "GoKitt/pkg/gdr/search.go",
-          "hash": "14255294106351897136"
+          "hash": "1016183105148139046"
         },
         {
           "file": "GoKitt/pkg/gdr/search_brute.go",
-          "hash": "17667541313412096737"
+          "hash": "7852303048029871858"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/community.go",
+          "hash": "16606771616460071704"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/community_test.go",
+          "hash": "12402757015459160727"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/config.go",
+          "hash": "13870784058787541697"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/gldr.go",
+          "hash": "13525107156149118670"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/gldr_shortrun_test.go",
+          "hash": "11535182942867896849"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/gldr_test.go",
+          "hash": "11434496287090695699"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/iterator.go",
+          "hash": "1855632092681906009"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/temporal.go",
+          "hash": "1365876501941675111"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/temporal_test.go",
+          "hash": "8358241444344809383"
+        },
+        {
+          "file": "GoKitt/pkg/gldr/types.go",
+          "hash": "10991355549462012462"
         },
         {
           "file": "GoKitt/pkg/graph/graph.go",
-          "hash": "8344530618195031461"
+          "hash": "15670110319321668882"
         },
         {
           "file": "GoKitt/pkg/graph/graph_test.go",
           "hash": "16211231844834617256"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/alias_detection.go",
+          "hash": "15529086035488284224"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/alias_detection_test.go",
+          "hash": "9571728489097501735"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/chapter_context.go",
+          "hash": "6388534386038345811"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/chapter_context_test.go",
+          "hash": "15083460899584444063"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/config.go",
+          "hash": "12889882466712990228"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/cooccurrence.go",
+          "hash": "8321261907719972093"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/cooccurrence_test.go",
+          "hash": "10464540645550001118"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/entity_registry.go",
+          "hash": "10116134614856025330"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/entity_registry_test.go",
+          "hash": "17522009278538514882"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/full_system_session.go",
+          "hash": "9438057590449671451"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/full_system_session_test.go",
+          "hash": "8207161550128772957"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/graptor_conductor.go",
+          "hash": "12885574581106269246"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/integration_test.go",
+          "hash": "4690868224765807336"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/intern.go",
+          "hash": "18189487794851032281"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/memory_test.go",
+          "hash": "17308978173326814994"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/pool.go",
+          "hash": "9680782614180414971"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/pool_test.go",
+          "hash": "9328199717669166171"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/profile.go",
+          "hash": "15324148273610395570"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/ring_buffer.go",
+          "hash": "10440659913195901028"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/ring_buffer_test.go",
+          "hash": "4092653919620730340"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/stream.go",
+          "hash": "5668581176060372742"
+        },
+        {
+          "file": "GoKitt/pkg/graptor/stream_test.go",
+          "hash": "7205684467350016434"
         },
         {
           "file": "GoKitt/pkg/hierarchy/hierarchy.go",
@@ -3476,7 +3460,7 @@
         },
         {
           "file": "GoKitt/pkg/implicit-matcher/dictionary.go",
-          "hash": "2520308767472642098"
+          "hash": "12757360529434061310"
         },
         {
           "file": "GoKitt/pkg/implicit-matcher/dictionary_test.go",
@@ -3491,10 +3475,6 @@
           "hash": "14948723314747409827"
         },
         {
-          "file": "GoKitt/pkg/knowledge/test_output.txt",
-          "hash": "7210178804838159355"
-        },
-        {
           "file": "GoKitt/pkg/knowledge/traversal.go",
           "hash": "13950940338625163964"
         },
@@ -3504,7 +3484,7 @@
         },
         {
           "file": "GoKitt/pkg/memory/memory.go",
-          "hash": "11689192489334034648"
+          "hash": "14790965212301250298"
         },
         {
           "file": "GoKitt/pkg/memory/prompts.go",
@@ -3680,11 +3660,15 @@
         },
         {
           "file": "GoKitt/pkg/reality/projection/projector.go",
-          "hash": "4076727373902319300"
+          "hash": "5086175957692735308"
+        },
+        {
+          "file": "GoKitt/pkg/reality/projection/projector_causal_test.go",
+          "hash": "16977350275554436437"
         },
         {
           "file": "GoKitt/pkg/reality/projection/provenance_test.go",
-          "hash": "1765326539055604218"
+          "hash": "16575277775862133628"
         },
         {
           "file": "GoKitt/pkg/reality/syntax/kind.go",
@@ -3839,20 +3823,8 @@
           "hash": "8084294636537692641"
         },
         {
-          "file": "GoKitt/results.txt",
-          "hash": "6681858820685640437"
-        },
-        {
-          "file": "GoKitt/results_v2.txt",
-          "hash": "9219128797957029649"
-        },
-        {
-          "file": "GoKitt/results_v3.txt",
-          "hash": "16470112160501076914"
-        },
-        {
-          "file": "GoKitt/results_v4.txt",
-          "hash": "8722207594603633325"
+          "file": "GoKitt/src/assets/gokitt.wasm",
+          "hash": "3686809151529555925"
         },
         {
           "file": "GoKitt/storetest",
@@ -3867,40 +3839,12 @@
           "hash": "16534364274100241146"
         },
         {
-          "file": "GoKitt/test_error.txt",
-          "hash": "6539282777994807381"
-        },
-        {
-          "file": "GoKitt/test_failure.txt",
-          "hash": "15995654274404915922"
-        },
-        {
-          "file": "GoKitt/test_final_final_results.txt",
-          "hash": "7386264033158417977"
-        },
-        {
-          "file": "GoKitt/test_final_results.txt",
-          "hash": "15667349357675637561"
-        },
-        {
-          "file": "GoKitt/test_full_results.txt",
-          "hash": "17666775850519442044"
-        },
-        {
-          "file": "GoKitt/test_results.txt",
-          "hash": "8226257450572660642"
-        },
-        {
-          "file": "GoKitt/test_results_final_phase4_v2.txt",
-          "hash": "267795556353197731"
+          "file": "GoKitt/tmp.wasm",
+          "hash": "15974641196499190469"
         },
         {
           "file": "GoKitt/wasm",
-          "hash": "13819031093671907233"
-        },
-        {
-          "file": "GoKitt/workspace_test_results.txt",
-          "hash": "13699507065423662044"
+          "hash": "16611319133465131046"
         },
         {
           "file": "README.md",
@@ -3917,6 +3861,10 @@
         {
           "file": "angular.json",
           "hash": "7434538648278960590"
+        },
+        {
+          "file": "build.log",
+          "hash": "14688876526848298240"
         },
         {
           "file": "components.json",
@@ -3936,7 +3884,11 @@
         },
         {
           "file": "docs/perfect_run.md",
-          "hash": "8570192362825379770"
+          "hash": "13390936555972631152"
+        },
+        {
+          "file": "docs/perfect_run2.md",
+          "hash": "3748045215921379447"
         },
         {
           "file": "docs/reflector-agent.md",
@@ -3945,10 +3897,6 @@
         {
           "file": "docs/results.csv",
           "hash": "14503353893056396787"
-        },
-        {
-          "file": "docs/results2-analysis.txt",
-          "hash": "17953738816572888311"
         },
         {
           "file": "docs/results2-summary.md",
@@ -3960,7 +3908,7 @@
         },
         {
           "file": "docs/shortrun.md",
-          "hash": "9438866556911319218"
+          "hash": "11349249581573256749"
         },
         {
           "file": "docs/tree logs.md",
@@ -3969,6 +3917,10 @@
         {
           "file": "exposed_api_verification.md",
           "hash": "7650784198444854645"
+        },
+        {
+          "file": "fix-dialogs.js",
+          "hash": "10600482962981471787"
         },
         {
           "file": "gokitt.wasm",
@@ -4196,11 +4148,11 @@
         },
         {
           "file": "package-lock.json",
-          "hash": "7720202512401214655"
+          "hash": "10646256081246603675"
         },
         {
           "file": "package.json",
-          "hash": "16213390297591631547"
+          "hash": "1513676639576489152"
         },
         {
           "file": "plans/Go_RLM.md",
@@ -4231,6 +4183,10 @@
           "hash": "15348896689586731733"
         },
         {
+          "file": "plans/gldr-architecture.md",
+          "hash": "7167365534580379421"
+        },
+        {
           "file": "plans/go-wasm-persistence-audit.md",
           "hash": "2303202220290547751"
         },
@@ -4241,6 +4197,22 @@
         {
           "file": "plans/graphstore-algorithms-plan.md",
           "hash": "3430192137897435863"
+        },
+        {
+          "file": "plans/graphstore-opt-fix-plan.md",
+          "hash": "2827934373448945116"
+        },
+        {
+          "file": "plans/graptor-embedding-free-plan.md",
+          "hash": "17775367279827583796"
+        },
+        {
+          "file": "plans/graptor-memory-enhancements-report.md",
+          "hash": "15084146092499900300"
+        },
+        {
+          "file": "plans/graptor-reality-integration.md",
+          "hash": "5480853224709049072"
         },
         {
           "file": "plans/hnsw-go-port-plan.md",
@@ -4311,6 +4283,10 @@
           "hash": "8635777896154451875"
         },
         {
+          "file": "plans/temporal-edge-system-design.md",
+          "hash": "9770475957787656897"
+        },
+        {
           "file": "plans/unified-extraction-service.md",
           "hash": "5722444149340373434"
         },
@@ -4323,24 +4299,32 @@
           "hash": "13042332794747846404"
         },
         {
-          "file": "public/assets/gokitt.wasm",
-          "hash": "1062189048027005679"
+          "file": "plans/zero-copy-profile-optimization.md",
+          "hash": "14954219023545728524"
         },
         {
           "file": "public/favicon.ico",
           "hash": "3988961587069885523"
         },
         {
-          "file": "public/gokitt.wasm",
-          "hash": "12646155330840769440"
-        },
-        {
           "file": "scripts/analyze_results.js",
           "hash": "17749007385827537528"
         },
         {
+          "file": "scripts/build-gokitt-wasm.mjs",
+          "hash": "12241049002540410305"
+        },
+        {
+          "file": "scripts/ensure-gokitt-wasm.mjs",
+          "hash": "17374627246202355812"
+        },
+        {
           "file": "scripts/format_shortrun.js",
           "hash": "12752966745383742789"
+        },
+        {
+          "file": "scripts/sync-gokitt-wasm.mjs",
+          "hash": "6002286802353039819"
         },
         {
           "file": "src/app/api/index.ts",
@@ -4351,8 +4335,20 @@
           "hash": "12316781285559678541"
         },
         {
+          "file": "src/app/api/pretty-text-api.spec.ts",
+          "hash": "4421737566034229214"
+        },
+        {
           "file": "src/app/api/pretty-text-api.ts",
-          "hash": "3238430136238636295"
+          "hash": "2201757528149551838"
+        },
+        {
+          "file": "src/app/api/pretty-text-cache.spec.ts",
+          "hash": "16854339287363645066"
+        },
+        {
+          "file": "src/app/api/pretty-text-cache.ts",
+          "hash": "3409230668204699064"
         },
         {
           "file": "src/app/api/types.ts",
@@ -4372,19 +4368,23 @@
         },
         {
           "file": "src/app/app.component.ts",
-          "hash": "3025617124390749509"
+          "hash": "1233593102584862399"
         },
         {
           "file": "src/app/app.config.ts",
-          "hash": "8400809299122216404"
+          "hash": "18294654192662944400"
         },
         {
           "file": "src/app/app.routes.ts",
-          "hash": "7056672122616446571"
+          "hash": "894797263544543968"
+        },
+        {
+          "file": "src/app/components/analytics-panel/analytics-panel.component.spec.ts",
+          "hash": "1751647119538940713"
         },
         {
           "file": "src/app/components/analytics-panel/analytics-panel.component.ts",
-          "hash": "2085690526025779042"
+          "hash": "11590464503386786268"
         },
         {
           "file": "src/app/components/analytics-panel/flow-score/flow-score.component.ts",
@@ -4400,11 +4400,11 @@
         },
         {
           "file": "src/app/components/blueprint-hub/blueprint-hub.component.html",
-          "hash": "848679057888697787"
+          "hash": "3977856246556352034"
         },
         {
           "file": "src/app/components/blueprint-hub/blueprint-hub.component.ts",
-          "hash": "5130356931731164284"
+          "hash": "5384018671504318146"
         },
         {
           "file": "src/app/components/blueprint-hub/blueprint-hub.service.ts",
@@ -4416,15 +4416,15 @@
         },
         {
           "file": "src/app/components/blueprint-hub/hub-footer/hub-footer.component.html",
-          "hash": "5606055470458385751"
+          "hash": "17442783180768349425"
         },
         {
           "file": "src/app/components/blueprint-hub/hub-footer/hub-footer.component.ts",
-          "hash": "10395892891595842870"
+          "hash": "13699909562375079647"
         },
         {
           "file": "src/app/components/blueprint-hub/hub-footer/scope-indicator.component.ts",
-          "hash": "7107877424977105331"
+          "hash": "16940462965904472701"
         },
         {
           "file": "src/app/components/blueprint-hub/hub-footer/tts-settings-popup.component.ts",
@@ -4432,7 +4432,7 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/graph-tab/entity-creator-dialog/entity-creator-dialog.component.ts",
-          "hash": "6637333968579370107"
+          "hash": "9676953989490531870"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-detail/connection-group/connection-group.component.ts",
@@ -4452,7 +4452,7 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/graph-tab/graph-tab.component.ts",
-          "hash": "50578707735162777"
+          "hash": "15131953324565875687"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/add-token-menu/add-token-menu.component.html",
@@ -4464,7 +4464,7 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/live-match-highlighter/live-match-highlighter.component.ts",
-          "hash": "8206742225531514214"
+          "hash": "486475708691982851"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/patterns-tab/pattern-builder/pattern-builder.component.html",
@@ -4496,19 +4496,19 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/patterns-tab/patterns-tab.component.html",
-          "hash": "17186248657345965259"
+          "hash": "15211603833653420648"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/patterns-tab/patterns-tab.component.ts",
           "hash": "1820308347052945162"
         },
         {
-          "file": "src/app/components/blueprint-hub/tabs/story-beats-tab/story-beats-tab.component.html",
-          "hash": "5681787373149023465"
+          "file": "src/app/components/blueprint-hub/tabs/plot-threads-tab/plot-threads-tab.component.html",
+          "hash": "9821423075758185560"
         },
         {
-          "file": "src/app/components/blueprint-hub/tabs/story-beats-tab/story-beats-tab.component.ts",
-          "hash": "14859072455300185833"
+          "file": "src/app/components/blueprint-hub/tabs/plot-threads-tab/plot-threads-tab.component.ts",
+          "hash": "1950641703677346634"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/theme-tab/highlighting-mode-toggle/highlighting-mode-toggle.component.css",
@@ -4536,7 +4536,7 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/cultures.component.ts",
-          "hash": "2272832877397109563"
+          "hash": "3252898262098462741"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/geography.component.ts",
@@ -4544,11 +4544,11 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/magic-system.component.ts",
-          "hash": "4403752778219631761"
+          "hash": "6495799441428254213"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/mystery.component.ts",
-          "hash": "5197999553514272176"
+          "hash": "958203149706193641"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/politics.component.ts",
@@ -4556,11 +4556,11 @@
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/religion.component.ts",
-          "hash": "8904595245458415143"
+          "hash": "829817791223042905"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/tabs/world-overview.component.ts",
-          "hash": "3624082906420315836"
+          "hash": "14444336721761477325"
         },
         {
           "file": "src/app/components/blueprint-hub/tabs/worldbuilding-tab/worldbuilding-tab.component.html",
@@ -4580,7 +4580,7 @@
         },
         {
           "file": "src/app/components/editor/editor.component.ts",
-          "hash": "13616144912813326077"
+          "hash": "4021322206559816114"
         },
         {
           "file": "src/app/components/editor/editor.css",
@@ -4593,6 +4593,14 @@
         {
           "file": "src/app/components/editor/editor.ts",
           "hash": "5191831092080241620"
+        },
+        {
+          "file": "src/app/components/editor/entity-mark-sanitizer.spec.ts",
+          "hash": "4970583498925890937"
+        },
+        {
+          "file": "src/app/components/editor/entity-mark-sanitizer.ts",
+          "hash": "4720704256205159143"
         },
         {
           "file": "src/app/components/editor/plugins/block-handle/block-handle.component.ts",
@@ -4621,6 +4629,10 @@
         {
           "file": "src/app/components/editor/plugins/details/index.ts",
           "hash": "6036119589346029769"
+        },
+        {
+          "file": "src/app/components/editor/plugins/keywordFocusPlugin.ts",
+          "hash": "16052114486771876927"
         },
         {
           "file": "src/app/components/editor/plugins/marks/entity.ts",
@@ -4659,12 +4671,20 @@
           "hash": "6441791350354445309"
         },
         {
+          "file": "src/app/components/editor/plugins/plain-text-clipboard.spec.ts",
+          "hash": "10492822192835842745"
+        },
+        {
+          "file": "src/app/components/editor/plugins/plain-text-clipboard.ts",
+          "hash": "17350696960198796916"
+        },
+        {
           "file": "src/app/components/editor/plugins/pretty-text-toolkit.ts",
           "hash": "14178668296931214653"
         },
         {
           "file": "src/app/components/editor/plugins/prettyTextPlugin.ts",
-          "hash": "12853152482946291232"
+          "hash": "12864067224586420787"
         },
         {
           "file": "src/app/components/editor/plugins/toolbar/color-picker.component.ts",
@@ -4680,7 +4700,7 @@
         },
         {
           "file": "src/app/components/editor/plugins/toolbar/toolbar.component.ts",
-          "hash": "16274673568669723901"
+          "hash": "15898807783865602739"
         },
         {
           "file": "src/app/components/fact-sheets/fact-sheet-card/fact-sheet-card.component.ts",
@@ -4692,7 +4712,7 @@
         },
         {
           "file": "src/app/components/fact-sheets/fact-sheet.service.ts",
-          "hash": "8105337411191260113"
+          "hash": "460161640411384324"
         },
         {
           "file": "src/app/components/fact-sheets/fields/dynamic-slider.component.ts",
@@ -4700,7 +4720,7 @@
         },
         {
           "file": "src/app/components/fact-sheets/fields/slider-manager.component.ts",
-          "hash": "14647225657819813643"
+          "hash": "4402732567625770695"
         },
         {
           "file": "src/app/components/fact-sheets/index.ts",
@@ -4720,7 +4740,7 @@
         },
         {
           "file": "src/app/components/fact-sheets/services/custom-slider.service.ts",
-          "hash": "7401285353415130239"
+          "hash": "5283289586115475255"
         },
         {
           "file": "src/app/components/fact-sheets/types.ts",
@@ -4732,7 +4752,7 @@
         },
         {
           "file": "src/app/components/fantasy-calendar/calendar-grid/calendar-grid.component.ts",
-          "hash": "10973542771773724475"
+          "hash": "3474520524589317388"
         },
         {
           "file": "src/app/components/fantasy-calendar/calendar-sidebar/calendar-sidebar.component.ts",
@@ -4752,11 +4772,15 @@
         },
         {
           "file": "src/app/components/fantasy-calendar/event-creator/event-creator.component.ts",
-          "hash": "5610493941048976557"
+          "hash": "7855856673297488440"
         },
         {
           "file": "src/app/components/fantasy-calendar/event-edit-dialog/event-edit-dialog.component.ts",
           "hash": "18345758803865920744"
+        },
+        {
+          "file": "src/app/components/fantasy-calendar/event-target-picker/event-target-picker.component.ts",
+          "hash": "10731346000886336791"
         },
         {
           "file": "src/app/components/fantasy-calendar/index.ts",
@@ -4764,7 +4788,7 @@
         },
         {
           "file": "src/app/components/fantasy-calendar/narrative-editor/narrative-editor.component.ts",
-          "hash": "11859576812606503431"
+          "hash": "6388720267178637952"
         },
         {
           "file": "src/app/components/fantasy-calendar/timeline-bar/timeline-bar.component.ts",
@@ -4799,8 +4823,12 @@
           "hash": "16874720484503553854"
         },
         {
+          "file": "src/app/components/graptor-module/graptor-module.component.ts",
+          "hash": "9747663660637026910"
+        },
+        {
           "file": "src/app/components/header/editor-tabs/editor-tabs.component.ts",
-          "hash": "2095909482102371118"
+          "hash": "12558848354872242639"
         },
         {
           "file": "src/app/components/header/header.component.css",
@@ -4851,6 +4879,14 @@
           "hash": "5272120533285662421"
         },
         {
+          "file": "src/app/components/memory-module/memory-module.component.spec.ts",
+          "hash": "3286975818366988161"
+        },
+        {
+          "file": "src/app/components/memory-module/memory-module.component.ts",
+          "hash": "10877892553112187947"
+        },
+        {
           "file": "src/app/components/raptor-eval/index.ts",
           "hash": "2644230613299932181"
         },
@@ -4859,8 +4895,12 @@
           "hash": "16079566874690132357"
         },
         {
+          "file": "src/app/components/raptor-module/raptor-module.component.ts",
+          "hash": "3140281624167665650"
+        },
+        {
           "file": "src/app/components/right-sidebar/ai-chat-panel/ai-chat-panel.component.ts",
-          "hash": "10766671882150253418"
+          "hash": "7713643592505459505"
         },
         {
           "file": "src/app/components/right-sidebar/ai-chat-panel/index.ts",
@@ -4868,27 +4908,47 @@
         },
         {
           "file": "src/app/components/right-sidebar/right-sidebar.component.ts",
-          "hash": "4689997681065595072"
+          "hash": "13166146877187005425"
+        },
+        {
+          "file": "src/app/components/right-sidebar/timeline-view/timeline-view.component.spec.ts",
+          "hash": "7689461807403909887"
         },
         {
           "file": "src/app/components/right-sidebar/timeline-view/timeline-view.component.ts",
-          "hash": "3004749936287137018"
+          "hash": "8453273515020526169"
+        },
+        {
+          "file": "src/app/components/search-panel/search-panel.component.css",
+          "hash": "8323521024511455670"
+        },
+        {
+          "file": "src/app/components/search-panel/search-panel.component.html",
+          "hash": "8900394159176363798"
         },
         {
           "file": "src/app/components/search-panel/search-panel.component.ts",
-          "hash": "6994852014766756325"
+          "hash": "17243256193576636391"
+        },
+        {
+          "file": "src/app/components/search-panel/search-panel.graptor.spec.ts",
+          "hash": "7093720975826097282"
+        },
+        {
+          "file": "src/app/components/search-panel/search-panel.graptor.ts",
+          "hash": "2933752106127535464"
         },
         {
           "file": "src/app/components/sidebar/file-tree/file-tree.component.ts",
-          "hash": "16346934243496303648"
+          "hash": "12567664619118977194"
         },
         {
           "file": "src/app/components/sidebar/file-tree/tree-node.component.ts",
-          "hash": "2393109195871380690"
+          "hash": "9110688615769360583"
         },
         {
           "file": "src/app/components/sidebar/ner-panel/ner-panel.component.ts",
-          "hash": "18199008427592204542"
+          "hash": "16507550642508083048"
         },
         {
           "file": "src/app/components/sidebar/ner-panel/suggestion-card/suggestion-card.component.ts",
@@ -4896,15 +4956,19 @@
         },
         {
           "file": "src/app/components/sidebar/sidebar.component.css",
-          "hash": "6403988062780127998"
+          "hash": "11398658065032044298"
         },
         {
           "file": "src/app/components/sidebar/sidebar.component.html",
-          "hash": "8701311623433503276"
+          "hash": "10159046246236660998"
+        },
+        {
+          "file": "src/app/components/sidebar/sidebar.component.spec.ts",
+          "hash": "8338824746828911228"
         },
         {
           "file": "src/app/components/sidebar/sidebar.component.ts",
-          "hash": "16203681894567738072"
+          "hash": "4298369985406579889"
         },
         {
           "file": "src/app/lib/Scanner/DeltaScanner.ts",
@@ -4923,12 +4987,44 @@
           "hash": "7094289687378151153"
         },
         {
+          "file": "src/app/lib/Scanner/discovery-scanner.ts",
+          "hash": "16778059396882331718"
+        },
+        {
+          "file": "src/app/lib/Scanner/graph-scanner.ts",
+          "hash": "2264959635387998307"
+        },
+        {
+          "file": "src/app/lib/Scanner/highlight-scanner.ts",
+          "hash": "17980500849362680397"
+        },
+        {
           "file": "src/app/lib/Scanner/index.ts",
-          "hash": "7008182710664034399"
+          "hash": "17246367575895712644"
+        },
+        {
+          "file": "src/app/lib/Scanner/keyword-focus.spec.ts",
+          "hash": "14299174836541409688"
+        },
+        {
+          "file": "src/app/lib/Scanner/keyword-focus.ts",
+          "hash": "13877424833360253858"
         },
         {
           "file": "src/app/lib/Scanner/pattern-scanner.ts",
           "hash": "13029362390035941189"
+        },
+        {
+          "file": "src/app/lib/Scanner/prosemirror-bridge.spec.ts",
+          "hash": "13638994572195662704"
+        },
+        {
+          "file": "src/app/lib/Scanner/prosemirror-bridge.ts",
+          "hash": "1643057626124664026"
+        },
+        {
+          "file": "src/app/lib/Scanner/scan-pipeline.ts",
+          "hash": "2656147970528368161"
         },
         {
           "file": "src/app/lib/Scanner/scanCoordinatorInstance.ts",
@@ -4936,11 +5032,11 @@
         },
         {
           "file": "src/app/lib/Scanner/styles.ts",
-          "hash": "824338363248099450"
+          "hash": "8555674976755268952"
         },
         {
           "file": "src/app/lib/Scanner/types.ts",
-          "hash": "12571108650756355020"
+          "hash": "1608925866274833258"
         },
         {
           "file": "src/app/lib/analytics/index.ts",
@@ -4948,7 +5044,7 @@
         },
         {
           "file": "src/app/lib/analytics/text-analytics.ts",
-          "hash": "7365270801411024457"
+          "hash": "11635029382596505652"
         },
         {
           "file": "src/app/lib/arborist/flatten.ts",
@@ -4963,14 +5059,6 @@
           "hash": "14056701852745667447"
         },
         {
-          "file": "src/app/lib/bridge/DataSyncService.ts",
-          "hash": "11122553157368803126"
-        },
-        {
-          "file": "src/app/lib/bridge/index.ts",
-          "hash": "17231453959082221913"
-        },
-        {
           "file": "src/app/lib/constants/fonts.ts",
           "hash": "273108317440795974"
         },
@@ -4979,16 +5067,16 @@
           "hash": "16717039921519094720"
         },
         {
-          "file": "src/app/lib/core/app-orchestrator.ts",
-          "hash": "520288734138991692"
+          "file": "src/app/lib/core/app-orchestrator.spec.ts",
+          "hash": "7615687671792454157"
         },
         {
-          "file": "src/app/lib/core/boot-cache.ts",
-          "hash": "3325242994256287150"
+          "file": "src/app/lib/core/app-orchestrator.ts",
+          "hash": "9271305837443613658"
         },
         {
           "file": "src/app/lib/dexie/db.ts",
-          "hash": "15283639826310385201"
+          "hash": "10252397159322616275"
         },
         {
           "file": "src/app/lib/dexie/decorations.ts",
@@ -5000,11 +5088,11 @@
         },
         {
           "file": "src/app/lib/dexie/notes.service.ts",
-          "hash": "2272407542261341979"
+          "hash": "13055272742908769257"
         },
         {
           "file": "src/app/lib/dexie/settings.service.ts",
-          "hash": "8456792229254773396"
+          "hash": "4466508434140215123"
         },
         {
           "file": "src/app/lib/embeddings/EmbeddingEngine.ts",
@@ -5124,47 +5212,7 @@
         },
         {
           "file": "src/app/lib/operations.ts",
-          "hash": "4998034548143526555"
-        },
-        {
-          "file": "src/app/lib/opfs/BlobStore.test.ts",
-          "hash": "13626996072504241121"
-        },
-        {
-          "file": "src/app/lib/opfs/BlobStore.ts",
-          "hash": "18062948722985835412"
-        },
-        {
-          "file": "src/app/lib/opfs/GoOpfsSyncService.ts",
-          "hash": "9252871897235637123"
-        },
-        {
-          "file": "src/app/lib/opfs/GraphObjectStore.test.ts",
-          "hash": "3097646829379409205"
-        },
-        {
-          "file": "src/app/lib/opfs/GraphObjectStore.ts",
-          "hash": "178371778143894491"
-        },
-        {
-          "file": "src/app/lib/opfs/README.md",
-          "hash": "16825267909595704079"
-        },
-        {
-          "file": "src/app/lib/opfs/RealOpfsBackend.ts",
-          "hash": "17025233295629633855"
-        },
-        {
-          "file": "src/app/lib/opfs/Wal.ts",
-          "hash": "12152287681841995534"
-        },
-        {
-          "file": "src/app/lib/opfs/index.ts",
-          "hash": "6258226363933500315"
-        },
-        {
-          "file": "src/app/lib/opfs/schema.ts",
-          "hash": "8821305179492870196"
+          "hash": "17050394335781766819"
         },
         {
           "file": "src/app/lib/rag/clustering.ts",
@@ -5195,52 +5243,12 @@
           "hash": "11195427919732800018"
         },
         {
+          "file": "src/app/lib/registry.spec.ts",
+          "hash": "186554269744041932"
+        },
+        {
           "file": "src/app/lib/registry.ts",
-          "hash": "833891983311732322"
-        },
-        {
-          "file": "src/app/lib/rlm/index.ts",
-          "hash": "10913162033652997069"
-        },
-        {
-          "file": "src/app/lib/rlm/schema/workspace-schema.ts",
-          "hash": "12615286395051316146"
-        },
-        {
-          "file": "src/app/lib/rlm/services/app-context-provider.service.spec.ts",
-          "hash": "9654863606085040859"
-        },
-        {
-          "file": "src/app/lib/rlm/services/app-context-provider.service.ts",
-          "hash": "15177192295268313680"
-        },
-        {
-          "file": "src/app/lib/rlm/services/app-context.ts",
-          "hash": "5749829566875164977"
-        },
-        {
-          "file": "src/app/lib/rlm/services/rlm-context.ts",
-          "hash": "15916201689338398200"
-        },
-        {
-          "file": "src/app/lib/rlm/services/rlm-llm.service.spec.ts",
-          "hash": "16490073948410191588"
-        },
-        {
-          "file": "src/app/lib/rlm/services/rlm-llm.service.ts",
-          "hash": "10898933073435509398"
-        },
-        {
-          "file": "src/app/lib/rlm/services/rlm-orchestrator.service.ts",
-          "hash": "1358992550907504471"
-        },
-        {
-          "file": "src/app/lib/rlm/validators/query-validator.spec.ts",
-          "hash": "17861331251614908398"
-        },
-        {
-          "file": "src/app/lib/rlm/validators/query-validator.ts",
-          "hash": "4930579210585463741"
+          "hash": "12432371092078623729"
         },
         {
           "file": "src/app/lib/schemas/entity-fact-sheet-schemas.ts",
@@ -5248,15 +5256,35 @@
         },
         {
           "file": "src/app/lib/services/app-state.service.ts",
-          "hash": "6596560933706648495"
+          "hash": "18087579190451027601"
+        },
+        {
+          "file": "src/app/lib/services/calendar-note-snapshot.service.spec.ts",
+          "hash": "14933382829345692880"
+        },
+        {
+          "file": "src/app/lib/services/calendar-note-snapshot.service.ts",
+          "hash": "1911484103913743032"
         },
         {
           "file": "src/app/lib/services/chapter.service.ts",
           "hash": "2082488098108626657"
         },
         {
+          "file": "src/app/lib/services/chat-tool-host.service.ts",
+          "hash": "768164423117219058"
+        },
+        {
           "file": "src/app/lib/services/codex.service.ts",
-          "hash": "16651242552192170043"
+          "hash": "5745368207570791553"
+        },
+        {
+          "file": "src/app/lib/services/document-ingestion.service.ts",
+          "hash": "4858792216797721128"
+        },
+        {
+          "file": "src/app/lib/services/editor-agent-workspace.service.ts",
+          "hash": "15487850977923464889"
         },
         {
           "file": "src/app/lib/services/embedding-queue.service.ts",
@@ -5268,35 +5296,35 @@
         },
         {
           "file": "src/app/lib/services/folder.service.ts",
-          "hash": "11106004678351430966"
+          "hash": "10868517885324183702"
         },
         {
           "file": "src/app/lib/services/go-chat.service.ts",
-          "hash": "9263829416283433660"
+          "hash": "5893633879120111714"
         },
         {
           "file": "src/app/lib/services/google-genai.service.ts",
           "hash": "11963898795112598257"
         },
         {
+          "file": "src/app/lib/services/kammi-chat-ui.service.ts",
+          "hash": "10009159185535829418"
+        },
+        {
           "file": "src/app/lib/services/llm-batch.service.ts",
-          "hash": "5825060897872896274"
+          "hash": "13660285085119642170"
         },
         {
           "file": "src/app/lib/services/llm-entity-extractor.service.ts",
-          "hash": "16716230322685772990"
+          "hash": "8919667545249527184"
         },
         {
           "file": "src/app/lib/services/llm-relation-extractor.service.ts",
-          "hash": "8133447289182622182"
+          "hash": "8366132937429326716"
         },
         {
           "file": "src/app/lib/services/network.service.ts",
           "hash": "13220829838977629050"
-        },
-        {
-          "file": "src/app/lib/services/openrouter.service.ts",
-          "hash": "8525648055847187029"
         },
         {
           "file": "src/app/lib/services/projection-cache.service.ts",
@@ -5308,15 +5336,35 @@
         },
         {
           "file": "src/app/lib/services/reorder.service.ts",
-          "hash": "5472555345510491957"
+          "hash": "5542384782702946449"
+        },
+        {
+          "file": "src/app/lib/services/right-sidebar.service.spec.ts",
+          "hash": "5024691567256644525"
         },
         {
           "file": "src/app/lib/services/right-sidebar.service.ts",
-          "hash": "3686177337557313923"
+          "hash": "3753177764096478459"
         },
         {
           "file": "src/app/lib/services/scope.service.ts",
-          "hash": "4704676684966673998"
+          "hash": "11338926359099840338"
+        },
+        {
+          "file": "src/app/lib/services/scoped-document.service.ts",
+          "hash": "12387823317517497559"
+        },
+        {
+          "file": "src/app/lib/services/scoped-entity-field.service.ts",
+          "hash": "3655350687667610207"
+        },
+        {
+          "file": "src/app/lib/services/scoped-timeline-event-store.service.spec.ts",
+          "hash": "7138985355338034228"
+        },
+        {
+          "file": "src/app/lib/services/scoped-timeline-event-store.service.ts",
+          "hash": "17991299651617883757"
         },
         {
           "file": "src/app/lib/services/semantic-search.service.ts",
@@ -5336,27 +5384,35 @@
         },
         {
           "file": "src/app/lib/services/world-building.service.ts",
-          "hash": "5017906046983127486"
+          "hash": "15397338294737686152"
         },
         {
           "file": "src/app/lib/sqlite/persistence/SqlitePersistenceService.ts",
-          "hash": "4708775865278259975"
+          "hash": "18170671278305185338"
         },
         {
           "file": "src/app/lib/sqlite/persistence/sqlite-opfs-core.ts",
-          "hash": "2428173756358213706"
+          "hash": "9713868386104534419"
         },
         {
           "file": "src/app/lib/sqlite/persistence/sqlite-opfs.worker.ts",
-          "hash": "9174981280357952832"
+          "hash": "1006173373140975306"
         },
         {
-          "file": "src/app/lib/storage/cozoBootCache.ts",
-          "hash": "11356559138399312107"
+          "file": "src/app/lib/store/analyticsHighlightStore.spec.ts",
+          "hash": "605890354167511889"
+        },
+        {
+          "file": "src/app/lib/store/analyticsHighlightStore.ts",
+          "hash": "12778502396597519035"
+        },
+        {
+          "file": "src/app/lib/store/chat-context-clip.store.ts",
+          "hash": "7639082241176090887"
         },
         {
           "file": "src/app/lib/store/discoveryStore.ts",
-          "hash": "16219773743360188776"
+          "hash": "17104405579432696428"
         },
         {
           "file": "src/app/lib/store/entityColorStore.ts",
@@ -5367,12 +5423,28 @@
           "hash": "441606687034918589"
         },
         {
+          "file": "src/app/lib/store/keywordHighlightStore.spec.ts",
+          "hash": "11027130386067946420"
+        },
+        {
+          "file": "src/app/lib/store/keywordHighlightStore.ts",
+          "hash": "10383543124126393147"
+        },
+        {
           "file": "src/app/lib/store/note-editor.store.ts",
-          "hash": "6218100826593450342"
+          "hash": "1845425471370288713"
+        },
+        {
+          "file": "src/app/lib/store/searchHighlightStore.spec.ts",
+          "hash": "17258691968439683431"
+        },
+        {
+          "file": "src/app/lib/store/searchHighlightStore.ts",
+          "hash": "14780333495378053088"
         },
         {
           "file": "src/app/lib/store/tab.store.ts",
-          "hash": "998407735427652271"
+          "hash": "5065497627990948489"
         },
         {
           "file": "src/app/lib/types/entity.ts",
@@ -5387,60 +5459,112 @@
           "hash": "12328749525451393246"
         },
         {
+          "file": "src/app/pages/ai-chat/ai-chat-page.component.ts",
+          "hash": "16851342134507256500"
+        },
+        {
           "file": "src/app/pages/fantasy-calendar/fantasy-calendar-page.component.ts",
           "hash": "1204035903476130290"
         },
         {
+          "file": "src/app/pages/graph/graph-page.component.spec.ts",
+          "hash": "1785923773840790325"
+        },
+        {
           "file": "src/app/pages/graph/graph-page.component.ts",
-          "hash": "11534372721250227821"
+          "hash": "18251563755948662745"
+        },
+        {
+          "file": "src/app/pages/playground/playground-page.component.ts",
+          "hash": "9944429763557917526"
+        },
+        {
+          "file": "src/app/services/calendar.service.spec.ts",
+          "hash": "6946194397238578958"
         },
         {
           "file": "src/app/services/calendar.service.ts",
-          "hash": "12640177053336166856"
+          "hash": "8301873080843953517"
+        },
+        {
+          "file": "src/app/services/editor.service.spec.ts",
+          "hash": "2005826512591188849"
         },
         {
           "file": "src/app/services/editor.service.ts",
-          "hash": "9736753396223510438"
+          "hash": "8043091418251884290"
+        },
+        {
+          "file": "src/app/services/footer-stats.service.spec.ts",
+          "hash": "14251976197790866096"
         },
         {
           "file": "src/app/services/footer-stats.service.ts",
-          "hash": "5195084838422587927"
+          "hash": "16394741099213932600"
         },
         {
           "file": "src/app/services/gokitt-store.service.ts",
-          "hash": "2872599994663426903"
+          "hash": "18424956094075016551"
+        },
+        {
+          "file": "src/app/services/gokitt.service.spec.ts",
+          "hash": "5451287103305005752"
         },
         {
           "file": "src/app/services/gokitt.service.ts",
-          "hash": "4881272550085674921"
+          "hash": "9800855101880026690"
+        },
+        {
+          "file": "src/app/services/graph-pipeline.service.spec.ts",
+          "hash": "12653220031160345699"
+        },
+        {
+          "file": "src/app/services/graph-pipeline.service.ts",
+          "hash": "11966999657326829122"
+        },
+        {
+          "file": "src/app/services/graph-viz.service.spec.ts",
+          "hash": "6041446277225818859"
         },
         {
           "file": "src/app/services/graph-viz.service.ts",
-          "hash": "11373662160105154024"
+          "hash": "17876427495636383981"
         },
         {
           "file": "src/app/services/knowledge.service.ts",
-          "hash": "13944985352872163424"
+          "hash": "18183208249837449438"
+        },
+        {
+          "file": "src/app/services/ner.service.spec.ts",
+          "hash": "12323069196915447839"
         },
         {
           "file": "src/app/services/ner.service.ts",
-          "hash": "3324786087579094843"
-        },
-        {
-          "file": "src/app/services/orchestrator.service.spec.ts",
-          "hash": "12903329454857885097"
+          "hash": "11458574737093053833"
         },
         {
           "file": "src/app/services/orchestrator.service.ts",
-          "hash": "18228969827726019496"
+          "hash": "17096958115002751013"
+        },
+        {
+          "file": "src/app/services/playground-data.service.ts",
+          "hash": "11409032026405550136"
+        },
+        {
+          "file": "src/app/services/playground-log.service.ts",
+          "hash": "12001022039527683092"
         },
         {
           "file": "src/app/services/raptor-eval.service.ts",
           "hash": "14993105703569725694"
         },
         {
+          "file": "src/app/services/tts.service.spec.ts",
+          "hash": "597687816234717024"
+        },
+        {
           "file": "src/app/services/tts.service.ts",
-          "hash": "1141526118751191626"
+          "hash": "12247430634514278183"
         },
         {
           "file": "src/app/test/gokitt-graph-test.component.html",
@@ -5459,8 +5583,16 @@
           "hash": "2617678043214834746"
         },
         {
+          "file": "src/app/workers/gokitt-worker-compat.spec.ts",
+          "hash": "18017115639094153459"
+        },
+        {
+          "file": "src/app/workers/gokitt-worker-compat.ts",
+          "hash": "10851026261708166236"
+        },
+        {
           "file": "src/app/workers/gokitt.worker.ts",
-          "hash": "3686577423778546182"
+          "hash": "1878657943863872418"
         },
         {
           "file": "src/app/workers/rag.worker.ts",
@@ -5472,7 +5604,7 @@
         },
         {
           "file": "src/app/workers/tts.worker.ts",
-          "hash": "2465256250684072161"
+          "hash": "13292163049726758667"
         },
         {
           "file": "src/assets/cozo_lib_wasm_bg.wasm",
@@ -5720,11 +5852,7 @@
         },
         {
           "file": "src/assets/gokitt.wasm",
-          "hash": "10823818787496546994"
-        },
-        {
-          "file": "src/assets/wasm/gokitt.wasm",
-          "hash": "11124046784997353610"
+          "hash": "5883077503093568340"
         },
         {
           "file": "src/assets/wasm_exec.js",
@@ -5736,7 +5864,7 @@
         },
         {
           "file": "src/main.ts",
-          "hash": "13498211040569957818"
+          "hash": "17950577665113623534"
         },
         {
           "file": "src/styles.css",
@@ -5749,6 +5877,10 @@
         {
           "file": "tailwind.config.js",
           "hash": "14214376874232382716"
+        },
+        {
+          "file": "test_json.go",
+          "hash": "12490165797336228105"
         },
         {
           "file": "tsconfig.app.json",
@@ -5770,5 +5902,5 @@
     },
     "nonProjectFiles": []
   },
-  "externalNodesHash": "12966491871548248436"
+  "externalNodesHash": "5422101184335909965"
 }

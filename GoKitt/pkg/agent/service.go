@@ -64,6 +64,20 @@ func NewService(b *batch.Service) *Service {
 	return &Service{batch: b}
 }
 
+// Chat performs a plain non-tool LLM completion.
+func (s *Service) Chat(ctx context.Context, userPrompt, systemPrompt string) (*CompletionResult, error) {
+	if s.batch == nil {
+		return nil, fmt.Errorf("agent: batch service not initialized")
+	}
+
+	content, err := s.batch.Complete(ctx, userPrompt, systemPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("agent: LLM call failed: %w", err)
+	}
+
+	return &CompletionResult{Content: &content}, nil
+}
+
 // ChatWithTools performs a non-streaming LLM call that may return tool_calls.
 // This replaces openrouter.service.ts chatWithTools().
 //

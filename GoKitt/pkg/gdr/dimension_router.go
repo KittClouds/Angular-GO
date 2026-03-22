@@ -1,4 +1,7 @@
-// Package gdr provides the Gate-Driven Retriever (GDR) combining lexical (qgram) and vector (HNSW) indexes.
+// Package gdr is legacy retrieval infrastructure.
+//
+// Deprecated: do not use this package for new chat or RLM work. The canonical
+// indexed-app retrieval path is the Graptor/full-system stack.
 package gdr
 
 import (

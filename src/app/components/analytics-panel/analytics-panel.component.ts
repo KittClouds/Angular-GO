@@ -253,7 +253,7 @@ interface AnalyticsSearchResult {
                         }
 
                         @if (activeAnalyticsView() === 'repetition') {
-                            @if (!analytics().repetition?.items?.length) {
+                            @if (!analytics().repetition.items.length) {
                                 <p class="text-xs text-muted-foreground italic py-2">No significant repetitions found.</p>
                             } @else {
                                 @for (item of analytics().repetition.items; track item.id) {
@@ -270,7 +270,7 @@ interface AnalyticsSearchResult {
                         }
 
                         @if (activeAnalyticsView() === 'proximity') {
-                            @if (!analytics().proximity?.items?.length) {
+                            @if (!analytics().proximity.items.length) {
                                 <p class="text-xs text-muted-foreground italic py-2">No proximity warnings found.</p>
                             } @else {
                                 @for (item of analytics().proximity.items; track item.id) {
@@ -293,7 +293,7 @@ interface AnalyticsSearchResult {
                         }
 
                         @if (activeAnalyticsView() === 'cadence') {
-                            @if (!analytics().cadence?.hotspots?.length) {
+                            @if (!analytics().cadence.hotspots.length) {
                                 <p class="text-xs text-muted-foreground italic py-2">No cadence hotspots detected.</p>
                             } @else {
                                 @for (hotspot of analytics().cadence.hotspots; track hotspot.id) {

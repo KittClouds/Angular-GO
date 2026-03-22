@@ -24,7 +24,7 @@ type plannerClient interface {
 	ChatWithTools(ctx context.Context, messages []agent.Message, tools []agent.ToolDefinition, systemPrompt string) (*agent.CompletionResult, error)
 }
 
-type blockSearchFunc func(ctx context.Context, query string, limit int) ([]store.EvidenceItem, error)
+type blockSearchFunc func(ctx context.Context, run *store.ChatRun, query string, limit int) ([]store.EvidenceItem, error)
 
 type SubmittedToolResult struct {
 	CallID     string              `json:"callId,omitempty"`
@@ -944,7 +944,7 @@ func (s *ChatService) execSearchBlocksGDR(ctx context.Context, run *store.ChatRu
 	}
 	query := stringArg(args, "query", run.UserPrompt)
 	limit := intArg(args, "limit", 5)
-	items, err := s.blockSearcher(ctx, query, limit)
+	items, err := s.blockSearcher(ctx, run, query, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -961,7 +961,7 @@ func (s *ChatService) execSearchBlocksGraptor(ctx context.Context, run *store.Ch
 	}
 	query := stringArg(args, "query", run.UserPrompt)
 	limit := intArg(args, "limit", 5)
-	items, err := searcher(ctx, query, limit)
+	items, err := searcher(ctx, run, query, limit)
 	if err != nil {
 		return "", nil, err
 	}

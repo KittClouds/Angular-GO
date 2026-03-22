@@ -14,7 +14,6 @@ import { PlaygroundDataService } from '../../services/playground-data.service';
 import { RaptorModuleComponent } from '../../components/raptor-module/raptor-module.component';
 import { GraptorModuleComponent } from '../../components/graptor-module/graptor-module.component';
 import { MemoryModuleComponent } from '../../components/memory-module/memory-module.component';
-import { RlmModuleComponent } from '../../components/rlm-module/rlm-module.component';
 
 const DOC_URL = '/docs/shortrun.md';
 
@@ -23,7 +22,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
   { label: '🔵 RAPTOR', value: 'raptor' },
   { label: '🟢 Graptor', value: 'graptor' },
   { label: '🟣 Memory/OM', value: 'memory' },
-  { label: '🟠 RLM', value: 'rlm' },
   { label: '⚙️  System', value: 'system' },
 ];
 
@@ -39,7 +37,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     RaptorModuleComponent,
     GraptorModuleComponent,
     MemoryModuleComponent,
-    RlmModuleComponent,
   ],
   template: `
     <div class="playground-root">
@@ -104,10 +101,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
               <span class="tab-dot memory-dot"></span>
               Memory / OM
             </p-tab>
-            <p-tab value="rlm">
-              <span class="tab-dot rlm-dot"></span>
-              RLM Workspace
-            </p-tab>
           </p-tablist>
 
           <p-tabpanels>
@@ -119,9 +112,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
             </p-tabpanel>
             <p-tabpanel value="memory">
               <app-memory-module></app-memory-module>
-            </p-tabpanel>
-            <p-tabpanel value="rlm">
-              <app-rlm-module></app-rlm-module>
             </p-tabpanel>
           </p-tabpanels>
         </p-tabs>
@@ -230,7 +220,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     .raptor-dot  { background: #60a5fa; }
     .graptor-dot { background: #34d399; }
     .memory-dot  { background: #c084fc; }
-    .rlm-dot     { background: #fb923c; }
 
     /* Shared stat pill (used in all modules via global) */
     :host ::ng-deep .module-stats .stat-pill {

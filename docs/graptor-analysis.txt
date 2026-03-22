@@ -4,34 +4,6 @@ GRAPTOR DETAILED ANALYSIS
 ENTITIES BY CHAPTER:
 ----------------------------------------
 
-Chapter 1 (7 entities):
-  - Ryan [Person] (gender: unknown)
-  - New Rome [Location] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-  - Wyvern [Person] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-  - Ghoul [Person] (gender: unknown)
-
-Chapter 2 (7 entities):
-  - Ryan [Person] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - New Rome [Location] (gender: unknown)
-  - Ghoul [Person] (gender: unknown)
-  - Wyvern [Person] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-
-Chapter 3 (8 entities):
-  - Ryan [Person] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - New Rome [Location] (gender: unknown)
-  - Zanbato [Person] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-  - Wyvern [Person] (gender: unknown)
-  - Ghoul [Person] (gender: unknown)
-
 Chapter 5 (6 entities):
   - Ryan [Person] (gender: unknown)
   - Ghoul [Person] (gender: unknown)
@@ -49,35 +21,6 @@ Chapter 6 (7 entities):
   - Meta-Gang [Organization] (gender: unknown)
   - Zanbato [Person] (gender: unknown)
 
-Chapter 9 (8 entities):
-  - Ghoul [Person] (gender: unknown)
-  - Ryan [Person] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-  - Wyvern [Person] (gender: unknown)
-  - Zanbato [Person] (gender: unknown)
-  - New Rome [Location] (gender: unknown)
-
-Chapter 10 (8 entities):
-  - Ryan [Person] (gender: unknown)
-  - Zanbato [Person] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-  - New Rome [Location] (gender: unknown)
-  - Wyvern [Person] (gender: unknown)
-  - Lanka [Unknown] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-
-Chapter 4 (7 entities):
-  - Ryan [Person] (gender: unknown)
-  - Zanbato [Person] (gender: unknown)
-  - Meta-Gang [Organization] (gender: unknown)
-  - Luigi [Unknown] (gender: unknown)
-  - Len [Person] (gender: unknown)
-  - Ghoul [Person] (gender: unknown)
-  - Augusti [Organization] (gender: unknown)
-
 Chapter 7 (8 entities):
   - Ryan [Person] (gender: unknown)
   - New Rome [Location] (gender: unknown)
@@ -93,71 +36,72 @@ Chapter 8 (3 entities):
   - Ryan [Person] (gender: unknown)
   - Meta-Gang [Organization] (gender: unknown)
 
+Chapter 10 (8 entities):
+  - Ryan [Person] (gender: unknown)
+  - Zanbato [Person] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+  - New Rome [Location] (gender: unknown)
+  - Wyvern [Person] (gender: unknown)
+  - Lanka [Unknown] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+
+Chapter 1 (7 entities):
+  - Ryan [Person] (gender: unknown)
+  - New Rome [Location] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+  - Wyvern [Person] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+  - Ghoul [Person] (gender: unknown)
+
+Chapter 3 (8 entities):
+  - Ryan [Person] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - New Rome [Location] (gender: unknown)
+  - Zanbato [Person] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+  - Wyvern [Person] (gender: unknown)
+  - Ghoul [Person] (gender: unknown)
+
+Chapter 9 (8 entities):
+  - Ghoul [Person] (gender: unknown)
+  - Ryan [Person] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+  - Wyvern [Person] (gender: unknown)
+  - Zanbato [Person] (gender: unknown)
+  - New Rome [Location] (gender: unknown)
+
+Chapter 2 (7 entities):
+  - Ryan [Person] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - New Rome [Location] (gender: unknown)
+  - Ghoul [Person] (gender: unknown)
+  - Wyvern [Person] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+
+Chapter 4 (7 entities):
+  - Ryan [Person] (gender: unknown)
+  - Zanbato [Person] (gender: unknown)
+  - Meta-Gang [Organization] (gender: unknown)
+  - Luigi [Unknown] (gender: unknown)
+  - Len [Person] (gender: unknown)
+  - Ghoul [Person] (gender: unknown)
+  - Augusti [Organization] (gender: unknown)
+
 
 ALL ENTITIES:
 ----------------------------------------
-ID: char-wyvern
-  Name: Wyvern
-  Kind: Person, Gender: unknown
-  Chapters: [0 1 2 3 6 7 9 10]
-  Mentions: 38
-  Aliases: [Wyvern]
-
-ID: char-zanbato
-  Name: Zanbato
-  Kind: Person, Gender: unknown
-  Chapters: [0 3 4 5 6 7 9 10]
-  Mentions: 169
-  Aliases: [Zanbato Jamie Zan]
-
-ID: char-len
-  Name: Len
-  Kind: Person, Gender: unknown
-  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
-  Mentions: 113
-  Aliases: [Len Underdiver]
-
-ID: org-augusti
-  Name: Augusti
-  Kind: Organization, Gender: unknown
-  Chapters: [0 1 2 3 4 5 6 7 9 10]
-  Mentions: 30
-  Aliases: [Augusti]
-
-ID: char-ryan
-  Name: Ryan
-  Kind: Person, Gender: unknown
-  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
-  Mentions: 519
-  Aliases: [Ryan Quicksave Riri]
-
-ID: org-meta-gang
-  Name: Meta-Gang
-  Kind: Organization, Gender: unknown
-  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
-  Mentions: 49
-  Aliases: [Meta-Gang Meta Meta Meta Meta Meta Meta Meta Meta Meta Meta]
-
-ID: entity_Unknown_e2ecf61eec4e0be4
-  Name: Lanka
-  Kind: Unknown, Gender: unknown
-  Chapters: [10]
-  Mentions: 2
-  Aliases: [Lanka]
-
 ID: entity_Unknown_e6eaac4b854f3a5b
   Name: Luigi
   Kind: Unknown, Gender: unknown
   Chapters: [4]
   Mentions: 1
   Aliases: [Luigi]
-
-ID: loc-new-rome
-  Name: New Rome
-  Kind: Location, Gender: unknown
-  Chapters: [0 1 2 3 7 9 10]
-  Mentions: 22
-  Aliases: [New Rome]
 
 ID: char-ghoul
   Name: Ghoul
@@ -166,9 +110,115 @@ ID: char-ghoul
   Mentions: 58
   Aliases: [Ghoul]
 
+ID: org-meta-gang
+  Name: Meta-Gang
+  Kind: Organization, Gender: unknown
+  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
+  Mentions: 49
+  Aliases: [Meta-Gang Meta Meta Meta Meta Meta Meta Meta Meta Meta Meta]
+
+ID: char-zanbato
+  Name: Zanbato
+  Kind: Person, Gender: unknown
+  Chapters: [0 3 4 5 6 7 9 10]
+  Mentions: 169
+  Aliases: [Zanbato Jamie Zan]
+
+ID: org-augusti
+  Name: Augusti
+  Kind: Organization, Gender: unknown
+  Chapters: [0 1 2 3 4 5 6 7 9 10]
+  Mentions: 30
+  Aliases: [Augusti]
+
+ID: entity_Unknown_e2ecf61eec4e0be4
+  Name: Lanka
+  Kind: Unknown, Gender: unknown
+  Chapters: [10]
+  Mentions: 2
+  Aliases: [Lanka]
+
+ID: char-ryan
+  Name: Ryan
+  Kind: Person, Gender: unknown
+  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
+  Mentions: 519
+  Aliases: [Ryan Quicksave Riri]
+
+ID: char-wyvern
+  Name: Wyvern
+  Kind: Person, Gender: unknown
+  Chapters: [0 1 2 3 6 7 9 10]
+  Mentions: 38
+  Aliases: [Wyvern]
+
+ID: char-len
+  Name: Len
+  Kind: Person, Gender: unknown
+  Chapters: [0 1 2 3 4 5 6 7 8 9 10]
+  Mentions: 113
+  Aliases: [Len Underdiver]
+
+ID: loc-new-rome
+  Name: New Rome
+  Kind: Location, Gender: unknown
+  Chapters: [0 1 2 3 7 9 10]
+  Mentions: 22
+  Aliases: [New Rome]
+
 
 CROSS-CHAPTER EDGES:
 ----------------------------------------
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch0→ch1, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 0 and 1
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch1→ch2, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 1 and 2
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch2→ch3, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 2 and 3
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch3→ch4, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 3 and 4
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch4→ch5, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 4 and 5
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch5→ch6, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 5 and 6
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch6→ch7, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 6 and 7
+  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch7→ch9, conf=1.00)
+    Evidence: Entity 'Ghoul' appears in chapters 7 and 9
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch0→ch1, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 0 and 1
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch1→ch2, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 1 and 2
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch2→ch3, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 2 and 3
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch3→ch4, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 3 and 4
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch4→ch5, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 4 and 5
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch5→ch6, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 5 and 6
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch6→ch7, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 6 and 7
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch7→ch8, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 7 and 8
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch8→ch9, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 8 and 9
+  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch9→ch10, conf=1.00)
+    Evidence: Entity 'Meta-Gang' appears in chapters 9 and 10
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch0→ch3, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 0 and 3
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch3→ch4, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 3 and 4
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch4→ch5, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 4 and 5
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch5→ch6, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 5 and 6
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch6→ch7, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 6 and 7
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch7→ch9, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 7 and 9
+  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch9→ch10, conf=1.00)
+    Evidence: Entity 'Zanbato' appears in chapters 9 and 10
   [org-augusti] --[SAME_AS]--> [org-augusti] (ch0→ch1, conf=1.00)
     Evidence: Entity 'Augusti' appears in chapters 0 and 1
   [org-augusti] --[SAME_AS]--> [org-augusti] (ch1→ch2, conf=1.00)
@@ -207,54 +257,6 @@ CROSS-CHAPTER EDGES:
     Evidence: Entity 'Ryan' appears in chapters 8 and 9
   [char-ryan] --[SAME_AS]--> [char-ryan] (ch9→ch10, conf=1.00)
     Evidence: Entity 'Ryan' appears in chapters 9 and 10
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch0→ch1, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 0 and 1
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch1→ch2, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 1 and 2
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch2→ch3, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 2 and 3
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch3→ch4, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 3 and 4
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch4→ch5, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 4 and 5
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch5→ch6, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 5 and 6
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch6→ch7, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 6 and 7
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch7→ch8, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 7 and 8
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch8→ch9, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 8 and 9
-  [org-meta-gan] --[SAME_AS]--> [org-meta-gan] (ch9→ch10, conf=1.00)
-    Evidence: Entity 'Meta-Gang' appears in chapters 9 and 10
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch0→ch1, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 0 and 1
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch1→ch2, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 1 and 2
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch2→ch3, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 2 and 3
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch3→ch7, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 3 and 7
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch7→ch9, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 7 and 9
-  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch9→ch10, conf=1.00)
-    Evidence: Entity 'New Rome' appears in chapters 9 and 10
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch0→ch1, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 0 and 1
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch1→ch2, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 1 and 2
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch2→ch3, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 2 and 3
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch3→ch4, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 3 and 4
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch4→ch5, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 4 and 5
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch5→ch6, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 5 and 6
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch6→ch7, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 6 and 7
-  [char-ghoul] --[SAME_AS]--> [char-ghoul] (ch7→ch9, conf=1.00)
-    Evidence: Entity 'Ghoul' appears in chapters 7 and 9
   [char-wyvern] --[SAME_AS]--> [char-wyvern] (ch0→ch1, conf=1.00)
     Evidence: Entity 'Wyvern' appears in chapters 0 and 1
   [char-wyvern] --[SAME_AS]--> [char-wyvern] (ch1→ch2, conf=1.00)
@@ -269,20 +271,6 @@ CROSS-CHAPTER EDGES:
     Evidence: Entity 'Wyvern' appears in chapters 7 and 9
   [char-wyvern] --[SAME_AS]--> [char-wyvern] (ch9→ch10, conf=1.00)
     Evidence: Entity 'Wyvern' appears in chapters 9 and 10
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch0→ch3, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 0 and 3
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch3→ch4, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 3 and 4
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch4→ch5, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 4 and 5
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch5→ch6, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 5 and 6
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch6→ch7, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 6 and 7
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch7→ch9, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 7 and 9
-  [char-zanbato] --[SAME_AS]--> [char-zanbato] (ch9→ch10, conf=1.00)
-    Evidence: Entity 'Zanbato' appears in chapters 9 and 10
   [char-len] --[SAME_AS]--> [char-len] (ch0→ch1, conf=1.00)
     Evidence: Entity 'Len' appears in chapters 0 and 1
   [char-len] --[SAME_AS]--> [char-len] (ch1→ch2, conf=1.00)
@@ -303,3 +291,15 @@ CROSS-CHAPTER EDGES:
     Evidence: Entity 'Len' appears in chapters 8 and 9
   [char-len] --[SAME_AS]--> [char-len] (ch9→ch10, conf=1.00)
     Evidence: Entity 'Len' appears in chapters 9 and 10
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch0→ch1, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 0 and 1
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch1→ch2, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 1 and 2
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch2→ch3, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 2 and 3
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch3→ch7, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 3 and 7
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch7→ch9, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 7 and 9
+  [loc-new-rome] --[SAME_AS]--> [loc-new-rome] (ch9→ch10, conf=1.00)
+    Evidence: Entity 'New Rome' appears in chapters 9 and 10

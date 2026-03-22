@@ -48,6 +48,9 @@ type EntityMatch struct {
 // ChunkResult is the cycle-safe GLDR chunk result shape.
 type ChunkResult struct {
 	ChunkID         string        `json:"chunkId"`
+	DocumentID      string        `json:"documentId,omitempty"`
+	NoteID          string        `json:"noteId,omitempty"`
+	Text            string        `json:"text,omitempty"`
 	ChunkScore      float64       `json:"chunkScore"`
 	LexScore        float64       `json:"lexScore"`
 	GraphScore      float64       `json:"graphScore"`

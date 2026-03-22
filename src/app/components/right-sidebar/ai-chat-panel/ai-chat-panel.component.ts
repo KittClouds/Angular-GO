@@ -28,7 +28,6 @@ import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
 import { ChatToolHostService } from '../../../lib/services/chat-tool-host.service';
-import type { ActivationResult } from '../../../lib/rlm';
 
 interface SessionInfo {
     id: string;
@@ -1850,71 +1849,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         this.finishActivityStep(stepId, event.status, event.detail);
     }
 
-    private mapActivationToActivity(
-        indexStepId: string,
-        activation: ActivationResult | null,
-        contextBlock: string
-    ): void {
-        if (!activation) {
-            this.finishActivityStep(indexStepId, 'done', contextBlock ? 'Relevant note context was found.' : 'Workspace check complete.');
-            return;
-        }
-
-        if (activation.error) {
-            this.finishActivityStep(indexStepId, 'error', activation.error);
-            return;
-        }
-
-        if (!activation.triggered) {
-            this.finishActivityStep(indexStepId, 'done', activation.miss_reason || 'No extra note context was needed.');
-            return;
-        }
-
-        const summary = activation.summary
-            || activation.miss_reason
-            || (contextBlock ? 'Relevant note context was injected.' : 'Context was injected from index mode.');
-
-        this.finishActivityStep(indexStepId, 'done', summary);
-
-        for (const call of activation.tool_calls || []) {
-            this.addCompletedStep(
-                'tool',
-                `Tool: ${this.prettyToolName(call.tool)}` ,
-                call.ok ? 'Completed successfully.' : (call.error || 'Tool failed.'),
-                call.ok ? 'done' : 'error',
-                call.lat_ms
-            );
-        }
-    }
-
-    private buildThinkingSummary(
-        contextBlock: string,
-        highlightedCount: number,
-        activation: ActivationResult | null
-    ): string {
-        const parts: string[] = [];
-
-        if (contextBlock || activation?.triggered) {
-            parts.push('used note context');
-        }
-
-        if (highlightedCount > 0) {
-            parts.push(highlightedCount === 1 ? 'included highlighted text' : `included ${highlightedCount} highlighted passages`);
-        }
-
-        const toolCount = activation?.tool_calls?.length ?? 0;
-        if (toolCount > 0) {
-            parts.push(toolCount === 1 ? 'ran 1 tool' : `ran ${toolCount} tools`);
-        }
-
-        if (parts.length === 0) {
-            return 'Ready to answer.';
-        }
-
-        const sentence = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-        return parts.length === 1 ? `${sentence}.` : `${sentence} and ${parts.slice(1).join(' and ')}.`;
-    }
-
     private syncActivityTrace(): void {
         const id = this.currentTraceMsgId;
         if (!id) return;
@@ -1935,14 +1869,6 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         }
 
         return steps.some((step) => step.status === 'error') ? 'Completed with issues' : 'Done';
-    }
-
-    private prettyToolName(name: string): string {
-        return name
-            .replace(/[_-]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .replace(/\b\w/g, (m) => m.toUpperCase());
     }
 
     private escapeHtml(value: string): string {

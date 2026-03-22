@@ -208,21 +208,6 @@ func (s *ChatService) GetOMRecord(threadID string) (*store.OMRecord, error) {
 	return s.store.GetOMRecord(threadID)
 }
 
-// ProcessWithWorkspace runs the OM loop and, if a miss signal fires, activates the
-// workspace to resurface lost context from notes/episodes/blocks.
-//
-// scopeID is typically the thread's NarrativeID (world scope for episode search).
-// userPrompt is the latest user message that triggered the call.
-//
-// Returns a JSON-serializable result describing whether workspace activated,
-// what tools were called, and the new observation that was injected.
-func (s *ChatService) ProcessWithWorkspace(ctx context.Context, threadID, scopeID, userPrompt string) (*memory.ActivationResult, error) {
-	if s.observer == nil {
-		return &memory.ActivationResult{Triggered: false}, nil
-	}
-	return s.observer.ProcessWithWorkspace(ctx, threadID, scopeID, userPrompt)
-}
-
 // =============================================================================
 // Export
 // =============================================================================
