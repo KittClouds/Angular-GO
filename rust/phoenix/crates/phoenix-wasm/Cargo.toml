@@ -1,0 +1,21 @@
+[package]
+name = "phoenix-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+phoenix-runtime = { path = "../phoenix-runtime" }
+phoenix-types = { path = "../phoenix-types" }
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+opfs-project = "0.2"
+js-sys = "0.3"
+tokio-fs-ext = "0.7"
+wasm-bindgen-futures = "0.4"
