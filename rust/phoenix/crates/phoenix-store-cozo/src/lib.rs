@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use cozo;
 use phoenix_types::{RelationCount, SnapshotDto, StorageMode};
@@ -133,7 +132,11 @@ impl PhoenixCozoStore {
         let script = build_fetch_script(spec);
         let rows = self
             .db
-            .run_script(&script, Default::default(), cozo::ScriptMutability::Immutable)
+            .run_script(
+                &script,
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
             .map_err(|error| StoreError::Query(error.to_string()))?;
         Ok(named_rows_to_json_objects(rows))
     }
@@ -199,8 +202,8 @@ impl PhoenixCozoStore {
     }
 
     pub fn import_snapshot(&self, bytes: &[u8]) -> Result<SnapshotEnvelope, StoreError> {
-        let envelope: SnapshotEnvelope =
-            serde_json::from_slice(bytes).map_err(|error| StoreError::Snapshot(error.to_string()))?;
+        let envelope: SnapshotEnvelope = serde_json::from_slice(bytes)
+            .map_err(|error| StoreError::Snapshot(error.to_string()))?;
         self.clear_all_relations()?;
 
         for (relation, rows) in &envelope.relations {
@@ -252,11 +255,17 @@ fn build_create_relation_script(spec: &PhoenixRelationSpec) -> String {
     if values.is_empty() {
         format!(":create {} {{\n    {}\n}}", spec.name, keys)
     } else {
-        format!(":create {} {{\n    {}\n    =>\n    {}\n}}", spec.name, keys, values)
+        format!(
+            ":create {} {{\n    {}\n    =>\n    {}\n}}",
+            spec.name, keys, values
+        )
     }
 }
 
-fn build_put_script(spec: &PhoenixRelationSpec, row: &Map<String, Value>) -> Result<String, StoreError> {
+fn build_put_script(
+    spec: &PhoenixRelationSpec,
+    row: &Map<String, Value>,
+) -> Result<String, StoreError> {
     let column_names = spec
         .columns
         .iter()
@@ -267,7 +276,10 @@ fn build_put_script(spec: &PhoenixRelationSpec, row: &Map<String, Value>) -> Res
         .iter()
         .map(|column| row_literal(spec, column, row))
         .collect::<Result<Vec<_>, _>>()?;
-    let keys = spec.key_columns().map(|column| column.name).collect::<Vec<_>>();
+    let keys = spec
+        .key_columns()
+        .map(|column| column.name)
+        .collect::<Vec<_>>();
     let values = spec
         .value_columns()
         .map(|column| column.name)
@@ -308,7 +320,10 @@ fn build_clear_script(spec: &PhoenixRelationSpec) -> String {
         .map(|column| column.name)
         .collect::<Vec<_>>()
         .join(", ");
-    format!("?[{keys}] := *{}{{{keys}}} :rm {}{{{keys}}}", spec.name, spec.name)
+    format!(
+        "?[{keys}] := *{}{{{keys}}} :rm {}{{{keys}}}",
+        spec.name, spec.name
+    )
 }
 
 fn column_declaration(column: &PhoenixColumnSpec) -> String {
@@ -391,10 +406,18 @@ fn relation_already_exists(message: &str) -> bool {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_millis() as i64
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as i64
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as i64
+    }
 }
 
 #[cfg(test)]
@@ -455,7 +478,9 @@ mod tests {
         let snapshot = store.export_snapshot().expect("snapshot bytes");
 
         let restored = PhoenixCozoStore::new().expect("restored store");
-        restored.import_snapshot(&snapshot).expect("import snapshot");
+        restored
+            .import_snapshot(&snapshot)
+            .expect("import snapshot");
 
         let rows = restored.fetch_rows("notes").expect("restored notes");
         assert_eq!(rows.len(), 1);

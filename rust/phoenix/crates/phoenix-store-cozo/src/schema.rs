@@ -28,12 +28,7 @@ pub struct PhoenixColumnSpec {
 }
 
 impl PhoenixColumnSpec {
-    pub const fn new(
-        name: &'static str,
-        ty: PhoenixColumnType,
-        optional: bool,
-        key: bool,
-    ) -> Self {
+    pub const fn new(name: &'static str, ty: PhoenixColumnType, optional: bool, key: bool) -> Self {
         Self {
             name,
             ty,
@@ -267,13 +262,33 @@ const CHAT_RUNS: &[PhoenixColumnSpec] = &[
     col("options_json", PhoenixColumnType::Json, false, false),
     col("capabilities_json", PhoenixColumnType::Json, false, false),
     col("prepared_context", PhoenixColumnType::String, false, false),
-    col("prepared_system_prompt", PhoenixColumnType::String, false, false),
-    col("planner_messages_json", PhoenixColumnType::Json, false, false),
+    col(
+        "prepared_system_prompt",
+        PhoenixColumnType::String,
+        false,
+        false,
+    ),
+    col(
+        "planner_messages_json",
+        PhoenixColumnType::Json,
+        false,
+        false,
+    ),
     col("evidence_json", PhoenixColumnType::Json, false, false),
-    col("missing_capabilities_json", PhoenixColumnType::Json, false, false),
+    col(
+        "missing_capabilities_json",
+        PhoenixColumnType::Json,
+        false,
+        false,
+    ),
     col("error", PhoenixColumnType::String, false, false),
     col("final_response", PhoenixColumnType::String, false, false),
-    col("assistant_message_id", PhoenixColumnType::String, false, false),
+    col(
+        "assistant_message_id",
+        PhoenixColumnType::String,
+        false,
+        false,
+    ),
     col("deadline_at", PhoenixColumnType::Int, false, false),
     col("completed_at", PhoenixColumnType::Int, false, false),
     col("created_at", PhoenixColumnType::Int, false, false),
@@ -425,7 +440,12 @@ const WORMHOLES: &[PhoenixColumnSpec] = &[
 const SPAN_MENTIONS: &[PhoenixColumnSpec] = &[
     col("id", PhoenixColumnType::String, false, true),
     col("span_id", PhoenixColumnType::String, true, false),
-    col("candidate_entity_id", PhoenixColumnType::String, true, false),
+    col(
+        "candidate_entity_id",
+        PhoenixColumnType::String,
+        true,
+        false,
+    ),
     col("match_type", PhoenixColumnType::String, true, false),
     col("confidence", PhoenixColumnType::Float, true, false),
     col("ev_frequency", PhoenixColumnType::Float, true, false),
@@ -505,7 +525,12 @@ const FOLDER_SCHEMAS: &[PhoenixColumnSpec] = &[
     col("allowed_note_types", PhoenixColumnType::Json, true, false),
     col("is_vault_root", PhoenixColumnType::Bool, true, false),
     col("container_only", PhoenixColumnType::Bool, true, false),
-    col("propagate_kind_to_children", PhoenixColumnType::Bool, true, false),
+    col(
+        "propagate_kind_to_children",
+        PhoenixColumnType::Bool,
+        true,
+        false,
+    ),
     col("icon", PhoenixColumnType::String, true, false),
     col("is_system", PhoenixColumnType::Bool, true, false),
     col("created_at", PhoenixColumnType::Int, true, false),
@@ -519,7 +544,12 @@ const SCOPED_DOCUMENTS: &[PhoenixColumnSpec] = &[
     col("namespace", PhoenixColumnType::String, false, false),
     col("document_key", PhoenixColumnType::String, false, false),
     col("payload", PhoenixColumnType::Json, false, false),
-    col("seeded_from_scope_folder_id", PhoenixColumnType::String, true, false),
+    col(
+        "seeded_from_scope_folder_id",
+        PhoenixColumnType::String,
+        true,
+        false,
+    ),
     col("created_at", PhoenixColumnType::Int, false, false),
     col("updated_at", PhoenixColumnType::Int, false, false),
 ];
@@ -531,7 +561,12 @@ const SCOPED_ENTITY_FIELDS: &[PhoenixColumnSpec] = &[
     col("narrative_id", PhoenixColumnType::String, false, false),
     col("field_key", PhoenixColumnType::String, false, false),
     col("value_json", PhoenixColumnType::Json, false, false),
-    col("seeded_from_scope_folder_id", PhoenixColumnType::String, true, false),
+    col(
+        "seeded_from_scope_folder_id",
+        PhoenixColumnType::String,
+        true,
+        false,
+    ),
     col("created_at", PhoenixColumnType::Int, false, false),
     col("updated_at", PhoenixColumnType::Int, false, false),
 ];

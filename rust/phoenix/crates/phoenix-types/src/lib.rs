@@ -1,4 +1,10 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+mod binary;
+
+pub use binary::*;
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -30,6 +36,37 @@ string_id!(SessionId);
 string_id!(ThreadId);
 string_id!(CommitId);
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EntityKind {
+    Character,
+    Location,
+    Npc,
+    Item,
+    Faction,
+    Organization,
+    Event,
+    Concept,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GenderHint {
+    Unknown,
+    Male,
+    Female,
+    Neutral,
+    Plural,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NumberHint {
+    Singular,
+    Plural,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScopeKey {
@@ -58,7 +95,7 @@ pub struct TemporalMarker {
     pub ordinal: Option<i64>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextRange {
     pub start: u32,
@@ -157,8 +194,77 @@ pub struct IngestResult {
     pub session_id: Option<SessionId>,
     pub document_count: usize,
     pub warning_count: usize,
+    pub documents: Vec<IngestDocumentSummary>,
+    pub chunk_stats: Option<ChunkStats>,
+    pub graph_summary: Option<GraphSummary>,
+    pub entity_summary: Option<EntitySummary>,
+    pub discovery_summary: Option<DiscoverySummary>,
+    pub retrieval_summary: Option<RetrievalSummary>,
     pub relation_counts: Vec<RelationCount>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestDocumentSummary {
+    pub document_id: DocumentId,
+    pub note_id: Option<NoteId>,
+    pub chapter_count: usize,
+    pub parent_count: usize,
+    pub leaf_count: usize,
+    pub entity_count: usize,
+    pub edge_count: usize,
+    pub has_front_matter_chapter: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkStats {
+    pub documents: usize,
+    pub total_chapters: usize,
+    pub total_parents: usize,
+    pub total_leaves: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphSummary {
+    pub documents: usize,
+    pub total_chapters: usize,
+    pub total_leaves: usize,
+    pub total_entities: usize,
+    pub total_mentions: usize,
+    pub total_edges: usize,
+    pub cross_chapter_links: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitySummary {
+    pub total_entities: usize,
+    pub total_aliases: usize,
+    pub total_mentions: usize,
+    pub multi_chapter_entities: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverySummary {
+    pub candidate_count: usize,
+    pub mention_count: usize,
+    pub persisted_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalSummary {
+    pub qgram_documents: usize,
+    pub gldr_chunks: usize,
+    pub gldr_entities: usize,
+    pub gldr_edges: usize,
+    pub raptor_documents: usize,
+    pub raptor_leaves: usize,
+    pub raptor_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,11 +326,499 @@ pub struct QueryResult {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GraphDeltaRequest {
+    pub session_id: SessionId,
+    pub scope: ScopeKey,
+    pub changed_documents: Vec<DocumentId>,
+    pub limit: Option<usize>,
+    pub since_commit: Option<CommitId>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphDeltaChunk {
+    pub vertex_id: String,
+    pub chunk_id: String,
+    pub document_id: DocumentId,
+    pub note_id: Option<NoteId>,
+    pub chapter_id: u32,
+    pub range: TextRange,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphDeltaNode {
+    pub node_id: String,
+    pub kind: String,
+    pub label: String,
+    pub entity_id: Option<EntityId>,
+    pub document_id: Option<DocumentId>,
+    pub chapter_id: Option<u32>,
+    pub weight: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphDeltaEdge {
+    pub source_id: String,
+    pub target_id: String,
+    pub edge_type: String,
+    pub weight: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphDeltaResult {
+    pub session_id: SessionId,
+    pub chunks: Vec<GraphDeltaChunk>,
+    pub nodes: Vec<GraphDeltaNode>,
+    pub edges: Vec<GraphDeltaEdge>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LexicalField {
+    Title,
+    Body,
+    Tags,
+    Summary,
+    Other,
+}
+
+impl Default for LexicalField {
+    fn default() -> Self {
+        Self::Body
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexedTextField {
+    pub field: LexicalField,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexedSpan {
+    pub span_id: String,
+    pub note_id: Option<NoteId>,
+    pub document_id: Option<DocumentId>,
+    pub scope: ScopeKey,
+    pub fields: Vec<IndexedTextField>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImplicitMatchHit {
+    pub range: TextRange,
+    pub surface: String,
+    pub label: String,
+    pub kind: Option<EntityKind>,
+    pub resolved_entity_id: Option<EntityId>,
+    pub candidate_entity_ids: Vec<EntityId>,
+    pub candidate_labels: Vec<String>,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpanHit {
+    pub span_id: String,
+    pub note_id: Option<NoteId>,
+    pub document_id: Option<DocumentId>,
+    pub score: f64,
+    pub coverage: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LexicalSearchResult {
+    pub span_hits: Vec<SpanHit>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotDto {
     pub schema_version: String,
     pub created_at: i64,
     pub payload_bytes: usize,
     pub relation_counts: Vec<RelationCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LexiconSurfaceSource {
+    Canonical,
+    Alias,
+    AutoAlias,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LexiconEntry {
+    pub entity_id: EntityId,
+    pub label: String,
+    pub aliases: Vec<String>,
+    pub kind: Option<EntityKind>,
+    pub gender: Option<GenderHint>,
+    pub number: Option<NumberHint>,
+    pub scope: ScopeKey,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KnownMatchSource {
+    ExactCanonical,
+    ExactAlias,
+    ExactAutoAlias,
+    FuzzyAnchor,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownMatch {
+    pub range: TextRange,
+    pub surface: String,
+    pub entries: Vec<LexiconEntry>,
+    pub source: Option<KnownMatchSource>,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LexiconStats {
+    pub entity_count: usize,
+    pub exact_surface_count: usize,
+    pub anchor_count: usize,
+    pub unique_token_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LexiconSnapshot {
+    pub version: u64,
+    pub compiled_at: i64,
+    pub fst_bytes: Vec<u8>,
+    pub entries: Vec<LexiconEntry>,
+    pub buckets: Vec<Vec<usize>>,
+    pub exact_surfaces: Vec<String>,
+    pub exact_surface_bucket_indices: Vec<usize>,
+    pub exact_surface_sources: Vec<LexiconSurfaceSource>,
+    pub unique_token_to_entry: BTreeMap<String, usize>,
+    pub anchor_to_entries: BTreeMap<String, Vec<usize>>,
+    pub entry_tokens: BTreeMap<String, Vec<String>>,
+    pub stats: LexiconStats,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FuzzyMode {
+    Off,
+    AnchorOnly,
+}
+
+impl Default for FuzzyMode {
+    fn default() -> Self {
+        Self::AnchorOnly
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NarrativeTransitivity {
+    Intransitive,
+    Transitive,
+    Ditransitive,
+}
+
+impl Default for NarrativeTransitivity {
+    fn default() -> Self {
+        Self::Transitive
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NarrativeRule {
+    pub lemma: String,
+    pub event_class: String,
+    pub relation_type: String,
+    pub transitivity: NarrativeTransitivity,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryThresholds {
+    pub min_occurrences: u32,
+    pub min_score: f32,
+    pub narrative_bonus: f32,
+    pub np_head_bonus: f32,
+    pub capitalized_bonus: f32,
+}
+
+impl Default for DiscoveryThresholds {
+    fn default() -> Self {
+        Self {
+            min_occurrences: 2,
+            min_score: 2.0,
+            narrative_bonus: 0.5,
+            np_head_bonus: 0.75,
+            capitalized_bonus: 0.5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannerConfig {
+    pub discovery_thresholds: DiscoveryThresholds,
+    pub fuzzy_mode: FuzzyMode,
+    pub stopword_profile: String,
+    pub alias_rules: Vec<String>,
+    pub narrative_overlay: Vec<NarrativeRule>,
+}
+
+impl Default for ScannerConfig {
+    fn default() -> Self {
+        Self {
+            discovery_thresholds: DiscoveryThresholds::default(),
+            fuzzy_mode: FuzzyMode::AnchorOnly,
+            stopword_profile: "default".to_owned(),
+            alias_rules: vec![
+                "parenthetical".to_owned(),
+                "aka".to_owned(),
+                "also_known_as".to_owned(),
+                "called".to_owned(),
+                "appositive".to_owned(),
+            ],
+            narrative_overlay: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolverEntitySeed {
+    pub entity_id: EntityId,
+    pub canonical_name: String,
+    pub aliases: Vec<String>,
+    pub kind: Option<EntityKind>,
+    pub gender: Option<GenderHint>,
+    pub number: Option<NumberHint>,
+    pub scope: ScopeKey,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanRequest {
+    pub text: String,
+    pub scope: ScopeKey,
+    pub session_id: Option<SessionId>,
+    pub resolver_seed: Vec<ResolverEntitySeed>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TokenClass {
+    Word,
+    Number,
+    Punctuation,
+    Symbol,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PosTag {
+    Noun,
+    Pronoun,
+    ProperNoun,
+    Verb,
+    Auxiliary,
+    Modal,
+    Adjective,
+    Adverb,
+    Determiner,
+    Preposition,
+    Conjunction,
+    RelativePronoun,
+    Punctuation,
+    Other,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenSpan {
+    pub range: TextRange,
+    pub token_class: Option<TokenClass>,
+    pub pos: Option<PosTag>,
+    pub masked: bool,
+    pub capitalized: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentenceSpan {
+    pub index: usize,
+    pub range: TextRange,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MentionSource {
+    Known,
+    Alias,
+    Fuzzy,
+    Discovery,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MentionEntityRef {
+    Known(EntityId),
+    Speculative(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionSpan {
+    pub range: TextRange,
+    pub surface: String,
+    pub kind: Option<EntityKind>,
+    pub entity_ref: Option<MentionEntityRef>,
+    pub source: Option<MentionSource>,
+    pub confidence: f32,
+    pub sentence_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChunkKind {
+    Np,
+    Vp,
+    Pp,
+    Clause,
+    AdjP,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkSpan {
+    pub kind: Option<ChunkKind>,
+    pub range: TextRange,
+    pub head: TextRange,
+    pub modifiers: Vec<TextRange>,
+    pub sentence_index: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NarrativeVerbHit {
+    pub range: TextRange,
+    pub lemma: String,
+    pub event_class: String,
+    pub relation_type: String,
+    pub transitivity: Option<NarrativeTransitivity>,
+    pub sentence_index: usize,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResolverLinkKind {
+    Pronoun,
+    AliasCandidate,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolverLink {
+    pub source_range: TextRange,
+    pub target_range: Option<TextRange>,
+    pub target_entity: Option<MentionEntityRef>,
+    pub link_kind: Option<ResolverLinkKind>,
+    pub confidence: f32,
+    pub sentence_index: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanArtifact {
+    pub sentences: Vec<SentenceSpan>,
+    pub tokens: Vec<TokenSpan>,
+    pub mentions: Vec<MentionSpan>,
+    pub chunks: Vec<ChunkSpan>,
+    pub resolver_links: Vec<ResolverLink>,
+    pub narrative_hits: Vec<NarrativeVerbHit>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameSlot {
+    pub range: TextRange,
+    pub entity_ref: Option<MentionEntityRef>,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerbFrame {
+    pub verb_range: TextRange,
+    pub lemma: String,
+    pub event_class: String,
+    pub relation_type: String,
+    pub transitivity: Option<NarrativeTransitivity>,
+    pub subject_candidates: Vec<FrameSlot>,
+    pub object_candidates: Vec<FrameSlot>,
+    pub recipient_candidates: Vec<FrameSlot>,
+    pub pp_attachments: Vec<TextRange>,
+    pub clause_range: TextRange,
+    pub evidence: Vec<EvidenceSpan>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationCandidate {
+    pub sentence_index: usize,
+    pub verb_range: TextRange,
+    pub lemma: String,
+    pub event_class: String,
+    pub relation_type: String,
+    pub subject: Option<FrameSlot>,
+    pub object: Option<FrameSlot>,
+    pub recipient: Option<FrameSlot>,
+    pub attachments: Vec<TextRange>,
+    pub evidence: Vec<EvidenceSpan>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentenceFrame {
+    pub sentence: SentenceSpan,
+    pub mentions: Vec<MentionSpan>,
+    pub chunks: Vec<ChunkSpan>,
+    pub verb_frames: Vec<VerbFrame>,
+    pub clause_ranges: Vec<TextRange>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureRequest {
+    pub text: String,
+    pub scan: ScanArtifact,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureArtifact {
+    pub sentence_frames: Vec<SentenceFrame>,
+    pub relations: Vec<RelationCandidate>,
+    pub evidence_spans: Vec<EvidenceSpan>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +841,16 @@ pub enum PacketKind {
     SnapshotExportRequest = 14,
     SnapshotResult = 15,
     SnapshotImportRequest = 16,
+    ScanRequest = 17,
+    ScanResult = 18,
+    StructureRequest = 19,
+    StructureResult = 20,
+    GraphDeltaRequest = 21,
+    GraphDeltaResult = 22,
+    SessionStateRequest = 23,
+    SessionStateResult = 24,
+    SessionStatsRequest = 25,
+    SessionStatsResult = 26,
     Ack = 255,
 }
 
@@ -275,6 +879,16 @@ impl From<u32> for PacketKind {
             14 => Self::SnapshotExportRequest,
             15 => Self::SnapshotResult,
             16 => Self::SnapshotImportRequest,
+            17 => Self::ScanRequest,
+            18 => Self::ScanResult,
+            19 => Self::StructureRequest,
+            20 => Self::StructureResult,
+            21 => Self::GraphDeltaRequest,
+            22 => Self::GraphDeltaResult,
+            23 => Self::SessionStateRequest,
+            24 => Self::SessionStateResult,
+            25 => Self::SessionStatsRequest,
+            26 => Self::SessionStatsResult,
             255 => Self::Ack,
             _ => Self::None,
         }
@@ -317,6 +931,58 @@ pub struct SessionRecord {
     pub revision: u64,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDocumentState {
+    pub document_id: DocumentId,
+    pub note_id: Option<NoteId>,
+    pub chapter_count: usize,
+    pub chapter_titles: Vec<String>,
+    pub parent_count: usize,
+    pub leaf_count: usize,
+    pub entity_count: usize,
+    pub discovery_count: usize,
+    pub has_front_matter_chapter: bool,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionState {
+    pub session_id: SessionId,
+    pub documents: Vec<SessionDocumentState>,
+    pub manifest_namespaces: Vec<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStats {
+    pub session_id: SessionId,
+    pub document_count: usize,
+    pub chapter_count: usize,
+    pub parent_count: usize,
+    pub leaf_count: usize,
+    pub entity_count: usize,
+    pub discovery_candidate_count: usize,
+    pub graph_vertex_count: usize,
+    pub graph_edge_count: usize,
+    pub span_count: usize,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStateRequest {
+    pub session_id: SessionId,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStatsRequest {
+    pub session_id: SessionId,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,5 +1085,24 @@ mod tests {
 
         assert!(json.contains("snapshotPolicy"));
         assert!(json.contains("featureFlags"));
+    }
+
+    #[test]
+    fn scan_artifact_serializes_camel_case() {
+        let artifact = ScanArtifact::default();
+        let json = serde_json::to_string(&artifact).expect("serialize scan artifact");
+
+        assert!(json.contains("resolverLinks"));
+        assert!(json.contains("narrativeHits"));
+    }
+
+    #[test]
+    fn packet_kind_round_trip_for_new_binary_kinds() {
+        assert_eq!(PacketKind::from(21), PacketKind::GraphDeltaRequest);
+        assert_eq!(PacketKind::from(22), PacketKind::GraphDeltaResult);
+        assert_eq!(PacketKind::from(23), PacketKind::SessionStateRequest);
+        assert_eq!(PacketKind::from(24), PacketKind::SessionStateResult);
+        assert_eq!(PacketKind::from(25), PacketKind::SessionStatsRequest);
+        assert_eq!(PacketKind::from(26), PacketKind::SessionStatsResult);
     }
 }

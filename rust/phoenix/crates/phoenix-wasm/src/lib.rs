@@ -1,19 +1,20 @@
 use std::cell::RefCell;
 
 use phoenix_runtime::PhoenixRuntime;
+#[cfg(target_arch = "wasm32")]
+use phoenix_types::SnapshotPolicy;
 use phoenix_types::{
-    CommitRequest, CreateSessionRequest, Diagnostic, IngestRequest, PacketHeader, PacketKind,
-    QueryRequest, RebuildRequest, RuntimeInitRequest,
+    CommitRequest, CreateSessionRequest, Diagnostic, GraphDeltaRequest, IngestRequest,
+    PacketHeader, PacketKind, QueryRequest, RebuildRequest, RuntimeInitRequest, ScanRequest,
+    SessionStateRequest, SessionStatsRequest, StructureRequest,
 };
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
-#[cfg(target_arch = "wasm32")]
-use phoenix_types::SnapshotPolicy;
 
 #[cfg(target_arch = "wasm32")]
 mod opfs;
 
-pub const PHOENIX_PROTOCOL_VERSION: u32 = 2;
+pub const PHOENIX_PROTOCOL_VERSION: u32 = 3;
 pub const DEFAULT_PACKET_REGION_SIZE: usize = 64 * 1024;
 
 thread_local! {
@@ -87,9 +88,7 @@ pub fn packet_header_size() -> usize {
 
 #[cfg(target_arch = "wasm32")]
 fn opfs_status_json() -> String {
-    OPFS_STATUS.with(|cell| {
-        serde_json::to_string(&*cell.borrow()).expect("serialize opfs status")
-    })
+    OPFS_STATUS.with(|cell| serde_json::to_string(&*cell.borrow()).expect("serialize opfs status"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -125,17 +124,21 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
 
     match header.packet_kind() {
         PacketKind::InitRuntimeRequest => {
-            let request: RuntimeInitRequest = decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
-            let runtime = PhoenixRuntime::open(
-                request.config.clone(),
-                request.storage_path.map(Into::into),
-            )
-            .map_err(|error| error.to_string())?;
+            let request: RuntimeInitRequest =
+                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let runtime =
+                PhoenixRuntime::open(request.config.clone(), request.storage_path.map(Into::into))
+                    .map_err(|error| error.to_string())?;
             let result = runtime.init().map_err(|error| error.to_string())?;
             RUNTIME.with(|cell| {
                 *cell.borrow_mut() = Some(runtime);
             });
-            write_json_response(buffer, PacketKind::InitRuntimeResult, header.request_id, &result)
+            write_json_response(
+                buffer,
+                PacketKind::InitRuntimeResult,
+                header.request_id,
+                &result,
+            )
         }
         PacketKind::CreateSessionRequest => with_runtime(|runtime| {
             let request: CreateSessionRequest =
@@ -143,11 +146,15 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
             let result = runtime
                 .create_session(request)
                 .map_err(|error| error.to_string())?;
-            write_json_response(buffer, PacketKind::CreateSessionResult, header.request_id, &result)
+            write_json_response(
+                buffer,
+                PacketKind::CreateSessionResult,
+                header.request_id,
+                &result,
+            )
         }),
         PacketKind::CommitRequest => with_runtime(|runtime| {
-            let request: CommitRequest =
-                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let request: CommitRequest = decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
             let result = runtime.commit(request).map_err(|error| error.to_string())?;
             write_json_response(buffer, PacketKind::CommitResult, header.request_id, &result)?;
             #[cfg(target_arch = "wasm32")]
@@ -159,17 +166,21 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
         PacketKind::RebuildRequest => with_runtime(|runtime| {
             let request: RebuildRequest =
                 decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
-            let result = runtime.rebuild(request).map_err(|error| error.to_string())?;
-            write_json_response(buffer, PacketKind::RebuildResult, header.request_id, &result)
+            let result = runtime
+                .rebuild(request)
+                .map_err(|error| error.to_string())?;
+            write_json_response(
+                buffer,
+                PacketKind::RebuildResult,
+                header.request_id,
+                &result,
+            )
         }),
         PacketKind::IngestRequest => with_runtime(|runtime| {
-            let request: IngestRequest =
-                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let request: IngestRequest = decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
             #[cfg(target_arch = "wasm32")]
             let should_auto_save = request.commit;
-            let result = runtime
-                .ingest_stub(request)
-                .map_err(|error| error.to_string())?;
+            let result = runtime.ingest(request).map_err(|error| error.to_string())?;
             write_json_response(buffer, PacketKind::IngestResult, header.request_id, &result)?;
             #[cfg(target_arch = "wasm32")]
             if should_auto_save && should_auto_save_on_commit() {
@@ -178,14 +189,77 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
             Ok(())
         }),
         PacketKind::QueryRequest => with_runtime(|runtime| {
-            let request: QueryRequest =
+            let request: QueryRequest = decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime
+                .query_binary(request)
+                .map_err(|error| error.to_string())?;
+            write_binary_response(buffer, PacketKind::QueryResult, header.request_id, &result)
+        }),
+        PacketKind::ScanRequest => with_runtime(|runtime| {
+            let request: ScanRequest = decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime.scan_text(request);
+            write_json_response(buffer, PacketKind::ScanResult, header.request_id, &result)
+        }),
+        PacketKind::StructureRequest => with_runtime(|runtime| {
+            let request: StructureRequest =
                 decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
-            let result = runtime.query_stub(request).map_err(|error| error.to_string())?;
-            write_json_response(buffer, PacketKind::QueryResult, header.request_id, &result)
+            let result = runtime.build_structure(request);
+            write_json_response(
+                buffer,
+                PacketKind::StructureResult,
+                header.request_id,
+                &result,
+            )
+        }),
+        PacketKind::GraphDeltaRequest => with_runtime(|runtime| {
+            let request: GraphDeltaRequest =
+                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime
+                .graph_delta_binary(request)
+                .map_err(|error| error.to_string())?;
+            write_binary_response(
+                buffer,
+                PacketKind::GraphDeltaResult,
+                header.request_id,
+                &result,
+            )
+        }),
+        PacketKind::SessionStateRequest => with_runtime(|runtime| {
+            let request: SessionStateRequest =
+                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime
+                .session_state_binary(&request.session_id)
+                .map_err(|error| error.to_string())?;
+            write_binary_response(
+                buffer,
+                PacketKind::SessionStateResult,
+                header.request_id,
+                &result,
+            )
+        }),
+        PacketKind::SessionStatsRequest => with_runtime(|runtime| {
+            let request: SessionStatsRequest =
+                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime
+                .session_stats_binary(&request.session_id)
+                .map_err(|error| error.to_string())?;
+            write_binary_response(
+                buffer,
+                PacketKind::SessionStatsResult,
+                header.request_id,
+                &result,
+            )
         }),
         PacketKind::SnapshotExportRequest => with_runtime(|runtime| {
-            let bytes = runtime.export_snapshot().map_err(|error| error.to_string())?;
-            write_binary_response(buffer, PacketKind::SnapshotResult, header.request_id, &bytes)
+            let bytes = runtime
+                .export_snapshot()
+                .map_err(|error| error.to_string())?;
+            write_binary_response(
+                buffer,
+                PacketKind::SnapshotResult,
+                header.request_id,
+                &bytes,
+            )
         }),
         PacketKind::SnapshotImportRequest => with_runtime(|runtime| {
             let snapshot_len = header.payload_len as usize;
@@ -193,7 +267,12 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
                 .import_snapshot(&buffer[PacketHeader::BYTE_LEN..payload_end])
                 .map_err(|error| error.to_string())?;
             let descriptor = runtime.snapshot_descriptor(envelope.created_at, snapshot_len);
-            write_json_response(buffer, PacketKind::SnapshotResult, header.request_id, &descriptor)
+            write_json_response(
+                buffer,
+                PacketKind::SnapshotResult,
+                header.request_id,
+                &descriptor,
+            )
         }),
         kind => write_error_response(
             buffer,
@@ -208,7 +287,9 @@ fn with_runtime<T>(
 ) -> Result<T, String> {
     RUNTIME.with(|cell| {
         let borrow = cell.borrow();
-        let runtime = borrow.as_ref().ok_or_else(|| "runtime not initialized".to_owned())?;
+        let runtime = borrow
+            .as_ref()
+            .ok_or_else(|| "runtime not initialized".to_owned())?;
         operation(runtime)
     })
 }
@@ -306,7 +387,9 @@ pub extern "C" fn phoenix_process_packet_at(offset: usize, capacity: usize) -> i
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn phoenix_opfs_save_snapshot() -> i32 {
-    let snapshot = match with_runtime(|runtime| runtime.export_snapshot().map_err(|error| error.to_string())) {
+    let snapshot = match with_runtime(|runtime| {
+        runtime.export_snapshot().map_err(|error| error.to_string())
+    }) {
         Ok(bytes) => bytes,
         Err(error) => {
             set_opfs_status(OpfsStatus::failed("save", &error));
@@ -314,7 +397,10 @@ pub extern "C" fn phoenix_opfs_save_snapshot() -> i32 {
         }
     };
 
-    set_opfs_status(OpfsStatus::pending("save", "Saving Phoenix snapshot to OPFS"));
+    set_opfs_status(OpfsStatus::pending(
+        "save",
+        "Saving Phoenix snapshot to OPFS",
+    ));
     wasm_bindgen_futures::spawn_local(async move {
         match opfs::save_snapshot(&snapshot).await {
             Ok(snapshot_bytes) => {
@@ -343,15 +429,21 @@ pub extern "C" fn phoenix_opfs_load_snapshot() -> i32 {
         return -1;
     }
 
-    set_opfs_status(OpfsStatus::pending("load", "Loading Phoenix snapshot from OPFS"));
+    set_opfs_status(OpfsStatus::pending(
+        "load",
+        "Loading Phoenix snapshot from OPFS",
+    ));
     wasm_bindgen_futures::spawn_local(async move {
         match opfs::load_snapshot().await {
             Ok(load) => match load.bytes {
                 Some(bytes) => {
                     let recovered_from_backup = load.recovered_from_backup;
                     let snapshot_bytes = bytes.len();
-                    let import_result =
-                        with_runtime(|runtime| runtime.import_snapshot(&bytes).map_err(|error| error.to_string()));
+                    let import_result = with_runtime(|runtime| {
+                        runtime
+                            .import_snapshot(&bytes)
+                            .map_err(|error| error.to_string())
+                    });
 
                     match import_result {
                         Ok(_) => {
@@ -393,7 +485,10 @@ pub extern "C" fn phoenix_opfs_load_snapshot() -> i32 {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn phoenix_opfs_clear_snapshot() -> i32 {
-    set_opfs_status(OpfsStatus::pending("clear", "Clearing Phoenix snapshot from OPFS"));
+    set_opfs_status(OpfsStatus::pending(
+        "clear",
+        "Clearing Phoenix snapshot from OPFS",
+    ));
     wasm_bindgen_futures::spawn_local(async move {
         match opfs::clear_snapshot().await {
             Ok(()) => {
@@ -435,8 +530,10 @@ pub extern "C" fn phoenix_opfs_write_status_at(offset: usize, capacity: usize) -
 mod tests {
     use super::*;
     use phoenix_types::{
-        CreateSessionRequest, DocumentId, QueryTarget, RuntimeConfig, RuntimeInitResult, ScopeKey,
-        SessionRecord, SnapshotDto,
+        CreateSessionRequest, DocumentId, GraphDeltaRequest, GraphDeltaResultHeader,
+        QueryResultHeader, QueryTarget, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScopeKey,
+        SessionRecord, SessionStateRequest, SessionStateResultHeader, SessionStatsRequest,
+        SessionStatsResultHeader, SnapshotDto, StructureArtifact, StructureRequest,
     };
 
     fn packet(kind: PacketKind, request_id: u32, payload: &[u8]) -> Vec<u8> {
@@ -450,6 +547,20 @@ mod tests {
 
     fn decode_header(buffer: &[u8]) -> PacketHeader {
         PacketHeader::from_le_bytes(buffer[..PacketHeader::BYTE_LEN].try_into().expect("header"))
+    }
+
+    fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("u32"))
+    }
+
+    fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+        u64::from_le_bytes(bytes[offset..offset + 8].try_into().expect("u64"))
+    }
+
+    fn read_utf8(bytes: &[u8], arena_offset: usize, string_offset: u32, string_len: u32) -> String {
+        let start = arena_offset + string_offset as usize;
+        let end = start + string_len as usize;
+        String::from_utf8(bytes[start..end].to_vec()).expect("utf8")
     }
 
     #[test]
@@ -471,7 +582,8 @@ mod tests {
         let init_header = decode_header(&init_packet);
         assert_eq!(init_header.packet_kind(), PacketKind::InitRuntimeResult);
         let init_result: RuntimeInitResult = serde_json::from_slice(
-            &init_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + init_header.payload_len as usize],
+            &init_packet
+                [PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + init_header.payload_len as usize],
         )
         .expect("init result");
         assert!(init_result.ready);
@@ -486,7 +598,10 @@ mod tests {
         process_packet_buffer(&mut session_packet).expect("session packet");
 
         let session_header = decode_header(&session_packet);
-        assert_eq!(session_header.packet_kind(), PacketKind::CreateSessionResult);
+        assert_eq!(
+            session_header.packet_kind(),
+            PacketKind::CreateSessionResult
+        );
         let session: SessionRecord = serde_json::from_slice(
             &session_packet[PacketHeader::BYTE_LEN
                 ..PacketHeader::BYTE_LEN + session_header.payload_len as usize],
@@ -548,21 +663,32 @@ mod tests {
         let mut query_packet = packet(PacketKind::QueryRequest, 4, &query_payload);
         process_packet_buffer(&mut query_packet).expect("query packet");
         let query_header = decode_header(&query_packet);
-        let query: phoenix_types::QueryResult = serde_json::from_slice(
-            &query_packet[PacketHeader::BYTE_LEN
-                ..PacketHeader::BYTE_LEN + query_header.payload_len as usize],
-        )
-        .expect("query result");
-        assert_eq!(query.chunk_hits.len(), 1);
+        assert_eq!(query_header.packet_kind(), PacketKind::QueryResult);
+        let query_payload =
+            &query_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + query_header.payload_len as usize];
+        assert!(query_payload.len() >= QueryResultHeader::BYTE_LEN);
+        let chunk_count = read_u32(query_payload, 20);
+        let arena_offset = read_u32(query_payload, 48) as usize;
+        let session_offset = read_u32(query_payload, 8);
+        let session_len = read_u32(query_payload, 12);
+        let first_chunk_id = read_utf8(
+            query_payload,
+            arena_offset,
+            read_u32(query_payload, QueryResultHeader::BYTE_LEN),
+            read_u32(query_payload, QueryResultHeader::BYTE_LEN + 4),
+        );
+        assert_eq!(chunk_count, 1);
+        assert!(read_utf8(query_payload, arena_offset, session_offset, session_len).starts_with("session-"));
+        assert!(first_chunk_id.starts_with("packet-doc:"));
 
         let mut export_packet = packet(PacketKind::SnapshotExportRequest, 5, &[]);
         process_packet_buffer(&mut export_packet).expect("snapshot export");
         let export_header = decode_header(&export_packet);
         assert_eq!(export_header.packet_kind(), PacketKind::SnapshotResult);
 
-        let snapshot_bytes =
-            export_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + export_header.payload_len as usize]
-                .to_vec();
+        let snapshot_bytes = export_packet
+            [PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + export_header.payload_len as usize]
+            .to_vec();
         let mut import_packet = packet(PacketKind::SnapshotImportRequest, 6, &snapshot_bytes);
         process_packet_buffer(&mut import_packet).expect("snapshot import");
         let import_header = decode_header(&import_packet);
@@ -572,5 +698,155 @@ mod tests {
         )
         .expect("snapshot descriptor");
         assert_eq!(snapshot_result.schema_version, "phoenix.cozo.v1");
+    }
+
+    #[test]
+    fn shared_memory_scan_and_structure_round_trip() {
+        let init_payload = serde_json::to_vec(&RuntimeInitRequest {
+            config: RuntimeConfig::default(),
+            storage_path: None,
+            force_reset: false,
+        })
+        .expect("init payload");
+        let mut init_packet = packet(PacketKind::InitRuntimeRequest, 1, &init_payload);
+        process_packet_buffer(&mut init_packet).expect("init packet");
+
+        let scan_payload = serde_json::to_vec(&ScanRequest {
+            text: "Luffy attacked Zoro.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("packet-scan".to_owned())),
+            resolver_seed: vec![
+                phoenix_types::ResolverEntitySeed {
+                    entity_id: phoenix_types::EntityId("luffy".to_owned()),
+                    canonical_name: "Luffy".to_owned(),
+                    aliases: Vec::new(),
+                    kind: Some(phoenix_types::EntityKind::Character),
+                    gender: Some(phoenix_types::GenderHint::Male),
+                    number: None,
+                    scope: ScopeKey::default(),
+                },
+                phoenix_types::ResolverEntitySeed {
+                    entity_id: phoenix_types::EntityId("zoro".to_owned()),
+                    canonical_name: "Zoro".to_owned(),
+                    aliases: Vec::new(),
+                    kind: Some(phoenix_types::EntityKind::Character),
+                    gender: Some(phoenix_types::GenderHint::Male),
+                    number: None,
+                    scope: ScopeKey::default(),
+                },
+            ],
+        })
+        .expect("scan payload");
+        let mut scan_packet = packet(PacketKind::ScanRequest, 2, &scan_payload);
+        process_packet_buffer(&mut scan_packet).expect("scan packet");
+        let scan_header = decode_header(&scan_packet);
+        let scan: ScanArtifact = serde_json::from_slice(
+            &scan_packet
+                [PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + scan_header.payload_len as usize],
+        )
+        .expect("scan result");
+        assert_eq!(scan.mentions.len(), 2);
+
+        let structure_payload = serde_json::to_vec(&StructureRequest {
+            text: "Luffy attacked Zoro.".to_owned(),
+            scan,
+        })
+        .expect("structure payload");
+        let mut structure_packet = packet(PacketKind::StructureRequest, 3, &structure_payload);
+        process_packet_buffer(&mut structure_packet).expect("structure packet");
+        let structure_header = decode_header(&structure_packet);
+        let structure: StructureArtifact = serde_json::from_slice(
+            &structure_packet[PacketHeader::BYTE_LEN
+                ..PacketHeader::BYTE_LEN + structure_header.payload_len as usize],
+        )
+        .expect("structure result");
+        assert_eq!(structure.sentence_frames.len(), 1);
+    }
+
+    #[test]
+    fn shared_memory_graph_delta_and_session_packets_are_binary() {
+        let init_payload = serde_json::to_vec(&RuntimeInitRequest {
+            config: RuntimeConfig::default(),
+            storage_path: None,
+            force_reset: false,
+        })
+        .expect("init payload");
+        let mut init_packet = packet(PacketKind::InitRuntimeRequest, 11, &init_payload);
+        process_packet_buffer(&mut init_packet).expect("init packet");
+
+        let session_payload = serde_json::to_vec(&CreateSessionRequest {
+            session_id: None,
+            label: "GraphState".to_owned(),
+            scope: ScopeKey::default(),
+        })
+        .expect("session payload");
+        let mut session_packet = packet(PacketKind::CreateSessionRequest, 12, &session_payload);
+        process_packet_buffer(&mut session_packet).expect("session packet");
+        let session_header = decode_header(&session_packet);
+        let session: SessionRecord = serde_json::from_slice(
+            &session_packet[PacketHeader::BYTE_LEN
+                ..PacketHeader::BYTE_LEN + session_header.payload_len as usize],
+        )
+        .expect("session result");
+
+        let ingest_payload = serde_json::to_vec(&IngestRequest {
+            session_id: Some(session.session_id.clone()),
+            documents: vec![phoenix_types::IngestDocument {
+                document_id: DocumentId("graph-doc".to_owned()),
+                note_id: None,
+                title: "Graph Packet".to_owned(),
+                text: "Ryan attacked Len. Ryan gave Len a blade.".to_owned(),
+                scope: ScopeKey::default(),
+            }],
+            commit: false,
+        })
+        .expect("ingest payload");
+        let mut ingest_packet = packet(PacketKind::IngestRequest, 13, &ingest_payload);
+        process_packet_buffer(&mut ingest_packet).expect("ingest packet");
+
+        let graph_delta_payload = serde_json::to_vec(&GraphDeltaRequest {
+            session_id: session.session_id.clone(),
+            scope: ScopeKey::default(),
+            changed_documents: vec![DocumentId("graph-doc".to_owned())],
+            limit: Some(8),
+            since_commit: None,
+        })
+        .expect("graph delta payload");
+        let mut graph_packet = packet(PacketKind::GraphDeltaRequest, 14, &graph_delta_payload);
+        process_packet_buffer(&mut graph_packet).expect("graph packet");
+        let graph_header = decode_header(&graph_packet);
+        assert_eq!(graph_header.packet_kind(), PacketKind::GraphDeltaResult);
+        let graph_payload =
+            &graph_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + graph_header.payload_len as usize];
+        assert!(graph_payload.len() >= GraphDeltaResultHeader::BYTE_LEN);
+        assert!(read_u32(graph_payload, 20) >= 1);
+        assert!(read_u32(graph_payload, 36) >= 1);
+
+        let state_payload = serde_json::to_vec(&SessionStateRequest {
+            session_id: session.session_id.clone(),
+        })
+        .expect("state payload");
+        let mut state_packet = packet(PacketKind::SessionStateRequest, 15, &state_payload);
+        process_packet_buffer(&mut state_packet).expect("state packet");
+        let state_header = decode_header(&state_packet);
+        assert_eq!(state_header.packet_kind(), PacketKind::SessionStateResult);
+        let state_payload =
+            &state_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + state_header.payload_len as usize];
+        assert!(state_payload.len() >= SessionStateResultHeader::BYTE_LEN);
+        assert_eq!(read_u32(state_payload, 20), 1);
+
+        let stats_payload = serde_json::to_vec(&SessionStatsRequest {
+            session_id: session.session_id,
+        })
+        .expect("stats payload");
+        let mut stats_packet = packet(PacketKind::SessionStatsRequest, 16, &stats_payload);
+        process_packet_buffer(&mut stats_packet).expect("stats packet");
+        let stats_header = decode_header(&stats_packet);
+        assert_eq!(stats_header.packet_kind(), PacketKind::SessionStatsResult);
+        let stats_payload =
+            &stats_packet[PacketHeader::BYTE_LEN..PacketHeader::BYTE_LEN + stats_header.payload_len as usize];
+        assert!(stats_payload.len() >= SessionStatsResultHeader::BYTE_LEN);
+        assert_eq!(read_u32(stats_payload, 20), 1);
+        assert!(read_u64(stats_payload, SessionStatsResultHeader::BYTE_LEN + 36) > 0);
     }
 }
