@@ -1,5 +1,6 @@
 mod fuzzy;
 mod normalize;
+mod sentence;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -17,6 +18,7 @@ pub use normalize::{
     normalize_raw, phrase_key, scope_matches, strip_possessive, tokenize_norm,
     tokens_from_normalized, MAX_PHRASE_TOKENS, TOK_SEP,
 };
+pub use sentence::split_sentence_ranges;
 
 #[derive(Debug, Error)]
 pub enum AlexError {

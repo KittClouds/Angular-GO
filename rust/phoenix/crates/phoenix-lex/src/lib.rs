@@ -1,14 +1,15 @@
 use phoenix_qgram::{QgramConfig, QgramIndex};
-use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
+use phoenix_store_cozo::{CompactRowView, PhoenixCozoStore, StoreError};
 use phoenix_types::{
-    DocumentId, ImplicitMatchHit, IndexedSpan, IndexedTextField, LexicalField,
-    LexicalSearchResult, NoteId, ScopeKey,
+    DocumentId, ImplicitMatchHit, IndexedSpan, IndexedTextField, LexicalField, LexicalSearchResult,
+    NoteId, ScopeKey,
 };
-use serde_json::Value;
-use std::collections::BTreeMap;
+use rustc_hash::FxHashMap;
 
-pub use phoenix_qgram::{CatalogSpan, CorpusStats, PackedGram, PostingSet, SpanCatalog, SpanOrdinal};
 pub use phoenix_qgram::{parse_query, Clause, ClauseType, SearchConfig};
+pub use phoenix_qgram::{
+    CatalogSpan, CorpusStats, PackedGram, PostingSet, SpanCatalog, SpanOrdinal,
+};
 
 pub type LexConfig = QgramConfig;
 
@@ -71,34 +72,73 @@ impl LexIndex {
 }
 
 pub fn indexed_spans_from_store(store: &PhoenixCozoStore) -> Result<Vec<IndexedSpan>, StoreError> {
-    let chunks = store.fetch_rows("chunks")?;
+    const CHUNK_COLUMNS: &[&str] = &["chunk_id", "doc_id", "text", "parent_id", "level"];
+    const CHUNK_ID_COLUMNS: &[&str] = &["id", "chunk_key"];
+    const NOTE_COLUMNS: &[&str] = &[
+        "id",
+        "owner_id",
+        "title",
+        "world_id",
+        "narrative_id",
+        "folder_id",
+    ];
+
+    let chunks = store.fetch_compact_rows_with_columns("chunks", CHUNK_COLUMNS)?;
     let chunk_keys = store
-        .fetch_rows("chunkid_map")?
+        .fetch_compact_rows_with_columns("chunkid_map", CHUNK_ID_COLUMNS)?
         .into_iter()
         .filter_map(|row| {
-            Some((
-                row.get("id")?.as_i64()?,
-                row.get("chunk_key")?.as_str()?.to_owned(),
-            ))
+            let row = CompactRowView::new(CHUNK_ID_COLUMNS, &row);
+            Some((row.get_i64("id")?, row.get_str("chunk_key")?.to_owned()))
         })
-        .collect::<BTreeMap<_, _>>();
-    let notes = store.fetch_rows("notes")?;
+        .collect::<FxHashMap<_, _>>();
+    let notes = store.fetch_compact_rows_with_columns("notes", NOTE_COLUMNS)?;
+    #[derive(Clone, Debug)]
+    struct NoteMeta {
+        note_id: NoteId,
+        title: Option<String>,
+        scope: ScopeKey,
+    }
     let note_titles = notes
         .into_iter()
         .filter_map(|row| {
-            let note_id = row.get("id")?.as_str()?.to_owned();
+            let row = CompactRowView::new(NOTE_COLUMNS, &row);
+            let note_id = row.get_str("id")?.to_owned();
             let owner_id = row
-                .get("owner_id")
-                .and_then(Value::as_str)
+                .get_str("owner_id")
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| note_id.clone());
-            Some((owner_id, (NoteId(note_id), row)))
+            Some((
+                owner_id,
+                NoteMeta {
+                    note_id: NoteId(note_id),
+                    title: row
+                        .get_str("title")
+                        .filter(|value| !value.trim().is_empty())
+                        .map(str::to_owned),
+                    scope: ScopeKey {
+                        world_id: row
+                            .get_str("world_id")
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_owned),
+                        narrative_id: row
+                            .get_str("narrative_id")
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_owned),
+                        folder_id: row
+                            .get_str("folder_id")
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_owned),
+                        folder_path: None,
+                    },
+                },
+            ))
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
     let chunk_rows = chunks
         .into_iter()
-        .filter(|row| row.get("level").and_then(Value::as_i64) == Some(0))
+        .filter(|row| CompactRowView::new(CHUNK_COLUMNS, row).get_i64("level") == Some(0))
         .collect::<Vec<_>>();
     if chunk_rows.is_empty() {
         return indexed_spans_from_notes(store);
@@ -107,33 +147,28 @@ pub fn indexed_spans_from_store(store: &PhoenixCozoStore) -> Result<Vec<IndexedS
     let parent_text_by_chunk_id = chunk_rows
         .iter()
         .filter_map(|row| {
+            let row = CompactRowView::new(CHUNK_COLUMNS, row);
             Some((
-                row.get("chunk_id")?.as_i64()?,
-                row.get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
+                row.get_i64("chunk_id")?,
+                row.get_str("text").unwrap_or_default().to_owned(),
             ))
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
 
     Ok(chunk_rows
         .into_iter()
         .filter_map(|row| {
-            let chunk_id = row.get("chunk_id")?.as_i64()?;
+            let row = CompactRowView::new(CHUNK_COLUMNS, &row);
+            let chunk_id = row.get_i64("chunk_id")?;
             let span_id = chunk_keys
                 .get(&chunk_id)
                 .cloned()
                 .unwrap_or_else(|| format!("chunk:{chunk_id}"));
-            let doc_id = row.get("doc_id")?.as_str()?.to_owned();
-            let (note_id, note_row) = note_titles.get(&doc_id)?;
-            let body = row.get("text").and_then(Value::as_str)?.to_owned();
+            let doc_id = row.get_str("doc_id")?.to_owned();
+            let note_meta = note_titles.get(&doc_id)?;
+            let body = row.get_str("text")?.to_owned();
             let mut fields = Vec::new();
-            if let Some(title) = note_row
-                .get("title")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-            {
+            if let Some(title) = note_meta.title.as_deref() {
                 fields.push(IndexedTextField {
                     field: LexicalField::Title,
                     text: title.to_owned(),
@@ -145,10 +180,10 @@ pub fn indexed_spans_from_store(store: &PhoenixCozoStore) -> Result<Vec<IndexedS
                     text: body,
                 });
             }
-            if let Some(parent_id) = row.get("parent_id").and_then(Value::as_i64) {
+            if let Some(parent_id) = row.get_i64("parent_id") {
                 if let Some(parent_text) = parent_text_by_chunk_id
                     .get(&parent_id)
-                    .filter(|value| !value.trim().is_empty())
+                    .filter(|value: &&String| !value.trim().is_empty())
                 {
                     fields.push(IndexedTextField {
                         field: LexicalField::Summary,
@@ -162,30 +197,9 @@ pub fn indexed_spans_from_store(store: &PhoenixCozoStore) -> Result<Vec<IndexedS
 
             Some(IndexedSpan {
                 span_id,
-                note_id: Some(note_id.clone()),
+                note_id: Some(note_meta.note_id.clone()),
                 document_id: Some(DocumentId(doc_id.clone())),
-                scope: ScopeKey {
-                    world_id: note_row
-                        .get("world_id")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned),
-                    narrative_id: note_row
-                        .get("narrative_id")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned),
-                    folder_id: note_row
-                        .get("folder_id")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned),
-                    folder_path: note_row
-                        .get("folder_path")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned),
-                },
+                scope: note_meta.scope.clone(),
                 fields,
             })
         })
@@ -193,25 +207,34 @@ pub fn indexed_spans_from_store(store: &PhoenixCozoStore) -> Result<Vec<IndexedS
 }
 
 fn indexed_spans_from_notes(store: &PhoenixCozoStore) -> Result<Vec<IndexedSpan>, StoreError> {
-    let rows = store.fetch_rows("notes")?;
+    const NOTE_COLUMNS: &[&str] = &[
+        "id",
+        "title",
+        "content",
+        "markdown_content",
+        "is_current",
+        "world_id",
+        "narrative_id",
+        "folder_id",
+    ];
+    let rows = store.fetch_compact_rows_with_columns("notes", NOTE_COLUMNS)?;
     Ok(rows
         .into_iter()
-        .filter(|row| row.get("is_current").and_then(Value::as_bool).unwrap_or(true))
-        .filter_map(|row| note_row_to_indexed_span(&row))
+        .filter(|row| {
+            CompactRowView::new(NOTE_COLUMNS, row)
+                .get_bool("is_current")
+                .unwrap_or(true)
+        })
+        .filter_map(|row| note_row_to_indexed_span(CompactRowView::new(NOTE_COLUMNS, &row)))
         .collect())
 }
 
-fn note_row_to_indexed_span(row: &Value) -> Option<IndexedSpan> {
-    let id = row.get("id")?.as_str()?.to_owned();
-    let title = row
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+fn note_row_to_indexed_span(row: CompactRowView<'_>) -> Option<IndexedSpan> {
+    let id = row.get_str("id")?.to_owned();
+    let title = row.get_str("title").unwrap_or_default().to_owned();
     let body = row
-        .get("content")
-        .and_then(Value::as_str)
-        .or_else(|| row.get("markdown_content").and_then(Value::as_str))
+        .get_str("content")
+        .or_else(|| row.get_str("markdown_content"))
         .unwrap_or_default()
         .to_owned();
 
@@ -240,15 +263,14 @@ fn note_row_to_indexed_span(row: &Value) -> Option<IndexedSpan> {
             world_id: optional_row_string(row, "world_id"),
             narrative_id: optional_row_string(row, "narrative_id"),
             folder_id: optional_row_string(row, "folder_id"),
-            folder_path: optional_row_string(row, "folder_path"),
+            folder_path: None,
         },
         fields,
     })
 }
 
-fn optional_row_string(row: &Value, key: &str) -> Option<String> {
-    row.get(key)
-        .and_then(Value::as_str)
+fn optional_row_string(row: CompactRowView<'_>, key: &str) -> Option<String> {
+    row.get_str(key)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
 }

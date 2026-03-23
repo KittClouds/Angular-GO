@@ -1,3 +1,7 @@
+use std::mem::size_of;
+
+use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct StringRef {
@@ -157,6 +161,136 @@ impl StringRefRecord {
     pub const BYTE_LEN: usize = 8;
 }
 
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct QueryBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub flags: [u8; 4],
+    pub session_offset: [u8; 4],
+    pub session_len: [u8; 4],
+    pub query_offset: [u8; 4],
+    pub query_len: [u8; 4],
+    pub world_offset: [u8; 4],
+    pub world_len: [u8; 4],
+    pub narrative_offset: [u8; 4],
+    pub narrative_len: [u8; 4],
+    pub folder_id_offset: [u8; 4],
+    pub folder_id_len: [u8; 4],
+    pub folder_path_offset: [u8; 4],
+    pub folder_path_len: [u8; 4],
+    pub limit: [u8; 4],
+    pub temporal_offset: [u8; 4],
+    pub temporal_len: [u8; 4],
+    pub arena_offset: [u8; 4],
+    pub arena_len: [u8; 4],
+}
+
+impl QueryBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct AnalyzeTextBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub flags: [u8; 4],
+    pub text_offset: [u8; 4],
+    pub text_len: [u8; 4],
+    pub arena_offset: [u8; 4],
+    pub arena_len: [u8; 4],
+}
+
+impl AnalyzeTextBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct IngestBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub flags: [u8; 4],
+    pub session_offset: [u8; 4],
+    pub session_len: [u8; 4],
+    pub table1_offset: [u8; 4],
+    pub table1_count: [u8; 4],
+    pub arena_offset: [u8; 4],
+    pub arena_len: [u8; 4],
+}
+
+impl IngestBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct IngestDocumentBinaryRecord {
+    pub document_id_offset: [u8; 4],
+    pub document_id_len: [u8; 4],
+    pub note_id_offset: [u8; 4],
+    pub note_id_len: [u8; 4],
+    pub title_offset: [u8; 4],
+    pub title_len: [u8; 4],
+    pub text_offset: [u8; 4],
+    pub text_len: [u8; 4],
+    pub world_offset: [u8; 4],
+    pub world_len: [u8; 4],
+    pub narrative_offset: [u8; 4],
+    pub narrative_len: [u8; 4],
+    pub folder_id_offset: [u8; 4],
+    pub folder_id_len: [u8; 4],
+    pub folder_path_offset: [u8; 4],
+    pub folder_path_len: [u8; 4],
+    pub flags: [u8; 4],
+}
+
+impl IngestDocumentBinaryRecord {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct ScanBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub flags: [u8; 4],
+    pub session_offset: [u8; 4],
+    pub session_len: [u8; 4],
+    pub text_offset: [u8; 4],
+    pub text_len: [u8; 4],
+    pub world_offset: [u8; 4],
+    pub world_len: [u8; 4],
+    pub narrative_offset: [u8; 4],
+    pub narrative_len: [u8; 4],
+    pub folder_id_offset: [u8; 4],
+    pub folder_id_len: [u8; 4],
+    pub folder_path_offset: [u8; 4],
+    pub folder_path_len: [u8; 4],
+    pub resolver_seed_offset: [u8; 4],
+    pub resolver_seed_len: [u8; 4],
+    pub arena_offset: [u8; 4],
+    pub arena_len: [u8; 4],
+}
+
+impl ScanBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct StructureBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub flags: [u8; 4],
+    pub text_offset: [u8; 4],
+    pub text_len: [u8; 4],
+    pub scan_offset: [u8; 4],
+    pub scan_len: [u8; 4],
+    pub arena_offset: [u8; 4],
+    pub arena_len: [u8; 4],
+}
+
+impl StructureBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct SessionDocumentRecord {
@@ -199,9 +333,17 @@ impl SessionStatsRecord {
 }
 
 pub const BINARY_LAYOUT_VERSION: u32 = 1;
+pub const BINARY_REQUEST_LAYOUT_VERSION: u32 = 1;
 
 pub const FLAG_HAS_SESSION: u32 = 1 << 0;
 pub const FLAG_HAS_NOTE_ID: u32 = 1 << 1;
 pub const FLAG_HAS_ENTITY_ID: u32 = 1 << 2;
 pub const FLAG_HAS_DOCUMENT_ID: u32 = 1 << 3;
 pub const FLAG_HAS_FRONT_MATTER: u32 = 1 << 4;
+pub const REQUEST_FLAG_COMMIT: u32 = 1 << 0;
+pub const REQUEST_FLAG_HAS_SESSION: u32 = 1 << 1;
+pub const REQUEST_FLAG_HAS_TEMPORAL: u32 = 1 << 2;
+pub const REQUEST_FLAG_TARGET_CHUNKS: u32 = 1 << 8;
+pub const REQUEST_FLAG_TARGET_NODES: u32 = 1 << 9;
+pub const REQUEST_FLAG_TARGET_GRAPH: u32 = 1 << 10;
+pub const REQUEST_FLAG_TARGET_SEMANTIC: u32 = 1 << 11;

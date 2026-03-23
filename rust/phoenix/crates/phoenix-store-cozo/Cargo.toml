@@ -10,6 +10,11 @@ phoenix-types = { path = "../phoenix-types" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "1.0"
+smallvec.workspace = true
+rustc-hash.workspace = true
+lz4_flex.workspace = true
+bincode.workspace = true
+rmp-serde.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cozo = "0.7.6"

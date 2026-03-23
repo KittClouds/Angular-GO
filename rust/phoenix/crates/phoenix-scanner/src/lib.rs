@@ -3,13 +3,13 @@ use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use fst::{Map, MapBuilder};
-use phoenix_alex::{is_sentence_guard, is_stop_word, normalize_raw, strip_possessive, Lexicon};
+use phoenix_alex::{is_stop_word, normalize_raw, split_sentence_ranges, strip_possessive, Lexicon};
 use phoenix_types::{
     ChunkKind, ChunkSpan, DiscoveryThresholds, EntityKind, FuzzyMode, GenderHint, KnownMatch,
     KnownMatchSource, LexiconEntry, MentionEntityRef, MentionSource, MentionSpan, NarrativeRule,
     NarrativeTransitivity, NarrativeVerbHit, PosTag, ResolverEntitySeed, ResolverLink,
-    ResolverLinkKind, ScanArtifact, ScanRequest, ScannerConfig, ScopeKey, SentenceSpan, TextRange,
-    TokenClass, TokenSpan,
+    ResolverLinkKind, ScanArtifact, ScanRequest, ScannerConfig, ScopeKey, SentenceSpan, SessionId,
+    TextRange, TokenClass, TokenSpan,
 };
 
 pub struct PhoenixScanner {
@@ -30,20 +30,37 @@ impl PhoenixScanner {
     }
 
     pub fn scan(&self, request: &ScanRequest) -> ScanArtifact {
-        if let Some(session_id) = &request.session_id {
+        self.scan_parts(
+            &request.text,
+            &request.scope,
+            request.session_id.as_ref(),
+            &request.resolver_seed,
+        )
+    }
+
+    pub fn scan_parts(
+        &self,
+        text: &str,
+        scope: &ScopeKey,
+        session_id: Option<&SessionId>,
+        resolver_seed: &[ResolverEntitySeed],
+    ) -> ScanArtifact {
+        if let Some(session_id) = session_id {
             let mut sessions = self.sessions.borrow_mut();
             let session = sessions.entry(session_id.0.clone()).or_default();
-            self.scan_with_session(session, request)
+            self.scan_with_session(session, text, scope, resolver_seed)
         } else {
             let mut session = ScannerSessionState::default();
-            self.scan_with_session(&mut session, request)
+            self.scan_with_session(&mut session, text, scope, resolver_seed)
         }
     }
 
     fn scan_with_session(
         &self,
         session: &mut ScannerSessionState,
-        request: &ScanRequest,
+        text: &str,
+        scope: &ScopeKey,
+        resolver_seed: &[ResolverEntitySeed],
     ) -> ScanArtifact {
         let ScannerSessionState {
             seed_hash,
@@ -51,40 +68,39 @@ impl PhoenixScanner {
             resolver,
             discovery,
         } = session;
-        resolver.seed(&request.resolver_seed);
-        ensure_lexicon(seed_hash, lexicon, &request.resolver_seed);
+        resolver.seed(resolver_seed);
+        ensure_lexicon(seed_hash, lexicon, resolver_seed);
         let lexicon = lexicon
             .as_ref()
             .expect("lexicon should exist after ensure_lexicon");
 
-        let sentences = split_sentences(&request.text);
+        let sentences = split_sentences(text);
         let exact_candidates = lexicon
-            .scan(&request.text, &request.scope)
+            .scan(text, scope)
             .into_iter()
             .map(known_match_to_candidate)
             .collect::<Vec<_>>();
 
-        let base_tokens = tokenize(&request.text, &[]);
+        let base_tokens = tokenize(text, &[]);
         let fuzzy_candidates = if self.config.fuzzy_mode == FuzzyMode::Off {
             Vec::new()
         } else {
-            build_fuzzy_candidates(&request.text, &base_tokens, &request.scope, lexicon)
+            build_fuzzy_candidates(text, &base_tokens, scope, lexicon)
         };
 
         let mut mention_candidates = exact_candidates;
         mention_candidates.extend(fuzzy_candidates);
         let exact_and_fuzzy = select_mentions(mention_candidates, &sentences);
 
-        let first_pass =
-            build_pass_artifacts(&request.text, &sentences, &exact_and_fuzzy, &self.narrative);
+        let first_pass = build_pass_artifacts(text, &sentences, &exact_and_fuzzy, &self.narrative);
         let discovery_mentions = build_discovery_mentions(
-            &request.text,
+            text,
             &sentences,
             &first_pass.tokens,
             &first_pass.chunks,
             &first_pass.narrative_hits,
             &exact_and_fuzzy,
-            &request.scope,
+            scope,
             &self.config.discovery_thresholds,
             discovery,
             lexicon,
@@ -97,15 +113,9 @@ impl PhoenixScanner {
             .collect::<Vec<_>>();
         final_candidates.extend(discovery_mentions.into_iter().map(mention_to_candidate));
         let mentions = select_mentions(final_candidates, &sentences);
-        let final_pass =
-            build_pass_artifacts(&request.text, &sentences, &mentions, &self.narrative);
-        let resolver_links = resolve_links(
-            &request.text,
-            &final_pass.tokens,
-            &mentions,
-            &sentences,
-            resolver,
-        );
+        let final_pass = build_pass_artifacts(text, &sentences, &mentions, &self.narrative);
+        let resolver_links =
+            resolve_links(text, &final_pass.tokens, &mentions, &sentences, resolver);
 
         ScanArtifact {
             sentences,
@@ -267,62 +277,17 @@ fn build_pass_artifacts(
 }
 
 fn split_sentences(text: &str) -> Vec<SentenceSpan> {
-    let mut sentences = Vec::new();
-    let mut start = 0usize;
-    let chars = text.char_indices().collect::<Vec<_>>();
-
-    for (offset, ch) in chars.iter() {
-        if !matches!(ch, '.' | '!' | '?') {
-            continue;
-        }
-
-        let mut token_start = *offset;
-        while token_start > start {
-            let previous_char = text[..token_start].chars().next_back();
-            if previous_char
-                .map(|value| value.is_ascii_alphanumeric() || value == '\'' || value == '-')
-                .unwrap_or(false)
-            {
-                let previous_len = previous_char.map(|value| value.len_utf8()).unwrap_or(1);
-                token_start -= previous_len;
-            } else {
-                break;
-            }
-        }
-        let guard = normalize_raw(
-            text.get(token_start..(*offset + ch.len_utf8()))
-                .unwrap_or_default(),
-        );
-        let trimmed_guard = guard.trim_end_matches('.');
-        if (guard.len() <= 3 && is_sentence_guard(trimmed_guard)) || trimmed_guard.len() <= 1 {
-            continue;
-        }
-
-        let end = *offset + ch.len_utf8();
-        if end > start {
-            sentences.push(SentenceSpan {
-                index: sentences.len(),
-                range: TextRange {
-                    start: start as u32,
-                    end: end as u32,
-                },
-            });
-        }
-        start = end;
-        while start < text.len() && text.as_bytes()[start].is_ascii_whitespace() {
-            start += 1;
-        }
-    }
-
-    if start < text.len() {
-        sentences.push(SentenceSpan {
-            index: sentences.len(),
+    let mut sentences = split_sentence_ranges(text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (start, end))| SentenceSpan {
+            index,
             range: TextRange {
                 start: start as u32,
-                end: text.len() as u32,
+                end: end as u32,
             },
-        });
-    }
+        })
+        .collect::<Vec<_>>();
 
     if sentences.is_empty() {
         sentences.push(SentenceSpan {
@@ -1671,5 +1636,39 @@ mod tests {
             .mentions
             .iter()
             .any(|mention| mention.source == Some(MentionSource::Discovery)));
+    }
+
+    #[test]
+    fn shared_sentence_splitter_preserves_guard_behavior() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Dr. Luffy ran. Mr. Zoro stayed! Wow?".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: None,
+            resolver_seed: Vec::new(),
+        });
+
+        assert_eq!(artifact.sentences.len(), 3);
+        assert_eq!(
+            slice(
+                "Dr. Luffy ran. Mr. Zoro stayed! Wow?",
+                artifact.sentences[0].range
+            ),
+            "Dr. Luffy ran."
+        );
+        assert_eq!(
+            slice(
+                "Dr. Luffy ran. Mr. Zoro stayed! Wow?",
+                artifact.sentences[1].range
+            ),
+            "Mr. Zoro stayed!"
+        );
+        assert_eq!(
+            slice(
+                "Dr. Luffy ran. Mr. Zoro stayed! Wow?",
+                artifact.sentences[2].range
+            ),
+            "Wow?"
+        );
     }
 }

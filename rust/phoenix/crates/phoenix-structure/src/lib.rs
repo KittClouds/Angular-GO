@@ -11,22 +11,23 @@ impl PhoenixStructure {
     }
 
     pub fn build(&self, request: &StructureRequest) -> StructureArtifact {
+        self.build_parts(&request.text, &request.scan)
+    }
+
+    pub fn build_parts(&self, text: &str, scan: &phoenix_types::ScanArtifact) -> StructureArtifact {
         let mut evidence_spans = Vec::new();
         let mut relations = Vec::new();
-        let sentence_frames = request
-            .scan
+        let sentence_frames = scan
             .sentences
             .iter()
             .map(|sentence| {
-                let mentions = request
-                    .scan
+                let mentions = scan
                     .mentions
                     .iter()
                     .filter(|mention| contains(sentence.range, mention.range))
                     .cloned()
                     .collect::<Vec<_>>();
-                let chunks = request
-                    .scan
+                let chunks = scan
                     .chunks
                     .iter()
                     .filter(|chunk| contains(sentence.range, chunk.range))
@@ -37,20 +38,18 @@ impl PhoenixStructure {
                     .filter(|chunk| chunk.kind == Some(ChunkKind::Clause))
                     .map(|chunk| chunk.range)
                     .collect::<Vec<_>>();
-                let sentence_links = request
-                    .scan
+                let sentence_links = scan
                     .resolver_links
                     .iter()
                     .filter(|link| link.sentence_index == sentence.index)
                     .collect::<Vec<_>>();
-                let verb_frames = request
-                    .scan
+                let verb_frames = scan
                     .narrative_hits
                     .iter()
                     .filter(|hit| hit.sentence_index == sentence.index)
                     .map(|hit| {
                         build_verb_frame(
-                            &request.text,
+                            text,
                             sentence.index,
                             hit.range,
                             &hit.lemma,
@@ -70,9 +69,7 @@ impl PhoenixStructure {
                 );
 
                 evidence_spans.extend(
-                    request
-                        .scan
-                        .narrative_hits
+                    scan.narrative_hits
                         .iter()
                         .filter(|hit| hit.sentence_index == sentence.index)
                         .map(|hit| EvidenceSpan {

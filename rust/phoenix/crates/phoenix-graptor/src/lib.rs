@@ -1,19 +1,19 @@
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, BTreeSet};
 
 use daachorse::{DoubleArrayAhoCorasick, DoubleArrayAhoCorasickBuilder, MatchKind};
-use phoenix_alex::{is_sentence_guard, normalize_raw};
+use phoenix_alex::{normalize_raw, split_sentence_ranges};
 use phoenix_scanner::PhoenixScanner;
-use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
+use phoenix_store_cozo::{CompactRelationBuffer, CompactRowView, PhoenixCozoStore, StoreError};
 use phoenix_structure::PhoenixStructure;
 use phoenix_types::{
     ChunkStats, Diagnostic, DiscoverySummary, DocumentId, EntityId, EntityKind, EntitySummary,
     EvidenceSpan, FrameSlot, GenderHint, GraphDeltaChunk, GraphDeltaEdge, GraphDeltaNode,
     GraphDeltaRequest, GraphDeltaResult, GraphSummary, IngestDocument, IngestDocumentSummary,
     IngestRequest, IngestResult, MentionEntityRef, MentionSource, NoteId, RelationCandidate,
-    ResolverEntitySeed, ResolverLinkKind, RetrievalSummary, ScopeKey, ScanRequest,
-    SessionDocumentState, SessionId, SessionState, SessionStats, StructureRequest, TextRange,
+    ResolverEntitySeed, ResolverLinkKind, RetrievalSummary, ScopeKey, SessionDocumentState,
+    SessionId, SessionState, SessionStats, TextRange,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{json, Value};
 
 const DEFAULT_CHAPTER_KEYWORDS: &[&str] = &[
@@ -56,6 +56,33 @@ pub struct PhoenixGraptor {
     chapter_matcher: Option<DoubleArrayAhoCorasick>,
 }
 
+#[derive(Clone, Debug)]
+pub struct BorrowedIngestDocument<'a> {
+    pub document_id: DocumentId,
+    pub note_id: Option<NoteId>,
+    pub title: &'a str,
+    pub text: &'a str,
+    pub scope: ScopeKey,
+}
+
+#[derive(Clone, Debug)]
+pub struct BorrowedIngestRequest<'a> {
+    pub session_id: Option<SessionId>,
+    pub documents: &'a [BorrowedIngestDocument<'a>],
+}
+
+impl<'a> From<&'a IngestDocument> for BorrowedIngestDocument<'a> {
+    fn from(value: &'a IngestDocument) -> Self {
+        Self {
+            document_id: value.document_id.clone(),
+            note_id: value.note_id.clone(),
+            title: &value.title,
+            text: &value.text,
+            scope: value.scope.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct GraptorVertex {
     pub id: String,
@@ -82,10 +109,10 @@ pub struct GraptorEdge {
 
 #[derive(Clone, Debug, Default)]
 pub struct GraptorGraph {
-    pub vertices: BTreeMap<String, GraptorVertex>,
-    pub outgoing: BTreeMap<String, Vec<GraptorEdge>>,
-    pub incoming: BTreeMap<String, Vec<GraptorEdge>>,
-    pub chapter_leaves: BTreeMap<(String, u32), Vec<String>>,
+    pub vertices: FxHashMap<String, GraptorVertex>,
+    pub outgoing: FxHashMap<String, Vec<GraptorEdge>>,
+    pub incoming: FxHashMap<String, Vec<GraptorEdge>>,
+    pub chapter_leaves: FxHashMap<(String, u32), Vec<String>>,
 }
 
 impl GraptorGraph {
@@ -162,9 +189,39 @@ impl PhoenixGraptor {
         structure: &PhoenixStructure,
         request: &IngestRequest,
     ) -> Result<IngestResult, StoreError> {
+        let documents = request
+            .documents
+            .iter()
+            .map(|document| BorrowedIngestDocument {
+                document_id: document.document_id.clone(),
+                note_id: document.note_id.clone(),
+                title: &document.title,
+                text: &document.text,
+                scope: document.scope.clone(),
+            })
+            .collect::<Vec<_>>();
+        self.ingest_view(
+            store,
+            scanner,
+            structure,
+            &BorrowedIngestRequest {
+                session_id: request.session_id.clone(),
+                documents: &documents,
+            },
+        )
+    }
+
+    pub fn ingest_view(
+        &self,
+        store: &PhoenixCozoStore,
+        scanner: &PhoenixScanner,
+        structure: &PhoenixStructure,
+        request: &BorrowedIngestRequest<'_>,
+    ) -> Result<IngestResult, StoreError> {
         let now = now_ms();
         let mut registry = EntityRegistry::from_store(store)?;
         let mut diagnostics = Vec::new();
+        let mut total_warning_count = 0usize;
         let mut documents = Vec::new();
         let mut total_chapters = 0usize;
         let mut total_parents = 0usize;
@@ -174,24 +231,31 @@ impl PhoenixGraptor {
         let mut total_cross_chapter = 0usize;
         let mut total_discovery_candidates = 0usize;
 
-        for document in &request.documents {
-            let artifacts =
-                self.process_document(document, request.session_id.as_ref(), scanner, structure, &mut registry);
-            self.persist_document(store, &artifacts, &registry, now)?;
-            total_chapters += artifacts.summary.chapter_count;
-            total_parents += artifacts.summary.parent_count;
-            total_leaves += artifacts.summary.leaf_count;
-            total_mentions += artifacts.mention_count;
-            total_edges += artifacts.edge_count;
-            total_cross_chapter += artifacts.cross_chapter_links;
-            total_discovery_candidates += artifacts.discovery_rows.len();
-            diagnostics.extend(artifacts.diagnostics.clone());
-            documents.push(artifacts.summary);
+        for document in request.documents {
+            let processed = self.process_document_streaming(
+                store,
+                document,
+                request.session_id.as_ref(),
+                scanner,
+                structure,
+                &mut registry,
+            )?;
+            total_chapters += processed.summary.chapter_count;
+            total_parents += processed.summary.parent_count;
+            total_leaves += processed.summary.leaf_count;
+            total_mentions += processed.persist_state.mention_count;
+            total_edges +=
+                processed.persist_state.edge_count + processed.persist_state.graph_edge_count;
+            total_cross_chapter += processed.persist_state.cross_chapter_links;
+            total_discovery_candidates += processed.persist_state.discovery_count;
+            total_warning_count += processed.warning_count;
+            diagnostics.extend(processed.diagnostics);
+            documents.push(processed.summary);
         }
         let result = IngestResult {
             session_id: request.session_id.clone(),
             document_count: request.documents.len(),
-            warning_count: diagnostics.len(),
+            warning_count: total_warning_count,
             documents,
             chunk_stats: Some(ChunkStats {
                 documents: request.documents.len(),
@@ -267,50 +331,48 @@ impl PhoenixGraptor {
         build_graph_delta(store, request)
     }
 
-    fn process_document(
+    fn process_document_streaming(
         &self,
-        document: &IngestDocument,
+        store: &PhoenixCozoStore,
+        document: &BorrowedIngestDocument<'_>,
         session_id: Option<&SessionId>,
         scanner: &PhoenixScanner,
         structure: &PhoenixStructure,
         registry: &mut EntityRegistry,
-    ) -> DocumentArtifacts {
+    ) -> Result<ProcessedDocument, StoreError> {
         let note_id = document
             .note_id
             .clone()
             .unwrap_or_else(|| NoteId(document.document_id.0.clone()));
-        let boundaries = self.detect_chapter_boundaries(&document.text);
+        let boundaries = self.detect_chapter_boundaries(document.text);
         let mut chapters = build_chapter_specs(document, &boundaries);
         let mut leaves = build_leaf_chunks(document, &self.config);
         assign_leaves_to_chapters(document, &chapters, &mut leaves);
         build_parent_chunks(document, &self.config, &mut chapters, &mut leaves);
 
-        let mut diagnostics = vec![Diagnostic {
+        let policy = FlushPolicy::default();
+        let mut diagnostics = DiagnosticCollector::new(policy.diagnostic_cap);
+        diagnostics.push(Diagnostic {
             code: "PX_GRAPTOR_CHUNKERX2".to_owned(),
             message: format!(
                 "ChunkerX2-style ingest produced {} chapters, {} parents, and {} leaves.",
                 chapters.len(),
-                chapters.iter().map(|chapter| chapter.parents.len()).sum::<usize>(),
+                chapters
+                    .iter()
+                    .map(|chapter| chapter.parents.len())
+                    .sum::<usize>(),
                 leaves.len()
             ),
-        }];
-        let mut chunk_rows = Vec::new();
-        let mut chunkid_rows = Vec::new();
-        let mut entity_ids = BTreeSet::new();
-        let mut span_rows = BTreeMap::<String, Value>::new();
-        let mut span_mention_rows = BTreeMap::<String, Value>::new();
-        let mut evidence_rows = BTreeMap::<String, Value>::new();
-        let mut discovery_rows = BTreeMap::<String, Value>::new();
-        let mut edge_rows = BTreeMap::<String, Value>::new();
-        let mut graph_vertex_rows = BTreeMap::<String, Value>::new();
-        let mut graph_label_rows = BTreeSet::<(String, String)>::new();
-        let mut graph_edge_rows = BTreeMap::<(String, String), Value>::new();
-        let mut graph_property_rows = BTreeMap::<(String, String, String, i64), Value>::new();
-        let mut chapter_links = BTreeMap::<(u32, u32), BTreeSet<String>>::new();
-        let mut mention_count = 0usize;
+        });
+        let mut buffers = BufferSet::new();
+        let mut persist_state = DocumentPersistState::default();
+        let mut chapter_links = FxHashMap::<(u32, u32), FxHashSet<String>>::default();
+        let mut resolver_scratch = ResolverSeedScratch::default();
+        let now = now_ms();
 
-        graph_vertex_rows.insert(
-            document_vertex_id(&document.document_id),
+        persist_document_backbone(store, document, &note_id, now)?;
+        insert_graph_vertex(
+            &mut buffers,
             json!({
                 "id": document_vertex_id(&document.document_id),
                 "value": {
@@ -325,24 +387,34 @@ impl PhoenixGraptor {
                 },
             }),
         );
-        graph_label_rows.insert((document_vertex_id(&document.document_id), document.title.clone()));
+        buffers
+            .graph_label_rows
+            .insert_value(json!({
+                "vertex_id": document_vertex_id(&document.document_id),
+                "label": document.title,
+            }))
+            .expect("document label row");
 
         for chapter in &chapters {
-            chunk_rows.push(chapter_chunk_row(document, chapter, &document.scope));
-            chunkid_rows.push(chapter_chunkid_row(document, chapter));
-            graph_vertex_rows.insert(
-                chapter_vertex_id(&document.document_id, chapter.chapter_id),
-                chapter_vertex_row(document, chapter),
-            );
-            graph_label_rows.insert((
-                chapter_vertex_id(&document.document_id, chapter.chapter_id),
-                chapter.title.clone(),
-            ));
-            graph_edge_rows.insert(
-                (
-                    document_vertex_id(&document.document_id),
-                    chapter_vertex_id(&document.document_id, chapter.chapter_id),
-                ),
+            buffers
+                .chunk_rows
+                .insert_value(chapter_chunk_row(document, chapter, &document.scope))
+                .expect("chapter chunk row");
+            buffers
+                .chunkid_rows
+                .insert_value(chapter_chunkid_row(document, chapter))
+                .expect("chapter chunk id row");
+            insert_graph_vertex(&mut buffers, chapter_vertex_row(document, chapter));
+            buffers
+                .graph_label_rows
+                .insert_value(json!({
+                    "vertex_id": chapter_vertex_id(&document.document_id, chapter.chapter_id),
+                    "label": chapter.title.clone(),
+                }))
+                .expect("chapter label row");
+            insert_graph_edge(
+                &mut buffers,
+                &mut persist_state,
                 graph_edge_row(
                     &document_vertex_id(&document.document_id),
                     &chapter_vertex_id(&document.document_id, chapter.chapter_id),
@@ -352,6 +424,7 @@ impl PhoenixGraptor {
                     None,
                 ),
             );
+            buffers.flush_due(store, policy)?;
         }
 
         let scan_session_id = SessionId(format!(
@@ -363,6 +436,8 @@ impl PhoenixGraptor {
         ));
 
         process_document_chunks(
+            store,
+            policy,
             document,
             &note_id,
             &chapters,
@@ -371,85 +446,48 @@ impl PhoenixGraptor {
             scanner,
             structure,
             registry,
-            &mut chunk_rows,
-            &mut chunkid_rows,
-            &mut entity_ids,
-            &mut span_rows,
-            &mut span_mention_rows,
-            &mut evidence_rows,
-            &mut discovery_rows,
-            &mut edge_rows,
-            &mut graph_vertex_rows,
-            &mut graph_label_rows,
-            &mut graph_edge_rows,
-            &mut graph_property_rows,
+            &mut resolver_scratch,
+            &mut buffers,
+            &mut persist_state,
             &mut chapter_links,
-            &mut mention_count,
             &mut diagnostics,
-        );
+        )?;
 
-        populate_graph_properties(
-            &mut graph_property_rows,
-            &graph_vertex_rows,
-            &graph_edge_rows,
-            now_ms(),
-        );
+        buffers.flush_all(store)?;
 
         let summary = IngestDocumentSummary {
             document_id: document.document_id.clone(),
-            note_id: Some(note_id),
+            note_id: Some(note_id.clone()),
             chapter_count: chapters.len(),
             parent_count: chapters.iter().map(|chapter| chapter.parents.len()).sum(),
             leaf_count: leaves.len(),
-            entity_count: entity_ids.len(),
-            edge_count: edge_rows.len() + graph_edge_rows.len(),
+            entity_count: persist_state.entity_ids.len(),
+            edge_count: persist_state.edge_count + persist_state.graph_edge_count,
             has_front_matter_chapter: chapters
                 .first()
                 .map(|chapter| chapter.chapter_id == 0)
                 .unwrap_or(false),
         };
 
-        let document_manifest = build_document_manifest(
+        persist_entity_rows(
+            store,
             document,
             session_id,
+            &note_id,
             &summary,
             &chapters,
-            &discovery_rows,
-            now_ms(),
-        );
+            registry,
+            &persist_state,
+            now,
+        )?;
 
-        DocumentArtifacts {
-            document: document.clone(),
-            session_id: session_id.cloned(),
-            entity_ids,
-            chunk_rows,
-            chunkid_rows,
-            span_rows,
-            span_mention_rows,
-            evidence_rows,
-            discovery_rows,
-            edge_rows,
-            graph_vertex_rows,
-            graph_label_rows,
-            graph_edge_rows,
-            graph_property_rows,
-            document_manifest,
-            mention_count,
-            edge_count: summary.edge_count,
-            cross_chapter_links: chapter_links.len(),
-            diagnostics,
+        let (warning_count, diagnostics) = diagnostics.finish();
+        Ok(ProcessedDocument {
             summary,
-        }
-    }
-
-    fn persist_document(
-        &self,
-        store: &PhoenixCozoStore,
-        artifacts: &DocumentArtifacts,
-        registry: &EntityRegistry,
-        now: i64,
-    ) -> Result<(), StoreError> {
-        persist_document_rows(store, artifacts, registry, now)
+            persist_state,
+            warning_count,
+            diagnostics,
+        })
     }
 
     fn detect_chapter_boundaries(&self, text: &str) -> Vec<ChapterBoundary> {
@@ -479,7 +517,10 @@ impl PhoenixGraptor {
                 continue;
             }
             let line_end = if *byte == b'\n' { offset } else { bytes.len() };
-            if boundaries.iter().any(|boundary| boundary.start == line_start) {
+            if boundaries
+                .iter()
+                .any(|boundary| boundary.start == line_start)
+            {
                 line_start = offset + 1;
                 continue;
             }
@@ -554,13 +595,24 @@ impl PhoenixGraptor {
 }
 
 pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, StoreError> {
+    const VERTEX_COLUMNS: &[&str] = &["id", "weight", "value", "attributes"];
+    const EDGE_COLUMNS: &[&str] = &[
+        "source_id",
+        "target_id",
+        "edge_type",
+        "weight",
+        "attributes",
+        "data",
+    ];
+
     let mut graph = GraptorGraph::default();
-    for row in store.fetch_rows("graph_vertices")? {
-        let Some(id) = row.get("id").and_then(Value::as_str) else {
+    for row in store.fetch_compact_rows_with_columns("graph_vertices", VERTEX_COLUMNS)? {
+        let row = CompactRowView::new(VERTEX_COLUMNS, &row);
+        let Some(id) = row.get_str("id") else {
             continue;
         };
-        let value = row.get("value").cloned().unwrap_or(Value::Null);
-        let attributes = row.get("attributes").cloned().unwrap_or(Value::Null);
+        let value = row.get_json("value").unwrap_or(Value::Null);
+        let attributes = row.get_json("attributes").unwrap_or(Value::Null);
         let kind = value
             .get("kind")
             .and_then(Value::as_str)
@@ -602,7 +654,7 @@ pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, Sto
         let vertex = GraptorVertex {
             id: id.to_owned(),
             kind,
-            weight: row.get("weight").and_then(Value::as_i64).unwrap_or(1),
+            weight: row.get_i64("weight").unwrap_or(1),
             value,
             attributes: attributes.clone(),
             entity_id,
@@ -622,24 +674,21 @@ pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, Sto
                 .push(id.to_owned());
         }
     }
-    for row in store.fetch_rows("graph_edges")? {
-        let Some(source_id) = row.get("source_id").and_then(Value::as_str) else {
+    for row in store.fetch_compact_rows_with_columns("graph_edges", EDGE_COLUMNS)? {
+        let row = CompactRowView::new(EDGE_COLUMNS, &row);
+        let Some(source_id) = row.get_str("source_id") else {
             continue;
         };
-        let Some(target_id) = row.get("target_id").and_then(Value::as_str) else {
+        let Some(target_id) = row.get_str("target_id") else {
             continue;
         };
         let edge = GraptorEdge {
             source_id: source_id.to_owned(),
             target_id: target_id.to_owned(),
-            edge_type: row
-                .get("edge_type")
-                .and_then(Value::as_str)
-                .unwrap_or("edge")
-                .to_owned(),
-            weight: row.get("weight").and_then(Value::as_i64).unwrap_or(1),
-            attributes: row.get("attributes").cloned().unwrap_or(Value::Null),
-            data: row.get("data").cloned().filter(|value| !value.is_null()),
+            edge_type: row.get_str("edge_type").unwrap_or("edge").to_owned(),
+            weight: row.get_i64("weight").unwrap_or(1),
+            attributes: row.get_json("attributes").unwrap_or(Value::Null),
+            data: row.get_json("data").filter(|value| !value.is_null()),
         };
         graph
             .outgoing
@@ -659,31 +708,42 @@ pub fn load_session_state(
     store: &PhoenixCozoStore,
     session_id: &SessionId,
 ) -> Result<SessionState, StoreError> {
+    const ARTIFACT_COLUMNS: &[&str] = &["thread_id", "kind", "payload"];
+    const SCOPED_DOCUMENT_COLUMNS: &[&str] = &["namespace", "payload"];
+
     let artifact = store
-        .fetch_rows("workspace_artifacts")?
+        .fetch_compact_rows_with_columns("workspace_artifacts", ARTIFACT_COLUMNS)?
         .into_iter()
         .find(|row| {
-            row.get("thread_id").and_then(Value::as_str) == Some(session_id.0.as_str())
-                && row.get("kind").and_then(Value::as_str) == Some("graptor_session_state")
+            let row = CompactRowView::new(ARTIFACT_COLUMNS, row);
+            row.get_str("thread_id") == Some(session_id.0.as_str())
+                && row.get_str("kind") == Some("graptor_session_state")
         });
-    if let Some(payload) = artifact.and_then(|row| row.get("payload").cloned()) {
+    if let Some(payload) =
+        artifact.and_then(|row| CompactRowView::new(ARTIFACT_COLUMNS, &row).get_json("payload"))
+    {
         if let Ok(state) = serde_json::from_value(payload) {
             return Ok(state);
         }
     }
 
     let mut documents = store
-        .fetch_rows("scoped_documents")?
+        .fetch_compact_rows_with_columns("scoped_documents", SCOPED_DOCUMENT_COLUMNS)?
         .into_iter()
-        .filter(|row| row.get("namespace").and_then(Value::as_str) == Some("graptor.documents"))
         .filter(|row| {
-            row.get("payload")
+            CompactRowView::new(SCOPED_DOCUMENT_COLUMNS, row).get_str("namespace")
+                == Some("graptor.documents")
+        })
+        .filter(|row| {
+            CompactRowView::new(SCOPED_DOCUMENT_COLUMNS, row)
+                .get_json("payload")
+                .as_ref()
                 .and_then(|value| value.get("sessionId"))
                 .and_then(Value::as_str)
                 == Some(session_id.0.as_str())
         })
         .filter_map(|row| {
-            let payload = row.get("payload")?;
+            let payload = CompactRowView::new(SCOPED_DOCUMENT_COLUMNS, &row).get_json("payload")?;
             Some(SessionDocumentState {
                 document_id: DocumentId(
                     payload
@@ -760,14 +820,18 @@ pub fn load_session_stats(
     store: &PhoenixCozoStore,
     session_id: &SessionId,
 ) -> Result<SessionStats, StoreError> {
+    const ARTIFACT_COLUMNS: &[&str] = &["thread_id", "kind", "payload"];
     let artifact = store
-        .fetch_rows("workspace_artifacts")?
+        .fetch_compact_rows_with_columns("workspace_artifacts", ARTIFACT_COLUMNS)?
         .into_iter()
         .find(|row| {
-            row.get("thread_id").and_then(Value::as_str) == Some(session_id.0.as_str())
-                && row.get("kind").and_then(Value::as_str) == Some("graptor_session_stats")
+            let row = CompactRowView::new(ARTIFACT_COLUMNS, row);
+            row.get_str("thread_id") == Some(session_id.0.as_str())
+                && row.get_str("kind") == Some("graptor_session_stats")
         });
-    if let Some(payload) = artifact.and_then(|row| row.get("payload").cloned()) {
+    if let Some(payload) =
+        artifact.and_then(|row| CompactRowView::new(ARTIFACT_COLUMNS, &row).get_json("payload"))
+    {
         if let Ok(stats) = serde_json::from_value(payload) {
             return Ok(stats);
         }
@@ -785,10 +849,26 @@ pub fn load_session_stats(
     Ok(SessionStats {
         session_id: session_id.clone(),
         document_count: state.documents.len(),
-        chapter_count: state.documents.iter().map(|document| document.chapter_count).sum(),
-        parent_count: state.documents.iter().map(|document| document.parent_count).sum(),
-        leaf_count: state.documents.iter().map(|document| document.leaf_count).sum(),
-        entity_count: state.documents.iter().map(|document| document.entity_count).sum(),
+        chapter_count: state
+            .documents
+            .iter()
+            .map(|document| document.chapter_count)
+            .sum(),
+        parent_count: state
+            .documents
+            .iter()
+            .map(|document| document.parent_count)
+            .sum(),
+        leaf_count: state
+            .documents
+            .iter()
+            .map(|document| document.leaf_count)
+            .sum(),
+        entity_count: state
+            .documents
+            .iter()
+            .map(|document| document.entity_count)
+            .sum(),
         discovery_candidate_count: count_for("discovery_candidates"),
         graph_vertex_count: count_for("graph_vertices"),
         graph_edge_count: count_for("graph_edges"),
@@ -807,13 +887,13 @@ pub fn build_graph_delta(
         .documents
         .iter()
         .map(|document| document.document_id.0.clone())
-        .collect::<BTreeSet<_>>();
+        .collect::<FxHashSet<_>>();
     if !request.changed_documents.is_empty() {
         let requested = request
             .changed_documents
             .iter()
             .map(|document| document.0.clone())
-            .collect::<BTreeSet<_>>();
+            .collect::<FxHashSet<_>>();
         allowed_documents.retain(|document_id| requested.contains(document_id));
     }
 
@@ -852,18 +932,18 @@ pub fn build_graph_delta(
         }
     }
 
-    let chunk_id_set = chunk_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let chunk_id_set = chunk_ids.iter().cloned().collect::<FxHashSet<_>>();
     let mut included_nodes = chunk_id_set.clone();
     for chunk_id in &chunk_ids {
-        for edge in graph.outgoing_any(chunk_id).chain(graph.incoming_any(chunk_id)) {
-            if let Some(vertex) = graph
-                .vertices
-                .get(if edge.source_id == *chunk_id {
-                    edge.target_id.as_str()
-                } else {
-                    edge.source_id.as_str()
-                })
-            {
+        for edge in graph
+            .outgoing_any(chunk_id)
+            .chain(graph.incoming_any(chunk_id))
+        {
+            if let Some(vertex) = graph.vertices.get(if edge.source_id == *chunk_id {
+                edge.target_id.as_str()
+            } else {
+                edge.source_id.as_str()
+            }) {
                 if matches!(vertex.kind.as_str(), "entity" | "event") {
                     included_nodes.insert(vertex.id.clone());
                 }
@@ -925,15 +1005,21 @@ pub fn build_graph_delta(
             node_id: vertex.id.clone(),
             kind: vertex.kind.clone(),
             label,
-            entity_id: vertex.entity_id.as_ref().map(|value| EntityId(value.clone())),
-            document_id: vertex.document_id.as_ref().map(|value| DocumentId(value.clone())),
+            entity_id: vertex
+                .entity_id
+                .as_ref()
+                .map(|value| EntityId(value.clone())),
+            document_id: vertex
+                .document_id
+                .as_ref()
+                .map(|value| DocumentId(value.clone())),
             chapter_id: vertex.chapter_id,
             weight: vertex.weight as i32,
         });
     }
 
     let mut edges = Vec::new();
-    let mut edge_keys = BTreeSet::new();
+    let mut edge_keys = FxHashSet::default();
     for vertex_id in &included_nodes {
         for edge in graph.outgoing_any(vertex_id) {
             if included_nodes.contains(&edge.target_id)
@@ -969,7 +1055,6 @@ pub fn build_graph_delta(
     })
 }
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BoundaryKind {
     Chapter,
@@ -997,7 +1082,6 @@ struct ParentChunk {
     chunk_id: i64,
     start: usize,
     end: usize,
-    text: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1008,7 +1092,174 @@ struct LeafChunk {
     parent_id: Option<i64>,
     start: usize,
     end: usize,
-    text: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FlushPolicy {
+    text_heavy_limit: usize,
+    medium_limit: usize,
+    lightweight_limit: usize,
+    diagnostic_cap: usize,
+}
+
+impl Default for FlushPolicy {
+    fn default() -> Self {
+        if cfg!(target_arch = "wasm32") {
+            Self {
+                text_heavy_limit: 128,
+                medium_limit: 256,
+                lightweight_limit: 512,
+                diagnostic_cap: 256,
+            }
+        } else {
+            Self {
+                text_heavy_limit: 256,
+                medium_limit: 512,
+                lightweight_limit: 1024,
+                diagnostic_cap: 512,
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct DiagnosticCollector {
+    cap: usize,
+    total: usize,
+    diagnostics: Vec<Diagnostic>,
+    truncated: bool,
+}
+
+impl DiagnosticCollector {
+    fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            total: 0,
+            diagnostics: Vec::new(),
+            truncated: false,
+        }
+    }
+
+    fn push(&mut self, diagnostic: Diagnostic) {
+        self.total += 1;
+        if self.diagnostics.len() < self.cap {
+            self.diagnostics.push(diagnostic);
+        } else {
+            self.truncated = true;
+        }
+    }
+
+    fn finish(mut self) -> (usize, Vec<Diagnostic>) {
+        if self.truncated {
+            self.diagnostics.push(Diagnostic {
+                code: "PX_GRAPTOR_DIAGNOSTICS_TRUNCATED".to_owned(),
+                message: format!(
+                    "Ingest emitted {} diagnostics; only the first {} are retained in-memory.",
+                    self.total, self.cap
+                ),
+            });
+        }
+        (self.total, self.diagnostics)
+    }
+}
+
+#[derive(Default)]
+struct ResolverSeedScratch {
+    version: u64,
+    seeds: Vec<ResolverEntitySeed>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DocumentPersistState {
+    entity_ids: FxHashSet<String>,
+    mention_count: usize,
+    edge_count: usize,
+    graph_edge_count: usize,
+    cross_chapter_links: usize,
+    discovery_count: usize,
+}
+
+struct ProcessedDocument {
+    summary: IngestDocumentSummary,
+    persist_state: DocumentPersistState,
+    warning_count: usize,
+    diagnostics: Vec<Diagnostic>,
+}
+
+struct BufferSet {
+    chunk_rows: CompactRelationBuffer,
+    chunkid_rows: CompactRelationBuffer,
+    span_rows: CompactRelationBuffer,
+    span_mention_rows: CompactRelationBuffer,
+    evidence_rows: CompactRelationBuffer,
+    discovery_rows: CompactRelationBuffer,
+    edge_rows: CompactRelationBuffer,
+    graph_vertex_rows: CompactRelationBuffer,
+    graph_label_rows: CompactRelationBuffer,
+    graph_edge_rows: CompactRelationBuffer,
+    graph_property_rows: CompactRelationBuffer,
+}
+
+impl BufferSet {
+    fn new() -> Self {
+        Self {
+            chunk_rows: CompactRelationBuffer::new("chunks").expect("chunks relation"),
+            chunkid_rows: CompactRelationBuffer::new("chunkid_map").expect("chunkid_map relation"),
+            span_rows: CompactRelationBuffer::new("spans").expect("spans relation"),
+            span_mention_rows: CompactRelationBuffer::new("span_mentions")
+                .expect("span_mentions relation"),
+            evidence_rows: CompactRelationBuffer::new("spans").expect("spans relation"),
+            discovery_rows: CompactRelationBuffer::new("discovery_candidates")
+                .expect("discovery_candidates relation"),
+            edge_rows: CompactRelationBuffer::new("edges").expect("edges relation"),
+            graph_vertex_rows: CompactRelationBuffer::new("graph_vertices")
+                .expect("graph_vertices relation"),
+            graph_label_rows: CompactRelationBuffer::new("graph_vertex_labels")
+                .expect("graph_vertex_labels relation"),
+            graph_edge_rows: CompactRelationBuffer::new("graph_edges")
+                .expect("graph_edges relation"),
+            graph_property_rows: CompactRelationBuffer::new("graph_properties")
+                .expect("graph_properties relation"),
+        }
+    }
+
+    fn flush_due(
+        &mut self,
+        store: &PhoenixCozoStore,
+        policy: FlushPolicy,
+    ) -> Result<(), StoreError> {
+        flush_relation_if_needed(store, &mut self.chunk_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(store, &mut self.span_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(store, &mut self.evidence_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(store, &mut self.graph_vertex_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(store, &mut self.graph_edge_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(
+            store,
+            &mut self.graph_property_rows,
+            policy.text_heavy_limit,
+        )?;
+        flush_relation_if_needed(store, &mut self.discovery_rows, policy.medium_limit)?;
+        flush_relation_if_needed(store, &mut self.edge_rows, policy.medium_limit)?;
+        flush_relation_if_needed(store, &mut self.graph_label_rows, policy.medium_limit)?;
+        flush_relation_if_needed(store, &mut self.span_mention_rows, policy.medium_limit)?;
+        flush_relation_if_needed(store, &mut self.chunkid_rows, policy.lightweight_limit)?;
+        Ok(())
+    }
+
+    fn flush_all(&mut self, store: &PhoenixCozoStore) -> Result<(), StoreError> {
+        flush_relation_all(store, &mut self.chunk_rows)?;
+        flush_relation_all(store, &mut self.chunkid_rows)?;
+        flush_relation_all(store, &mut self.span_rows)?;
+        flush_relation_all(store, &mut self.span_mention_rows)?;
+        flush_relation_all(store, &mut self.evidence_rows)?;
+        flush_relation_all(store, &mut self.discovery_rows)?;
+        flush_relation_all(store, &mut self.edge_rows)?;
+        flush_relation_all(store, &mut self.graph_vertex_rows)?;
+        flush_relation_all(store, &mut self.graph_label_rows)?;
+        flush_relation_all(store, &mut self.graph_edge_rows)?;
+        flush_relation_all(store, &mut self.graph_property_rows)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1035,80 +1286,54 @@ struct EntityState {
     id: EntityId,
     label: String,
     kind: EntityKind,
-    aliases: BTreeSet<String>,
-    chapters: BTreeSet<u32>,
+    aliases: FxHashSet<String>,
+    chapters: FxHashSet<u32>,
     total_mentions: u32,
 }
 
 #[derive(Default)]
 struct EntityRegistry {
-    entities: BTreeMap<String, EntityState>,
-    surfaces: BTreeMap<String, EntityId>,
-    cooccurrence: BTreeMap<(String, String, String), u32>,
+    entities: FxHashMap<String, EntityState>,
+    surfaces: FxHashMap<String, EntityId>,
+    cooccurrence: FxHashMap<(String, String, String), u32>,
     initial_mentions: u32,
-}
-
-#[derive(Clone, Debug)]
-struct DocumentArtifacts {
-    document: IngestDocument,
-    session_id: Option<SessionId>,
-    entity_ids: BTreeSet<String>,
-    chunk_rows: Vec<Value>,
-    chunkid_rows: Vec<Value>,
-    span_rows: BTreeMap<String, Value>,
-    span_mention_rows: BTreeMap<String, Value>,
-    evidence_rows: BTreeMap<String, Value>,
-    discovery_rows: BTreeMap<String, Value>,
-    edge_rows: BTreeMap<String, Value>,
-    graph_vertex_rows: BTreeMap<String, Value>,
-    graph_label_rows: BTreeSet<(String, String)>,
-    graph_edge_rows: BTreeMap<(String, String), Value>,
-    graph_property_rows: BTreeMap<(String, String, String, i64), Value>,
-    document_manifest: Value,
-    mention_count: usize,
-    edge_count: usize,
-    cross_chapter_links: usize,
-    diagnostics: Vec<Diagnostic>,
-    summary: IngestDocumentSummary,
+    version: u64,
 }
 
 impl EntityRegistry {
     fn from_store(store: &PhoenixCozoStore) -> Result<Self, StoreError> {
+        const ENTITY_COLUMNS: &[&str] = &["id", "label", "kind", "aliases", "total_mentions"];
         let mut registry = Self::default();
-        for row in store.fetch_rows("entities")? {
-            let Some(id) = row.get("id").and_then(Value::as_str) else {
+        for row in store.fetch_compact_rows_with_columns("entities", ENTITY_COLUMNS)? {
+            let row = CompactRowView::new(ENTITY_COLUMNS, &row);
+            let Some(id) = row.get_str("id") else {
                 continue;
             };
-            let label = row
-                .get("label")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
+            let label = row.get_str("label").unwrap_or_default().to_owned();
             let aliases = row
-                .get("aliases")
-                .and_then(Value::as_array)
+                .get_json("aliases")
+                .and_then(|value| value.as_array().cloned())
                 .map(|values| {
                     values
                         .iter()
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
-                        .collect::<BTreeSet<_>>()
+                        .collect::<FxHashSet<_>>()
                 })
                 .unwrap_or_default();
-            let total_mentions = row
-                .get("total_mentions")
-                .and_then(Value::as_u64)
-                .unwrap_or_default() as u32;
+            let total_mentions = row.get_u64("total_mentions").unwrap_or_default() as u32;
             let entity = EntityState {
                 id: EntityId(id.to_owned()),
                 label: label.clone(),
-                kind: kind_from_string(row.get("kind").and_then(Value::as_str).unwrap_or("Other")),
+                kind: kind_from_string(row.get_str("kind").unwrap_or("Other")),
                 aliases: aliases.clone(),
-                chapters: BTreeSet::new(),
+                chapters: FxHashSet::default(),
                 total_mentions,
             };
             registry.initial_mentions += total_mentions;
-            registry.surfaces.insert(normalize_key(&label), entity.id.clone());
+            registry
+                .surfaces
+                .insert(normalize_key(&label), entity.id.clone());
             for alias in &aliases {
                 registry
                     .surfaces
@@ -1119,19 +1344,27 @@ impl EntityRegistry {
         Ok(registry)
     }
 
-    fn resolver_seed(&self, scope: &ScopeKey) -> Vec<ResolverEntitySeed> {
-        self.entities
-            .values()
-            .map(|entity| ResolverEntitySeed {
-                entity_id: entity.id.clone(),
-                canonical_name: entity.label.clone(),
-                aliases: entity.aliases.iter().cloned().collect(),
-                kind: Some(entity.kind.clone()),
-                gender: Some(GenderHint::Unknown),
-                number: None,
-                scope: scope.clone(),
-            })
-            .collect()
+    fn refresh_resolver_seed<'a>(
+        &self,
+        scope: &ScopeKey,
+        scratch: &'a mut ResolverSeedScratch,
+    ) -> &'a [ResolverEntitySeed] {
+        if scratch.version != self.version {
+            scratch.seeds.clear();
+            scratch
+                .seeds
+                .extend(self.entities.values().map(|entity| ResolverEntitySeed {
+                    entity_id: entity.id.clone(),
+                    canonical_name: entity.label.clone(),
+                    aliases: entity.aliases.iter().cloned().collect(),
+                    kind: Some(entity.kind.clone()),
+                    gender: Some(GenderHint::Unknown),
+                    number: None,
+                    scope: scope.clone(),
+                }));
+            scratch.version = self.version;
+        }
+        &scratch.seeds
     }
 
     fn resolve_or_register(
@@ -1142,17 +1375,24 @@ impl EntityRegistry {
         chapter_id: u32,
     ) -> EntityId {
         if let Some(explicit_id) = explicit_id {
-            let entry = self.entities.entry(explicit_id.0.clone()).or_insert_with(|| EntityState {
-                id: explicit_id.clone(),
-                label: surface.to_owned(),
-                kind: kind.clone().unwrap_or(EntityKind::Other),
-                aliases: BTreeSet::new(),
-                chapters: BTreeSet::new(),
-                total_mentions: 0,
-            });
+            let existed = self.entities.contains_key(&explicit_id.0);
+            let entry = self
+                .entities
+                .entry(explicit_id.0.clone())
+                .or_insert_with(|| EntityState {
+                    id: explicit_id.clone(),
+                    label: surface.to_owned(),
+                    kind: kind.clone().unwrap_or(EntityKind::Other),
+                    aliases: FxHashSet::default(),
+                    chapters: FxHashSet::default(),
+                    total_mentions: 0,
+                });
             entry.chapters.insert(chapter_id);
             self.surfaces
                 .insert(normalize_key(surface), explicit_id.clone());
+            if !existed {
+                self.version = self.version.wrapping_add(1);
+            }
             return explicit_id.clone();
         }
 
@@ -1164,19 +1404,25 @@ impl EntityRegistry {
             return existing.clone();
         }
 
-        let entity_id = EntityId(format!("entity-{}", stable_hex("entity", &[normalized.as_str()])));
+        let entity_id = EntityId(format!(
+            "entity-{}",
+            stable_hex("entity", &[normalized.as_str()])
+        ));
+        let mut chapters = FxHashSet::default();
+        chapters.insert(chapter_id);
         self.entities.insert(
             entity_id.0.clone(),
             EntityState {
                 id: entity_id.clone(),
                 label: surface.to_owned(),
                 kind: kind.unwrap_or(EntityKind::Other),
-                aliases: BTreeSet::new(),
-                chapters: BTreeSet::from([chapter_id]),
+                aliases: FxHashSet::default(),
+                chapters,
                 total_mentions: 0,
             },
         );
         self.surfaces.insert(normalized, entity_id.clone());
+        self.version = self.version.wrapping_add(1);
         entity_id
     }
 
@@ -1188,6 +1434,7 @@ impl EntityRegistry {
             entity.aliases.insert(alias.to_owned());
             self.surfaces
                 .insert(normalize_key(alias), entity_id.clone());
+            self.version = self.version.wrapping_add(1);
         }
     }
 
@@ -1198,11 +1445,15 @@ impl EntityRegistry {
         }
     }
 
-    fn record_cooccurrence(&mut self, document: &IngestDocument, entity_ids: Vec<EntityId>) {
+    fn record_cooccurrence(
+        &mut self,
+        document: &BorrowedIngestDocument<'_>,
+        entity_ids: Vec<EntityId>,
+    ) {
         let unique = entity_ids
             .into_iter()
             .map(|entity_id| entity_id.0)
-            .collect::<BTreeSet<_>>()
+            .collect::<FxHashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
         for index in 0..unique.len() {
@@ -1220,7 +1471,7 @@ impl EntityRegistry {
         }
     }
 
-    fn cooccurrence_rows(&self, document: &IngestDocument) -> Vec<Value> {
+    fn cooccurrence_rows(&self, document: &BorrowedIngestDocument<'_>) -> Vec<Value> {
         self.cooccurrence
             .iter()
             .filter_map(|((doc_id, left, right), count)| {
@@ -1242,7 +1493,10 @@ impl EntityRegistry {
     }
 
     fn total_aliases(&self) -> usize {
-        self.entities.values().map(|entity| entity.aliases.len()).sum()
+        self.entities
+            .values()
+            .map(|entity| entity.aliases.len())
+            .sum()
     }
 
     fn multi_chapter_entities(&self) -> usize {
@@ -1253,10 +1507,21 @@ impl EntityRegistry {
     }
 }
 
-fn build_chapter_specs(document: &IngestDocument, boundaries: &[ChapterBoundary]) -> Vec<ChapterSpec> {
+fn build_chapter_specs(
+    document: &BorrowedIngestDocument<'_>,
+    boundaries: &[ChapterBoundary],
+) -> Vec<ChapterSpec> {
     if boundaries.is_empty() {
         return vec![ChapterSpec {
-            chunk_id: stable_int("chunk", &[document.document_id.0.as_str(), "2", "0", &document.text.len().to_string()]),
+            chunk_id: stable_int(
+                "chunk",
+                &[
+                    document.document_id.0.as_str(),
+                    "2",
+                    "0",
+                    &document.text.len().to_string(),
+                ],
+            ),
             chapter_id: 0,
             start: 0,
             end: document.text.len(),
@@ -1269,7 +1534,15 @@ fn build_chapter_specs(document: &IngestDocument, boundaries: &[ChapterBoundary]
     let mut next_id = 1u32;
     if boundaries[0].start > 0 && document.text[..boundaries[0].start].trim().len() > 0 {
         chapters.push(ChapterSpec {
-            chunk_id: stable_int("chunk", &[document.document_id.0.as_str(), "2", "0", &boundaries[0].start.to_string()]),
+            chunk_id: stable_int(
+                "chunk",
+                &[
+                    document.document_id.0.as_str(),
+                    "2",
+                    "0",
+                    &boundaries[0].start.to_string(),
+                ],
+            ),
             chapter_id: 0,
             start: 0,
             end: boundaries[0].start,
@@ -1303,8 +1576,11 @@ fn build_chapter_specs(document: &IngestDocument, boundaries: &[ChapterBoundary]
     chapters
 }
 
-fn build_leaf_chunks(document: &IngestDocument, config: &GraptorConfig) -> Vec<LeafChunk> {
-    let sentences = split_sentences(&document.text);
+fn build_leaf_chunks(
+    document: &BorrowedIngestDocument<'_>,
+    config: &GraptorConfig,
+) -> Vec<LeafChunk> {
+    let sentences = split_sentences(document.text);
     if sentences.is_empty() {
         return Vec::new();
     }
@@ -1322,14 +1598,18 @@ fn build_leaf_chunks(document: &IngestDocument, config: &GraptorConfig) -> Vec<L
         leaves.push(LeafChunk {
             chunk_id: stable_int(
                 "chunk",
-                &[document.document_id.0.as_str(), "0", &start.to_string(), &end.to_string()],
+                &[
+                    document.document_id.0.as_str(),
+                    "0",
+                    &start.to_string(),
+                    &end.to_string(),
+                ],
             ),
             search_id: String::new(),
             chapter_id: 0,
             parent_id: None,
             start,
             end,
-            text: preserve_offsets_slice(&document.text[start..end]),
         });
     };
 
@@ -1358,9 +1638,16 @@ fn build_leaf_chunks(document: &IngestDocument, config: &GraptorConfig) -> Vec<L
     leaves
 }
 
-fn assign_leaves_to_chapters(document: &IngestDocument, chapters: &[ChapterSpec], leaves: &mut [LeafChunk]) {
+fn assign_leaves_to_chapters(
+    document: &BorrowedIngestDocument<'_>,
+    chapters: &[ChapterSpec],
+    leaves: &mut [LeafChunk],
+) {
     for leaf in leaves {
-        let mut best_chapter = chapters.first().map(|chapter| chapter.chapter_id).unwrap_or(0);
+        let mut best_chapter = chapters
+            .first()
+            .map(|chapter| chapter.chapter_id)
+            .unwrap_or(0);
         let mut best_overlap = 0usize;
         for chapter in chapters {
             let overlap = overlap_len(leaf.start, leaf.end, chapter.start, chapter.end);
@@ -1378,7 +1665,7 @@ fn assign_leaves_to_chapters(document: &IngestDocument, chapters: &[ChapterSpec]
 }
 
 fn build_parent_chunks(
-    document: &IngestDocument,
+    document: &BorrowedIngestDocument<'_>,
     config: &GraptorConfig,
     chapters: &mut [ChapterSpec],
     leaves: &mut [LeafChunk],
@@ -1420,7 +1707,6 @@ fn build_parent_chunks(
                 chunk_id: parent_id,
                 start: first.start,
                 end: last.end,
-                text: preserve_offsets_slice(&document.text[first.start..last.end]),
             });
             for index in &indices[start_index..end_index] {
                 leaves[*index].parent_id = Some(parent_id);
@@ -1451,7 +1737,9 @@ fn build_parent_chunks(
 
 #[allow(clippy::too_many_arguments)]
 fn process_document_chunks(
-    document: &IngestDocument,
+    store: &PhoenixCozoStore,
+    policy: FlushPolicy,
+    document: &BorrowedIngestDocument<'_>,
     note_id: &NoteId,
     chapters: &[ChapterSpec],
     leaves: &[LeafChunk],
@@ -1459,33 +1747,27 @@ fn process_document_chunks(
     scanner: &PhoenixScanner,
     structure: &PhoenixStructure,
     registry: &mut EntityRegistry,
-    chunk_rows: &mut Vec<Value>,
-    chunkid_rows: &mut Vec<Value>,
-    entity_ids: &mut BTreeSet<String>,
-    span_rows: &mut BTreeMap<String, Value>,
-    span_mention_rows: &mut BTreeMap<String, Value>,
-    evidence_rows: &mut BTreeMap<String, Value>,
-    discovery_rows: &mut BTreeMap<String, Value>,
-    edge_rows: &mut BTreeMap<String, Value>,
-    graph_vertex_rows: &mut BTreeMap<String, Value>,
-    graph_label_rows: &mut BTreeSet<(String, String)>,
-    graph_edge_rows: &mut BTreeMap<(String, String), Value>,
-    graph_property_rows: &mut BTreeMap<(String, String, String, i64), Value>,
-    chapter_links: &mut BTreeMap<(u32, u32), BTreeSet<String>>,
-    mention_count: &mut usize,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+    resolver_scratch: &mut ResolverSeedScratch,
+    buffers: &mut BufferSet,
+    persist_state: &mut DocumentPersistState,
+    chapter_links: &mut FxHashMap<(u32, u32), FxHashSet<String>>,
+    diagnostics: &mut DiagnosticCollector,
+) -> Result<(), StoreError> {
     for chapter in chapters {
         for parent in &chapter.parents {
-            chunk_rows.push(parent_chunk_row(document, parent, &document.scope));
-            chunkid_rows.push(parent_chunkid_row(document, chapter, parent));
+            buffers
+                .chunk_rows
+                .insert_value(parent_chunk_row(document, parent, &document.scope))
+                .expect("parent chunk row");
+            buffers
+                .chunkid_rows
+                .insert_value(parent_chunkid_row(document, chapter, parent))
+                .expect("parent chunk id row");
             let parent_vertex = parent_vertex_id(parent.chunk_id);
-            graph_vertex_rows.insert(parent_vertex.clone(), parent_vertex_row(document, chapter, parent));
-            graph_edge_rows.insert(
-                (
-                    chapter_vertex_id(&document.document_id, chapter.chapter_id),
-                    parent_vertex.clone(),
-                ),
+            insert_graph_vertex(buffers, parent_vertex_row(document, chapter, parent));
+            insert_graph_edge(
+                buffers,
+                persist_state,
                 graph_edge_row(
                     &chapter_vertex_id(&document.document_id, chapter.chapter_id),
                     &parent_vertex,
@@ -1495,25 +1777,39 @@ fn process_document_chunks(
                     None,
                 ),
             );
+            buffers.flush_due(store, policy)?;
         }
     }
 
     for leaf in leaves {
-        chunk_rows.push(leaf_chunk_row(document, leaf, &document.scope));
-        chunkid_rows.push(leaf_chunkid_row(document, leaf));
+        buffers
+            .chunk_rows
+            .insert_value(leaf_chunk_row(document, leaf, &document.scope))
+            .expect("leaf chunk row");
+        buffers
+            .chunkid_rows
+            .insert_value(leaf_chunkid_row(document, leaf))
+            .expect("leaf chunk id row");
         let chapter = chapters
             .iter()
             .find(|chapter| chapter.chapter_id == leaf.chapter_id)
             .expect("leaf chapter should exist");
         let leaf_vertex = leaf_vertex_id(&leaf.search_id);
-        graph_vertex_rows.insert(leaf_vertex.clone(), leaf_vertex_row(document, note_id, chapter, leaf));
-        graph_label_rows.insert((leaf_vertex.clone(), leaf.search_id.clone()));
+        insert_graph_vertex(buffers, leaf_vertex_row(document, note_id, chapter, leaf));
+        buffers
+            .graph_label_rows
+            .insert_value(json!({
+                "vertex_id": leaf_vertex.clone(),
+                "label": leaf.search_id.clone(),
+            }))
+            .expect("leaf label row");
         let parent_or_chapter = leaf
             .parent_id
             .map(parent_vertex_id)
             .unwrap_or_else(|| chapter_vertex_id(&document.document_id, leaf.chapter_id));
-        graph_edge_rows.insert(
-            (parent_or_chapter.clone(), leaf_vertex.clone()),
+        insert_graph_edge(
+            buffers,
+            persist_state,
             graph_edge_row(
                 &parent_or_chapter,
                 &leaf_vertex,
@@ -1524,20 +1820,19 @@ fn process_document_chunks(
             ),
         );
 
-        let scan = scanner.scan(&ScanRequest {
-            text: leaf.text.clone(),
-            scope: document.scope.clone(),
-            session_id: Some(scan_session_id.clone()),
-            resolver_seed: registry.resolver_seed(&document.scope),
-        });
-        let structure_artifact = structure.build(&StructureRequest {
-            text: leaf.text.clone(),
-            scan: scan.clone(),
-        });
+        let leaf_text = preserve_offsets_slice(&document.text[leaf.start..leaf.end]);
+        let resolver_seed = registry.refresh_resolver_seed(&document.scope, resolver_scratch);
+        let scan = scanner.scan_parts(
+            &leaf_text,
+            &document.scope,
+            Some(scan_session_id),
+            resolver_seed,
+        );
+        let structure_artifact = structure.build_parts(&leaf_text, &scan);
 
         let (mentions, discoveries) =
             resolve_mentions(document, note_id, leaf, &scan, registry, chapter_links);
-        *mention_count += mentions.len();
+        persist_state.mention_count += mentions.len();
         if !mentions.is_empty() {
             diagnostics.push(Diagnostic {
                 code: "PX_GRAPTOR_LEAF".to_owned(),
@@ -1561,36 +1856,48 @@ fn process_document_chunks(
         }
 
         for discovery in discoveries {
-            discovery_rows.insert(
-                discovery_row_id(document, &discovery),
-                discovery_row(document, &discovery),
-            );
+            buffers
+                .discovery_rows
+                .insert_value(discovery_row(document, &discovery))
+                .expect("discovery row");
+            persist_state.discovery_count += 1;
         }
 
         for mention in &mentions {
-            entity_ids.insert(mention.entity_id.0.clone());
-            span_rows.insert(
-                mention.span_id.clone(),
-                mention_span_row(document, note_id, mention),
-            );
-            span_mention_rows.insert(
-                mention.span_mention_id.clone(),
-                mention_span_mention_row(mention),
-            );
+            persist_state.entity_ids.insert(mention.entity_id.0.clone());
+            buffers
+                .span_rows
+                .insert_value(mention_span_row(document, note_id, mention))
+                .expect("mention span row");
+            buffers
+                .span_mention_rows
+                .insert_value(mention_span_mention_row(mention))
+                .expect("span mention row");
             let entity_vertex = entity_vertex_id(&mention.entity_id);
             let entity = registry
                 .entities
                 .get(&mention.entity_id.0)
                 .expect("entity should exist");
-            graph_vertex_rows
-                .entry(entity_vertex.clone())
-                .or_insert_with(|| entity_vertex_row(entity));
-            graph_label_rows.insert((entity_vertex.clone(), entity.label.clone()));
+            insert_graph_vertex(buffers, entity_vertex_row(entity));
+            buffers
+                .graph_label_rows
+                .insert_value(json!({
+                    "vertex_id": entity_vertex.clone(),
+                    "label": entity.label.clone(),
+                }))
+                .expect("entity label row");
             for alias in &entity.aliases {
-                graph_label_rows.insert((entity_vertex.clone(), alias.clone()));
+                buffers
+                    .graph_label_rows
+                    .insert_value(json!({
+                        "vertex_id": entity_vertex.clone(),
+                        "label": alias.clone(),
+                    }))
+                    .expect("entity alias label row");
             }
-            graph_edge_rows.insert(
-                (leaf_vertex.clone(), entity_vertex.clone()),
+            insert_graph_edge(
+                buffers,
+                persist_state,
                 graph_edge_row(
                     &leaf_vertex,
                     &entity_vertex,
@@ -1603,17 +1910,22 @@ fn process_document_chunks(
         }
 
         record_graph_property(
-            graph_property_rows,
+            &mut buffers.graph_property_rows,
             &leaf_vertex,
             "vertex",
             "chunk.text",
-            json!(leaf.text),
+            json!(leaf_text),
             now_ms(),
         );
 
         apply_alias_candidates(&scan, &mentions, registry);
-        for evidence in build_absolute_evidence(document, note_id, leaf, &structure_artifact.evidence_spans) {
-            evidence_rows.insert(evidence_id(note_id, &evidence), evidence_row(document, note_id, &evidence));
+        for evidence in
+            build_absolute_evidence(document, note_id, leaf, &structure_artifact.evidence_spans)
+        {
+            buffers
+                .evidence_rows
+                .insert_value(evidence_row(document, note_id, &evidence))
+                .expect("evidence row");
         }
         materialize_relations(
             document,
@@ -1621,11 +1933,8 @@ fn process_document_chunks(
             leaf,
             &structure_artifact.relations,
             &mentions,
-            edge_rows,
-            graph_vertex_rows,
-            graph_label_rows,
-            graph_edge_rows,
-            evidence_rows,
+            buffers,
+            persist_state,
         );
         registry.record_cooccurrence(
             document,
@@ -1634,19 +1943,21 @@ fn process_document_chunks(
                 .map(|mention| mention.entity_id.clone())
                 .collect(),
         );
+        buffers.flush_due(store, policy)?;
     }
 
     for edge in registry.cooccurrence_rows(document) {
-        let edge_id = edge["id"].as_str().unwrap_or_default().to_owned();
         let left = edge["source_id"].as_str().unwrap_or_default().to_owned();
         let right = edge["target_id"].as_str().unwrap_or_default().to_owned();
         let count = edge["confidence"].as_f64().unwrap_or(1.0) as i64;
-        edge_rows.insert(edge_id, edge);
-        graph_edge_rows.insert(
-            (
-                entity_vertex_id(&EntityId(left.clone())),
-                entity_vertex_id(&EntityId(right.clone())),
-            ),
+        buffers
+            .edge_rows
+            .insert_value(edge)
+            .expect("cooccurrence edge row");
+        persist_state.edge_count += 1;
+        insert_graph_edge(
+            buffers,
+            persist_state,
             graph_edge_row(
                 &entity_vertex_id(&EntityId(left.clone())),
                 &entity_vertex_id(&EntityId(right.clone())),
@@ -1656,14 +1967,12 @@ fn process_document_chunks(
                 None,
             ),
         );
-        graph_edge_rows.insert(
-            (
-                entity_vertex_id(&EntityId(right.clone())),
-                entity_vertex_id(&EntityId(left.clone())),
-            ),
+        insert_graph_edge(
+            buffers,
+            persist_state,
             graph_edge_row(
-                &entity_vertex_id(&EntityId(right)),
-                &entity_vertex_id(&EntityId(left)),
+                &entity_vertex_id(&EntityId(right.clone())),
+                &entity_vertex_id(&EntityId(left.clone())),
                 count,
                 "cooccurs",
                 json!({ "count": count }),
@@ -1682,9 +1991,9 @@ fn process_document_chunks(
                 "cross_chapter",
             ],
         );
-        edge_rows.insert(
-            edge_id.clone(),
-            json!({
+        buffers
+            .edge_rows
+            .insert_value(json!({
                 "id": edge_id,
                 "source_id": chapter_vertex_id(&document.document_id, *left),
                 "target_id": chapter_vertex_id(&document.document_id, *right),
@@ -1693,13 +2002,12 @@ fn process_document_chunks(
                 "bidirectional": true,
                 "source_note": note_id.0,
                 "created_at": now_ms(),
-            }),
-        );
-        graph_edge_rows.insert(
-            (
-                chapter_vertex_id(&document.document_id, *left),
-                chapter_vertex_id(&document.document_id, *right),
-            ),
+            }))
+            .expect("cross chapter edge row");
+        persist_state.edge_count += 1;
+        insert_graph_edge(
+            buffers,
+            persist_state,
             graph_edge_row(
                 &chapter_vertex_id(&document.document_id, *left),
                 &chapter_vertex_id(&document.document_id, *right),
@@ -1710,115 +2018,17 @@ fn process_document_chunks(
             ),
         );
     }
-}
-
-fn persist_document_rows(
-    store: &PhoenixCozoStore,
-    artifacts: &DocumentArtifacts,
-    registry: &EntityRegistry,
-    now: i64,
-) -> Result<(), StoreError> {
-    let note_id = artifacts.summary.note_id.as_ref().expect("note id");
-    store.put_row(
-        "notes",
-        json!({
-            "id": note_id.0,
-            "version": 1,
-            "world_id": artifacts.document.scope.world_id.clone().unwrap_or_default(),
-            "title": artifacts.document.title,
-            "content": artifacts.document.text,
-            "markdown_content": artifacts.document.text,
-            "folder_id": artifacts.document.scope.folder_id,
-            "entity_kind": null,
-            "entity_subtype": null,
-            "is_entity": false,
-            "is_pinned": false,
-            "favorite": false,
-            "owner_id": artifacts.document.document_id.0,
-            "narrative_id": artifacts.document.scope.narrative_id,
-            "order": null,
-            "created_at": now,
-            "updated_at": now,
-            "valid_from": now,
-            "valid_to": null,
-            "is_current": true,
-            "change_reason": "phoenix_graptor_ingest",
-        }),
-    )?;
-    store.put_row(
-        "docid_map",
-        json!({
-            "id": stable_int("docid", &[artifacts.document.document_id.0.as_str()]),
-            "docid": artifacts.document.document_id.0,
-            "created_at": now,
-        }),
-    )?;
-    for row in &artifacts.chunk_rows {
-        store.put_row("chunks", row.clone())?;
-    }
-    for row in &artifacts.chunkid_rows {
-        store.put_row("chunkid_map", row.clone())?;
-    }
-    for entity_id in &artifacts.entity_ids {
-        let entity = registry.entities.get(entity_id).expect("entity should exist");
-        store.put_row("entities", entity_row(entity, &artifacts.document.scope, note_id, now))?;
-    }
-    for row in artifacts.span_rows.values() {
-        store.put_row("spans", row.clone())?;
-    }
-    for row in artifacts.span_mention_rows.values() {
-        store.put_row("span_mentions", row.clone())?;
-    }
-    for row in artifacts.evidence_rows.values() {
-        store.put_row("spans", row.clone())?;
-    }
-    for row in artifacts.discovery_rows.values() {
-        store.put_row("discovery_candidates", row.clone())?;
-    }
-    for row in artifacts.edge_rows.values() {
-        store.put_row("edges", row.clone())?;
-    }
-    for row in artifacts.graph_vertex_rows.values() {
-        store.put_row("graph_vertices", row.clone())?;
-    }
-    for (vertex_id, label) in &artifacts.graph_label_rows {
-        store.put_row("graph_vertex_labels", json!({ "vertex_id": vertex_id, "label": label }))?;
-    }
-    for row in artifacts.graph_edge_rows.values() {
-        store.put_row("graph_edges", row.clone())?;
-    }
-    for row in artifacts.graph_property_rows.values() {
-        store.put_row("graph_properties", row.clone())?;
-    }
-    store.put_row(
-        "scoped_documents",
-        scoped_document_row(&artifacts.document, &artifacts.document_manifest, now),
-    )?;
-    store.put_row(
-        "scoped_definitions",
-        scoped_document_definition_row(&artifacts.document, &artifacts.document_manifest, now),
-    )?;
-    for entity_id in &artifacts.entity_ids {
-        let entity = registry.entities.get(entity_id).expect("entity should exist");
-        store.put_row(
-            "scoped_entity_fields",
-            scoped_entity_field_row(
-                &artifacts.document,
-                artifacts.session_id.as_ref(),
-                entity,
-                now,
-            ),
-        )?;
-    }
+    persist_state.cross_chapter_links = chapter_links.len();
+    buffers.flush_due(store, policy)?;
     Ok(())
 }
 
 fn build_document_manifest(
-    document: &IngestDocument,
+    document: &BorrowedIngestDocument<'_>,
     session_id: Option<&SessionId>,
     summary: &IngestDocumentSummary,
     chapters: &[ChapterSpec],
-    discovery_rows: &BTreeMap<String, Value>,
+    discovery_count: usize,
     now: i64,
 ) -> Value {
     json!({
@@ -1828,7 +2038,7 @@ fn build_document_manifest(
         "title": document.title,
         "scope": document.scope,
         "summary": summary,
-        "discoveryCount": discovery_rows.len(),
+        "discoveryCount": discovery_count,
         "chapters": chapters.iter().map(|chapter| {
             json!({
                 "chapterId": chapter.chapter_id,
@@ -1843,7 +2053,7 @@ fn build_document_manifest(
     })
 }
 
-fn scoped_document_row(document: &IngestDocument, payload: &Value, now: i64) -> Value {
+fn scoped_document_row(document: &BorrowedIngestDocument<'_>, payload: &Value, now: i64) -> Value {
     json!({
         "id": stable_hex("scoped_document", &[document.document_id.0.as_str()]),
         "scope_folder_id": document.scope.folder_id.clone().unwrap_or_else(|| "__root__".to_owned()),
@@ -1857,7 +2067,11 @@ fn scoped_document_row(document: &IngestDocument, payload: &Value, now: i64) -> 
     })
 }
 
-fn scoped_document_definition_row(document: &IngestDocument, payload: &Value, now: i64) -> Value {
+fn scoped_document_definition_row(
+    document: &BorrowedIngestDocument<'_>,
+    payload: &Value,
+    now: i64,
+) -> Value {
     json!({
         "id": stable_hex("scoped_definition", &[document.document_id.0.as_str(), "manifest"]),
         "narrative_id": document.scope.narrative_id.clone().unwrap_or_else(|| "__global__".to_owned()),
@@ -1870,7 +2084,7 @@ fn scoped_document_definition_row(document: &IngestDocument, payload: &Value, no
 }
 
 fn scoped_entity_field_row(
-    document: &IngestDocument,
+    document: &BorrowedIngestDocument<'_>,
     session_id: Option<&SessionId>,
     entity: &EntityState,
     now: i64,
@@ -1896,7 +2110,7 @@ fn scoped_entity_field_row(
     })
 }
 
-fn discovery_row_id(document: &IngestDocument, discovery: &DiscoveryRecord) -> String {
+fn discovery_row_id(document: &BorrowedIngestDocument<'_>, discovery: &DiscoveryRecord) -> String {
     stable_hex(
         "discovery",
         &[
@@ -1909,7 +2123,7 @@ fn discovery_row_id(document: &IngestDocument, discovery: &DiscoveryRecord) -> S
     )
 }
 
-fn discovery_row(document: &IngestDocument, discovery: &DiscoveryRecord) -> Value {
+fn discovery_row(document: &BorrowedIngestDocument<'_>, discovery: &DiscoveryRecord) -> Value {
     json!({
         "token": discovery_row_id(document, discovery),
         "kind": 0,
@@ -1921,58 +2135,8 @@ fn discovery_row(document: &IngestDocument, discovery: &DiscoveryRecord) -> Valu
     })
 }
 
-fn populate_graph_properties(
-    rows: &mut BTreeMap<(String, String, String, i64), Value>,
-    graph_vertex_rows: &BTreeMap<String, Value>,
-    graph_edge_rows: &BTreeMap<(String, String), Value>,
-    now: i64,
-) {
-    for (vertex_id, row) in graph_vertex_rows {
-        if let Some(weight) = row.get("weight") {
-            record_graph_property(rows, vertex_id, "vertex", "weight", weight.clone(), now);
-        }
-        if let Some(value) = row.get("value") {
-            record_graph_json_properties(rows, vertex_id, "vertex", "value", value, now);
-        }
-        if let Some(attributes) = row.get("attributes") {
-            record_graph_json_properties(rows, vertex_id, "vertex", "attributes", attributes, now);
-        }
-    }
-
-    for row in graph_edge_rows.values() {
-        let Some(source_id) = row.get("source_id").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(target_id) = row.get("target_id").and_then(Value::as_str) else {
-            continue;
-        };
-        let edge_type = row
-            .get("edge_type")
-            .and_then(Value::as_str)
-            .unwrap_or("edge");
-        let owner_id = format!("{source_id}->{target_id}::{edge_type}");
-        if let Some(weight) = row.get("weight") {
-            record_graph_property(rows, &owner_id, "edge", "weight", weight.clone(), now);
-        }
-        record_graph_property(
-            rows,
-            &owner_id,
-            "edge",
-            "edge_type",
-            json!(edge_type),
-            now,
-        );
-        if let Some(attributes) = row.get("attributes") {
-            record_graph_json_properties(rows, &owner_id, "edge", "attributes", attributes, now);
-        }
-        if let Some(data) = row.get("data").filter(|value| !value.is_null()) {
-            record_graph_json_properties(rows, &owner_id, "edge", "data", data, now);
-        }
-    }
-}
-
 fn record_graph_json_properties(
-    rows: &mut BTreeMap<(String, String, String, i64), Value>,
+    rows: &mut CompactRelationBuffer,
     owner_id: &str,
     owner_type: &str,
     prefix: &str,
@@ -1995,7 +2159,7 @@ fn record_graph_json_properties(
 }
 
 fn record_graph_property(
-    rows: &mut BTreeMap<(String, String, String, i64), Value>,
+    rows: &mut CompactRelationBuffer,
     owner_id: &str,
     owner_type: &str,
     key: &str,
@@ -2003,24 +2167,17 @@ fn record_graph_property(
     now: i64,
 ) {
     let txn_id = stable_int("graph_property", &[owner_id, owner_type, key]);
-    rows.insert(
-        (
-            owner_id.to_owned(),
-            owner_type.to_owned(),
-            key.to_owned(),
-            now,
-        ),
-        json!({
-            "owner_id": owner_id,
-            "owner_type": owner_type,
-            "key": key,
-            "valid_from": now,
-            "value_type": graph_value_type(&value),
-            "value_blob": value,
-            "valid_until": null,
-            "txn_id": txn_id,
-        }),
-    );
+    let mut row = serde_json::Map::new();
+    row.insert("owner_id".to_owned(), json!(owner_id));
+    row.insert("owner_type".to_owned(), json!(owner_type));
+    row.insert("key".to_owned(), json!(key));
+    row.insert("valid_from".to_owned(), json!(now));
+    row.insert("value_type".to_owned(), json!(graph_value_type(&value)));
+    row.insert("value_blob".to_owned(), value);
+    row.insert("valid_until".to_owned(), Value::Null);
+    row.insert("txn_id".to_owned(), json!(txn_id));
+    rows.insert_value(Value::Object(row))
+        .expect("graph property row");
 }
 
 fn graph_value_type(value: &Value) -> &'static str {
@@ -2032,6 +2189,131 @@ fn graph_value_type(value: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+fn flush_relation_if_needed(
+    store: &PhoenixCozoStore,
+    rows: &mut CompactRelationBuffer,
+    limit: usize,
+) -> Result<(), StoreError> {
+    if let Some(drained) = rows.drain_if_len_ge(limit) {
+        store.put_compact_rows_owned(rows.relation(), drained)?;
+    }
+    Ok(())
+}
+
+fn flush_relation_all(
+    store: &PhoenixCozoStore,
+    rows: &mut CompactRelationBuffer,
+) -> Result<(), StoreError> {
+    if !rows.is_empty() {
+        store.put_compact_rows_owned(rows.relation(), rows.drain_all())?;
+    }
+    Ok(())
+}
+
+fn insert_graph_vertex(buffers: &mut BufferSet, row: Value) {
+    let now = now_ms();
+    if let Some(vertex_id) = row.get("id").and_then(Value::as_str) {
+        if let Some(weight) = row.get("weight").cloned() {
+            record_graph_property(
+                &mut buffers.graph_property_rows,
+                vertex_id,
+                "vertex",
+                "weight",
+                weight,
+                now,
+            );
+        }
+        if let Some(value) = row.get("value").filter(|value| !value.is_null()) {
+            record_graph_json_properties(
+                &mut buffers.graph_property_rows,
+                vertex_id,
+                "vertex",
+                "value",
+                value,
+                now,
+            );
+        }
+        if let Some(attributes) = row.get("attributes").filter(|value| !value.is_null()) {
+            record_graph_json_properties(
+                &mut buffers.graph_property_rows,
+                vertex_id,
+                "vertex",
+                "attributes",
+                attributes,
+                now,
+            );
+        }
+    }
+    buffers
+        .graph_vertex_rows
+        .insert_value(row)
+        .expect("graph vertex row");
+}
+
+fn insert_graph_edge(
+    buffers: &mut BufferSet,
+    persist_state: &mut DocumentPersistState,
+    row: Value,
+) {
+    let now = now_ms();
+    let source_id = row
+        .get("source_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let target_id = row
+        .get("target_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let edge_type = row
+        .get("edge_type")
+        .and_then(Value::as_str)
+        .unwrap_or("edge");
+    let owner_id = format!("{source_id}->{target_id}::{edge_type}");
+    if let Some(weight) = row.get("weight").cloned() {
+        record_graph_property(
+            &mut buffers.graph_property_rows,
+            &owner_id,
+            "edge",
+            "weight",
+            weight,
+            now,
+        );
+    }
+    record_graph_property(
+        &mut buffers.graph_property_rows,
+        &owner_id,
+        "edge",
+        "edge_type",
+        json!(edge_type),
+        now,
+    );
+    if let Some(attributes) = row.get("attributes").filter(|value| !value.is_null()) {
+        record_graph_json_properties(
+            &mut buffers.graph_property_rows,
+            &owner_id,
+            "edge",
+            "attributes",
+            attributes,
+            now,
+        );
+    }
+    if let Some(data) = row.get("data").filter(|value| !value.is_null()) {
+        record_graph_json_properties(
+            &mut buffers.graph_property_rows,
+            &owner_id,
+            "edge",
+            "data",
+            data,
+            now,
+        );
+    }
+    buffers
+        .graph_edge_rows
+        .insert_value(row)
+        .expect("graph edge row");
+    persist_state.graph_edge_count += 1;
 }
 
 fn persist_session_workspace_artifact(
@@ -2082,13 +2364,115 @@ fn persist_session_definition(
     )
 }
 
+fn persist_document_backbone(
+    store: &PhoenixCozoStore,
+    document: &BorrowedIngestDocument<'_>,
+    note_id: &NoteId,
+    now: i64,
+) -> Result<(), StoreError> {
+    store.put_rows(
+        "notes",
+        &[json!({
+            "id": note_id.0,
+            "version": 1,
+            "world_id": document.scope.world_id.clone().unwrap_or_default(),
+            "title": document.title,
+            "content": document.text,
+            "markdown_content": document.text,
+            "folder_id": document.scope.folder_id,
+            "entity_kind": null,
+            "entity_subtype": null,
+            "is_entity": false,
+            "is_pinned": false,
+            "favorite": false,
+            "owner_id": document.document_id.0,
+            "narrative_id": document.scope.narrative_id,
+            "order": null,
+            "created_at": now,
+            "updated_at": now,
+            "valid_from": now,
+            "valid_to": null,
+            "is_current": true,
+            "change_reason": "phoenix_graptor_ingest",
+        })],
+    )?;
+    store.put_rows(
+        "docid_map",
+        &[json!({
+            "id": stable_int("docid", &[document.document_id.0.as_str()]),
+            "docid": document.document_id.0,
+            "created_at": now,
+        })],
+    )?;
+    Ok(())
+}
+
+fn persist_entity_rows(
+    store: &PhoenixCozoStore,
+    document: &BorrowedIngestDocument<'_>,
+    session_id: Option<&SessionId>,
+    note_id: &NoteId,
+    summary: &IngestDocumentSummary,
+    chapters: &[ChapterSpec],
+    registry: &EntityRegistry,
+    persist_state: &DocumentPersistState,
+    now: i64,
+) -> Result<(), StoreError> {
+    let entity_rows = persist_state
+        .entity_ids
+        .iter()
+        .map(|entity_id| {
+            let entity = registry
+                .entities
+                .get(entity_id)
+                .expect("entity should exist");
+            entity_row(entity, &document.scope, note_id, now)
+        })
+        .collect::<Vec<_>>();
+    store.put_rows("entities", &entity_rows)?;
+
+    let document_manifest = build_document_manifest(
+        document,
+        session_id,
+        summary,
+        chapters,
+        persist_state.discovery_count,
+        now,
+    );
+    store.put_rows(
+        "scoped_documents",
+        &[scoped_document_row(document, &document_manifest, now)],
+    )?;
+    store.put_rows(
+        "scoped_definitions",
+        &[scoped_document_definition_row(
+            document,
+            &document_manifest,
+            now,
+        )],
+    )?;
+    let scoped_entity_rows = persist_state
+        .entity_ids
+        .iter()
+        .map(|entity_id| {
+            let entity = registry
+                .entities
+                .get(entity_id)
+                .expect("entity should exist");
+            scoped_entity_field_row(document, session_id, entity, now)
+        })
+        .collect::<Vec<_>>();
+    store.put_rows("scoped_entity_fields", &scoped_entity_rows)?;
+    Ok(())
+}
+
 fn resolve_mentions(
-    _document: &IngestDocument,
+    _document: &BorrowedIngestDocument<'_>,
     note_id: &NoteId,
     leaf: &LeafChunk,
     scan: &phoenix_types::ScanArtifact,
     registry: &mut EntityRegistry,
-    chapter_links: &mut BTreeMap<(u32, u32), BTreeSet<String>>,
+    chapter_links: &mut FxHashMap<(u32, u32), FxHashSet<String>>,
 ) -> (Vec<MentionRecord>, Vec<DiscoveryRecord>) {
     let mut mentions = Vec::new();
     let mut discoveries = Vec::new();
@@ -2122,7 +2506,12 @@ fn resolve_mentions(
         );
         registry.record_mention(&entity_id, leaf.chapter_id);
         if let Some(entity) = registry.entities.get(&entity_id.0) {
-            for chapter_id in entity.chapters.iter().copied().filter(|chapter| *chapter != leaf.chapter_id) {
+            for chapter_id in entity
+                .chapters
+                .iter()
+                .copied()
+                .filter(|chapter| *chapter != leaf.chapter_id)
+            {
                 let key = if chapter_id < leaf.chapter_id {
                     (chapter_id, leaf.chapter_id)
                 } else {
@@ -2156,7 +2545,10 @@ fn resolve_mentions(
             absolute_range,
             confidence: mention.confidence,
             span_id: span_id.clone(),
-            span_mention_id: stable_hex("spanmention", &[span_id.as_str(), mention.surface.as_str()]),
+            span_mention_id: stable_hex(
+                "spanmention",
+                &[span_id.as_str(), mention.surface.as_str()],
+            ),
         });
     }
     (mentions, discoveries)
@@ -2195,7 +2587,7 @@ fn apply_alias_candidates(
 }
 
 fn build_absolute_evidence(
-    document: &IngestDocument,
+    document: &BorrowedIngestDocument<'_>,
     note_id: &NoteId,
     leaf: &LeafChunk,
     evidence: &[EvidenceSpan],
@@ -2216,16 +2608,13 @@ fn build_absolute_evidence(
 }
 
 fn materialize_relations(
-    document: &IngestDocument,
+    document: &BorrowedIngestDocument<'_>,
     note_id: &NoteId,
     leaf: &LeafChunk,
     relations: &[RelationCandidate],
     mentions: &[MentionRecord],
-    edge_rows: &mut BTreeMap<String, Value>,
-    graph_vertex_rows: &mut BTreeMap<String, Value>,
-    graph_label_rows: &mut BTreeSet<(String, String)>,
-    graph_edge_rows: &mut BTreeMap<(String, String), Value>,
-    evidence_rows: &mut BTreeMap<String, Value>,
+    buffers: &mut BufferSet,
+    persist_state: &mut DocumentPersistState,
 ) {
     for relation in relations {
         let event_id = stable_hex(
@@ -2237,8 +2626,8 @@ fn materialize_relations(
                 &relation.verb_range.start.to_string(),
             ],
         );
-        graph_vertex_rows.insert(
-            event_id.clone(),
+        insert_graph_vertex(
+            buffers,
             json!({
                 "id": event_id.clone(),
                 "value": {
@@ -2257,10 +2646,23 @@ fn materialize_relations(
                 },
             }),
         );
-        graph_label_rows.insert((event_id.clone(), relation.lemma.clone()));
-        graph_label_rows.insert((event_id.clone(), relation.relation_type.clone()));
-        graph_edge_rows.insert(
-            (leaf_vertex_id(&leaf.search_id), event_id.clone()),
+        buffers
+            .graph_label_rows
+            .insert_value(json!({
+                "vertex_id": event_id.clone(),
+                "label": relation.lemma.clone(),
+            }))
+            .expect("event lemma label row");
+        buffers
+            .graph_label_rows
+            .insert_value(json!({
+                "vertex_id": event_id.clone(),
+                "label": relation.relation_type.clone(),
+            }))
+            .expect("event relation label row");
+        insert_graph_edge(
+            buffers,
+            persist_state,
             graph_edge_row(
                 &leaf_vertex_id(&leaf.search_id),
                 &event_id,
@@ -2272,8 +2674,9 @@ fn materialize_relations(
         );
 
         if let Some(subject_id) = resolve_slot_entity(relation.subject.as_ref(), mentions) {
-            graph_edge_rows.insert(
-                (entity_vertex_id(&subject_id), event_id.clone()),
+            insert_graph_edge(
+                buffers,
+                persist_state,
                 graph_edge_row(
                     &entity_vertex_id(&subject_id),
                     &event_id,
@@ -2284,8 +2687,9 @@ fn materialize_relations(
                 ),
             );
             if let Some(object_id) = resolve_slot_entity(relation.object.as_ref(), mentions) {
-                graph_edge_rows.insert(
-                    (event_id.clone(), entity_vertex_id(&object_id)),
+                insert_graph_edge(
+                    buffers,
+                    persist_state,
                     graph_edge_row(
                         &event_id,
                         &entity_vertex_id(&object_id),
@@ -2306,9 +2710,9 @@ fn materialize_relations(
                         event_id.as_str(),
                     ],
                 );
-                edge_rows.insert(
-                    edge_id.clone(),
-                    json!({
+                buffers
+                    .edge_rows
+                    .insert_value(json!({
                         "id": edge_id,
                         "source_id": subject_id.0,
                         "target_id": object_id.0,
@@ -2317,12 +2721,14 @@ fn materialize_relations(
                         "bidirectional": false,
                         "source_note": note_id.0,
                         "created_at": now_ms(),
-                    }),
-                );
+                    }))
+                    .expect("relation object edge row");
+                persist_state.edge_count += 1;
             }
             if let Some(recipient_id) = resolve_slot_entity(relation.recipient.as_ref(), mentions) {
-                graph_edge_rows.insert(
-                    (event_id.clone(), entity_vertex_id(&recipient_id)),
+                insert_graph_edge(
+                    buffers,
+                    persist_state,
                     graph_edge_row(
                         &event_id,
                         &entity_vertex_id(&recipient_id),
@@ -2343,9 +2749,9 @@ fn materialize_relations(
                         event_id.as_str(),
                     ],
                 );
-                edge_rows.insert(
-                    edge_id.clone(),
-                    json!({
+                buffers
+                    .edge_rows
+                    .insert_value(json!({
                         "id": edge_id,
                         "source_id": subject_id.0,
                         "target_id": recipient_id.0,
@@ -2354,8 +2760,9 @@ fn materialize_relations(
                         "bidirectional": false,
                         "source_note": note_id.0,
                         "created_at": now_ms(),
-                    }),
-                );
+                    }))
+                    .expect("relation recipient edge row");
+                persist_state.edge_count += 1;
             }
         }
 
@@ -2370,7 +2777,10 @@ fn materialize_relations(
                     end: leaf.start as u32 + evidence.range.end,
                 },
             };
-            evidence_rows.insert(evidence_id(note_id, &absolute), evidence_row(document, note_id, &absolute));
+            buffers
+                .evidence_rows
+                .insert_value(evidence_row(document, note_id, &absolute))
+                .expect("relation evidence row");
         }
     }
 }
@@ -2387,44 +2797,13 @@ fn resolve_slot_entity(slot: Option<&FrameSlot>, mentions: &[MentionRecord]) -> 
 }
 
 fn split_sentences(text: &str) -> Vec<TextRange> {
-    let mut sentences = Vec::new();
-    let mut start = 0usize;
-    for (offset, ch) in text.char_indices() {
-        if !matches!(ch, '.' | '!' | '?') {
-            continue;
-        }
-        let end = offset + ch.len_utf8();
-        let mut token_start = offset;
-        while token_start > start {
-            let Some(previous) = text[..token_start].chars().next_back() else {
-                break;
-            };
-            if previous.is_ascii_alphanumeric() || previous == '\'' || previous == '-' {
-                token_start -= previous.len_utf8();
-            } else {
-                break;
-            }
-        }
-        let guard = normalize_raw(text.get(token_start..end).unwrap_or_default());
-        let trimmed = guard.trim_end_matches('.');
-        if (guard.len() <= 3 && is_sentence_guard(trimmed)) || trimmed.len() <= 1 {
-            continue;
-        }
-        sentences.push(TextRange {
+    let mut sentences = split_sentence_ranges(text)
+        .into_iter()
+        .map(|(start, end)| TextRange {
             start: start as u32,
             end: end as u32,
-        });
-        start = end;
-        while start < text.len() && text.as_bytes()[start].is_ascii_whitespace() {
-            start += 1;
-        }
-    }
-    if start < text.len() {
-        sentences.push(TextRange {
-            start: start as u32,
-            end: text.len() as u32,
-        });
-    }
+        })
+        .collect::<Vec<_>>();
     if sentences.is_empty() && !text.is_empty() {
         sentences.push(TextRange {
             start: 0,
@@ -2470,7 +2849,11 @@ fn validate_numbered_section(line: &str) -> bool {
     index < bytes.len() && matches!(bytes[index], b' ' | b'\t' | b':' | b')')
 }
 
-fn chapter_chunk_row(document: &IngestDocument, chapter: &ChapterSpec, scope: &ScopeKey) -> Value {
+fn chapter_chunk_row(
+    document: &BorrowedIngestDocument<'_>,
+    chapter: &ChapterSpec,
+    scope: &ScopeKey,
+) -> Value {
     json!({
         "chunk_id": chapter.chunk_id,
         "doc_id": document.document_id.0,
@@ -2485,7 +2868,7 @@ fn chapter_chunk_row(document: &IngestDocument, chapter: &ChapterSpec, scope: &S
     })
 }
 
-fn chapter_chunkid_row(document: &IngestDocument, chapter: &ChapterSpec) -> Value {
+fn chapter_chunkid_row(document: &BorrowedIngestDocument<'_>, chapter: &ChapterSpec) -> Value {
     json!({
         "id": chapter.chunk_id,
         "chunk_key": format!("{}:{}:chapter", document.document_id.0, chapter.chapter_id),
@@ -2494,7 +2877,7 @@ fn chapter_chunkid_row(document: &IngestDocument, chapter: &ChapterSpec) -> Valu
     })
 }
 
-fn chapter_vertex_row(document: &IngestDocument, chapter: &ChapterSpec) -> Value {
+fn chapter_vertex_row(document: &BorrowedIngestDocument<'_>, chapter: &ChapterSpec) -> Value {
     json!({
         "id": chapter_vertex_id(&document.document_id, chapter.chapter_id),
         "value": {
@@ -2511,14 +2894,18 @@ fn chapter_vertex_row(document: &IngestDocument, chapter: &ChapterSpec) -> Value
     })
 }
 
-fn parent_chunk_row(document: &IngestDocument, parent: &ParentChunk, scope: &ScopeKey) -> Value {
+fn parent_chunk_row(
+    document: &BorrowedIngestDocument<'_>,
+    parent: &ParentChunk,
+    scope: &ScopeKey,
+) -> Value {
     json!({
         "chunk_id": parent.chunk_id,
         "doc_id": document.document_id.0,
         "level": 1,
         "start": parent.start,
         "end": parent.end,
-        "text": parent.text,
+        "text": preserve_offsets_slice(&document.text[parent.start..parent.end]),
         "parent_id": null,
         "scope_narrative": scope.narrative_id,
         "scope_folder": scope.folder_id,
@@ -2526,7 +2913,11 @@ fn parent_chunk_row(document: &IngestDocument, parent: &ParentChunk, scope: &Sco
     })
 }
 
-fn parent_chunkid_row(document: &IngestDocument, chapter: &ChapterSpec, parent: &ParentChunk) -> Value {
+fn parent_chunkid_row(
+    document: &BorrowedIngestDocument<'_>,
+    chapter: &ChapterSpec,
+    parent: &ParentChunk,
+) -> Value {
     json!({
         "id": parent.chunk_id,
         "chunk_key": format!("{}:{}:parent:{}-{}", document.document_id.0, chapter.chapter_id, parent.start, parent.end),
@@ -2535,7 +2926,11 @@ fn parent_chunkid_row(document: &IngestDocument, chapter: &ChapterSpec, parent: 
     })
 }
 
-fn parent_vertex_row(document: &IngestDocument, chapter: &ChapterSpec, parent: &ParentChunk) -> Value {
+fn parent_vertex_row(
+    document: &BorrowedIngestDocument<'_>,
+    chapter: &ChapterSpec,
+    parent: &ParentChunk,
+) -> Value {
     json!({
         "id": parent_vertex_id(parent.chunk_id),
         "value": {
@@ -2553,14 +2948,18 @@ fn parent_vertex_row(document: &IngestDocument, chapter: &ChapterSpec, parent: &
     })
 }
 
-fn leaf_chunk_row(document: &IngestDocument, leaf: &LeafChunk, scope: &ScopeKey) -> Value {
+fn leaf_chunk_row(
+    document: &BorrowedIngestDocument<'_>,
+    leaf: &LeafChunk,
+    scope: &ScopeKey,
+) -> Value {
     json!({
         "chunk_id": leaf.chunk_id,
         "doc_id": document.document_id.0,
         "level": 0,
         "start": leaf.start,
         "end": leaf.end,
-        "text": leaf.text,
+        "text": preserve_offsets_slice(&document.text[leaf.start..leaf.end]),
         "parent_id": leaf.parent_id,
         "scope_narrative": scope.narrative_id,
         "scope_folder": scope.folder_id,
@@ -2568,7 +2967,7 @@ fn leaf_chunk_row(document: &IngestDocument, leaf: &LeafChunk, scope: &ScopeKey)
     })
 }
 
-fn leaf_chunkid_row(document: &IngestDocument, leaf: &LeafChunk) -> Value {
+fn leaf_chunkid_row(document: &BorrowedIngestDocument<'_>, leaf: &LeafChunk) -> Value {
     json!({
         "id": leaf.chunk_id,
         "chunk_key": leaf.search_id,
@@ -2577,7 +2976,12 @@ fn leaf_chunkid_row(document: &IngestDocument, leaf: &LeafChunk) -> Value {
     })
 }
 
-fn leaf_vertex_row(document: &IngestDocument, note_id: &NoteId, chapter: &ChapterSpec, leaf: &LeafChunk) -> Value {
+fn leaf_vertex_row(
+    document: &BorrowedIngestDocument<'_>,
+    note_id: &NoteId,
+    chapter: &ChapterSpec,
+    leaf: &LeafChunk,
+) -> Value {
     json!({
         "id": leaf_vertex_id(&leaf.search_id),
         "value": {
@@ -2630,7 +3034,11 @@ fn entity_vertex_row(entity: &EntityState) -> Value {
     })
 }
 
-fn mention_span_row(document: &IngestDocument, note_id: &NoteId, mention: &MentionRecord) -> Value {
+fn mention_span_row(
+    document: &BorrowedIngestDocument<'_>,
+    note_id: &NoteId,
+    mention: &MentionRecord,
+) -> Value {
     json!({
         "id": mention.span_id,
         "world_id": document.scope.world_id,
@@ -2678,7 +3086,11 @@ fn evidence_id(note_id: &NoteId, evidence: &EvidenceSpan) -> String {
     )
 }
 
-fn evidence_row(document: &IngestDocument, note_id: &NoteId, evidence: &EvidenceSpan) -> Value {
+fn evidence_row(
+    document: &BorrowedIngestDocument<'_>,
+    note_id: &NoteId,
+    evidence: &EvidenceSpan,
+) -> Value {
     json!({
         "id": evidence_id(note_id, evidence),
         "world_id": document.scope.world_id,
@@ -2853,7 +3265,8 @@ mod tests {
     #[test]
     fn chapter_detector_picks_up_headers() {
         let graptor = PhoenixGraptor::default();
-        let boundaries = graptor.detect_chapter_boundaries("# Prologue\nRyan woke up.\n\nChapter 1\nRyan ran.");
+        let boundaries =
+            graptor.detect_chapter_boundaries("# Prologue\nRyan woke up.\n\nChapter 1\nRyan ran.");
         assert_eq!(boundaries.len(), 2);
     }
 
@@ -2862,11 +3275,17 @@ mod tests {
         let document = sample_document(
             "Chapter 1\nRyan woke up. Ryan sharpened the blade. Ryan left.\n\nChapter 2\nRyan found Len. Len smiled.",
         );
+        let borrowed = BorrowedIngestDocument::from(&document);
         let boundaries = PhoenixGraptor::default().detect_chapter_boundaries(&document.text);
-        let mut chapters = build_chapter_specs(&document, &boundaries);
-        let mut leaves = build_leaf_chunks(&document, &GraptorConfig::default());
-        assign_leaves_to_chapters(&document, &chapters, &mut leaves);
-        build_parent_chunks(&document, &GraptorConfig::default(), &mut chapters, &mut leaves);
+        let mut chapters = build_chapter_specs(&borrowed, &boundaries);
+        let mut leaves = build_leaf_chunks(&borrowed, &GraptorConfig::default());
+        assign_leaves_to_chapters(&borrowed, &chapters, &mut leaves);
+        build_parent_chunks(
+            &borrowed,
+            &GraptorConfig::default(),
+            &mut chapters,
+            &mut leaves,
+        );
 
         assert!(!leaves.is_empty());
         assert!(chapters.iter().any(|chapter| !chapter.parents.is_empty()));
@@ -2928,12 +3347,35 @@ mod tests {
             "speculative discovery should be persisted"
         );
         assert_eq!(
-            result.discovery_summary.as_ref().map(|summary| summary.persisted_count),
+            result
+                .discovery_summary
+                .as_ref()
+                .map(|summary| summary.persisted_count),
             Some(discovery_rows.len())
         );
         assert!(
             entity_rows.is_empty(),
             "discovery-only surfaces should not be promoted into canonical entities during ingest"
+        );
+    }
+
+    #[test]
+    fn shared_sentence_splitter_matches_graptor_sentence_ranges() {
+        let text = "Dr. Luffy ran. Mr. Zoro stayed! Wow?";
+        let ranges = split_sentences(text);
+
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(
+            &text[ranges[0].start as usize..ranges[0].end as usize],
+            "Dr. Luffy ran."
+        );
+        assert_eq!(
+            &text[ranges[1].start as usize..ranges[1].end as usize],
+            "Mr. Zoro stayed!"
+        );
+        assert_eq!(
+            &text[ranges[2].start as usize..ranges[2].end as usize],
+            "Wow?"
         );
     }
 }

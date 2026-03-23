@@ -1,11 +1,14 @@
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod binary;
+mod view;
 
+use phoenix_analytics::TextAnalytics;
 use phoenix_gldr::PhoenixGldr;
-use phoenix_graptor::PhoenixGraptor;
+use phoenix_graptor::{BorrowedIngestDocument, BorrowedIngestRequest, PhoenixGraptor};
 use phoenix_lex::LexIndex;
 use phoenix_scanner::PhoenixScanner;
 use phoenix_store_cozo::{PhoenixCozoStore, SnapshotEnvelope, StoreConfig, StoreError};
@@ -13,12 +16,16 @@ use phoenix_structure::PhoenixStructure;
 use phoenix_types::{
     CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic, GraphDeltaRequest,
     GraphDeltaResult, IngestRequest, IngestResult, QueryRequest, QueryResult, RebuildRequest,
-    RebuildResult, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScanRequest, SessionId,
-    SessionRecord, SessionState, SessionStats, SnapshotDto,
-    StructureArtifact, StructureRequest,
+    RebuildResult, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScanRequest, SavedNetworkView,
+    SessionId, SessionRecord, SessionState, SessionStats, SnapshotDto, StructureArtifact,
+    StructureRequest, EntityCard, FolderSchema, NetworkInstance,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub use view::{
+    AnalyzeTextRequestView, IngestDocumentView, IngestRequestView, QueryRequestView,
+    ScanRequestView, ScopeKeyView, StructureRequestView,
+};
 
 pub struct PhoenixRuntime {
     pub config: RuntimeConfig,
@@ -161,7 +168,18 @@ impl PhoenixRuntime {
     }
 
     pub fn ingest(&self, request: IngestRequest) -> Result<IngestResult, StoreError> {
+        self.ingest_view(IngestRequestView::from(&request))
+    }
+
+    pub fn ingest_view(&self, request: IngestRequestView<'_>) -> Result<IngestResult, StoreError> {
         let created_at = now_ms();
+        let request_summary = serde_json::json!({
+            "sessionId": request.session_id.as_ref().map(|value| value.0.clone()),
+            "documentCount": request.documents.len(),
+            "documentIds": request.documents.iter().map(|document| document.document_id.0.clone()).collect::<Vec<_>>(),
+            "titles": request.documents.iter().map(|document| document.title.to_owned()).collect::<Vec<_>>(),
+            "commit": request.commit,
+        });
         self.store.put_row(
             "phoenix_ingest_log",
             serde_json::json!({
@@ -169,13 +187,30 @@ impl PhoenixRuntime {
                 "session_id": request.session_id.as_ref().map(|value| value.0.clone()),
                 "document_count": request.documents.len(),
                 "commit_requested": request.commit,
-                "request_json": serde_json::to_value(&request).expect("ingest request json"),
+                "request_json": request_summary,
                 "created_at": created_at,
             }),
         )?;
-        let mut ingest = self
-            .graptor
-            .ingest(&self.store, &self.scanner, &self.structure, &request)?;
+        let documents = request
+            .documents
+            .iter()
+            .map(|document| BorrowedIngestDocument {
+                document_id: document.document_id.clone(),
+                note_id: document.note_id.clone(),
+                title: document.title,
+                text: document.text,
+                scope: document.scope.to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let mut ingest = self.graptor.ingest_view(
+            &self.store,
+            &self.scanner,
+            &self.structure,
+            &BorrowedIngestRequest {
+                session_id: request.session_id.clone(),
+                documents: &documents,
+            },
+        )?;
         let mut diagnostics = ingest.diagnostics.clone();
         diagnostics.push(Diagnostic {
             code: "PX_INGEST_GRAPTOR".to_owned(),
@@ -204,6 +239,10 @@ impl PhoenixRuntime {
     }
 
     pub fn query(&self, request: QueryRequest) -> Result<QueryResult, StoreError> {
+        self.query_view(QueryRequestView::from(&request))
+    }
+
+    pub fn query_view(&self, request: QueryRequestView<'_>) -> Result<QueryResult, StoreError> {
         let created_at = now_ms();
         self.store.put_row(
             "phoenix_query_log",
@@ -212,7 +251,14 @@ impl PhoenixRuntime {
                 "session_id": request.session_id.as_ref().map(|value| value.0.clone()),
                 "query": request.query,
                 "limit": request.limit,
-                "request_json": serde_json::to_value(&request).expect("query request json"),
+                "request_json": serde_json::json!({
+                    "sessionId": request.session_id.as_ref().map(|value| value.0.clone()),
+                    "query": request.query,
+                    "scope": request.scope.to_owned(),
+                    "targets": request.targets,
+                    "limit": request.limit,
+                    "temporal": request.temporal,
+                }),
                 "created_at": created_at,
             }),
         )?;
@@ -227,19 +273,20 @@ impl PhoenixRuntime {
             )
         });
         if graph_requested {
+            let semantic_requested = request
+                .targets
+                .iter()
+                .any(|target| matches!(target, phoenix_types::QueryTarget::Semantic));
+            let owned_request = request.to_owned();
             let mut result = self.gldr.query(
                 &self.store,
                 self.lex
                     .borrow()
                     .as_ref()
                     .expect("lex should exist after ensure"),
-                &request,
+                &owned_request,
             )?;
-            if request
-                .targets
-                .iter()
-                .any(|target| matches!(target, phoenix_types::QueryTarget::Semantic))
-            {
+            if semantic_requested {
                 result.diagnostics.push(Diagnostic {
                     code: "PX_QUERY_SEMANTIC_OFF".to_owned(),
                     message: "Semantic retrieval is still disabled; GLDR returned deterministic graph results only.".to_owned(),
@@ -253,10 +300,14 @@ impl PhoenixRuntime {
             .borrow()
             .as_ref()
             .expect("lex should exist after ensure")
-            .search(&request.query, &request.scope, request.limit.unwrap_or(5));
+            .search(
+                request.query,
+                &request.scope.to_owned(),
+                request.limit.unwrap_or(5),
+            );
 
         Ok(QueryResult {
-            session_id: request.session_id,
+            session_id: request.session_id.clone(),
             chunk_hits: lexical
                 .span_hits
                 .into_iter()
@@ -278,8 +329,25 @@ impl PhoenixRuntime {
     }
 
     pub fn query_binary(&self, request: QueryRequest) -> Result<Vec<u8>, StoreError> {
-        let result = self.query(request)?;
+        let result = self.query_view(QueryRequestView::from(&request))?;
         binary::encode_query_result(&result)
+    }
+
+    pub fn query_binary_into(
+        &self,
+        request: QueryRequestView<'_>,
+        buffer: &mut [u8],
+    ) -> Result<usize, StoreError> {
+        let result = self.query_view(request)?;
+        binary::encode_query_result_into(buffer, &result)
+    }
+
+    pub fn encode_query_result_into(
+        &self,
+        result: &QueryResult,
+        buffer: &mut [u8],
+    ) -> Result<usize, StoreError> {
+        binary::encode_query_result_into(buffer, result)
     }
 
     pub fn graph_delta(&self, request: GraphDeltaRequest) -> Result<GraphDeltaResult, StoreError> {
@@ -291,6 +359,15 @@ impl PhoenixRuntime {
         binary::encode_graph_delta(&result)
     }
 
+    pub fn graph_delta_binary_into(
+        &self,
+        request: GraphDeltaRequest,
+        buffer: &mut [u8],
+    ) -> Result<usize, StoreError> {
+        let result = self.graph_delta(request)?;
+        binary::encode_graph_delta_into(buffer, &result)
+    }
+
     pub fn ingest_stub(&self, request: IngestRequest) -> Result<IngestResult, StoreError> {
         self.ingest(request)
     }
@@ -300,11 +377,32 @@ impl PhoenixRuntime {
     }
 
     pub fn scan_text(&self, request: ScanRequest) -> ScanArtifact {
-        self.scanner.scan(&request)
+        self.scan_text_view(ScanRequestView::from(&request))
+    }
+
+    pub fn scan_text_view(&self, request: ScanRequestView<'_>) -> ScanArtifact {
+        self.scanner.scan_parts(
+            request.text,
+            &request.scope.to_owned(),
+            request.session_id.as_ref(),
+            request.resolver_seed,
+        )
     }
 
     pub fn build_structure(&self, request: StructureRequest) -> StructureArtifact {
-        self.structure.build(&request)
+        self.build_structure_view(StructureRequestView::from(&request))
+    }
+
+    pub fn build_structure_view(&self, request: StructureRequestView<'_>) -> StructureArtifact {
+        self.structure.build_parts(request.text, request.scan)
+    }
+
+    pub fn analyze_text(&self, text: &str) -> TextAnalytics {
+        self.analyze_text_view(AnalyzeTextRequestView { text })
+    }
+
+    pub fn analyze_text_view(&self, request: AnalyzeTextRequestView<'_>) -> TextAnalytics {
+        phoenix_analytics::analyze_text(request.text)
     }
 
     pub fn export_snapshot(&self) -> Result<Vec<u8>, StoreError> {
@@ -330,14 +428,129 @@ impl PhoenixRuntime {
         self.graptor.session_stats(&self.store, session_id)
     }
 
+    pub fn upsert_entity_card(&self, card: &EntityCard) -> Result<(), StoreError> {
+        self.store.upsert_entity_card(card)
+    }
+
+    pub fn upsert_entity_cards_batch(&self, cards: &[EntityCard]) -> Result<(), StoreError> {
+        self.store.upsert_entity_cards_batch(cards)
+    }
+
+    pub fn get_entity_cards(
+        &self,
+        entity_id: &phoenix_types::EntityId,
+    ) -> Result<Vec<EntityCard>, StoreError> {
+        self.store.get_entity_cards(entity_id)
+    }
+
+    pub fn upsert_folder_schema(&self, schema: &FolderSchema) -> Result<(), StoreError> {
+        self.store.upsert_folder_schema(schema)
+    }
+
+    pub fn get_folder_schema(&self, id: &str) -> Result<Option<FolderSchema>, StoreError> {
+        self.store.get_folder_schema(id)
+    }
+
+    pub fn save_network_view(&self, view: &SavedNetworkView) -> Result<(), StoreError> {
+        let existing = self.get_network_view(&view.instance.id)?;
+
+        self.store.upsert_network_instance(&view.instance)?;
+        self.store.upsert_network_memberships(&view.members)?;
+        self.store.upsert_network_relationships(&view.relationships)?;
+
+        if let Some(existing) = existing {
+            let new_member_keys = view
+                .members
+                .iter()
+                .map(|member| (member.network_id.clone(), member.entity_id.0.clone()))
+                .collect::<BTreeSet<_>>();
+            let stale_members = existing
+                .members
+                .into_iter()
+                .filter(|member| {
+                    !new_member_keys
+                        .contains(&(member.network_id.clone(), member.entity_id.0.clone()))
+                })
+                .collect::<Vec<_>>();
+            self.store.delete_network_memberships(&stale_members)?;
+
+            let new_relationship_keys = view
+                .relationships
+                .iter()
+                .map(|relationship| {
+                    (
+                        relationship.network_id.clone(),
+                        relationship.relationship_id.clone(),
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            let stale_relationships = existing
+                .relationships
+                .into_iter()
+                .filter(|relationship| {
+                    !new_relationship_keys.contains(&(
+                        relationship.network_id.clone(),
+                        relationship.relationship_id.clone(),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            self.store.delete_network_relationships(&stale_relationships)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_network_view(&self, id: &str) -> Result<Option<SavedNetworkView>, StoreError> {
+        let Some(instance) = self.store.get_network_instance(id)? else {
+            return Ok(None);
+        };
+        let members = self.store.get_network_members(id)?;
+        let relationships = self.store.get_network_relationships(id)?;
+        Ok(Some(SavedNetworkView {
+            instance,
+            members,
+            relationships,
+        }))
+    }
+
+    pub fn list_network_views(&self) -> Result<Vec<NetworkInstance>, StoreError> {
+        self.store.list_network_instances()
+    }
+
+    pub fn delete_network_view(&self, id: &str) -> Result<(), StoreError> {
+        let members = self.store.get_network_members(id)?;
+        let relationships = self.store.get_network_relationships(id)?;
+        self.store.delete_network_relationships(&relationships)?;
+        self.store.delete_network_memberships(&members)?;
+        self.store.delete_network_instance(id)
+    }
+
     pub fn session_state_binary(&self, session_id: &SessionId) -> Result<Vec<u8>, StoreError> {
         let state = self.session_state(session_id)?;
         binary::encode_session_state(&state)
     }
 
+    pub fn session_state_binary_into(
+        &self,
+        session_id: &SessionId,
+        buffer: &mut [u8],
+    ) -> Result<usize, StoreError> {
+        let state = self.session_state(session_id)?;
+        binary::encode_session_state_into(buffer, &state)
+    }
+
     pub fn session_stats_binary(&self, session_id: &SessionId) -> Result<Vec<u8>, StoreError> {
         let stats = self.session_stats(session_id)?;
         binary::encode_session_stats(&stats)
+    }
+
+    pub fn session_stats_binary_into(
+        &self,
+        session_id: &SessionId,
+        buffer: &mut [u8],
+    ) -> Result<usize, StoreError> {
+        let stats = self.session_stats(session_id)?;
+        binary::encode_session_stats_into(buffer, &stats)
     }
 
     fn ensure_lex_index(&self) -> Result<(), StoreError> {
@@ -361,7 +574,21 @@ impl PhoenixRuntime {
     }
 
     fn load_session(&self, session_id: &SessionId) -> Result<SessionRecord, StoreError> {
-        let rows = self.store.fetch_rows("phoenix_sessions")?;
+        let rows = self.store.fetch_rows_with_columns(
+            "phoenix_sessions",
+            &[
+                "session_id",
+                "label",
+                "world_id",
+                "narrative_id",
+                "folder_id",
+                "folder_path",
+                "status",
+                "revision",
+                "created_at",
+                "updated_at",
+            ],
+        )?;
         let row = rows
             .into_iter()
             .find(|row| {
@@ -753,6 +980,187 @@ mod tests {
         });
         assert_eq!(structure.sentence_frames.len(), 1);
         assert_eq!(structure.sentence_frames[0].verb_frames.len(), 1);
+    }
+
+    #[test]
+    fn entity_cards_and_folder_schema_persist() {
+        let runtime = PhoenixRuntime::new(RuntimeConfig::default()).expect("runtime");
+
+        runtime
+            .upsert_entity_cards_batch(&[
+                phoenix_types::EntityCard {
+                    entity_id: EntityId("CHARACTER".to_owned()),
+                    card_id: "summary".to_owned(),
+                    name: "Summary".to_owned(),
+                    color: "#ff8800".to_owned(),
+                    icon: "spark".to_owned(),
+                    display_order: 2,
+                    is_collapsed: false,
+                    created_at: 10,
+                    updated_at: 10,
+                },
+                phoenix_types::EntityCard {
+                    entity_id: EntityId("CHARACTER".to_owned()),
+                    card_id: "traits".to_owned(),
+                    name: "Traits".to_owned(),
+                    color: "#00aaff".to_owned(),
+                    icon: "bolt".to_owned(),
+                    display_order: 1,
+                    is_collapsed: true,
+                    created_at: 11,
+                    updated_at: 11,
+                },
+            ])
+            .expect("cards");
+
+        runtime
+            .upsert_folder_schema(&phoenix_types::FolderSchema {
+                id: "schema-character".to_owned(),
+                entity_kind: "character".to_owned(),
+                subtype: "crew".to_owned(),
+                name: "Character Vault".to_owned(),
+                description: "Stores character notes.".to_owned(),
+                allowed_subfolders: "[\"profiles\",\"chapters\"]".to_owned(),
+                allowed_note_types: "[\"bio\",\"scene\"]".to_owned(),
+                is_vault_root: true,
+                container_only: false,
+                propagate_kind_to_children: true,
+                icon: "user".to_owned(),
+                is_system: false,
+                created_at: 20,
+                updated_at: 21,
+            })
+            .expect("schema");
+
+        let cards = runtime
+            .get_entity_cards(&EntityId("CHARACTER".to_owned()))
+            .expect("entity cards");
+        let schema = runtime
+            .get_folder_schema("schema-character")
+            .expect("folder schema")
+            .expect("folder schema present");
+
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].card_id, "traits");
+        assert_eq!(schema.allowed_subfolders, "[\"profiles\",\"chapters\"]");
+        assert_eq!(schema.allowed_note_types, "[\"bio\",\"scene\"]");
+    }
+
+    #[test]
+    fn saved_network_view_replaces_members_and_relationships() {
+        let runtime = PhoenixRuntime::new(RuntimeConfig::default()).expect("runtime");
+
+        runtime
+            .save_network_view(&phoenix_types::SavedNetworkView {
+                instance: phoenix_types::NetworkInstance {
+                    id: "net-1".to_owned(),
+                    name: "Crew".to_owned(),
+                    schema_id: "schema-character".to_owned(),
+                    network_kind: "mindmap".to_owned(),
+                    network_subtype: "entity".to_owned(),
+                    root_folder_id: "folder-1".to_owned(),
+                    root_entity_id: String::new(),
+                    namespace: "world".to_owned(),
+                    description: "Crew graph".to_owned(),
+                    tags: vec!["crew".to_owned(), "battle".to_owned()],
+                    member_count: 2,
+                    relationship_count: 1,
+                    max_depth: 2,
+                    created_at: 100,
+                    updated_at: 100,
+                    group_id: String::new(),
+                    scope_type: "folder".to_owned(),
+                    narrative_id: "nar-1".to_owned(),
+                },
+                members: vec![
+                    phoenix_types::NetworkMembership {
+                        network_id: "net-1".to_owned(),
+                        entity_id: EntityId("luffy".to_owned()),
+                        x: 10.0,
+                        y: 20.0,
+                        fixed: true,
+                    },
+                    phoenix_types::NetworkMembership {
+                        network_id: "net-1".to_owned(),
+                        entity_id: EntityId("zoro".to_owned()),
+                        x: 30.0,
+                        y: 40.0,
+                        fixed: false,
+                    },
+                ],
+                relationships: vec![phoenix_types::NetworkRelationship {
+                    network_id: "net-1".to_owned(),
+                    source_entity_id: EntityId("luffy".to_owned()),
+                    target_entity_id: EntityId("zoro".to_owned()),
+                    relationship_id: "edge-1".to_owned(),
+                }],
+            })
+            .expect("initial save");
+
+        runtime
+            .save_network_view(&phoenix_types::SavedNetworkView {
+                instance: phoenix_types::NetworkInstance {
+                    id: "net-1".to_owned(),
+                    name: "Crew Revised".to_owned(),
+                    schema_id: "schema-character".to_owned(),
+                    network_kind: "mindmap".to_owned(),
+                    network_subtype: "entity".to_owned(),
+                    root_folder_id: "folder-1".to_owned(),
+                    root_entity_id: String::new(),
+                    namespace: "world".to_owned(),
+                    description: "Crew graph revised".to_owned(),
+                    tags: vec!["crew".to_owned()],
+                    member_count: 1,
+                    relationship_count: 0,
+                    max_depth: 1,
+                    created_at: 100,
+                    updated_at: 200,
+                    group_id: String::new(),
+                    scope_type: "folder".to_owned(),
+                    narrative_id: "nar-1".to_owned(),
+                },
+                members: vec![phoenix_types::NetworkMembership {
+                    network_id: "net-1".to_owned(),
+                    entity_id: EntityId("luffy".to_owned()),
+                    x: 12.0,
+                    y: 24.0,
+                    fixed: false,
+                }],
+                relationships: Vec::new(),
+            })
+            .expect("replacement save");
+
+        let view = runtime
+            .get_network_view("net-1")
+            .expect("network fetch")
+            .expect("network exists");
+        let listed = runtime.list_network_views().expect("network list");
+
+        assert_eq!(view.instance.name, "Crew Revised");
+        assert_eq!(view.members.len(), 1);
+        assert_eq!(view.members[0].entity_id.0, "luffy");
+        assert!(view.relationships.is_empty());
+        assert_eq!(listed.len(), 1);
+
+        runtime.delete_network_view("net-1").expect("delete network");
+        assert!(runtime
+            .get_network_view("net-1")
+            .expect("network fetch after delete")
+            .is_none());
+    }
+
+    #[test]
+    fn runtime_text_analytics_matches_gokitt_shape() {
+        let runtime = PhoenixRuntime::new(RuntimeConfig::default()).expect("runtime");
+        let analytics = runtime.analyze_text(
+            "The iron gate slammed shut. The iron gate rattled again. The iron gate shook against the wall. \
+Bright embers glowed beside the ember-lit grate. Bright embers hissed in the ash.",
+        );
+
+        assert!(analytics.word_count > 0);
+        assert!(!analytics.repetition.items.is_empty());
+        assert!(!analytics.proximity.items.is_empty());
+        assert_eq!(analytics.cadence.sentences.len(), 5);
     }
 
     #[test]

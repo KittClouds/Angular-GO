@@ -11,4 +11,4 @@ phoenix-qgram = { path = "../phoenix-qgram" }
 phoenix-store-cozo = { path = "../phoenix-store-cozo" }
 phoenix-types = { path = "../phoenix-types" }
 serde_json.workspace = true
-
+rustc-hash.workspace = true

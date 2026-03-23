@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const PACKET_KIND = {
@@ -10,10 +10,24 @@ const PACKET_KIND = {
     snapshotExportRequest: 14,
     snapshotImportRequest: 16,
     scanRequest: 17,
+    structureRequest: 19,
     graphDeltaRequest: 21,
     sessionStateRequest: 23,
     sessionStatsRequest: 25,
+    analyzeTextRequest: 27,
+    queryBinaryRequest: 29,
+    analyzeTextBinaryRequest: 30,
+    ingestBinaryRequest: 31,
+    scanBinaryRequest: 32,
+    structureBinaryRequest: 33,
 } as const;
+
+const REQUEST_FLAG_COMMIT = 1 << 0;
+const REQUEST_FLAG_TARGET_CHUNKS = 1 << 8;
+const REQUEST_FLAG_TARGET_NODES = 1 << 9;
+const REQUEST_FLAG_TARGET_GRAPH = 1 << 10;
+const REQUEST_FLAG_TARGET_SEMANTIC = 1 << 11;
+const REQUEST_LAYOUT_VERSION = 1;
 
 type WasmExports = {
     memory: WebAssembly.Memory;
@@ -113,15 +127,16 @@ export class PhoenixWasmHarness {
         this.exports = exports;
     }
 
-    static async create(): Promise<PhoenixWasmHarness> {
-        ensurePhoenixWasmBuilt();
+    static async create(options?: { release?: boolean }): Promise<PhoenixWasmHarness> {
+        const release = options?.release ?? false;
+        ensurePhoenixWasmBuilt(release);
         const wasmPath = path.join(
             workspaceRoot(),
             'rust',
             'phoenix',
             'target',
             'wasm32-unknown-unknown',
-            'debug',
+            release ? 'release' : 'debug',
             'phoenix_wasm.wasm',
         );
         const moduleBytes = readFileSync(wasmPath);
@@ -131,6 +146,14 @@ export class PhoenixWasmHarness {
 
     protocolVersion(): number {
         return this.exports.phoenix_wasm_protocol_version();
+    }
+
+    memoryByteLength(): number {
+        return this.exports.memory.buffer.byteLength;
+    }
+
+    memoryPageCount(): number {
+        return this.memoryByteLength() / 65_536;
     }
 
     initRuntime(): any {
@@ -160,16 +183,52 @@ export class PhoenixWasmHarness {
         }).json;
     }
 
-    scan(text: string): any {
+    scan(text: string, sessionId = 'scan-worker'): any {
+        return this.scanJson(text, sessionId);
+    }
+
+    scanJson(text: string, sessionId = 'scan-worker'): any {
         return this.sendJson(PACKET_KIND.scanRequest, {
             text,
             scope: {},
-            sessionId: 'scan-worker',
+            sessionId,
             resolverSeed: [],
         }).json;
     }
 
+    scanBinary(text: string, sessionId = 'scan-worker'): any {
+        return this.sendBytes(
+            PACKET_KIND.scanBinaryRequest,
+            encodeScanBinaryPayload({
+                text,
+                scope: {},
+                sessionId,
+                resolverSeed: [],
+            }),
+        ).json;
+    }
+
+    analyzeText(text: string, capacityHint?: number): any {
+        return this.analyzeTextBinary(text, capacityHint);
+    }
+
+    analyzeTextJson(text: string, capacityHint?: number): any {
+        return this.sendJson(PACKET_KIND.analyzeTextRequest, { text }, capacityHint).json;
+    }
+
+    analyzeTextBinary(text: string, capacityHint?: number): any {
+        return this.sendBytes(
+            PACKET_KIND.analyzeTextBinaryRequest,
+            encodeAnalyzeTextBinaryPayload(text),
+            capacityHint,
+        ).json;
+    }
+
     ingest(sessionId: string, documentId: string, title: string, text: string): any {
+        return this.ingestBinary(sessionId, documentId, title, text);
+    }
+
+    ingestJson(sessionId: string, documentId: string, title: string, text: string): any {
         return this.sendJson(PACKET_KIND.ingestRequest, {
             sessionId,
             documents: [{ documentId, noteId: null, title, text, scope: {} }],
@@ -177,55 +236,136 @@ export class PhoenixWasmHarness {
         }).json;
     }
 
-    queryBinary(sessionId: string, query: string): QueryBinaryResult {
-        const payload = this.sendJson(PACKET_KIND.queryRequest, {
-            sessionId,
-            query,
-            scope: {},
-            targets: ['chunks'],
-            limit: 5,
-            temporal: null,
-        }).bytes;
+    ingestBinary(sessionId: string, documentId: string, title: string, text: string): any {
+        return this.sendBytes(
+            PACKET_KIND.ingestBinaryRequest,
+            encodeIngestBinaryPayload({
+                sessionId,
+                documents: [{ documentId, noteId: null, title, text, scope: {} }],
+                commit: false,
+            }),
+        ).json;
+    }
+
+    queryBinary(
+        sessionId: string,
+        query: string,
+        options?: { targets?: string[]; limit?: number; capacityHint?: number },
+    ): QueryBinaryResult {
+        return this.queryBinaryRequest(sessionId, query, options);
+    }
+
+    queryBinaryJson(
+        sessionId: string,
+        query: string,
+        options?: { targets?: string[]; limit?: number; capacityHint?: number },
+    ): QueryBinaryResult {
+        const payload = this.sendJson(
+            PACKET_KIND.queryRequest,
+            {
+                sessionId,
+                query,
+                scope: {},
+                targets: options?.targets ?? ['chunks'],
+                limit: options?.limit ?? 5,
+                temporal: null,
+            },
+            options?.capacityHint,
+        ).bytes;
         return decodeQueryResult(payload);
     }
 
-    graphDeltaBinary(sessionId: string, documentId: string): GraphDeltaBinaryResult {
-        const payload = this.sendJson(PACKET_KIND.graphDeltaRequest, {
-            sessionId,
-            scope: {},
-            changedDocuments: [documentId],
-            limit: 16,
-            sinceCommit: null,
-        }).bytes;
+    queryBinaryRequest(
+        sessionId: string,
+        query: string,
+        options?: { targets?: string[]; limit?: number; capacityHint?: number },
+    ): QueryBinaryResult {
+        const payload = this.sendBytes(
+            PACKET_KIND.queryBinaryRequest,
+            encodeQueryBinaryPayload({
+                sessionId,
+                query,
+                scope: {},
+                targets: options?.targets ?? ['chunks'],
+                limit: options?.limit ?? 5,
+                temporal: null,
+            }),
+            options?.capacityHint,
+        ).bytes;
+        return decodeQueryResult(payload);
+    }
+
+    structure(text: string, scan: any): any {
+        return this.structureBinary(text, scan);
+    }
+
+    structureJson(text: string, scan: any): any {
+        return this.sendJson(PACKET_KIND.structureRequest, { text, scan }).json;
+    }
+
+    structureBinary(text: string, scan: any): any {
+        return this.sendBytes(
+            PACKET_KIND.structureBinaryRequest,
+            encodeStructureBinaryPayload(text, scan),
+        ).json;
+    }
+
+    graphDeltaBinary(
+        sessionId: string,
+        documentId: string,
+        options?: { limit?: number | null; capacityHint?: number },
+    ): GraphDeltaBinaryResult {
+        const payload = this.sendJson(
+            PACKET_KIND.graphDeltaRequest,
+            {
+                sessionId,
+                scope: {},
+                changedDocuments: [documentId],
+                limit: options?.limit === undefined ? 16 : options.limit,
+                sinceCommit: null,
+            },
+            options?.capacityHint,
+        ).bytes;
         return decodeGraphDeltaResult(payload);
     }
 
-    sessionStateBinary(sessionId: string): SessionStateBinaryResult {
-        const payload = this.sendJson(PACKET_KIND.sessionStateRequest, { sessionId }).bytes;
+    sessionStateBinary(sessionId: string, capacityHint?: number): SessionStateBinaryResult {
+        const payload = this.sendJson(PACKET_KIND.sessionStateRequest, { sessionId }, capacityHint).bytes;
         return decodeSessionStateResult(payload);
     }
 
-    sessionStatsBinary(sessionId: string): SessionStatsBinaryResult {
-        const payload = this.sendJson(PACKET_KIND.sessionStatsRequest, { sessionId }).bytes;
+    sessionStatsBinary(sessionId: string, capacityHint?: number): SessionStatsBinaryResult {
+        const payload = this.sendJson(PACKET_KIND.sessionStatsRequest, { sessionId }, capacityHint).bytes;
         return decodeSessionStatsResult(payload);
     }
 
-    exportSnapshot(): Uint8Array {
-        return this.sendJson(PACKET_KIND.snapshotExportRequest, undefined).bytes;
+    exportSnapshot(capacityHint?: number): Uint8Array {
+        return this.sendJson(PACKET_KIND.snapshotExportRequest, undefined, capacityHint).bytes;
     }
 
-    importSnapshot(snapshot: Uint8Array): any {
-        return this.sendBytes(16, snapshot).json;
+    importSnapshot(snapshot: Uint8Array, capacityHint?: number): any {
+        return this.sendBytes(16, snapshot, capacityHint).json;
     }
 
-    private sendJson(kind: number, payload: unknown): { kind: number; bytes: Uint8Array; json?: any } {
+    private sendJson(
+        kind: number,
+        payload: unknown,
+        capacityHint?: number,
+    ): { kind: number; bytes: Uint8Array; json?: any } {
         const payloadBytes = payload === undefined ? new Uint8Array() : this.encoder.encode(JSON.stringify(payload));
-        return this.sendBytes(kind, payloadBytes);
+        return this.sendBytes(kind, payloadBytes, capacityHint);
     }
 
-    private sendBytes(kind: number, payload: Uint8Array): { kind: number; bytes: Uint8Array; json?: any } {
+    private sendBytes(
+        kind: number,
+        payload: Uint8Array,
+        capacityHint?: number,
+    ): { kind: number; bytes: Uint8Array; json?: any } {
         const packetHeaderSize = this.exports.phoenix_packet_header_size();
-        const capacity = Math.max(128 * 1024, packetHeaderSize + payload.byteLength + 1024);
+        const capacity = Math.max(
+            capacityHint ?? 128 * 1024,
+            packetHeaderSize + payload.byteLength + 1024,
+        );
         const ptr = this.exports.phoenix_alloc(capacity);
         let memory = new Uint8Array(this.exports.memory.buffer);
         let view = new DataView(this.exports.memory.buffer);
@@ -265,22 +405,41 @@ function workspaceRoot(): string {
     return process.cwd();
 }
 
-function ensurePhoenixWasmBuilt(): void {
-    const wasmPath = path.join(
-        workspaceRoot(),
-        'rust',
-        'phoenix',
-        'target',
-        'wasm32-unknown-unknown',
-        'debug',
-        'phoenix_wasm.wasm',
-    );
-    if (existsSync(wasmPath)) {
+function ensurePhoenixWasmBuilt(release = false): void {
+    const args = ['build', '--target', 'wasm32-unknown-unknown', '-p', 'phoenix-wasm', '-j', '1'];
+    if (release) {
+        args.splice(1, 0, '--release');
+    }
+    const env = { ...process.env };
+    if (release) {
+        env.RUSTFLAGS = `${env.RUSTFLAGS ?? ''} -C target-feature=+simd128`.trim();
+    }
+    execFileSync('cargo', args, {
+        cwd: path.join(workspaceRoot(), 'rust', 'phoenix'),
+        stdio: 'inherit',
+        env,
+    });
+    if (release) {
+        const wasmPath = path.join(
+            workspaceRoot(),
+            'rust',
+            'phoenix',
+            'target',
+            'wasm32-unknown-unknown',
+            'release',
+            'phoenix_wasm.wasm',
+        );
+        optimizeWasmBinary(wasmPath);
+    }
+}
+
+function optimizeWasmBinary(wasmPath: string): void {
+    try {
+        execFileSync('wasm-opt', ['--version'], { stdio: 'ignore' });
+    } catch {
         return;
     }
-
-    execFileSync('cargo', ['build', '--target', 'wasm32-unknown-unknown', '-p', 'phoenix-wasm', '-j', '1'], {
-        cwd: path.join(workspaceRoot(), 'rust', 'phoenix'),
+    execFileSync('wasm-opt', ['-O4', wasmPath, '-o', wasmPath], {
         stdio: 'inherit',
     });
 }
@@ -314,6 +473,255 @@ function createImportObject(): Record<string, Record<string, (...args: any[]) =>
             },
         },
     ) as Record<string, Record<string, (...args: any[]) => any>>;
+}
+
+type ScopePayload = {
+    worldId?: string | null;
+    narrativeId?: string | null;
+    folderId?: string | null;
+    folderPath?: string | null;
+};
+
+class StringArenaBuilder {
+    private readonly encoder = new TextEncoder();
+    private readonly chunks: Uint8Array[] = [];
+    private length = 0;
+
+    add(value?: string | null): { offset: number; len: number } {
+        if (!value) {
+            return { offset: 0, len: 0 };
+        }
+        const bytes = this.encoder.encode(value);
+        const offset = this.length;
+        this.length += bytes.length;
+        this.chunks.push(bytes);
+        return { offset, len: bytes.length };
+    }
+
+    finish(): Uint8Array {
+        const arena = new Uint8Array(this.length);
+        let offset = 0;
+        for (const chunk of this.chunks) {
+            arena.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return arena;
+    }
+}
+
+function targetFlags(targets: string[]): number {
+    let flags = 0;
+    for (const target of targets) {
+        switch (target) {
+            case 'chunks':
+                flags |= REQUEST_FLAG_TARGET_CHUNKS;
+                break;
+            case 'nodes':
+                flags |= REQUEST_FLAG_TARGET_NODES;
+                break;
+            case 'graph':
+                flags |= REQUEST_FLAG_TARGET_GRAPH;
+                break;
+            case 'semantic':
+                flags |= REQUEST_FLAG_TARGET_SEMANTIC;
+                break;
+        }
+    }
+    return flags;
+}
+
+function encodeQueryBinaryPayload(input: {
+    sessionId?: string | null;
+    query: string;
+    scope: ScopePayload;
+    targets: string[];
+    limit?: number | null;
+    temporal?: unknown;
+}): Uint8Array {
+    const arena = new StringArenaBuilder();
+    const session = arena.add(input.sessionId ?? null);
+    const query = arena.add(input.query);
+    const world = arena.add(input.scope.worldId ?? null);
+    const narrative = arena.add(input.scope.narrativeId ?? null);
+    const folderId = arena.add(input.scope.folderId ?? null);
+    const folderPath = arena.add(input.scope.folderPath ?? null);
+    const temporal = arena.add(input.temporal ? JSON.stringify(input.temporal) : null);
+    const arenaBytes = arena.finish();
+    const headerSize = 19 * 4;
+    const bytes = new Uint8Array(headerSize + arenaBytes.length);
+    const view = new DataView(bytes.buffer);
+    [
+        REQUEST_LAYOUT_VERSION,
+        targetFlags(input.targets),
+        session.offset,
+        session.len,
+        query.offset,
+        query.len,
+        world.offset,
+        world.len,
+        narrative.offset,
+        narrative.len,
+        folderId.offset,
+        folderId.len,
+        folderPath.offset,
+        folderPath.len,
+        input.limit ?? 0xffffffff,
+        temporal.offset,
+        temporal.len,
+        headerSize,
+        arenaBytes.length,
+    ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));
+    bytes.set(arenaBytes, headerSize);
+    return bytes;
+}
+
+function encodeAnalyzeTextBinaryPayload(text: string): Uint8Array {
+    const arena = new StringArenaBuilder();
+    const textRef = arena.add(text);
+    const arenaBytes = arena.finish();
+    const headerSize = 6 * 4;
+    const bytes = new Uint8Array(headerSize + arenaBytes.length);
+    const view = new DataView(bytes.buffer);
+    [
+        REQUEST_LAYOUT_VERSION,
+        0,
+        textRef.offset,
+        textRef.len,
+        headerSize,
+        arenaBytes.length,
+    ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));
+    bytes.set(arenaBytes, headerSize);
+    return bytes;
+}
+
+function encodeIngestBinaryPayload(input: {
+    sessionId?: string | null;
+    documents: Array<{
+        documentId: string;
+        noteId?: string | null;
+        title: string;
+        text: string;
+        scope: ScopePayload;
+    }>;
+    commit: boolean;
+}): Uint8Array {
+    const arena = new StringArenaBuilder();
+    const session = arena.add(input.sessionId ?? null);
+    const records = input.documents.map((document) => ({
+        documentId: arena.add(document.documentId),
+        noteId: arena.add(document.noteId ?? null),
+        title: arena.add(document.title),
+        text: arena.add(document.text),
+        world: arena.add(document.scope.worldId ?? null),
+        narrative: arena.add(document.scope.narrativeId ?? null),
+        folderId: arena.add(document.scope.folderId ?? null),
+        folderPath: arena.add(document.scope.folderPath ?? null),
+    }));
+    const arenaBytes = arena.finish();
+    const headerSize = 8 * 4;
+    const recordSize = 17 * 4;
+    const tableOffset = headerSize;
+    const arenaOffset = tableOffset + records.length * recordSize;
+    const bytes = new Uint8Array(arenaOffset + arenaBytes.length);
+    const view = new DataView(bytes.buffer);
+    [
+        REQUEST_LAYOUT_VERSION,
+        input.commit ? REQUEST_FLAG_COMMIT : 0,
+        session.offset,
+        session.len,
+        tableOffset,
+        records.length,
+        arenaOffset,
+        arenaBytes.length,
+    ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));
+    records.forEach((record, index) => {
+        const base = tableOffset + index * recordSize;
+        [
+            record.documentId.offset,
+            record.documentId.len,
+            record.noteId.offset,
+            record.noteId.len,
+            record.title.offset,
+            record.title.len,
+            record.text.offset,
+            record.text.len,
+            record.world.offset,
+            record.world.len,
+            record.narrative.offset,
+            record.narrative.len,
+            record.folderId.offset,
+            record.folderId.len,
+            record.folderPath.offset,
+            record.folderPath.len,
+            0,
+        ].forEach((value, fieldIndex) => view.setUint32(base + fieldIndex * 4, value >>> 0, true));
+    });
+    bytes.set(arenaBytes, arenaOffset);
+    return bytes;
+}
+
+function encodeScanBinaryPayload(input: {
+    text: string;
+    scope: ScopePayload;
+    sessionId?: string | null;
+    resolverSeed: unknown[];
+}): Uint8Array {
+    const arena = new StringArenaBuilder();
+    const session = arena.add(input.sessionId ?? null);
+    const text = arena.add(input.text);
+    const world = arena.add(input.scope.worldId ?? null);
+    const narrative = arena.add(input.scope.narrativeId ?? null);
+    const folderId = arena.add(input.scope.folderId ?? null);
+    const folderPath = arena.add(input.scope.folderPath ?? null);
+    const resolverSeed = arena.add(JSON.stringify(input.resolverSeed));
+    const arenaBytes = arena.finish();
+    const headerSize = 18 * 4;
+    const bytes = new Uint8Array(headerSize + arenaBytes.length);
+    const view = new DataView(bytes.buffer);
+    [
+        REQUEST_LAYOUT_VERSION,
+        0,
+        session.offset,
+        session.len,
+        text.offset,
+        text.len,
+        world.offset,
+        world.len,
+        narrative.offset,
+        narrative.len,
+        folderId.offset,
+        folderId.len,
+        folderPath.offset,
+        folderPath.len,
+        resolverSeed.offset,
+        resolverSeed.len,
+        headerSize,
+        arenaBytes.length,
+    ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));
+    bytes.set(arenaBytes, headerSize);
+    return bytes;
+}
+
+function encodeStructureBinaryPayload(text: string, scan: unknown): Uint8Array {
+    const arena = new StringArenaBuilder();
+    const textRef = arena.add(text);
+    const scanRef = arena.add(JSON.stringify(scan));
+    const arenaBytes = arena.finish();
+    const headerSize = 8 * 4;
+    const bytes = new Uint8Array(headerSize + arenaBytes.length);
+    const view = new DataView(bytes.buffer);
+    [
+        REQUEST_LAYOUT_VERSION,
+        0,
+        textRef.offset,
+        textRef.len,
+        scanRef.offset,
+        scanRef.len,
+        headerSize,
+        arenaBytes.length,
+    ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));
+    bytes.set(arenaBytes, headerSize);
+    return bytes;
 }
 
 function decodeBinaryHeader(view: DataView): BinaryHeader {

@@ -326,6 +326,12 @@ pub struct QueryResult {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AnalyzeTextRequest {
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphDeltaRequest {
     pub session_id: SessionId,
     pub scope: ScopeKey,
@@ -851,6 +857,13 @@ pub enum PacketKind {
     SessionStateResult = 24,
     SessionStatsRequest = 25,
     SessionStatsResult = 26,
+    AnalyzeTextRequest = 27,
+    AnalyzeTextResult = 28,
+    QueryBinaryRequest = 29,
+    AnalyzeTextBinaryRequest = 30,
+    IngestBinaryRequest = 31,
+    ScanBinaryRequest = 32,
+    StructureBinaryRequest = 33,
     Ack = 255,
 }
 
@@ -889,6 +902,13 @@ impl From<u32> for PacketKind {
             24 => Self::SessionStateResult,
             25 => Self::SessionStatsRequest,
             26 => Self::SessionStatsResult,
+            27 => Self::AnalyzeTextRequest,
+            28 => Self::AnalyzeTextResult,
+            29 => Self::QueryBinaryRequest,
+            30 => Self::AnalyzeTextBinaryRequest,
+            31 => Self::IngestBinaryRequest,
+            32 => Self::ScanBinaryRequest,
+            33 => Self::StructureBinaryRequest,
             255 => Self::Ack,
             _ => Self::None,
         }
@@ -970,6 +990,89 @@ pub struct SessionStats {
     pub graph_vertex_count: usize,
     pub graph_edge_count: usize,
     pub span_count: usize,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInstance {
+    pub id: String,
+    pub name: String,
+    pub schema_id: String,
+    pub network_kind: String,
+    pub network_subtype: String,
+    pub root_folder_id: String,
+    pub root_entity_id: String,
+    pub namespace: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub member_count: usize,
+    pub relationship_count: usize,
+    pub max_depth: usize,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub group_id: String,
+    pub scope_type: String,
+    pub narrative_id: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkMembership {
+    pub network_id: String,
+    pub entity_id: EntityId,
+    pub x: f64,
+    pub y: f64,
+    pub fixed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkRelationship {
+    pub network_id: String,
+    pub source_entity_id: EntityId,
+    pub target_entity_id: EntityId,
+    pub relationship_id: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedNetworkView {
+    pub instance: NetworkInstance,
+    pub members: Vec<NetworkMembership>,
+    pub relationships: Vec<NetworkRelationship>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityCard {
+    pub entity_id: EntityId,
+    pub card_id: String,
+    pub name: String,
+    pub color: String,
+    pub icon: String,
+    pub display_order: i32,
+    pub is_collapsed: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSchema {
+    pub id: String,
+    pub entity_kind: String,
+    pub subtype: String,
+    pub name: String,
+    pub description: String,
+    pub allowed_subfolders: String,
+    pub allowed_note_types: String,
+    pub is_vault_root: bool,
+    pub container_only: bool,
+    pub propagate_kind_to_children: bool,
+    pub icon: String,
+    pub is_system: bool,
+    pub created_at: i64,
     pub updated_at: i64,
 }
 
@@ -1104,5 +1207,12 @@ mod tests {
         assert_eq!(PacketKind::from(24), PacketKind::SessionStateResult);
         assert_eq!(PacketKind::from(25), PacketKind::SessionStatsRequest);
         assert_eq!(PacketKind::from(26), PacketKind::SessionStatsResult);
+        assert_eq!(PacketKind::from(27), PacketKind::AnalyzeTextRequest);
+        assert_eq!(PacketKind::from(28), PacketKind::AnalyzeTextResult);
+        assert_eq!(PacketKind::from(29), PacketKind::QueryBinaryRequest);
+        assert_eq!(PacketKind::from(30), PacketKind::AnalyzeTextBinaryRequest);
+        assert_eq!(PacketKind::from(31), PacketKind::IngestBinaryRequest);
+        assert_eq!(PacketKind::from(32), PacketKind::ScanBinaryRequest);
+        assert_eq!(PacketKind::from(33), PacketKind::StructureBinaryRequest);
     }
 }

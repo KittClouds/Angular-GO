@@ -1,0 +1,2750 @@
+{
+  "generatedAt": 1774279139980,
+  "corpora": [
+    {
+      "corpusId": "perfect_run",
+      "title": "Perfect Run",
+      "path": "\\\\?\\C:\\Users\\shuga\\1kittroot\\1code\\Angular-build\\docs\\perfect_run.md",
+      "inputBytes": 2859630,
+      "inputChars": 2759471,
+      "estimatedInputPages": 44,
+      "excerptBytes": 32768,
+      "selectedQueries": {
+        "lexical": [
+          "\"New Rome\"",
+          "Len",
+          "Ryan"
+        ],
+        "graph": [
+          "Ryan Ghoul",
+          "Ryan Len"
+        ]
+      },
+      "relationCounts": [
+        {
+          "relation": "phoenix_schema_state",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_sessions",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_commits",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_ingest_log",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_query_log",
+          "rows": 5
+        },
+        {
+          "relation": "notes",
+          "rows": 1
+        },
+        {
+          "relation": "entities",
+          "rows": 0
+        },
+        {
+          "relation": "edges",
+          "rows": 0
+        },
+        {
+          "relation": "folders",
+          "rows": 0
+        },
+        {
+          "relation": "threads",
+          "rows": 0
+        },
+        {
+          "relation": "thread_messages",
+          "rows": 0
+        },
+        {
+          "relation": "memories",
+          "rows": 0
+        },
+        {
+          "relation": "memory_threads",
+          "rows": 0
+        },
+        {
+          "relation": "om_records",
+          "rows": 0
+        },
+        {
+          "relation": "om_generations",
+          "rows": 0
+        },
+        {
+          "relation": "workspace_artifacts",
+          "rows": 2
+        },
+        {
+          "relation": "chat_runs",
+          "rows": 0
+        },
+        {
+          "relation": "chat_run_events",
+          "rows": 0
+        },
+        {
+          "relation": "chat_tool_calls",
+          "rows": 0
+        },
+        {
+          "relation": "chat_approval_requests",
+          "rows": 0
+        },
+        {
+          "relation": "hnsw_index",
+          "rows": 0
+        },
+        {
+          "relation": "docid_map",
+          "rows": 1
+        },
+        {
+          "relation": "chunkid_map",
+          "rows": 9374
+        },
+        {
+          "relation": "chunks",
+          "rows": 9374
+        },
+        {
+          "relation": "raptor_nodes",
+          "rows": 0
+        },
+        {
+          "relation": "raptor_edges",
+          "rows": 0
+        },
+        {
+          "relation": "episodes",
+          "rows": 0
+        },
+        {
+          "relation": "spans",
+          "rows": 41071
+        },
+        {
+          "relation": "wormholes",
+          "rows": 0
+        },
+        {
+          "relation": "span_mentions",
+          "rows": 0
+        },
+        {
+          "relation": "network_instance",
+          "rows": 0
+        },
+        {
+          "relation": "network_membership",
+          "rows": 0
+        },
+        {
+          "relation": "network_relationship",
+          "rows": 0
+        },
+        {
+          "relation": "discovery_candidates",
+          "rows": 54495
+        },
+        {
+          "relation": "entity_cards",
+          "rows": 0
+        },
+        {
+          "relation": "folder_schemas",
+          "rows": 0
+        },
+        {
+          "relation": "scoped_documents",
+          "rows": 1
+        },
+        {
+          "relation": "scoped_entity_fields",
+          "rows": 0
+        },
+        {
+          "relation": "scoped_definitions",
+          "rows": 3
+        },
+        {
+          "relation": "blocks",
+          "rows": 0
+        },
+        {
+          "relation": "graph_vertices",
+          "rows": 10734
+        },
+        {
+          "relation": "graph_edges",
+          "rows": 10733
+        },
+        {
+          "relation": "graph_node_index",
+          "rows": 0
+        },
+        {
+          "relation": "graph_properties",
+          "rows": 173841
+        },
+        {
+          "relation": "graph_vertex_labels",
+          "rows": 9834
+        },
+        {
+          "relation": "graph_named_rules",
+          "rows": 0
+        },
+        {
+          "relation": "graph_rule_results",
+          "rows": 0
+        }
+      ],
+      "ingestSummary": {
+        "sessionId": "perf-perfect_run",
+        "documentCount": 1,
+        "warningCount": 515,
+        "documents": [
+          {
+            "documentId": "perf-doc-perfect_run",
+            "noteId": "perf-doc-perfect_run",
+            "chapterCount": 132,
+            "parentCount": 2247,
+            "leafCount": 6995,
+            "entityCount": 0,
+            "edgeCount": 10733,
+            "hasFrontMatterChapter": true
+          }
+        ],
+        "chunkStats": {
+          "documents": 1,
+          "totalChapters": 132,
+          "totalParents": 2247,
+          "totalLeaves": 6995
+        },
+        "graphSummary": {
+          "documents": 1,
+          "totalChapters": 132,
+          "totalLeaves": 6995,
+          "totalEntities": 0,
+          "totalMentions": 0,
+          "totalEdges": 10733,
+          "crossChapterLinks": 0
+        },
+        "entitySummary": {
+          "totalEntities": 0,
+          "totalAliases": 0,
+          "totalMentions": 0,
+          "multiChapterEntities": 0
+        },
+        "discoverySummary": {
+          "candidateCount": 63111,
+          "mentionCount": 63111,
+          "persistedCount": 63111
+        },
+        "retrievalSummary": {
+          "qgramDocuments": 1,
+          "gldrChunks": 6995,
+          "gldrEntities": 0,
+          "gldrEdges": 10733,
+          "raptorDocuments": 0,
+          "raptorLeaves": 0,
+          "raptorEnabled": false
+        },
+        "relationCounts": [
+          {
+            "relation": "phoenix_schema_state",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_sessions",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_commits",
+            "rows": 0
+          },
+          {
+            "relation": "phoenix_ingest_log",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_query_log",
+            "rows": 0
+          },
+          {
+            "relation": "notes",
+            "rows": 1
+          },
+          {
+            "relation": "entities",
+            "rows": 0
+          },
+          {
+            "relation": "edges",
+            "rows": 0
+          },
+          {
+            "relation": "folders",
+            "rows": 0
+          },
+          {
+            "relation": "threads",
+            "rows": 0
+          },
+          {
+            "relation": "thread_messages",
+            "rows": 0
+          },
+          {
+            "relation": "memories",
+            "rows": 0
+          },
+          {
+            "relation": "memory_threads",
+            "rows": 0
+          },
+          {
+            "relation": "om_records",
+            "rows": 0
+          },
+          {
+            "relation": "om_generations",
+            "rows": 0
+          },
+          {
+            "relation": "workspace_artifacts",
+            "rows": 2
+          },
+          {
+            "relation": "chat_runs",
+            "rows": 0
+          },
+          {
+            "relation": "chat_run_events",
+            "rows": 0
+          },
+          {
+            "relation": "chat_tool_calls",
+            "rows": 0
+          },
+          {
+            "relation": "chat_approval_requests",
+            "rows": 0
+          },
+          {
+            "relation": "hnsw_index",
+            "rows": 0
+          },
+          {
+            "relation": "docid_map",
+            "rows": 1
+          },
+          {
+            "relation": "chunkid_map",
+            "rows": 9374
+          },
+          {
+            "relation": "chunks",
+            "rows": 9374
+          },
+          {
+            "relation": "raptor_nodes",
+            "rows": 0
+          },
+          {
+            "relation": "raptor_edges",
+            "rows": 0
+          },
+          {
+            "relation": "episodes",
+            "rows": 0
+          },
+          {
+            "relation": "spans",
+            "rows": 41071
+          },
+          {
+            "relation": "wormholes",
+            "rows": 0
+          },
+          {
+            "relation": "span_mentions",
+            "rows": 0
+          },
+          {
+            "relation": "network_instance",
+            "rows": 0
+          },
+          {
+            "relation": "network_membership",
+            "rows": 0
+          },
+          {
+            "relation": "network_relationship",
+            "rows": 0
+          },
+          {
+            "relation": "discovery_candidates",
+            "rows": 54495
+          },
+          {
+            "relation": "entity_cards",
+            "rows": 0
+          },
+          {
+            "relation": "folder_schemas",
+            "rows": 0
+          },
+          {
+            "relation": "scoped_documents",
+            "rows": 1
+          },
+          {
+            "relation": "scoped_entity_fields",
+            "rows": 0
+          },
+          {
+            "relation": "scoped_definitions",
+            "rows": 3
+          },
+          {
+            "relation": "blocks",
+            "rows": 0
+          },
+          {
+            "relation": "graph_vertices",
+            "rows": 10734
+          },
+          {
+            "relation": "graph_edges",
+            "rows": 10733
+          },
+          {
+            "relation": "graph_node_index",
+            "rows": 0
+          },
+          {
+            "relation": "graph_properties",
+            "rows": 173841
+          },
+          {
+            "relation": "graph_vertex_labels",
+            "rows": 9834
+          },
+          {
+            "relation": "graph_named_rules",
+            "rows": 0
+          },
+          {
+            "relation": "graph_rule_results",
+            "rows": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "code": "PX_GRAPTOR_CHUNKERX2",
+            "message": "ChunkerX2-style ingest produced 132 chapters, 2247 parents, and 6995 leaves."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:0:504904122:443-898 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1840086759:856-1234 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1509416072:1238-1568 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:94318319:1569-1944 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1067091293:1933-2395 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:361369325:2337-2840 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:2077815422:2753-3242 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1556948906:3208-3684 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:30235800:3639-4139 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:184117796:4140-4634 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:91665998:4638-5134 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1115729977:5034-5499 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:925975636:5414-5920 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:963125638:5863-6356 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1718013180:6294-6771 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1481600942:6771-7237 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1495772640:7145-7590 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:568382183:7594-8000 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:95254087:7952-8442 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1565723946:8365-8846 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1424234983:8850-9326 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1210774751:9327-9791 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1359772572:9739-10166 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1046996898:10167-10659 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:730033457:10618-11120 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:2094003441:11015-11524 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1844380067:11500-11961 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:891117003:11923-12363 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:749847388:12337-12748 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1566943476:12669-13134 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:2063268983:13103-13526 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1802183850:13428-13873 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:867409928:13797-14303 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:562370272:14281-14719 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1237226720:14635-15115 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:507976303:15033-15508 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:243889514:15409-15799 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:441578569:15738-16200 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1624342441:16165-16670 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:1:1017123004:16616-17055 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1882378694:16943-17430 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1080337374:17431-17927 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:2082867005:17928-18436 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:96856196:18437-18901 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:67858003:18902-19371 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:606495316:19323-19831 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:508777721:19762-20194 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1751006952:20195-20694 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1000687807:20698-21139 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1182374402:21046-21536 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1230391273:21444-21889 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:2048321127:21825-22315 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:117271071:22282-22753 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1240815958:22653-23126 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1152094723:23127-23605 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:990006644:23605-24066 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1640170741:24024-24502 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1417402672:24472-24885 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1845472926:24798-25263 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1250823645:25198-25630 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1047564474:25567-26070 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:28235863:25978-26482 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1361927445:26382-26871 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1368070626:26787-27278 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:1440622043:27212-27624 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:2:947344669:27550-28046 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1531856291:28050-28444 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1940810434:28445-28867 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:482548208:28809-29196 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1538275643:29143-29610 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:480423688:29513-29919 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:745744257:29819-30290 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:677133477:30260-30647 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:653542688:30629-30995 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1667591428:30900-31358 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:490136:31301-31758 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:2101549266:31692-32077 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:535888843:32004-32432 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:826966994:32351-32816 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:629649771:32732-33233 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:2058350485:33237-33687 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1167078613:33691-34167 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:497379596:34077-34541 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1587821659:34446-34944 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1788359089:34845-35313 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1753714041:35269-35750 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1116109048:35654-36136 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:904571577:36058-36503 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:855111146:36461-36861 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1226644956:36761-37258 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1594690792:37226-37732 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1573618716:37656-38130 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:2124527969:38044-38492 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:390765521:38398-38900 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1624291984:38826-39294 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1169802019:39198-39566 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:1798328594:39464-39947 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:2004940391:39874-40374 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:3:217254926:40307-40659 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:356961822:40631-41049 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1224548927:41050-41516 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:838544229:41428-41915 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1306505823:41841-42241 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:991764885:42242-42593 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1351942913:42504-42963 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1849077848:42886-43366 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:2064838870:43358-43794 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1114619405:43795-44265 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:704892972:44266-44729 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1040832624:44643-45149 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1595810908:45048-45547 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:992737784:45471-45886 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1076206922:45832-46293 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:780406421:46297-46762 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:677395922:46700-47189 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:814393497:47135-47545 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1944737799:47446-47764 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:348732790:47664-48104 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1153447310:48105-48585 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1984970751:48538-49040 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1962471655:49041-49510 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1793328344:49446-49916 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:2091711833:49875-50388 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1465326424:50289-50764 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1973248772:50694-51181 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:605551484:51115-51603 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1664816193:51521-52002 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1815598304:52003-52463 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1551346887:52367-52812 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1797616821:52724-53195 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1278041140:53112-53495 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1915173061:53401-53798 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1470890867:53707-54110 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:992360790:54045-54544 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:984415519:54449-54903 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:246264632:54862-55368 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1043407144:55275-55765 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:809710431:55683-56047 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1214954674:56048-56516 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:498286644:56517-56991 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:364662620:56949-57445 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:931479012:57398-57882 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:822854985:57796-58198 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:611576818:58142-58573 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:1187385813:58485-58871 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:783913304:58790-59254 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:245633333:59255-59698 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:4:386149176:59669-60177 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:560197025:60107-60605 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1639726797:60606-61110 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:828683484:61024-61479 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:67925744:61403-61885 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:90744055:61889-62344 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1652355407:62267-62714 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1738294752:62718-63175 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1143066510:63076-63555 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:652702192:63525-63970 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:2125754571:63877-64303 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1961386898:64304-64779 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:119609787:64682-65181 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1907120279:65108-65396 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1770455491:65400-65872 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:654933898:65876-66345 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:665044849:66346-66790 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1418407:66778-67288 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1343595783:67289-67765 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:886073676:67674-68141 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:2146872139:68128-68578 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1029756945:68488-68885 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:61075526:68799-69279 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1769826761:69200-69627 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1116027077:69558-70001 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:965873061:70005-70484 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1703231043:70414-70848 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1041423924:70849-71354 produced 18 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1729486910:71322-71803 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1264163419:71807-72294 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:5:1147431898:72207-72698 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:519313163:72702-73157 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:2029093841:73158-73656 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:804750491:73657-74116 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1469911688:74117-74469 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:289863171:74408-74915 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:543205412:74916-75302 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1525368430:75303-75769 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:552543863:75761-76257 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:874816574:76258-76650 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1830605113:76571-76992 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1088000959:76993-77463 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1786597385:77402-77876 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1901232473:77783-78233 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:217992382:78157-78597 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:346223646:78545-78985 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:12549802:78903-79360 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:278249090:79290-79805 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:2097415826:79706-80218 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1771381552:80131-80627 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1928651397:80531-81003 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:404674619:80910-81367 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:254469023:81371-81589 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1028232895:81590-82066 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1372328822:81998-82498 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1177120082:82426-82826 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:878944968:82830-83347 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:384116384:83249-83694 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:531190673:83640-84110 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1475173734:84074-84496 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:807155687:84435-84810 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:1594344449:84720-85191 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:2139502446:85097-85574 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:6:2082964969:85535-85981 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1558519558:85982-86459 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1531929840:86460-86952 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:86857768:86956-87324 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:94365683:87325-87757 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:948698695:87711-88094 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:199414155:88095-88588 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:857105492:88503-88981 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1730332179:88909-89358 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:910288294:89288-89767 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:313568111:89693-90173 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1834084280:90174-90653 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1488443136:90654-91138 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:657125045:91048-91449 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:179294516:91359-91803 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:974417927:91710-92194 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:760073837:92123-92610 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1405251575:92611-93109 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:558122367:93019-93478 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:479422272:93479-93983 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:67778883:93886-94321 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:798908133:94270-94730 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:416723949:94644-95088 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1926890155:94993-95500 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:896315917:95458-95921 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:255094220:95873-96368 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:962366201:96293-96762 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:236915967:96735-97205 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1991302366:97112-97549 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:2040308984:97468-97970 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1575563950:97971-98462 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:491756062:98391-98878 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1394117110:98809-99305 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1653796357:99251-99724 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1201468852:99656-100020 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:661356346:99942-100372 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:413615577:100292-100646 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:702492476:100575-101024 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:836277867:100947-101334 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1495900643:101260-101661 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:2141008341:101619-102082 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1345835814:101982-102424 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:614846266:102428-102868 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1848201762:102869-103288 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1533869126:103222-103691 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:1185857566:103610-104084 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:7:736236825:104043-104497 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1093239007:104449-104949 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:557774168:104869-105277 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:2043290122:105205-105717 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1038129788:105659-106140 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1579415404:106067-106456 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1529180207:106457-106951 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:591881087:106952-107408 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1689352030:107345-107848 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:544972418:107773-108255 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1239813809:108159-108642 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:968661923:108582-109063 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:566242825:108989-109460 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:936855383:109369-109867 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:865800941:109802-110278 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:655406954:110195-110674 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1714687688:110612-111051 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:2097710437:110954-111455 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:514367089:111456-111943 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1804359686:111843-112332 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:67119356:112286-112794 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1996754484:112760-113127 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:850162654:113081-113511 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:561577288:113468-113970 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:250025729:113871-114299 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:617562465:114262-114737 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1414596930:114649-115084 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:773339963:115085-115589 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1190905444:115511-115955 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1400405988:115878-116372 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:182931985:116307-116807 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1273104582:116710-117162 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1118068756:117102-117599 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1829473446:117560-118048 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:2123269566:117990-118447 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1941176362:118424-118880 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:831154670:118803-119181 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:785324224:119166-119661 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:1827168139:119584-120079 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:721135689:119984-120406 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:571283212:120407-120906 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:8:464169267:120859-121338 produced 18 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:829295833:121277-121605 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:315504254:121606-122047 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1772966272:122048-122491 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1377127875:122391-122790 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:2117829422:122751-123215 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:694799911:123137-123602 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:38635172:123553-124028 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:278838807:124029-124543 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1135331307:124453-124942 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:387069580:124873-125353 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1764203699:125354-125742 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:78366416:125654-126154 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1233657969:126124-126602 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:910621076:126502-126982 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1718485599:126917-127410 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1153778819:127335-127840 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1141113172:127772-128210 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1013533612:128141-128590 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:468950497:128506-128916 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1895868108:128857-129364 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:483814930:129269-129755 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:463199057:129756-130245 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:265939170:130174-130631 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:365373924:130635-131135 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:2009417352:131046-131534 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1102110997:131535-132010 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1224159201:131952-132314 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1955373468:132315-132726 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:391645761:132694-133120 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:335424081:133097-133481 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:303807211:133482-133917 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:2084161812:133821-134327 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:2034471903:134296-134736 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:700994095:134737-135140 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1856922393:135123-135571 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:834024737:135572-136068 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:347778304:136015-136495 produced 16 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1277830331:136444-136939 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1758261534:136872-137211 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1307734602:137162-137560 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:127707795:137491-137908 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:612379783:137820-138291 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1592702280:138233-138725 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1545365487:138655-139143 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:526649519:139059-139508 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:47786305:139512-139980 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:1594237765:139964-140390 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:9:2097673709:140321-140799 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1313084453:140757-141245 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1744494189:141160-141640 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:623184443:141621-142102 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1672530619:142077-142553 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:390335015:142471-142779 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1380076913:142780-143252 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:584101433:143206-143685 produced 18 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:733454639:143609-144052 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:573324902:143966-144457 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1712209061:144412-144855 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:365423564:144768-145262 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:214514167:145184-145640 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:64678846:145576-146023 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:406050524:145954-146461 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:259592934:146378-146792 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1260160910:146719-147219 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1399211039:147125-147605 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1893983996:147529-147965 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:967979196:147869-148369 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1165977121:148307-148658 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:417451342:148606-149029 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1866742829:148949-149406 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1261143358:149410-149890 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:320692795:149822-150263 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:978283413:150187-150698 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1433145957:150627-151126 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1133704345:151127-151579 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:2076439662:151580-152037 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:2063547453:151956-152400 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:979121993:152401-152909 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1980911046:152815-153267 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1864340497:153195-153637 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:330849893:153638-154117 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:207627425:154118-154517 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1573671114:154521-154992 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:393423227:154891-155394 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:979118541:155320-155819 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1289041735:155739-156230 produced 16 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1855910910:156168-156656 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1476487734:156657-157120 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:485723160:157113-157588 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1807282517:157537-157974 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:882160408:157913-158390 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1445999931:158391-158792 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1208081286:158701-159186 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:633952540:159110-159574 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1999254803:159524-159947 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:759667448:159862-160356 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:722929994:160335-160777 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:2074181197:160691-161187 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:884902266:161134-161626 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:10:1333979371:161526-162018 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1599652624:162022-162442 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1288404215:162348-162811 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:677530158:162812-163228 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:101413763:163232-163697 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1333630478:163701-164162 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1630390325:164093-164504 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:231674039:164467-164974 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:990697419:164901-165372 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1226709008:165326-165823 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:615987105:165728-166225 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1318265517:166225-166572 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1645897048:166553-167051 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1368423199:166988-167384 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2117393553:167292-167778 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:61965226:167693-168131 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1128642071:168044-168524 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:199512916:168434-168874 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:960195342:168813-169270 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1013086707:169198-169599 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2027656940:169600-170022 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1528709072:169942-170443 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2082393673:170341-170830 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1109103318:170743-171236 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1009100377:171189-171661 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2111042902:171575-172068 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:225371882:172040-172550 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1973160528:172544-173000 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1785773808:173004-173378 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:816171908:173272-173706 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:759765654:173707-174203 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:743448736:174204-174631 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:186367436:174632-175138 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2006215342:175139-175634 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1509501770:175600-176021 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:158470860:175921-176401 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1142406258:176332-176802 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:836594307:176710-177125 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1234087163:177126-177567 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1216551845:177467-177877 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:784955244:177838-178314 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:219277431:178315-178749 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:2002158423:178656-179137 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:1205981007:179138-179599 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:11:447378513:179600-180120 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1589439328:180124-180555 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:530355490:180556-180941 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:2132212672:180945-181441 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1052747784:181442-181851 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:732197697:181852-182355 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:644641850:182309-182727 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:330110581:182652-183142 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1706946415:183048-183474 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1626504201:183428-183896 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:823646437:183897-184352 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:990707290:184353-184834 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1912863086:184794-185274 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:48699260:185200-185675 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:495568169:185597-186041 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1531873835:185984-186432 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:697359243:186357-186738 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:372878980:186663-187149 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:2015609474:187070-187566 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:484393972:187499-187976 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:457334045:187886-188343 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:2147445944:188263-188739 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1685443405:188739-189155 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:799942259:189077-189524 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:939020241:189524-189947 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:10972103:189898-190356 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:96051362:190340-190843 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1745845948:190747-191168 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1977568632:191169-191541 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:439219266:191498-191870 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1298014315:191825-192278 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1306135147:192197-192693 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1636726968:192646-193061 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1209690484:193007-193418 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:1793012064:193349-193703 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:12:361479690:193619-194074 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:695587630:194021-194494 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:129561054:194426-194868 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:125394772:194868-195302 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:581843766:195303-195817 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:2008384632:195728-196170 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:803488933:196174-196652 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:622956890:196656-197156 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1052993545:197068-197524 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:2003849746:197528-197966 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:446043312:197966-198471 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:213825844:198472-198917 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:2077663074:198918-199425 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:167266201:199426-199849 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1963617041:199759-200225 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:685639142:200137-200487 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1886876753:200488-200861 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1016481129:200763-201165 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:549979442:201095-201600 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:957243134:201604-202098 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1288578915:202099-202599 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1908458039:202531-203009 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1573480469:202954-203309 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1867808481:203309-203744 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1222584159:203681-204159 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1396002891:204160-204651 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:242056565:204557-205018 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1998071653:205019-205421 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:137293410:205321-205808 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:29379005:205771-206276 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:2134389252:206245-206687 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:268853924:206687-207134 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1448247221:207072-207512 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:594364071:207427-207909 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-perfect_run:13:1383545821:207809-208201 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DIAGNOSTICS_TRUNCATED",
+            "message": "Ingest emitted 6994 diagnostics; only the first 512 are retained in-memory."
+          },
+          {
+            "code": "PX_INGEST_GRAPTOR",
+            "message": "Phoenix Graptor ingested canonical chunk and graph facts."
+          },
+          {
+            "code": "PX_LEX_REBUILT",
+            "message": "Rebuilt lexical index from 6995 canonical spans."
+          }
+        ]
+      },
+      "sessionStats": {
+        "documentCount": 1,
+        "chapterCount": 132,
+        "parentCount": 2247,
+        "leafCount": 6995,
+        "entityCount": 0,
+        "discoveryCandidateCount": 54495,
+        "graphVertexCount": 10734,
+        "graphEdgeCount": 10733,
+        "spanCount": 41071
+      },
+      "phases": [
+        {
+          "name": "init_runtime",
+          "wallMs": 5,
+          "heapBeforeBytes": 3069556,
+          "heapAfterBytes": 3072724,
+          "heapPeakBytes": 3104426,
+          "heapPeakDeltaBytes": 34870,
+          "outputBytes": 0,
+          "note": null
+        },
+        {
+          "name": "create_session",
+          "wallMs": 0,
+          "heapBeforeBytes": 3070976,
+          "heapAfterBytes": 3071184,
+          "heapPeakBytes": 3087289,
+          "heapPeakDeltaBytes": 16313,
+          "outputBytes": 0,
+          "note": null
+        },
+        {
+          "name": "analyze_text",
+          "wallMs": 723,
+          "heapBeforeBytes": 3103966,
+          "heapAfterBytes": 20047950,
+          "heapPeakBytes": 160892063,
+          "heapPeakDeltaBytes": 157788097,
+          "outputBytes": 10536371,
+          "note": null
+        },
+        {
+          "name": "excerpt_scan",
+          "wallMs": 11,
+          "heapBeforeBytes": 20047962,
+          "heapAfterBytes": 20551743,
+          "heapPeakBytes": 21074601,
+          "heapPeakDeltaBytes": 1026639,
+          "outputBytes": 1206688,
+          "note": null
+        },
+        {
+          "name": "excerpt_structure",
+          "wallMs": 1,
+          "heapBeforeBytes": 20551755,
+          "heapAfterBytes": 20986893,
+          "heapPeakBytes": 21314678,
+          "heapPeakDeltaBytes": 762923,
+          "outputBytes": 493698,
+          "note": null
+        },
+        {
+          "name": "ingest_document",
+          "wallMs": 8362,
+          "heapBeforeBytes": 20987330,
+          "heapAfterBytes": 137805844,
+          "heapPeakBytes": 356610094,
+          "heapPeakDeltaBytes": 335622764,
+          "outputBytes": 75212,
+          "note": null
+        },
+        {
+          "name": "commit_session",
+          "wallMs": 829,
+          "heapBeforeBytes": 137805859,
+          "heapAfterBytes": 137808158,
+          "heapPeakBytes": 353749302,
+          "heapPeakDeltaBytes": 215943443,
+          "outputBytes": 1978,
+          "note": null
+        },
+        {
+          "name": "rebuild_lex",
+          "wallMs": 1548,
+          "heapBeforeBytes": 137808172,
+          "heapAfterBytes": 137810451,
+          "heapPeakBytes": 353751415,
+          "heapPeakDeltaBytes": 215943243,
+          "outputBytes": 1979,
+          "note": null
+        },
+        {
+          "name": "session_state",
+          "wallMs": 0,
+          "heapBeforeBytes": 137810462,
+          "heapAfterBytes": 137817855,
+          "heapPeakBytes": 137846419,
+          "heapPeakDeltaBytes": 35957,
+          "outputBytes": 4706,
+          "note": null
+        },
+        {
+          "name": "session_stats",
+          "wallMs": 0,
+          "heapBeforeBytes": 137818636,
+          "heapAfterBytes": 137818652,
+          "heapPeakBytes": 137854593,
+          "heapPeakDeltaBytes": 35957,
+          "outputBytes": 245,
+          "note": null
+        },
+        {
+          "name": "graph_delta",
+          "wallMs": 211,
+          "heapBeforeBytes": 137818665,
+          "heapAfterBytes": 140355252,
+          "heapPeakBytes": 196173643,
+          "heapPeakDeltaBytes": 58354978,
+          "outputBytes": 2157579,
+          "note": null
+        },
+        {
+          "name": "snapshot_export",
+          "wallMs": 1503,
+          "heapBeforeBytes": 140357651,
+          "heapAfterBytes": 168337795,
+          "heapPeakBytes": 511465035,
+          "heapPeakDeltaBytes": 371107384,
+          "outputBytes": 20040428,
+          "note": null
+        },
+        {
+          "name": "snapshot_import",
+          "wallMs": 2816,
+          "heapBeforeBytes": 168452283,
+          "heapAfterBytes": 287846356,
+          "heapPeakBytes": 527513859,
+          "heapPeakDeltaBytes": 359061576,
+          "outputBytes": 20040428,
+          "note": null
+        },
+        {
+          "name": "restore_query",
+          "wallMs": 1,
+          "heapBeforeBytes": 287846356,
+          "heapAfterBytes": 287892200,
+          "heapPeakBytes": 287948096,
+          "heapPeakDeltaBytes": 101740,
+          "outputBytes": 664,
+          "note": null
+        }
+      ],
+      "lexicalQueryBatch": {
+        "phase": {
+          "name": "lexical_query_batch",
+          "wallMs": 15,
+          "heapBeforeBytes": 140355497,
+          "heapAfterBytes": 140356936,
+          "heapPeakBytes": 142033331,
+          "heapPeakDeltaBytes": 1677834,
+          "outputBytes": 140,
+          "note": null
+        },
+        "runs": [
+          {
+            "query": "\"New Rome\"",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Len",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Ryan",
+            "chunkHits": 8,
+            "nodeHits": 0
+          }
+        ]
+      },
+      "graphQueryBatch": {
+        "phase": {
+          "name": "graph_query_batch",
+          "wallMs": 409,
+          "heapBeforeBytes": 140356956,
+          "heapAfterBytes": 140357636,
+          "heapPeakBytes": 199435684,
+          "heapPeakDeltaBytes": 59078728,
+          "outputBytes": 99,
+          "note": null
+        },
+        "runs": [
+          {
+            "query": "Ryan Ghoul",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Ryan Len",
+            "chunkHits": 8,
+            "nodeHits": 0
+          }
+        ]
+      },
+      "snapshotBytes": 20040428,
+      "snapshotRelationCount": 47,
+      "budget": {
+        "maxAnalyzeTextMs": 10000,
+        "maxExcerptScanMs": 3000,
+        "maxExcerptStructureMs": 3000,
+        "maxIngestMs": 180000,
+        "maxCommitMs": 3000,
+        "maxRebuildMs": 20000,
+        "maxGraphDeltaMs": 20000,
+        "maxLexicalQueryBatchMs": 6000,
+        "maxGraphQueryBatchMs": 20000,
+        "maxSnapshotExportMs": 20000,
+        "maxSnapshotImportMs": 40000,
+        "maxRestoreQueryMs": 4000,
+        "maxIngestPeakDeltaBytes": 1073741824,
+        "maxGraphDeltaPeakDeltaBytes": 268435456,
+        "maxSnapshotImportPeakDeltaBytes": 1073741824,
+        "maxSnapshotBytes": 268435456
+      },
+      "budgetCheck": {
+        "passed": true,
+        "failures": []
+      }
+    }
+  ],
+  "totalFailures": 0
+}

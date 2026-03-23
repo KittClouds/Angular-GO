@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use phoenix_types::{
     Diagnostic, ImplicitMatchHit, IndexedSpan, LexicalField, LexicalSearchResult, ScopeKey, SpanHit,
 };
+use rustc_hash::FxHashMap;
 
 use crate::catalog::{SpanCatalog, SpanOrdinal};
 use crate::grams::{extract_packed_grams, PackedGram};
@@ -65,8 +66,8 @@ impl Default for QgramConfig {
 pub struct QgramIndex {
     config: QgramConfig,
     catalog: SpanCatalog,
-    trigram_postings: BTreeMap<PackedGram, PostingSet>,
-    bigram_postings: BTreeMap<PackedGram, PostingSet>,
+    trigram_postings: FxHashMap<PackedGram, PostingSet>,
+    bigram_postings: FxHashMap<PackedGram, PostingSet>,
 }
 
 impl QgramIndex {
@@ -75,8 +76,8 @@ impl QgramIndex {
         let mut index = Self {
             config,
             catalog,
-            trigram_postings: BTreeMap::new(),
-            bigram_postings: BTreeMap::new(),
+            trigram_postings: FxHashMap::default(),
+            bigram_postings: FxHashMap::default(),
         };
         index.reindex();
         index
@@ -100,7 +101,7 @@ impl QgramIndex {
         }
 
         let verifier = QueryVerifier::new(&clauses);
-        let mut candidate_clause_counts = BTreeMap::<u32, usize>::new();
+        let mut candidate_clause_counts = FxHashMap::<u32, usize>::default();
         let clause_dfs = clauses
             .iter()
             .map(|clause| {
@@ -221,7 +222,7 @@ impl QgramIndex {
     fn candidates_for_grams(
         &self,
         grams: &[PackedGram],
-        postings: &BTreeMap<PackedGram, PostingSet>,
+        postings: &FxHashMap<PackedGram, PostingSet>,
         scope: &ScopeKey,
     ) -> Vec<u32> {
         if grams.is_empty() {
@@ -283,7 +284,7 @@ impl QgramIndex {
     fn gram_df(
         &self,
         grams: &[PackedGram],
-        postings: &BTreeMap<PackedGram, PostingSet>,
+        postings: &FxHashMap<PackedGram, PostingSet>,
         fallback_df: usize,
     ) -> usize {
         grams

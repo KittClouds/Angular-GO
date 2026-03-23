@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
-
 use daachorse::{DoubleArrayAhoCorasick, DoubleArrayAhoCorasickBuilder, MatchKind};
 use phoenix_types::LexicalField;
+use rustc_hash::FxHashMap;
 
 use crate::catalog::{SpanCatalog, SpanOrdinal};
 use crate::query::Clause;
@@ -15,7 +14,7 @@ pub struct MatchDetail {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PatternMatch {
-    pub field_matches: BTreeMap<LexicalField, MatchDetail>,
+    pub field_matches: FxHashMap<LexicalField, MatchDetail>,
     pub total_occ: usize,
     pub segment_mask: u32,
 }

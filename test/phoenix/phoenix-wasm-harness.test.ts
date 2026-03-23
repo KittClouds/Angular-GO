@@ -10,7 +10,7 @@ describe('Phoenix WASM shared-memory harness', () => {
     }, 120000);
 
     it('boots, scans, ingests, queries, and restores from snapshot bytes', async () => {
-        expect(harness.protocolVersion()).toBe(3);
+        expect(harness.protocolVersion()).toBe(5);
 
         const init = harness.initRuntime();
         expect(init.ready).toBe(true);
@@ -18,6 +18,10 @@ describe('Phoenix WASM shared-memory harness', () => {
         const scan = harness.scan('Luffy attacked Zoro.');
         expect(scan.sentences.length).toBe(1);
         expect(scan.tokens.length).toBeGreaterThan(0);
+
+        const analytics = harness.analyzeText('The iron gate slammed shut. The iron gate rattled again.');
+        expect(analytics.wordCount).toBeGreaterThan(0);
+        expect(analytics.sentenceCount).toBe(2);
 
         const session = harness.createSession('VitestPhoenix');
         expect(session.sessionId).toContain('session-');
@@ -77,5 +81,34 @@ describe('Phoenix WASM shared-memory harness', () => {
         expect(stats.leafCount).toBeGreaterThan(0);
         expect(stats.graphVertexCount).toBeGreaterThan(0);
         expect(stats.graphEdgeCount).toBeGreaterThan(0);
+    }, 120000);
+
+    it('keeps JSON and binary hot requests in parity', () => {
+        harness.initRuntime();
+        const session = harness.createSession('VitestParity');
+        const text = 'Ryan attacked Len. Then Ryan gave Len a blade.';
+
+        const scanJson = harness.scanJson(text, 'scan-json');
+        const scanBinary = harness.scanBinary(text, 'scan-bin');
+        expect(scanBinary.sentences).toEqual(scanJson.sentences);
+        expect(scanBinary.mentions).toEqual(scanJson.mentions);
+
+        const structureJson = harness.structureJson(text, scanJson);
+        const structureBinary = harness.structureBinary(text, scanBinary);
+        expect(structureBinary.relations).toEqual(structureJson.relations);
+
+        const analyticsJson = harness.analyzeTextJson(text);
+        const analyticsBinary = harness.analyzeTextBinary(text);
+        expect(analyticsBinary).toEqual(analyticsJson);
+
+        const ingestJson = harness.ingestJson(session.sessionId, 'vitest-parity-json', 'Parity Story', text);
+        const ingestBinary = harness.ingestBinary(session.sessionId, 'vitest-parity-bin', 'Parity Story', text);
+        expect(ingestBinary.documentCount).toBe(ingestJson.documentCount);
+        expect(ingestBinary.chunkStats.totalLeaves).toBeGreaterThan(0);
+
+        const queryJson = harness.queryBinaryJson(session.sessionId, 'Ryan');
+        const queryBinary = harness.queryBinaryRequest(session.sessionId, 'Ryan');
+        expect(queryBinary.chunkHits).toEqual(queryJson.chunkHits);
+        expect(queryBinary.diagnostics).toEqual(queryJson.diagnostics);
     }, 120000);
 });

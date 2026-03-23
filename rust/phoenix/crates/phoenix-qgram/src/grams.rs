@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use rustc_hash::FxHashSet;
 
 pub type PackedGram = u32;
 
@@ -7,14 +7,16 @@ pub fn extract_packed_grams(normalized: &str, width: usize) -> Vec<PackedGram> {
         return Vec::new();
     }
 
-    let mut grams = BTreeSet::new();
+    let mut grams = FxHashSet::default();
     let bytes = normalized.as_bytes();
     for start in 0..=bytes.len() - width {
         if let Some(packed) = pack_ngram(&bytes[start..start + width]) {
             grams.insert(packed);
         }
     }
-    grams.into_iter().collect()
+    let mut grams = grams.into_iter().collect::<Vec<_>>();
+    grams.sort_unstable();
+    grams
 }
 
 pub fn pack_ngram(bytes: &[u8]) -> Option<PackedGram> {

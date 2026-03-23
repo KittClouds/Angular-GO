@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
-
 use phoenix_alex::{normalize_raw, scope_matches};
 use phoenix_types::{IndexedSpan, IndexedTextField, LexicalField, NoteId, ScopeKey, TextRange};
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SpanOrdinal(pub u32);
@@ -25,7 +24,7 @@ pub struct CatalogSpan {
 #[derive(Clone, Debug, Default)]
 pub struct CorpusStats {
     pub total_spans: usize,
-    pub average_field_lengths: BTreeMap<LexicalField, f64>,
+    pub average_field_lengths: FxHashMap<LexicalField, f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,8 +38,8 @@ impl SpanCatalog {
     pub fn build(spans: &[IndexedSpan]) -> Self {
         let mut arena = String::new();
         let mut catalog_spans = Vec::with_capacity(spans.len());
-        let mut field_sums = BTreeMap::<LexicalField, usize>::new();
-        let mut field_counts = BTreeMap::<LexicalField, usize>::new();
+        let mut field_sums = FxHashMap::<LexicalField, usize>::default();
+        let mut field_counts = FxHashMap::<LexicalField, usize>::default();
 
         for span in spans {
             let mut fields = Vec::new();

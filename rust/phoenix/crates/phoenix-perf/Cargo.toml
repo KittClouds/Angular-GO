@@ -1,15 +1,12 @@
 [package]
-name = "phoenix-qgram"
+name = "phoenix-perf"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [dependencies]
-daachorse.workspace = true
-phoenix-alex = { path = "../phoenix-alex" }
+phoenix-runtime = { path = "../phoenix-runtime" }
 phoenix-types = { path = "../phoenix-types" }
-roaring.workspace = true
 serde.workspace = true
-thiserror.workspace = true
-rustc-hash.workspace = true
+serde_json.workspace = true

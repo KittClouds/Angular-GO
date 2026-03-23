@@ -9,6 +9,7 @@ authors.workspace = true
 bincode.workspace = true
 daachorse.workspace = true
 fst.workspace = true
+memchr.workspace = true
 phoenix-types = { path = "../phoenix-types" }
 serde.workspace = true
 thiserror.workspace = true
