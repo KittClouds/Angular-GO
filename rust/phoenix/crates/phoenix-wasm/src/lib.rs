@@ -12,7 +12,8 @@ use phoenix_types::{
     GraphDeltaRequest, IngestBinaryRequestHeader, IngestDocumentBinaryRecord, PacketHeader,
     PacketKind, QueryBinaryRequestHeader, QueryTarget, RebuildRequest, RuntimeInitRequest,
     ScanBinaryRequestHeader, SessionId, SessionStateRequest, SessionStatsRequest,
-    StructureBinaryRequestHeader, TemporalMarker, BINARY_REQUEST_LAYOUT_VERSION,
+    StoreCommandRequest, StructureBinaryRequestHeader, TemporalMarker,
+    BINARY_REQUEST_LAYOUT_VERSION,
 };
 use serde::Deserialize;
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +22,7 @@ use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 mod opfs;
 
-pub const PHOENIX_PROTOCOL_VERSION: u32 = 5;
+pub const PHOENIX_PROTOCOL_VERSION: u32 = 6;
 pub const DEFAULT_PACKET_REGION_SIZE: usize = 64 * 1024;
 
 thread_local! {
@@ -907,6 +908,19 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
                 PacketKind::SnapshotResult,
                 header.request_id,
                 &descriptor,
+            )
+        }),
+        PacketKind::StoreCommandRequest => with_runtime(|runtime| {
+            let request: StoreCommandRequest =
+                decode_json(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let result = runtime
+                .store_command(request)
+                .map_err(|error| error.to_string())?;
+            write_json_response(
+                buffer,
+                PacketKind::StoreCommandResult,
+                header.request_id,
+                &result,
             )
         }),
         kind => write_error_response(

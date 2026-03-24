@@ -8,7 +8,7 @@
  * - All CRUD goes directly to Go SQLite via the WASM worker
  */
 import { db } from './dexie/db';
-import { GoKittStoreService, StoreNote, StoreFolder, StoreEntity, StoreEdge } from '../services/gokitt-store.service';
+import { PhoenixStoreService, StoreNote, StoreFolder, StoreEntity, StoreEdge } from '../services/phoenix-store.service';
 
 // =============================================================================
 // INTERFACES
@@ -85,29 +85,30 @@ export interface Edge {
 // STORE ACCESS (Direct to GoKittStoreService — NO DataSyncService)
 // =============================================================================
 
-let _store: GoKittStoreService | null = null;
+let _store: PhoenixStoreService | null = null;
 let _storeResolve: (() => void) | null = null;
 const _storeReady = new Promise<void>(resolve => { _storeResolve = resolve; });
 
-export function setGoSqliteBridge(store: GoKittStoreService): void {
+export function setPhoenixStoreBridge(store: PhoenixStoreService): void {
     _store = store;
-    console.log('[Operations] GoKittStoreService connected (Direct Mode)');
+    console.log('[Operations] PhoenixStoreService connected');
     _storeResolve?.();
 }
+export const setGoSqliteBridge = setPhoenixStoreBridge;
 
-function requireStore(): GoKittStoreService {
+function requireStore(): PhoenixStoreService {
     if (!_store || !_store.isReady) {
-        throw new Error('[Operations] GoKittStoreService not ready - called too early');
+        throw new Error('[Operations] PhoenixStoreService not ready - called too early');
     }
     return _store;
 }
 
-async function waitForStore(): Promise<GoKittStoreService> {
+async function waitForStore(): Promise<PhoenixStoreService> {
     await _storeReady;
     return _store!;
 }
 
-export function getBridge(): GoKittStoreService | null {
+export function getBridge(): PhoenixStoreService | null {
     return _store?.isReady ? _store : null;
 }
 
@@ -145,7 +146,7 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         updatedAt: now,
     } as Note;
 
-    await store.upsertNote(GoKittStoreService.fromDexieNote(fullNote));
+    await store.upsertNote(PhoenixStoreService.fromDexieNote(fullNote));
     warmDexieNote(fullNote);
     return id;
 }
@@ -169,10 +170,10 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<vo
 
 function syncNoteToDocStore(id: string, content: any, version: number): void {
     import('../api/pretty-text-api').then((api) => {
-        const goKitt = (api as any).getGoKittService?.();
-        if (goKitt) {
+        const phoenixUiApi = (api as any).getPhoenixUiApi?.();
+        if (phoenixUiApi) {
             const text = typeof content === 'string' ? content : JSON.stringify(content);
-            goKitt.upsertNote(id, text, version).catch((e: any) =>
+            phoenixUiApi.upsertNote(id, text, version).catch((e: any) =>
                 console.warn('[Operations] DocStore sync failed:', e)
             );
         }
@@ -254,7 +255,7 @@ export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'up
         updatedAt: now,
     } as Folder;
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(fullFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(fullFolder));
     warmDexieFolder(fullFolder);
     return id;
 }
@@ -340,7 +341,7 @@ export async function upsertEntity(entity: Entity): Promise<void> {
         console.warn('[Operations] Store not ready for entity upsert');
         return;
     }
-    await store.upsertEntity(GoKittStoreService.fromDexieEntity(entity));
+    await store.upsertEntity(PhoenixStoreService.fromDexieEntity(entity));
     warmDexieEntity(entity);
 }
 
@@ -440,7 +441,7 @@ async function rebalanceNoteOrders(folderId: string): Promise<void> {
     notes.sort((a, b) => a.order - b.order);
     for (let i = 0; i < notes.length; i++) {
         const updated = { ...notes[i], order: (i + 1) * DEFAULT_ORDER_STEP };
-        await store.upsertNote(GoKittStoreService.fromDexieNote(updated));
+        await store.upsertNote(PhoenixStoreService.fromDexieNote(updated));
     }
     console.log(`[Operations] Rebalanced ${notes.length} note orders in folder ${folderId || 'root'}`);
 }
@@ -452,7 +453,7 @@ async function rebalanceFolderOrders(parentId: string): Promise<void> {
     folders.sort((a, b) => a.order - b.order);
     for (let i = 0; i < folders.length; i++) {
         const updated = { ...folders[i], order: (i + 1) * DEFAULT_ORDER_STEP };
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updated));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updated));
     }
     console.log(`[Operations] Rebalanced ${folders.length} folder orders in parent ${parentId || 'root'}`);
 }
@@ -497,7 +498,7 @@ export async function reorderFolder(folderId: string, targetIndex: number): Prom
 
     const updatedFolder = { ...folder, order: newOrder, updatedAt: Date.now() };
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedFolder));
     warmDexieFolder(updatedFolder);
 
     const allOrders = [...filteredSiblings.map(f => f.order), newOrder].sort((a, b) => a - b);
@@ -564,7 +565,7 @@ export async function moveFolderToParent(folderId: string, targetParentId: strin
         updatedAt: Date.now()
     };
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(movedFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(movedFolder));
     warmDexieFolder(movedFolder);
 
     const allOrders = [...siblings.map(f => f.order), newOrder].sort((a, b) => a - b);
@@ -587,8 +588,8 @@ export async function swapItems(sourceId: string, targetId: string, type: 'folde
 
         const updatedSource = { ...source, order: target.order, updatedAt: Date.now() };
         const updatedTarget = { ...target, order: source.order, updatedAt: Date.now() };
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedSource));
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedTarget));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedSource));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedTarget));
         warmDexieFolder(updatedSource);
         warmDexieFolder(updatedTarget);
     } else {

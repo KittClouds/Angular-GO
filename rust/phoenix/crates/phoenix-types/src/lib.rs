@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 mod binary;
 
@@ -864,6 +865,8 @@ pub enum PacketKind {
     IngestBinaryRequest = 31,
     ScanBinaryRequest = 32,
     StructureBinaryRequest = 33,
+    StoreCommandRequest = 34,
+    StoreCommandResult = 35,
     Ack = 255,
 }
 
@@ -909,6 +912,8 @@ impl From<u32> for PacketKind {
             31 => Self::IngestBinaryRequest,
             32 => Self::ScanBinaryRequest,
             33 => Self::StructureBinaryRequest,
+            34 => Self::StoreCommandRequest,
+            35 => Self::StoreCommandResult,
             255 => Self::Ack,
             _ => Self::None,
         }
@@ -1078,6 +1083,275 @@ pub struct FolderSchema {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Thread {
+    pub id: ThreadId,
+    pub world_id: String,
+    pub narrative_id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadMessage {
+    pub id: String,
+    pub thread_id: String,
+    pub role: String,
+    pub content: String,
+    pub narrative_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub is_streaming: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningEffort {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRuntimeConfig {
+    pub model: String,
+    pub temperature_milli: Option<u16>,
+    pub max_tokens: Option<u32>,
+    pub reasoning_enabled: bool,
+    pub reasoning_effort: ReasoningEffort,
+    pub reasoning_max_tokens: Option<u32>,
+    pub include_reasoning: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChatRunStatus {
+    #[default]
+    Queued,
+    Gathering,
+    Planning,
+    ExecutingTools,
+    AwaitingToolHost,
+    AwaitingApproval,
+    ReadyToAnswer,
+    Streaming,
+    Completed,
+    Degraded,
+    Failed,
+    Cancelled,
+}
+
+impl ChatRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Gathering => "gathering",
+            Self::Planning => "planning",
+            Self::ExecutingTools => "executing_tools",
+            Self::AwaitingToolHost => "awaiting_tool_host",
+            Self::AwaitingApproval => "awaiting_approval",
+            Self::ReadyToAnswer => "ready_to_answer",
+            Self::Streaming => "streaming",
+            Self::Completed => "completed",
+            Self::Degraded => "degraded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "queued" => Self::Queued,
+            "gathering" => Self::Gathering,
+            "planning" => Self::Planning,
+            "executing_tools" => Self::ExecutingTools,
+            "awaiting_tool_host" => Self::AwaitingToolHost,
+            "awaiting_approval" => Self::AwaitingApproval,
+            "ready_to_answer" => Self::ReadyToAnswer,
+            "streaming" => Self::Streaming,
+            "completed" => Self::Completed,
+            "degraded" => Self::Degraded,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Queued,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunOptions {
+    pub final_provider: String,
+    pub final_model: String,
+    pub planner_model: Option<String>,
+    pub om_model: Option<String>,
+    pub planner_enabled: bool,
+    pub om_enabled: bool,
+    pub workspace_enabled: bool,
+    pub mutations_enabled: bool,
+    pub deadline_ms: i64,
+    pub mutation_policy: String,
+    pub narrative_id: Option<String>,
+    pub folder_id: Option<String>,
+    pub scope_id: Option<String>,
+    pub base_system_prompt: Option<String>,
+    pub initial_external_context: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityProfile {
+    pub om_enabled: bool,
+    pub workspace_enabled: bool,
+    pub planner_enabled: bool,
+    pub go_tool_host: bool,
+    pub ts_tool_host: bool,
+    pub block_search: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceItem {
+    pub id: String,
+    pub source: String,
+    pub title: Option<String>,
+    pub content: String,
+    pub score: Option<f64>,
+    pub metadata: Option<BTreeMap<String, Value>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRun {
+    pub id: String,
+    pub thread_id: ThreadId,
+    pub user_prompt: String,
+    pub status: ChatRunStatus,
+    pub options: RunOptions,
+    pub capabilities: CapabilityProfile,
+    pub prepared_context: String,
+    pub prepared_system_prompt: String,
+    pub planner_messages_json: String,
+    pub evidence_json: String,
+    pub missing_capabilities_json: String,
+    pub error: Option<String>,
+    pub final_response: Option<String>,
+    pub assistant_message_id: Option<String>,
+    pub deadline_at: i64,
+    pub completed_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRunEvent {
+    pub id: String,
+    pub run_id: String,
+    pub phase: String,
+    pub kind: String,
+    pub label: String,
+    pub detail: Option<String>,
+    pub status: Option<String>,
+    pub payload: Option<String>,
+    pub latency_ms: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatToolCall {
+    pub id: String,
+    pub run_id: String,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub host: String,
+    pub class: String,
+    pub status: String,
+    pub arguments_json: String,
+    pub result_json: Option<String>,
+    pub error: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub approval_id: Option<String>,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub latency_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolProposal {
+    pub proposal_id: String,
+    pub tool_name: String,
+    pub affected_note_id: Option<String>,
+    pub summary: String,
+    pub diff_preview: Option<String>,
+    pub expected_revision: Option<i64>,
+    pub rollback_token: Option<String>,
+    pub payload_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatApprovalRequest {
+    pub id: String,
+    pub run_id: String,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub status: String,
+    pub affected_note_id: Option<String>,
+    pub summary: String,
+    pub diff_preview: Option<String>,
+    pub expected_revision: Option<i64>,
+    pub rollback_token: Option<String>,
+    pub proposal_json: Option<String>,
+    pub decision_json: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRunSnapshot {
+    pub run: ChatRun,
+    pub events: Vec<ChatRunEvent>,
+    pub tool_calls: Vec<ChatToolCall>,
+    pub approvals: Vec<ChatApprovalRequest>,
+    pub evidence: Vec<EvidenceItem>,
+    pub missing_capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolResultSubmission {
+    pub call_id: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub result_json: Option<String>,
+    pub error: Option<String>,
+    pub proposal: Option<ToolProposal>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreCommandRequest {
+    pub command: String,
+    #[serde(default)]
+    pub payload: Value,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreCommandResult {
+    pub success: bool,
+    pub payload: Option<Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionStateRequest {
     pub session_id: SessionId,
 }
@@ -1214,5 +1488,7 @@ mod tests {
         assert_eq!(PacketKind::from(31), PacketKind::IngestBinaryRequest);
         assert_eq!(PacketKind::from(32), PacketKind::ScanBinaryRequest);
         assert_eq!(PacketKind::from(33), PacketKind::StructureBinaryRequest);
+        assert_eq!(PacketKind::from(34), PacketKind::StoreCommandRequest);
+        assert_eq!(PacketKind::from(35), PacketKind::StoreCommandResult);
     }
 }

@@ -15,7 +15,7 @@ import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { ThemeService } from '../../lib/services/theme.service';
 import { EditorService } from '../../services/editor.service';
 import { ReorderService } from '../../lib/services/reorder.service';
-import { GoKittService } from '../../services/gokitt.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import { SearchPanelComponent } from '../search-panel/search-panel.component';
 import { NerPanelComponent } from './ner-panel/ner-panel.component';
@@ -23,7 +23,7 @@ import { DocumentIngestionService, DocumentIngestionMode, DocumentIngestionResul
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note } from '../../lib/dexie/db';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
-import { GoChatService } from '../../lib/services/go-chat.service';
+import { PhoenixChatService } from '../../lib/services/phoenix-chat.service';
 import { GraphPipelineService } from '../../services/graph-pipeline.service';
 
 interface EntityFolderOption {
@@ -85,11 +85,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
-    private goKittService = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
     private documentIngestionService = inject(DocumentIngestionService);
     private router = inject(Router);
     private graphPipeline = inject(GraphPipelineService);
-    goChatService = inject(GoChatService);
+    goChatService = inject(PhoenixChatService);
 
     isChatRoute = signal(false);
 
@@ -566,8 +566,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
             return;
         }
 
-        if (!this.goKittService.isReady) {
-            console.warn('[Sidebar] GoKitt WASM not ready.');
+        if (!this.phoenixUiApi.isReady) {
+            console.warn('[Sidebar] Phoenix WASM not ready.');
             return;
         }
 

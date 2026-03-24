@@ -1,6 +1,6 @@
 // src/app/lib/services/network.service.ts
 // Angular service for network CRUD with liveQuery
-// DUAL-WRITE: Live UI via Dexie, Persistence via GoKitt
+// Live UI via Dexie, persistence via Phoenix
 
 import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
@@ -12,13 +12,13 @@ import {
     NetworkRelationship,
     NetworkRelationshipDef
 } from '../dexie/db';
-import { GoKittService } from '../../services/gokitt.service'; // Adjust path if needed
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class NetworkService {
-    private goKitt = inject(GoKittService);
+    private store = inject(PhoenixStoreService);
 
     // ==========================================================================
     // SCHEMA QUERIES
@@ -132,9 +132,9 @@ export class NetworkService {
         // Dexie (UI)
         await db.networkInstances.add(instance);
 
-        // GoKitt (Backend)
-        this.goKitt.storeUpsertNetworkInstance(instance).catch(e => {
-            console.error('[NetworkService] GoKitt sync failed:', e);
+        // Phoenix (Backend)
+        this.store.storeUpsertNetworkInstance(instance).catch(e => {
+            console.error('[NetworkService] Phoenix sync failed:', e);
         });
 
         return id;
@@ -153,8 +153,8 @@ export class NetworkService {
         // Backend Sync
         const current = await db.networkInstances.get(id);
         if (current) {
-            this.goKitt.storeUpsertNetworkInstance(current).catch(e => {
-                console.error('[NetworkService] GoKitt sync failed:', e);
+            this.store.storeUpsertNetworkInstance(current).catch(e => {
+                console.error('[NetworkService] Phoenix sync failed:', e);
             });
         }
     }
@@ -168,8 +168,8 @@ export class NetworkService {
         await db.networkInstances.delete(id);
 
         // Backend Sync
-        this.goKitt.storeDeleteNetworkInstance(id).catch(e => {
-            console.error('[NetworkService] GoKitt delete failed:', e);
+        this.store.storeDeleteNetworkInstance(id).catch(e => {
+            console.error('[NetworkService] Phoenix delete failed:', e);
         });
     }
 
@@ -190,16 +190,16 @@ export class NetworkService {
             });
 
             // Sync Instance Update
-            this.goKitt.storeUpsertNetworkInstance(instance).catch(e => console.error('[NetworkService] Sync instance failed', e));
+            this.store.storeUpsertNetworkInstance(instance).catch(e => console.error('[NetworkService] Sync instance failed', e));
 
             // Sync Membership (New explicit table in Go)
-            this.goKitt.storeUpsertNetworkMembership({
+            this.store.storeUpsertNetworkMembership({
                 networkId,
                 entityId,
                 x: 0,
                 y: 0,
                 fixed: false
-            }).catch(e => console.error('[NetworkService] GoKitt membership sync failed', e));
+            }).catch(e => console.error('[NetworkService] Phoenix membership sync failed', e));
         }
     }
 
@@ -217,11 +217,11 @@ export class NetworkService {
         });
 
         // Sync instance update
-        this.goKitt.storeUpsertNetworkInstance(instance).catch(e => console.error(e));
+        this.store.storeUpsertNetworkInstance(instance).catch(e => console.error(e));
 
-        // Delete membership from GoKitt
-        this.goKitt.storeDeleteNetworkMembership(networkId, entityId).catch(e =>
-            console.error('[NetworkService] GoKitt membership delete failed:', e)
+        // Delete membership from Phoenix
+        this.store.storeDeleteNetworkMembership(networkId, entityId).catch(e =>
+            console.error('[NetworkService] Phoenix membership delete failed:', e)
         );
 
         // Remove relationships involving this entity
@@ -234,10 +234,10 @@ export class NetworkService {
 
         await db.networkRelationships.bulkDelete(relsToDelete.map(r => r.id));
 
-        // Sync relationship deletes to GoKitt
+        // Sync relationship deletes to Phoenix
         for (const rel of relsToDelete) {
-            this.goKitt.storeDeleteNetworkRelationship(networkId, rel.id).catch(e =>
-                console.error('[NetworkService] GoKitt relationship delete failed:', e)
+            this.store.storeDeleteNetworkRelationship(networkId, rel.id).catch(e =>
+                console.error('[NetworkService] Phoenix relationship delete failed:', e)
             );
         }
     }
@@ -273,8 +273,8 @@ export class NetworkService {
 
         await db.networkRelationships.add(rel);
 
-        // GoKitt Sync
-        this.goKitt.storeUpsertNetworkRelationship(rel).catch(e => console.error(e));
+        // Phoenix Sync
+        this.store.storeUpsertNetworkRelationship(rel).catch(e => console.error(e));
 
         // Check if we should auto-create inverse
         const instance = await db.networkInstances.get(networkId);
@@ -295,7 +295,7 @@ export class NetworkService {
                         updatedAt: now,
                     };
                     await db.networkRelationships.add(inverseRel);
-                    this.goKitt.storeUpsertNetworkRelationship(inverseRel).catch(e => console.error(e));
+                    this.store.storeUpsertNetworkRelationship(inverseRel).catch(e => console.error(e));
                 }
             }
         }
@@ -314,7 +314,7 @@ export class NetworkService {
 
         const current = await db.networkRelationships.get(id);
         if (current) {
-            this.goKitt.storeUpsertNetworkRelationship(current).catch(e => console.error(e));
+            this.store.storeUpsertNetworkRelationship(current).catch(e => console.error(e));
         }
     }
 
@@ -326,10 +326,10 @@ export class NetworkService {
         const rel = await db.networkRelationships.get(id);
         await db.networkRelationships.delete(id);
 
-        // Sync to GoKitt
+        // Sync to Phoenix
         if (rel) {
-            this.goKitt.storeDeleteNetworkRelationship(rel.networkId, id).catch(e =>
-                console.error('[NetworkService] GoKitt relationship delete failed:', e)
+            this.store.storeDeleteNetworkRelationship(rel.networkId, id).catch(e =>
+                console.error('[NetworkService] Phoenix relationship delete failed:', e)
             );
         }
     }

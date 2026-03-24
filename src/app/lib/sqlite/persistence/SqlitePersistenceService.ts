@@ -100,7 +100,9 @@ export class SqlitePersistenceService {
     /** Load the snapshot from OPFS. Returns { snapshot: Uint8Array | null }. */
     async load(): Promise<{ snapshot: Uint8Array | null }> {
         await this.init();
+        console.log('[SqlitePersistence] Loading snapshot...');
         const result = await this.send<any>('LOAD');
+        console.log(`[SqlitePersistence] Load complete. Snapshot bytes=${result?.snapshot?.byteLength || 0}`);
         return { snapshot: result.snapshot };
     }
 

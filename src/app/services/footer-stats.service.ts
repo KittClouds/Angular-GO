@@ -10,7 +10,7 @@ import { db, Mention } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
 import { parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
-import { GoKittService } from './gokitt.service';
+import { PhoenixUiApiService } from './phoenix-ui-api.service';
 
 export interface FooterStats {
     backlinks: number;
@@ -229,7 +229,7 @@ function normalizeTextAnalytics(value: unknown): TextAnalytics | null {
 export class FooterStatsService {
     private noteEditorStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
-    private goKittService = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
 
     // ─────────────────────────────────────────────────────────────
     // Internal state
@@ -281,7 +281,7 @@ export class FooterStatsService {
             }
 
             const requestVersion = ++this.analyticsRequestVersion;
-            const res = await this.goKittService.analyzeText(plainText);
+            const res = await this.phoenixUiApi.analyzeText(plainText);
             if (requestVersion !== this.analyticsRequestVersion) {
                 return;
             }

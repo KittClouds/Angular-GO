@@ -11,7 +11,7 @@ import {
 import { ChapterService } from '../../lib/services/chapter.service';
 import { inject } from '@angular/core';
 import { DEFAULT_ENTITY_SCHEMAS } from '../../lib/schemas/entity-fact-sheet-schemas';
-import { GoKittService } from '../../services/gokitt.service';
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 import { ScopeService } from '../../lib/services/scope.service';
 import { ScopedEntityFieldService } from '../../lib/services/scoped-entity-field.service';
 
@@ -143,7 +143,7 @@ export class FactSheetService {
     private attributeCache: Map<string, Record<string, any>> = new Map();
 
     private chapterService = inject(ChapterService);
-    private goKitt = inject(GoKittService);
+    private store = inject(PhoenixStoreService);
     private scopeService = inject(ScopeService);
     private scopedFields = inject(ScopedEntityFieldService);
 
@@ -266,8 +266,8 @@ export class FactSheetService {
      * No spin-loop — caller guarantees readiness.
      */
     async syncToBackend(): Promise<void> {
-        if (!this.goKitt.isReady) {
-            console.warn('[FactSheetService] GoKitt not ready, skipping card sync');
+        if (!this.store.isReady && !(await this.store.tryInitialize())) {
+            console.warn('[FactSheetService] Phoenix store not ready, skipping card sync');
             return;
         }
 
@@ -291,8 +291,8 @@ export class FactSheetService {
 
         if (allCards.length === 0) return;
 
-        console.log(`[FactSheetService] Syncing ${allCards.length} cards to GoKitt (BATCHED TX)...`);
-        const result = await this.goKitt.storeUpsertEntityCards(allCards);
+        console.log(`[FactSheetService] Syncing ${allCards.length} cards to Phoenix (BATCHED TX)...`);
+        const result = await this.store.storeUpsertEntityCards(allCards);
         if (result.success) {
             console.log(`[FactSheetService] ✅ Successfully synced ${allCards.length} cards`);
         } else {

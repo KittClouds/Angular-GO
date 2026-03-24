@@ -2,7 +2,7 @@
  * AI Chat Page Component
  *
  * Full-feature chat page that sits between sidebars (like Graph/Calendar pages).
- * Uses @neurodevworks/angular-chatbot types + our existing GoChatService/GoogleGenAIService.
+ * Uses @neurodevworks/angular-chatbot types + the Phoenix chat/GoogleGenAI services.
  */
 
 import { Component, OnInit, OnDestroy, ViewChild, ElementRef, signal, computed, inject, effect, untracked, AfterViewInit } from '@angular/core';
@@ -29,12 +29,11 @@ import {
 } from 'lucide-angular';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 import {
-    GoChatService,
     type Thread,
     type ChatConfig,
     type ChatProgressEvent,
     type OpenRouterMessage,
-} from '../../lib/services/go-chat.service';
+} from '../../lib/services/phoenix-chat.service';
 import {
     GoogleGenAIService,
     GoogleGenAIMessage,
@@ -335,7 +334,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                                     [class.text-white]="activeProvider() === 'go-openrouter'"
                                     [class.text-slate-400]="activeProvider() !== 'go-openrouter'"
                                     (click)="activeProvider.set('go-openrouter')">
-                                    OpenRouter (Go)
+                                    OpenRouter (Phoenix)
                                 </button>
                             </div>
 

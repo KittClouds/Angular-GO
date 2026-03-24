@@ -7,15 +7,15 @@ import { LucideAngularModule, User, Zap, BarChart3, Sparkles, Package, Users, St
 import { NgxSpinnerModule } from 'ngx-spinner';
 
 import { routes } from './app.routes';
-import { GoKittService } from './services/gokitt.service';
+import { PhoenixUiApiService } from './services/phoenix-ui-api.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideAppInitializer(() => {
-      const goKitt = inject(GoKittService);
-      void goKitt.loadWasm().catch((err) => {
-        console.error('[Boot] GoKitt warmup failed:', err);
+      const phoenixUiApi = inject(PhoenixUiApiService);
+      void phoenixUiApi.loadWasm().catch((err) => {
+        console.error('[Boot] Phoenix warmup failed:', err);
       });
     }),
     provideRouter(routes),

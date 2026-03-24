@@ -7,9 +7,7 @@ import { Subscription } from 'rxjs';
 import { smartGraphRegistry } from './lib/registry';
 import { entityColorStore } from './lib/store/entityColorStore';
 import { seedDefaultSchemas } from './lib/folders/seed';
-import { GoKittService } from './services/gokitt.service';
-import { GoKittStoreService } from './services/gokitt-store.service';
-import { setGoKittService, setDiscoveryStore } from './api/pretty-text-api';
+import { setDiscoveryStore, setPhoenixUiApi } from './api/pretty-text-api';
 import { AppOrchestrator, setAppOrchestrator } from './lib/core/app-orchestrator';
 import { ProjectionCacheService } from './lib/services/projection-cache.service';
 import { KnowledgeService } from './services/knowledge.service';
@@ -17,10 +15,12 @@ import { getNavigationApi } from './api/navigation-api';
 import { NotesService } from './lib/dexie/notes.service';
 import { NoteEditorStore } from './lib/store/note-editor.store';
 import { DiscoveryStore } from './lib/store/discoveryStore';
-import { setGoSqliteBridge } from './lib/operations';
+import { setPhoenixStoreBridge } from './lib/operations';
 import * as ops from './lib/operations';
 import { FactSheetService } from './components/fact-sheets/fact-sheet.service';
 import { db } from './lib/dexie/db';
+import { PhoenixUiApiService } from './services/phoenix-ui-api.service';
+import { PhoenixStoreService } from './services/phoenix-store.service';
 
 @Component({
   selector: 'app-root',
@@ -32,8 +32,8 @@ import { db } from './lib/dexie/db';
 export class AppComponent implements OnInit, OnDestroy {
   title = 'angular-notes';
   private spinner = inject(NgxSpinnerService);
-  private goKitt = inject(GoKittService);
-  private goKittStore = inject(GoKittStoreService);
+  private phoenixUiApi = inject(PhoenixUiApiService);
+  private phoenixStore = inject(PhoenixStoreService);
   private orchestrator = inject(AppOrchestrator);
   private projectionCache = inject(ProjectionCacheService);
   private notesService = inject(NotesService);
@@ -45,16 +45,19 @@ export class AppComponent implements OnInit, OnDestroy {
   // Navigation API subscriptions
   private notesSub: Subscription | null = null;
   private navUnsubscribe: (() => void) | null = null;
+  private bootStep = 'boot:start';
+  private bootWatchdog: ReturnType<typeof setInterval> | null = null;
 
   async ngOnInit() {
     // Phase 0: Shell - spinner visible
     this.spinner.show();
+    this.startBootWatchdog();
 
     // Export orchestrator for non-DI contexts
     setAppOrchestrator(this.orchestrator);
 
-    // Wire up GoKitt to Highlighter API
-    setGoKittService(this.goKitt);
+    // Wire up Phoenix to PrettyText API
+    setPhoenixUiApi(this.phoenixUiApi);
     setDiscoveryStore(this.discoveryStore);
 
     // Initialize entity color CSS variables (sync, no deps)
@@ -66,26 +69,36 @@ export class AppComponent implements OnInit, OnDestroy {
     console.log('[AppComponent] Starting orchestrated boot...');
 
     try {
+      this.setBootStep('seed:start');
       const seedPromise = seedDefaultSchemas();
-      const wasmLoadPromise = this.goKitt.loadWasm();
+      this.setBootStep('phoenix:loadWasm:start');
+      const wasmLoadPromise = this.phoenixUiApi.loadWasm();
 
       await seedPromise;
       console.log('[AppComponent] Seed complete');
+      this.setBootStep('seed:complete');
 
+      this.setBootStep('phoenix:loadWasm:await');
       await wasmLoadPromise;
-      console.log('[AppComponent] WASM module loaded');
+      console.log('[AppComponent] Phoenix WASM module loaded');
       this.orchestrator.completePhase('wasm_load');
+      this.setBootStep('phoenix:loadWasm:complete');
 
-      await this.goKittStore.initialize();
-      console.log('[AppComponent] GoKitt Store (SQLite) initialized');
+      this.setBootStep('phoenixStore:initialize:start');
+      await this.phoenixStore.initialize();
+      console.log('[AppComponent] Phoenix Store initialized');
+      this.setBootStep('phoenixStore:initialize:complete');
 
-      // SQLite is the sole source of truth. Dexie gets wiped and rebuilt.
-      await this.hydrateDexieFromSqlite();
+      // Phoenix is the backend source of truth. Dexie gets wiped and rebuilt.
+      this.setBootStep('dexie:hydrate:start');
+      await this.hydrateDexieFromPhoenix();
+      this.setBootStep('dexie:hydrate:complete');
 
-      // Connect operations after Dexie mirrors SQLite.
-      setGoSqliteBridge(this.goKittStore);
-      console.log('[AppComponent] Dexie hydrated from SQLite (Pure OPFS Mode)');
+      // Connect operations after Dexie mirrors Phoenix.
+      setPhoenixStoreBridge(this.phoenixStore);
+      console.log('[AppComponent] Dexie hydrated from Phoenix backend');
 
+      this.setBootStep('registry+editor:start');
       await Promise.all([
         this.noteEditorStore.restoreActiveNote().then(() => {
           console.log('[AppComponent] Active note restored');
@@ -95,13 +108,18 @@ export class AppComponent implements OnInit, OnDestroy {
         })
       ]);
       this.orchestrator.completePhase('registry');
+      this.setBootStep('registry+editor:complete');
 
-      await this.goKitt.hydrateWithEntities();
-      console.log('[AppComponent] WASM hydrated with entities');
+      this.setBootStep('phoenix:hydrateWithEntities:start');
+      await this.phoenixUiApi.hydrateWithEntities();
+      console.log('[AppComponent] Phoenix hydrated with entities');
       this.orchestrator.completePhase('wasm_hydrate');
+      this.setBootStep('phoenix:hydrateWithEntities:complete');
 
       this.orchestrator.completePhase('ready');
+      this.setBootStep('boot:ready');
 
+      this.setBootStep('background:start');
       const knowledgePromise = (async () => {
         try {
           await this.knowledgeService.init();
@@ -113,7 +131,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
       const docStorePromise = (async () => {
         try {
-          const allNotes = await this.goKittStore.listNotes();
+          const allNotes = await this.phoenixStore.listNotes();
 
           const noteData = allNotes.map((n) => {
             let text = '';
@@ -134,6 +152,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
             return {
               id: n.id,
+              title: n.title || n.id,
               text,
               version: n.updatedAt ?? 0,
               narrativeId: n.narrativeId || '',
@@ -141,8 +160,8 @@ export class AppComponent implements OnInit, OnDestroy {
             };
           });
 
-          await this.goKitt.hydrateNotes(noteData);
-          console.log(`[AppComponent] DocStore hydrated with ${noteData.length} notes (from SQLite)`);
+          await this.phoenixUiApi.hydrateNotes(noteData);
+          console.log(`[AppComponent] DocStore hydrated with ${noteData.length} notes (from Phoenix store)`);
         } catch (err) {
           console.error('[AppComponent] DocStore hydration failed:', err);
         }
@@ -159,10 +178,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
       void Promise.all([knowledgePromise, docStorePromise, factSheetPromise]).then(() => {
         this.orchestrator.completePhase('background');
+        this.setBootStep('background:complete');
       });
     } catch (err) {
       console.error('[AppComponent] Boot failed:', err);
+      this.setBootStep('boot:failed');
     } finally {
+      this.stopBootWatchdog();
       // Minimum display time for spinner
       await new Promise(resolve => setTimeout(resolve, 300));
       this.spinner.hide();
@@ -174,19 +196,19 @@ export class AppComponent implements OnInit, OnDestroy {
    * Dexie is wiped clean and rebuilt from SQLite's data.
    * This replaces what DataSyncService.init() used to do.
    */
-  private async hydrateDexieFromSqlite(): Promise<void> {
-    console.log('[AppComponent] Hydrating Dexie from SQLite...');
+  private async hydrateDexieFromPhoenix(): Promise<void> {
+    console.log('[AppComponent] Hydrating Dexie from Phoenix backend...');
     const start = Date.now();
 
     // Pause snapshots during hydration to prevent pointless OPFS writes
-    this.goKittStore.pauseSnapshots();
+    this.phoenixStore.pauseSnapshots();
 
     try {
       const [notes, entities, edges, folders] = await Promise.all([
-        this.goKittStore.listNotes(),
-        this.goKittStore.listEntities(),
-        this.goKittStore.listAllEdges(),
-        this.goKittStore.listFolders()
+        this.phoenixStore.listNotes(),
+        this.phoenixStore.listEntities(),
+        this.phoenixStore.listAllEdges(),
+        this.phoenixStore.listFolders()
       ]);
 
       await db.transaction('rw', db.notes, db.entities, db.edges, db.folders, async () => {
@@ -205,7 +227,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
       console.log(`[AppComponent] Dexie hydrated in ${Date.now() - start}ms: ${notes.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
     } finally {
-      this.goKittStore.resumeSnapshots();
+      this.phoenixStore.resumeSnapshots();
     }
   }
 
@@ -261,6 +283,29 @@ export class AppComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     if (this.notesSub) this.notesSub.unsubscribe();
     if (this.navUnsubscribe) this.navUnsubscribe();
+    this.stopBootWatchdog();
+  }
+
+  private setBootStep(step: string): void {
+    this.bootStep = step;
+    console.log(`[AppComponent] Boot step -> ${step}`);
+  }
+
+  private startBootWatchdog(): void {
+    this.stopBootWatchdog();
+    const startedAt = Date.now();
+    this.bootWatchdog = setInterval(() => {
+      console.warn(
+        `[AppComponent] Boot watchdog: still waiting at '${this.bootStep}' after ${Date.now() - startedAt}ms`,
+      );
+    }, 5000);
+  }
+
+  private stopBootWatchdog(): void {
+    if (this.bootWatchdog) {
+      clearInterval(this.bootWatchdog);
+      this.bootWatchdog = null;
+    }
   }
 
   /**

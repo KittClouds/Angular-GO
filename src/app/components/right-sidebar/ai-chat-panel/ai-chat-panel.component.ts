@@ -1,10 +1,10 @@
 /**
  * AI Chat Panel Component
 // Native UI replaces quikchat vanilla JS library with Angular integration.
- * Uses GoChatService for Go/SQLite persistence + memory extraction.
+ * Uses PhoenixChatService for Phoenix persistence + OpenRouter streaming.
  *
  * Architecture:
- * - GoChatService (Go WASM) — persistence, thread management, OpenRouter streaming
+ * - PhoenixChatService — persistence, thread management, OpenRouter streaming
  * - GoogleGenAIService (TypeScript) — Google Gemini streaming fallback
  */
 
@@ -23,7 +23,7 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw, Bot, User, Sparkles } from 'lucide-angular';
 import { computed, untracked } from '@angular/core';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
-import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage, type ChatApprovalRequest, type ChatRunSnapshot, type RunOptions } from '../../../lib/services/go-chat.service';
+import { PhoenixChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage, type ChatApprovalRequest, type ChatRunSnapshot, type RunOptions } from '../../../lib/services/phoenix-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
@@ -141,7 +141,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                             [class.text-white]="activeProvider() === 'go-openrouter'"
                             [class.text-muted-foreground]="activeProvider() !== 'go-openrouter'"
                             (click)="activeProvider.set('go-openrouter')">
-                            OpenRouter (Go)
+                            OpenRouter (Phoenix)
                         </button>
                     </div>
 
@@ -176,7 +176,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                         }
                     }
 
-                    <!-- Go OpenRouter Settings -->
+                    <!-- Phoenix OpenRouter Settings -->
                     @if (activeProvider() === 'go-openrouter') {
                         <div class="space-y-1">
                             <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
@@ -1026,8 +1026,8 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     isStreaming = signal(false);
     currentMessage = '';
 
-    // GoChatService for persistence, memory, and Go OpenRouter streaming
-    goChatService = inject(GoChatService);
+    // PhoenixChatService for persistence, run state, and OpenRouter streaming
+    goChatService = inject(PhoenixChatService);
     // Google GenAI fallback (TypeScript)
     googleGenAI = inject(GoogleGenAIService);
     private orchestrator = inject(OrchestratorService);
@@ -1121,7 +1121,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     // Index toggle - enables tool calling
     indexEnabled = signal(false);
 
-    /** True when a Go OpenRouter API key has been entered/saved. */
+    /** True when a Phoenix OpenRouter API key has been entered/saved. */
     readonly isGoConfigured = computed(() => !!this.apiKeyInput());
 
     // History panel state
@@ -1135,7 +1135,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     ngAfterViewInit(): void {
 
-        // Pre-fill Go OpenRouter config from saved openrouter:config (shared key store)
+        // Pre-fill Phoenix OpenRouter config from saved openrouter:config (shared key store)
         const savedOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
         if (savedOrConfig) {
             this.apiKeyInput.set(savedOrConfig.apiKey || '');
@@ -1163,12 +1163,12 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             this.googleModelInput.set(googleConfig.model || 'gemini-2.0-flash');
         }
 
-        // Default to Go OpenRouter; fallback to Google if configured
+        // Default to Phoenix OpenRouter; fallback to Google if configured
         if (this.googleGenAI.isConfigured() && !savedOrConfig?.apiKey) {
             this.activeProvider.set('google');
         }
 
-        // Initialize Go chat service
+        // Initialize Phoenix chat service
         this.initGoChatService();
 
         // Load saved system prompt
@@ -1182,7 +1182,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Initialize Go chat service with OpenRouter config.
+     * Initialize Phoenix chat service with OpenRouter config.
      * This enables persistence + memory extraction.
      */
     private async initGoChatService(): Promise<void> {
@@ -1191,7 +1191,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
         await this.goChatService.init();
         this.goChatInitialized = true;
-        console.log('[AiChatPanel] Go chat service initialized');
+        console.log('[AiChatPanel] Phoenix chat service initialized');
     }
 
     ngOnDestroy(): void {
@@ -1207,7 +1207,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     saveSettings(): void {
-        // Persist Go OpenRouter config to the shared openrouter:config key
+        // Persist Phoenix OpenRouter config to the shared openrouter:config key
         if (this.apiKeyInput()) {
             const existingOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
             const orConfig: ChatConfig = {
@@ -1268,7 +1268,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             return `Google Gemini (${this.googleGenAI.getModel()})`;
         }
         const model = this.selectedModel();
-        return model ? `Go OpenRouter (${model.split('/').pop()})` : 'Go OpenRouter';
+        return model ? `Phoenix OpenRouter (${model.split('/').pop()})` : 'Phoenix OpenRouter';
     }
 
     toggleIndexMode(): void {

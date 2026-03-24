@@ -1,11 +1,11 @@
 import { Injectable, inject } from '@angular/core';
-import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class ScopedDocumentService {
-    private store = inject(GoKittStoreService);
+    private store = inject(PhoenixStoreService);
 
     async getPayload<T>(
         scopeFolderId: string,

@@ -7,6 +7,7 @@ mod binary;
 mod view;
 
 use phoenix_analytics::TextAnalytics;
+use phoenix_chat::PhoenixChat;
 use phoenix_gldr::PhoenixGldr;
 use phoenix_graptor::{BorrowedIngestDocument, BorrowedIngestRequest, PhoenixGraptor};
 use phoenix_lex::LexIndex;
@@ -14,11 +15,12 @@ use phoenix_scanner::PhoenixScanner;
 use phoenix_store_cozo::{PhoenixCozoStore, SnapshotEnvelope, StoreConfig, StoreError};
 use phoenix_structure::PhoenixStructure;
 use phoenix_types::{
-    CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic, GraphDeltaRequest,
-    GraphDeltaResult, IngestRequest, IngestResult, QueryRequest, QueryResult, RebuildRequest,
-    RebuildResult, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScanRequest, SavedNetworkView,
-    SessionId, SessionRecord, SessionState, SessionStats, SnapshotDto, StructureArtifact,
-    StructureRequest, EntityCard, FolderSchema, NetworkInstance,
+    ChatRuntimeConfig, CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic,
+    GraphDeltaRequest, GraphDeltaResult, IngestRequest, IngestResult, QueryRequest, QueryResult,
+    RebuildRequest, RebuildResult, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScanRequest,
+    SavedNetworkView, SessionId, SessionRecord, SessionState, SessionStats, SnapshotDto,
+    StoreCommandRequest, StoreCommandResult, StructureArtifact, StructureRequest, EntityCard,
+    FolderSchema, NetworkInstance, RunOptions, ToolResultSubmission,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,6 +35,7 @@ pub struct PhoenixRuntime {
     pub scanner: PhoenixScanner,
     pub structure: PhoenixStructure,
     pub graptor: PhoenixGraptor,
+    pub chat: PhoenixChat,
     pub lex: RefCell<Option<LexIndex>>,
     pub gldr: PhoenixGldr,
 }
@@ -53,6 +56,7 @@ impl PhoenixRuntime {
             scanner: PhoenixScanner::default(),
             structure: PhoenixStructure::default(),
             graptor: PhoenixGraptor::default(),
+            chat: PhoenixChat::default(),
             lex: RefCell::new(None),
             gldr: PhoenixGldr::default(),
         })
@@ -525,6 +529,512 @@ impl PhoenixRuntime {
         self.store.delete_network_instance(id)
     }
 
+    pub fn init_chat_config(&self, config: ChatRuntimeConfig) -> ChatRuntimeConfig {
+        self.chat.init_config(config)
+    }
+
+    pub fn store_command(
+        &self,
+        request: StoreCommandRequest,
+    ) -> Result<StoreCommandResult, StoreError> {
+        match request.command.as_str() {
+            "relation:upsert" => {
+                let relation = require_payload_str(&request.payload, "relation")?;
+                let row = require_payload_value(&request.payload, "row")?;
+                self.store.put_row(relation, row.clone())?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "relation:getFirst" => {
+                let relation = require_payload_str(&request.payload, "relation")?;
+                let filter = payload_object(request.payload.get("filter"));
+                let row = self
+                    .store
+                    .fetch_rows(relation)?
+                    .into_iter()
+                    .find(|row| row_matches_filter(row, filter));
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: row,
+                    error: None,
+                })
+            }
+            "relation:list" => {
+                let relation = require_payload_str(&request.payload, "relation")?;
+                let filter = payload_object(request.payload.get("filter"));
+                let rows = self
+                    .store
+                    .fetch_rows(relation)?
+                    .into_iter()
+                    .filter(|row| row_matches_filter(row, filter))
+                    .collect::<Vec<_>>();
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(Value::Array(rows)),
+                    error: None,
+                })
+            }
+            "relation:delete" => {
+                let relation = require_payload_str(&request.payload, "relation")?;
+                let filter = payload_object(request.payload.get("filter"));
+                let rows = self.store.fetch_rows(relation)?;
+                let compact_rows = self.store.fetch_compact_rows(relation)?;
+                let matched = rows
+                    .iter()
+                    .zip(compact_rows.into_iter())
+                    .filter_map(|(row, compact)| row_matches_filter(row, filter).then_some(compact))
+                    .collect::<Vec<_>>();
+                self.store.delete_key_rows(relation, &matched)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(serde_json::json!({ "deleted": matched.len() })),
+                    error: None,
+                })
+            }
+            "chat:init" => {
+                let config: ChatRuntimeConfig = serde_json::from_value(
+                    request.payload.get("config").cloned().unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let config = self.init_chat_config(config);
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(config)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:createThread" => {
+                let world_id = request.payload.get("worldId").and_then(Value::as_str);
+                let narrative_id = request.payload.get("narrativeId").and_then(Value::as_str);
+                let title = request.payload.get("title").and_then(Value::as_str);
+                let thread = self
+                    .chat
+                    .create_thread(&self.store, world_id, narrative_id, title)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(thread)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:getThread" => {
+                let id = require_payload_str(&request.payload, "id")?;
+                let thread = self.chat.get_thread(&self.store, id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: thread
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:listThreads" => {
+                let world_id = request.payload.get("worldId").and_then(Value::as_str);
+                let threads = self.chat.list_threads(&self.store, world_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(threads)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:deleteThread" => {
+                let id = require_payload_str(&request.payload, "id")?;
+                self.chat.delete_thread(&self.store, id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "chat:addMessage" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let role = require_payload_str(&request.payload, "role")?;
+                let content = request
+                    .payload
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let narrative_id = request.payload.get("narrativeId").and_then(Value::as_str);
+                let message = self
+                    .chat
+                    .add_message(&self.store, thread_id, role, content, narrative_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(message)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:listMessages" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let messages = self.chat.list_messages(&self.store, thread_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(messages)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:updateMessage" => {
+                let message_id = require_payload_str(&request.payload, "messageId")?;
+                let content = request
+                    .payload
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let message = self.chat.update_message(&self.store, message_id, content)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: message
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:appendMessage" => {
+                let message_id = require_payload_str(&request.payload, "messageId")?;
+                let chunk = request
+                    .payload
+                    .get("chunk")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let message = self.chat.append_message(&self.store, message_id, chunk)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: message
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:startStreamingMessage" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let narrative_id = request.payload.get("narrativeId").and_then(Value::as_str);
+                let message = self
+                    .chat
+                    .start_streaming_message(&self.store, thread_id, narrative_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(message)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:clearThread" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                self.chat.clear_thread(&self.store, thread_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "chat:exportThread" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let exported = self.chat.export_thread(&self.store, thread_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(Value::String(exported)),
+                    error: None,
+                })
+            }
+            "chat:startRun" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let prompt = request
+                    .payload
+                    .get("prompt")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let options: RunOptions = serde_json::from_value(
+                    request.payload.get("options").cloned().unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let run = self.chat.start_run(&self.store, thread_id, prompt, options)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(run)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:pollRun" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let snapshot = self.chat.poll_run(&self.store, run_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: snapshot
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:resumeRun" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let run = self.chat.resume_run(&self.store, run_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: run
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:cancelRun" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let run = self.chat.cancel_run(&self.store, run_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: run
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:listRunEvents" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let limit = request
+                    .payload
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(100) as usize;
+                let events = self.chat.list_run_events_for_thread(&self.store, thread_id, limit)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(events)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:markRunStreaming" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let assistant_message_id =
+                    require_payload_str(&request.payload, "assistantMessageId")?;
+                let snapshot = self
+                    .chat
+                    .mark_run_streaming(&self.store, run_id, assistant_message_id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: snapshot
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:completeRun" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let assistant_message_id =
+                    require_payload_str(&request.payload, "assistantMessageId")?;
+                let final_response = request
+                    .payload
+                    .get("finalResponse")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let final_error = request.payload.get("finalError").and_then(Value::as_str);
+                let snapshot = self.chat.complete_run(
+                    &self.store,
+                    run_id,
+                    assistant_message_id,
+                    final_response,
+                    final_error,
+                )?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: snapshot
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:submitToolResults" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let results: Vec<ToolResultSubmission> = serde_json::from_value(
+                    request.payload.get("results").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let snapshot = self.chat.submit_tool_results(&self.store, run_id, &results)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(snapshot)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "chat:submitApproval" => {
+                let run_id = require_payload_str(&request.payload, "runId")?;
+                let approval_id = require_payload_str(&request.payload, "approvalId")?;
+                let approved = request
+                    .payload
+                    .get("approved")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let decision_json = request.payload.get("decisionJson").and_then(Value::as_str);
+                let snapshot = self.chat.submit_approval(
+                    &self.store,
+                    run_id,
+                    approval_id,
+                    approved,
+                    decision_json,
+                )?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(snapshot)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "entityCards:upsertBatch" => {
+                let cards: Vec<EntityCard> = serde_json::from_value(
+                    request.payload.get("cards").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                self.upsert_entity_cards_batch(&cards)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "entityCards:get" => {
+                let entity_id = require_payload_str(&request.payload, "entityId")?;
+                let cards = self.get_entity_cards(&phoenix_types::EntityId(entity_id.to_owned()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(cards)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "folderSchema:upsert" => {
+                let schema: FolderSchema = serde_json::from_value(
+                    request.payload.get("schema").cloned().unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                self.upsert_folder_schema(&schema)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "folderSchema:get" => {
+                let id = require_payload_str(&request.payload, "id")?;
+                let schema = self.get_folder_schema(id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: schema
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "networkView:save" => {
+                let view: SavedNetworkView = serde_json::from_value(
+                    request.payload.get("view").cloned().unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                self.save_network_view(&view)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            "networkView:get" => {
+                let id = require_payload_str(&request.payload, "id")?;
+                let view = self.get_network_view(id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: view
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "networkView:list" => {
+                let views = self.list_network_views()?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(views)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "networkView:delete" => {
+                let id = require_payload_str(&request.payload, "id")?;
+                self.delete_network_view(id)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: None,
+                    error: None,
+                })
+            }
+            other => Ok(StoreCommandResult {
+                success: false,
+                payload: None,
+                error: Some(format!("unsupported store command: {other}")),
+            }),
+        }
+    }
+
     pub fn session_state_binary(&self, session_id: &SessionId) -> Result<Vec<u8>, StoreError> {
         let state = self.session_state(session_id)?;
         binary::encode_session_state(&state)
@@ -647,6 +1157,35 @@ fn session_record_from_row(row: &Value) -> Result<SessionRecord, StoreError> {
             .and_then(Value::as_i64)
             .unwrap_or_default(),
     })
+}
+
+fn require_payload_str<'a>(payload: &'a Value, key: &str) -> Result<&'a str, StoreError> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Query(format!("missing store command field: {key}")))
+}
+
+fn require_payload_value<'a>(payload: &'a Value, key: &str) -> Result<&'a Value, StoreError> {
+    payload
+        .get(key)
+        .ok_or_else(|| StoreError::Query(format!("missing store command field: {key}")))
+}
+
+fn payload_object(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
+fn row_matches_filter(row: &Value, filter: Option<&serde_json::Map<String, Value>>) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    let Some(object) = row.as_object() else {
+        return false;
+    };
+    filter
+        .iter()
+        .all(|(key, expected)| object.get(key) == Some(expected))
 }
 
 fn now_ms() -> i64 {

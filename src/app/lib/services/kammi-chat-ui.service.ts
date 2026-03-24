@@ -1,12 +1,12 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { getSetting, setSetting } from '../dexie/settings.service';
 import {
-    GoChatService,
+    PhoenixChatService,
     type ChatConfig,
     type ChatProgressEvent,
     type OpenRouterMessage,
     type Thread,
-} from './go-chat.service';
+} from './phoenix-chat.service';
 import { GoogleGenAIService, type GoogleGenAIMessage } from './google-genai.service';
 import { ChatContextClipStore } from '../store/chat-context-clip.store';
 
@@ -65,7 +65,7 @@ Keep responses concise but helpful. If you don't know something specific about t
 
 @Injectable({ providedIn: 'root' })
 export class KammiChatUiService {
-    readonly goChatService = inject(GoChatService);
+    readonly goChatService = inject(PhoenixChatService);
     readonly googleGenAI = inject(GoogleGenAIService);
 
     private readonly chatContextClipStore = inject(ChatContextClipStore);
@@ -369,7 +369,7 @@ export class KammiChatUiService {
         }
 
         const model = this.selectedModel();
-        return model ? `Go OpenRouter (${model.split('/').pop()})` : 'Go OpenRouter';
+        return model ? `Phoenix OpenRouter (${model.split('/').pop()})` : 'Phoenix OpenRouter';
     }
 
     stripSuggestionPrefix(text: string): string {

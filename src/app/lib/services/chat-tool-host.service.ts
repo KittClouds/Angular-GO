@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { EditorAgentWorkspaceService } from './editor-agent-workspace.service';
-import type { ChatApprovalRequest, ChatToolCall, ToolProposal, ToolResultSubmission } from './go-chat.service';
+import type { ChatApprovalRequest, ChatToolCall, ToolProposal, ToolResultSubmission } from './phoenix-chat.service';
 
 @Injectable({ providedIn: 'root' })
 export class ChatToolHostService {

@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { GoKittService } from './gokitt.service';
+import { PhoenixUiApiService } from './phoenix-ui-api.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { smartGraphRegistry } from '../lib/registry';
 import { getSetting, setSetting } from '../lib/dexie/settings.service';
@@ -19,7 +19,7 @@ export interface NerSuggestion {
     providedIn: 'root'
 })
 export class NerService {
-    private goKitt = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
     private noteStore = inject(NoteEditorStore);
 
     constructor() {
@@ -55,7 +55,7 @@ export class NerService {
 
         try {
             // Step 1: GoKitt unsupervised NER
-            const rawSuggestions = await this.goKitt.scanDiscovery(text);
+            const rawSuggestions = await this.phoenixUiApi.scanDiscovery(text);
             console.log('[NerService] Raw suggestions from GoKitt:', rawSuggestions);
 
             if (!rawSuggestions || !Array.isArray(rawSuggestions)) {

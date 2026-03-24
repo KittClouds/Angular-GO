@@ -8,7 +8,7 @@
 
 // Let's check usage quickly.
 import { signal, computed, Injectable, inject } from '@angular/core';
-import { GoKittService } from '../../services/gokitt.service'; // Check path
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 
 export interface DiscoveryCandidate {
     token: string;
@@ -21,7 +21,7 @@ export interface DiscoveryCandidate {
 @Injectable({ providedIn: 'root' })
 export class DiscoveryStore {
     private candidates = signal<DiscoveryCandidate[]>([]);
-    private goKitt = inject(GoKittService); // Now we can inject!
+    private store = inject(PhoenixStoreService);
 
     readonly allCandidates = computed(() => this.candidates());
     readonly promoted = computed(() => this.candidates().filter(c => c.status === 1));
@@ -33,14 +33,17 @@ export class DiscoveryStore {
 
     private async loadFromBackend() {
         try {
-            // Wait for GoKitt to be ready
             const maxWait = 5000;
             const startTime = Date.now();
-            while (!this.goKitt.isReady && (Date.now() - startTime) < maxWait) {
+            while (!this.store.isReady && (Date.now() - startTime) < maxWait) {
+                const ready = await this.store.tryInitialize();
+                if (ready) {
+                    break;
+                }
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            const list = await this.goKitt.storeListDiscoveryCandidates();
+            const list = await this.store.storeListDiscoveryCandidates();
 
             // Defensive: Ensure list is an array
             if (!Array.isArray(list)) {
@@ -84,7 +87,7 @@ export class DiscoveryStore {
                     lastSeen: Date.now(),
                     firstSeen: Date.now() // Logic for firstSeen needed if exists?
                 };
-                this.goKitt.storeUpsertDiscoveryCandidate(goCandidate).catch(e => console.error(e));
+                this.store.storeUpsertDiscoveryCandidate(goCandidate).catch(e => console.error(e));
             });
 
             return Array.from(map.values());

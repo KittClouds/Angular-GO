@@ -38,7 +38,7 @@ import { highlightingStore } from '../lib/store/highlightingStore';
 import { analyticsHighlightStore } from '../lib/store/analyticsHighlightStore';
 import { keywordHighlightStore } from '../lib/store/keywordHighlightStore';
 import { searchHighlightStore } from '../lib/store/searchHighlightStore';
-import { GoKittService } from '../services/gokitt.service';
+import { PhoenixUiApiService } from '../services/phoenix-ui-api.service';
 import {
     getNoteDecorations,
     saveNoteDecorations,
@@ -55,15 +55,15 @@ import { filterCachedEntitySpans } from './pretty-text-cache';
 // ─────────────────────────────────────────────────────────────────────────────
 
 let discoveryStore: DiscoveryStore | null = null;
-let goKittService: GoKittService | null = null;
+let phoenixUiApi: PhoenixUiApiService | null = null;
 let scanPipeline: ScanPipeline | null = null;
 
 export function setDiscoveryStore(store: DiscoveryStore) {
     discoveryStore = store;
 }
 
-export function setGoKittService(service: GoKittService) {
-    goKittService = service;
+export function setPhoenixUiApi(service: PhoenixUiApiService) {
+    phoenixUiApi = service;
 
     // Build the pipeline when GoKitt becomes available
     scanPipeline = new ScanPipeline(
@@ -78,9 +78,12 @@ export function setGoKittService(service: GoKittService) {
     console.log('[PrettyTextAPI] ScanPipeline initialized');
 }
 
-export function getGoKittService(): GoKittService | null {
-    return goKittService;
+export function getPhoenixUiApi(): PhoenixUiApiService | null {
+    return phoenixUiApi;
 }
+
+export const setGoKittService = setPhoenixUiApi;
+export const getGoKittService = getPhoenixUiApi;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interface (unchanged — backward compatible)

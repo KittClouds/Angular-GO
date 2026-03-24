@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 
 import { db, type Note } from '../lib/dexie/db';
 import { GraphVizService, type ForceGraphData } from './graph-viz.service';
-import { GoKittService, type KnowledgeGraphData } from './gokitt.service';
+import { PhoenixUiApiService, type KnowledgeGraphData } from './phoenix-ui-api.service';
 import { KnowledgeService } from './knowledge.service';
 
 export interface GraphPipelineGraphResult {
@@ -16,7 +16,7 @@ export interface GraphPipelineRunResult extends GraphPipelineGraphResult {
 
 @Injectable({ providedIn: 'root' })
 export class GraphPipelineService {
-    private readonly goKitt = inject(GoKittService);
+    private readonly phoenixUiApi = inject(PhoenixUiApiService);
     private readonly knowledge = inject(KnowledgeService);
     private readonly graphViz = inject(GraphVizService);
 
@@ -24,7 +24,7 @@ export class GraphPipelineService {
         await this.knowledge.ensureReady();
 
         const scope = await this.resolveScope(note);
-        const runResult = await this.goKitt.systemRun({
+        const runResult = await this.phoenixUiApi.systemRun({
             ingest: {
                 scope,
                 documents: [{

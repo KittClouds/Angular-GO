@@ -24,7 +24,7 @@ import { ButtonModule } from 'primeng/button';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { TooltipModule } from 'primeng/tooltip';
 
-import { GoKittService, SearchScope } from '../../services/gokitt.service';
+import { PhoenixUiApiService, SearchScope } from '../../services/phoenix-ui-api.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { SemanticSearchService } from '../../lib/services/semantic-search.service';
@@ -114,7 +114,7 @@ interface GraptorBatchEntry {
 export class SearchPanelComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly graptorBatchSize = 16;
-  private readonly goKitt = inject(GoKittService);
+  private readonly phoenixUiApi = inject(PhoenixUiApiService);
   private readonly notesService = inject(NotesService);
   private readonly noteStore = inject(NoteEditorStore);
   private readonly semanticSearch = inject(SemanticSearchService);
@@ -177,11 +177,11 @@ export class SearchPanelComponent implements OnInit {
     return truncateDim === 'full' ? `${modelDims}d` : `${Math.min(Number(truncateDim), modelDims)}d`;
   });
   readonly headerSubtitle = computed(() => {
-    if (this.activeMode() === 'notes') return 'Live Go qgram';
+    if (this.activeMode() === 'notes') return 'Live Phoenix lex';
     if (this.activeMode() === 'vector') {
       return this.embeddingsReady()
         ? `${this.currentModelLabel()} ready for Graptor semantic sidecar`
-        : 'Local embeddings + Go note fallback';
+        : 'Local embeddings + Phoenix note fallback';
     }
     return this.graptorSemanticEnabled()
       ? 'GLDR + qgram + graph + semantic expansion'
@@ -318,7 +318,7 @@ export class SearchPanelComponent implements OnInit {
     this.graptorStatus.set('building');
     this.error.set(null);
     try {
-      const init = await this.goKitt.gldrInit();
+      const init = await this.phoenixUiApi.gldrInit();
       if (!init.success) {
         throw new Error(init.error || 'Failed to initialize GLDR');
       }
@@ -329,7 +329,7 @@ export class SearchPanelComponent implements OnInit {
 
       for (const note of notes) {
         const scanText = this.buildGraptorScanText(note);
-        const scanResult = scanText ? await this.goKitt.scan(scanText) : null;
+        const scanResult = scanText ? await this.phoenixUiApi.scan(scanText) : null;
         const mentions = this.extractGraptorMentions(scanResult);
         const embeddingText = (scanText || note.content || note.title).trim();
 
@@ -350,7 +350,7 @@ export class SearchPanelComponent implements OnInit {
           continue;
         }
 
-        const indexRes = await this.goKitt.gldrIndexChunk(note.id, {
+        const indexRes = await this.phoenixUiApi.gldrIndexChunk(note.id, {
           title: note.title,
           content: note.content,
         }, mentions);
@@ -431,7 +431,7 @@ export class SearchPanelComponent implements OnInit {
   }
 
   private async runNotesSearch(): Promise<void> {
-    const rawResults = await this.goKitt.searchScoped(this.query(), 60, this.buildScope());
+    const rawResults = await this.phoenixUiApi.searchScoped(this.query(), 60, this.buildScope());
     this.results.set(this.mapGoResults(rawResults, 'notes'));
   }
 
@@ -439,7 +439,7 @@ export class SearchPanelComponent implements OnInit {
     if (this.vectorStatus() === 'idle') {
       this.notice.set('Load the embedding model to manage vector indexing. Query results still come from the live Go note path until a dedicated vector retrieval UI replaces the retired Cozo stack.');
     }
-    const rawResults = await this.goKitt.searchScoped(this.query(), 60, this.buildScope());
+    const rawResults = await this.phoenixUiApi.searchScoped(this.query(), 60, this.buildScope());
     this.results.set(this.mapGoResults(rawResults, 'vector'));
   }
 
@@ -455,8 +455,8 @@ export class SearchPanelComponent implements OnInit {
       ? { topChunks: 12, semanticTopK: 24, semanticAlpha: 0.22, semanticGamma: 0.35 }
       : { topChunks: 12 };
     const raw = queryEmbedding
-      ? await this.goKitt.gldrSearchWithEmbedding(this.query(), queryEmbedding, config)
-      : await this.goKitt.gldrSearch(this.query(), config);
+      ? await this.phoenixUiApi.gldrSearchWithEmbedding(this.query(), queryEmbedding, config)
+      : await this.phoenixUiApi.gldrSearch(this.query(), config);
     const parsed = this.parseGraptorResults(raw) as Array<{
       chunkId: string;
       chunkScore: number;
@@ -489,7 +489,7 @@ export class SearchPanelComponent implements OnInit {
 
     try {
       const embeddings = await EmbeddingEngine.embed(items.map((item) => item.embeddingText));
-      const indexRes = await this.goKitt.gldrIndexChunksWithEmbeddings(items.map((item, index) => ({
+      const indexRes = await this.phoenixUiApi.gldrIndexChunksWithEmbeddings(items.map((item, index) => ({
         chunkId: item.chunkId,
         fields: {
           title: item.title,
@@ -503,7 +503,7 @@ export class SearchPanelComponent implements OnInit {
       }
     } catch (_err) {
       for (const item of items) {
-        const indexRes = await this.goKitt.gldrIndexChunk(item.chunkId, {
+        const indexRes = await this.phoenixUiApi.gldrIndexChunk(item.chunkId, {
           title: item.title,
           content: item.content,
         }, item.mentions);
@@ -564,7 +564,7 @@ export class SearchPanelComponent implements OnInit {
       const names = collectScopedRegistrationNames(mention.entityId, canonical, node);
 
       for (const name of names) {
-        await this.goKitt.gldrRegisterEntity(name, mention.entityId);
+        await this.phoenixUiApi.gldrRegisterEntity(name, mention.entityId);
       }
     }
   }
@@ -576,7 +576,7 @@ export class SearchPanelComponent implements OnInit {
       const targetId = edge?.target || edge?.Target;
       if (!sourceId || !targetId) continue;
 
-      await this.goKitt.gldrAddGraphEdge(sourceId, {
+      await this.phoenixUiApi.gldrAddGraphEdge(sourceId, {
         targetId,
         relType: edge?.type || edge?.Type || edge?.relation || 'related_to',
         confidence: Number(edge?.confidence || edge?.Confidence || edge?.weight || 1),
@@ -607,7 +607,7 @@ export class SearchPanelComponent implements OnInit {
   }
 
   private async refreshGraptorStats(): Promise<void> {
-    const raw = await this.goKitt.gldrStats();
+    const raw = await this.phoenixUiApi.gldrStats();
     this.graptorStats.set(JSON.parse(raw) as GraptorStats);
   }
 

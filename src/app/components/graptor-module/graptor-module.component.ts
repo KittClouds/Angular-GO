@@ -11,7 +11,7 @@ import { Tag } from 'primeng/tag';
 import { InputTextModule } from 'primeng/inputtext';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { Divider } from 'primeng/divider';
-import { GoKittService } from '../../services/gokitt.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { PlaygroundLogService } from '../../services/playground-log.service';
 import { PlaygroundDataService } from '../../services/playground-data.service';
 
@@ -251,7 +251,7 @@ export interface GraptorStats {
 export class GraptorModuleComponent implements OnInit {
     protected readonly dataService = inject(PlaygroundDataService);
     private readonly logService = inject(PlaygroundLogService);
-    private readonly goKitt = inject(GoKittService);
+    private readonly phoenixUiApi = inject(PhoenixUiApiService);
 
     readonly initialized = signal(false);
     readonly initializing = signal(false);
@@ -276,7 +276,7 @@ export class GraptorModuleComponent implements OnInit {
         this.initializing.set(true);
         this.log('info', 'Initializing GLDR index…');
         try {
-            await this.goKitt.gldrInit();
+            await this.phoenixUiApi.gldrInit();
             this.initialized.set(true);
             this.log('success', 'GLDR initialized');
             await this.refreshStats();
@@ -299,7 +299,7 @@ export class GraptorModuleComponent implements OnInit {
             for (let i = 0; i < chapters.length; i++) {
                 const ch = chapters[i];
                 if (i % 10 === 0) this.log('info', `Chapter ${i + 1}/${chapters.length}`);
-                await this.goKitt.gldrIndexChunk(ch.id, { content: ch.text }, []);
+                await this.phoenixUiApi.gldrIndexChunk(ch.id, { content: ch.text }, []);
             }
             this.log('success', `Indexed ${chapters.length} chunks`);
             await this.refreshStats();
@@ -314,7 +314,7 @@ export class GraptorModuleComponent implements OnInit {
         this.loadingGraph.set(true);
         this.log('info', 'Loading entity co-occurrence graph…');
         try {
-            await this.goKitt.gldrLoadCooccurrences(2);
+            await this.phoenixUiApi.gldrLoadCooccurrences(2);
             this.log('success', 'Co-occurrence graph loaded');
             await this.refreshStats();
         } catch (err) {
@@ -330,7 +330,7 @@ export class GraptorModuleComponent implements OnInit {
         this.nodeResults.set([]);
         this.log('info', `Searching: "${this.queryText}"`);
         try {
-            const raw = await this.goKitt.gldrSearch(this.queryText, {});
+            const raw = await this.phoenixUiApi.gldrSearch(this.queryText, {});
             const results: GraptorSearchResult[] = JSON.parse(raw);
             this.chunkResults.set(results);
             this.log('success', `${results.length} chunk results`);
@@ -347,7 +347,7 @@ export class GraptorModuleComponent implements OnInit {
         this.chunkResults.set([]);
         this.log('info', `Entity search: "${this.queryText}"`);
         try {
-            const raw = await this.goKitt.gldrSearchNodes(this.queryText, {});
+            const raw = await this.phoenixUiApi.gldrSearchNodes(this.queryText, {});
             const results: GraptorNodeResult[] = JSON.parse(raw);
             this.nodeResults.set(results);
             this.log('success', `${results.length} entity node results`);
@@ -368,7 +368,7 @@ export class GraptorModuleComponent implements OnInit {
 
     private async refreshStats(): Promise<void> {
         try {
-            const raw = await this.goKitt.gldrStats();
+            const raw = await this.phoenixUiApi.gldrStats();
             this.stats.set(JSON.parse(raw));
         } catch { /* ignore */ }
     }

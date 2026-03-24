@@ -4,7 +4,7 @@ import { NotesService } from '../dexie/notes.service';
 import { FolderService } from './folder.service';
 import { NoteEditorStore } from '../store/note-editor.store';
 import { ScopeService } from './scope.service';
-import { GoKittService, SearchScope } from '../../services/gokitt.service';
+import { PhoenixUiApiService, SearchScope } from '../../services/phoenix-ui-api.service';
 import { EmbeddingQueueService } from './embedding-queue.service';
 
 export type DocumentIngestionMode = 'files' | 'folder';
@@ -47,7 +47,7 @@ export class DocumentIngestionService {
     private folderService = inject(FolderService);
     private noteEditorStore = inject(NoteEditorStore);
     private scopeService = inject(ScopeService);
-    private goKittService = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
     private embeddingQueue = inject(EmbeddingQueueService);
 
     async openFilesPicker(): Promise<PickedDocumentBatch | null> {
@@ -173,15 +173,15 @@ export class DocumentIngestionService {
             }
             : undefined;
 
-        if (this.goKittService.isReady) {
+        if (this.phoenixUiApi.isReady) {
             try {
-                await this.goKittService.upsertNote(noteId, text, version);
+                await this.phoenixUiApi.upsertNote(noteId, text, version);
             } catch (error) {
                 console.warn('[DocumentIngestion] DocStore sync failed:', error);
             }
 
             try {
-                await this.goKittService.indexNote(noteId, text, scope);
+                await this.phoenixUiApi.indexNote(noteId, text, scope);
             } catch (error) {
                 console.warn('[DocumentIngestion] Search indexing failed:', error);
             }

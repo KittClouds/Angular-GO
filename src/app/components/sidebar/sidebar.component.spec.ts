@@ -20,7 +20,7 @@ import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { GoKittService } from '../../services/gokitt.service';
 import { DocumentIngestionService } from '../../lib/services/document-ingestion.service';
 import { Router } from '@angular/router';
-import { GoChatService } from '../../lib/services/go-chat.service';
+import { PhoenixChatService } from '../../lib/services/phoenix-chat.service';
 import { GraphPipelineService } from '../../services/graph-pipeline.service';
 
 describe('SidebarComponent graph scan', () => {
@@ -63,7 +63,7 @@ describe('SidebarComponent graph scan', () => {
             { provide: GoKittService, useValue: goKittMock },
             { provide: DocumentIngestionService, useValue: {} },
             { provide: Router, useValue: { navigate: vi.fn(), events: of(), url: '/' } },
-            { provide: GoChatService, useValue: { threads: signal([]), loadThread: vi.fn() } },
+            { provide: PhoenixChatService, useValue: { threads: signal([]), loadThread: vi.fn() } },
             { provide: GraphPipelineService, useValue: graphPipelineMock },
         ], Injector.create({ providers: [] }));
 

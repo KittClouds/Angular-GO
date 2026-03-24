@@ -7,7 +7,7 @@ import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
 import { clearAllDecorations } from './dexie/decorations';
 import { getBridge } from './operations';
-import { GoKittStoreService } from '../services/gokitt-store.service';
+import { PhoenixStoreService } from '../services/phoenix-store.service';
 
 // =============================================================================
 // Types
@@ -298,14 +298,14 @@ export class CentralRegistry {
             console.warn('[CentralRegistry] Failed to persist entity to Dexie:', entity.id, err);
         });
 
-        // 2. Write to SQLite (Source of Truth) via GoKittStoreService
+        // 2. Write to Phoenix backend (source of truth)
         const store = getBridge();
         if (store) {
-            store.upsertEntity(GoKittStoreService.fromDexieEntity(dexieEntity)).catch(err => {
-                console.error('[CentralRegistry] Failed to sync entity to SQLite:', err);
+            store.upsertEntity(PhoenixStoreService.fromDexieEntity(dexieEntity)).catch(err => {
+                console.error('[CentralRegistry] Failed to sync entity to Phoenix:', err);
             });
         } else {
-            console.warn('[CentralRegistry] Cannot sync entity to SQLite: Store not initialized yet.');
+            console.warn('[CentralRegistry] Cannot sync entity to Phoenix: Store not initialized yet.');
         }
     }
 
@@ -493,8 +493,8 @@ export class CentralRegistry {
         // Write-through to SQLite
         const store = getBridge();
         if (store) {
-            store.upsertEdge(GoKittStoreService.fromDexieEdge(dexieEdge)).catch(err => {
-                console.error('[CentralRegistry] Failed to sync edge to SQLite:', err);
+            store.upsertEdge(PhoenixStoreService.fromDexieEdge(dexieEdge)).catch(err => {
+                console.error('[CentralRegistry] Failed to sync edge to Phoenix:', err);
             });
         }
 
@@ -565,7 +565,7 @@ export class CentralRegistry {
 
     /**
      * Perform the actual dictionary rebuild.
-     * Collects all entities and sends them to GoKitt for AC recompilation.
+     * Collects all entities and sends them to Phoenix for scanner dictionary refresh.
      */
     private async performDictionaryRebuild(): Promise<void> {
         // Guard: Prevent concurrent rebuilds
@@ -575,18 +575,18 @@ export class CentralRegistry {
         }
         this.isRebuildingDictionary = true;
 
-        // Import GoKittService dynamically to avoid circular deps
+        // Import PhoenixUiApiService dynamically to avoid circular deps
         try {
-            const { GoKittService } = await import('../services/gokitt.service');
+            const { PhoenixUiApiService } = await import('../services/phoenix-ui-api.service');
             const injector = (window as any).__angularInjector;
             if (!injector) {
                 console.warn('[CentralRegistry] Angular injector not available for dictionary rebuild');
                 return;
             }
 
-            const goKittService = injector.get(GoKittService) as InstanceType<typeof GoKittService>;
-            if (!goKittService) {
-                console.warn('[CentralRegistry] GoKittService not available');
+            const phoenixUiApi = injector.get(PhoenixUiApiService) as InstanceType<typeof PhoenixUiApiService>;
+            if (!phoenixUiApi) {
+                console.warn('[CentralRegistry] PhoenixUiApiService not available');
                 return;
             }
 
@@ -599,7 +599,7 @@ export class CentralRegistry {
             }));
 
             console.log(`[CentralRegistry] Triggering dictionary rebuild with ${entities.length} entities`);
-            await goKittService.rebuildDictionary(entities);
+            await phoenixUiApi.rebuildDictionary(entities);
             console.log(`[CentralRegistry] ✅ Dictionary rebuild complete`);
 
             // Dispatch event to trigger immediate rescan with updated dictionary

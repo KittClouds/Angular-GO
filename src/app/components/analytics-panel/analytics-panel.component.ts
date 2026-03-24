@@ -15,7 +15,7 @@ import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { keywordHighlightStore } from '../../lib/store/keywordHighlightStore';
 import { EditorService } from '../../services/editor.service';
 import { FooterStatsService } from '../../services/footer-stats.service';
-import { GoKittService } from '../../services/gokitt.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 
 interface AnalyticsSearchResult {
@@ -580,7 +580,7 @@ interface AnalyticsSearchResult {
     `]
 })
 export class AnalyticsPanelComponent {
-    private goKitt = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
     private notesService = inject(NotesService);
     private noteStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
@@ -683,7 +683,7 @@ export class AnalyticsPanelComponent {
 
         try {
             // Search via WASM
-            const response = await this.goKitt.search(query, 10);
+            const response = await this.phoenixUiApi.search(query, 10);
             rawResults = Array.isArray(response) ? response : [];
         } catch (err) {
             console.error('[AnalyticsPanel] Search failed:', err);
