@@ -166,16 +166,11 @@ struct SimpleRange {
 }
 
 #[derive(Clone, Debug)]
-struct PhraseGroup {
-    phrase_ids: SmallVec<[u32; 5]>,
-    ranges: Vec<SimpleRange>,
-    token_starts: Vec<i32>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PhraseSummary {
+struct PhraseAccumulator {
     count: u32,
     last_start: i32,
+    ranges: Vec<SimpleRange>,
+    token_starts: Vec<i32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -290,13 +285,14 @@ pub fn get_empty_analytics() -> TextAnalytics {
 }
 
 impl StringInterner {
-    fn intern(&mut self, value: String) -> u32 {
-        if let Some(existing) = self.indices.get(value.as_str()) {
-            return *existing;
+    fn intern(&mut self, value: &str) -> u32 {
+        if let Some(&existing) = self.indices.get(value) {
+            return existing;
         }
         let id = self.values.len() as u32;
-        self.indices.insert(value.clone(), id);
-        self.values.push(value);
+        let owned = value.to_owned();
+        self.indices.insert(owned.clone(), id);
+        self.values.push(owned);
         id
     }
 
@@ -364,13 +360,13 @@ fn scan_text(text: &str) -> ScanStats {
                     && !stop_words().contains(normalized.as_str())
                     && !normalized.bytes().any(|byte| byte.is_ascii_digit())
                 {
-                    let keyword_id = stats.interner.intern(normalized.clone());
+                    let keyword_id = stats.interner.intern(&normalized);
                     *stats.keyword_frequencies.entry(keyword_id).or_default() += 1;
                 }
 
                 if bytes[start].is_ascii_alphabetic() && raw.bytes().all(is_alpha_token_byte) {
-                    let normalized_id = stats.interner.intern(normalized.clone());
-                    let root_id = stats.interner.intern(stem_word(&normalized));
+                    let normalized_id = stats.interner.intern(&normalized);
+                    let root_id = stats.interner.intern(&stem_word(&normalized));
                     stats.tokens.push(TokenMatch {
                         normalized_id,
                         root_id,
@@ -820,7 +816,8 @@ fn analyze_repetition(
     tokens: &[TokenMatch],
     interner: &StringInterner,
 ) -> RepetitionAnalysis {
-    let mut phrase_map = FxHashMap::<SmallVec<[u32; 5]>, PhraseSummary>::default();
+    // Single-pass: count occurrences AND collect ranges simultaneously
+    let mut phrase_map = FxHashMap::<SmallVec<[u32; 5]>, PhraseAccumulator>::default();
     for size in 2..=5 {
         if tokens.len() < size {
             continue;
@@ -840,21 +837,36 @@ fn analyze_repetition(
                 continue;
             }
 
-            let summary = phrase_map.entry(key).or_insert(PhraseSummary {
+            let acc = phrase_map.entry(key).or_insert(PhraseAccumulator {
                 count: 0,
                 last_start: i32::MIN / 2,
+                ranges: Vec::new(),
+                token_starts: Vec::new(),
             });
-            if summary.last_start >= 0 && (summary.last_start - index as i32).abs() < size as i32 {
+            // Use last_start check for counting (preserves original scoring)
+            if acc.last_start >= 0 && (acc.last_start - index as i32).abs() < size as i32 {
                 continue;
             }
-            summary.count += 1;
-            summary.last_start = index as i32;
+            acc.count += 1;
+            acc.last_start = index as i32;
+            // Collect ranges inline using accurate overlap check
+            let range_overlaps = acc
+                .token_starts
+                .iter()
+                .any(|start| (start - index as i32).abs() < size as i32);
+            if !range_overlaps {
+                acc.token_starts.push(index as i32);
+                acc.ranges.push(SimpleRange {
+                    from: slice[0].from,
+                    to: slice[slice.len() - 1].to,
+                });
+            }
         }
     }
 
     let mut scored = phrase_map
         .into_iter()
-        .filter(|(_, summary)| summary.count >= 2)
+        .filter(|(_, acc)| acc.count >= 2)
         .collect::<Vec<_>>();
     scored.sort_by(|left, right| {
         if left.1.count == right.1.count {
@@ -867,67 +879,26 @@ fn analyze_repetition(
         scored.truncate(12);
     }
 
-    let mut selected = FxHashMap::<SmallVec<[u32; 5]>, PhraseGroup>::default();
-    for (ids, _) in &scored {
-        selected.insert(
-            ids.clone(),
-            PhraseGroup {
-                phrase_ids: ids.clone(),
-                ranges: Vec::new(),
-                token_starts: Vec::new(),
-            },
-        );
-    }
-
-    for size in 2..=5 {
-        if tokens.len() < size {
-            continue;
-        }
-        for index in 0..=tokens.len() - size {
-            let slice = &tokens[index..index + size];
-            let mut key = SmallVec::<[u32; 5]>::with_capacity(size);
-            for token in slice {
-                key.push(token.normalized_id);
-            }
-            let Some(group) = selected.get_mut(&key) else {
-                continue;
-            };
-            let overlaps = group
-                .token_starts
-                .iter()
-                .any(|start| (start - index as i32).abs() < size as i32);
-            if overlaps {
-                continue;
-            }
-            group.token_starts.push(index as i32);
-            group.ranges.push(SimpleRange {
-                from: slice[0].from,
-                to: slice[slice.len() - 1].to,
-            });
-        }
-    }
-
     let items = scored
         .into_iter()
-        .filter_map(|(ids, summary)| {
-            let group = selected.remove(&ids)?;
-            let highlights = ranges_to_highlights(text, &group.ranges);
-            let snippets = group
+        .map(|(ids, acc)| {
+            let highlights = ranges_to_highlights(text, &acc.ranges);
+            let snippets = acc
                 .ranges
                 .iter()
                 .take(3)
                 .map(|range| build_snippet(text, range.from, range.to, 28))
                 .collect::<Vec<_>>();
-            let phrase = join_interned(&group.phrase_ids, interner);
-            let score = summary.count as i32 + max(0, ids.len() as i32 - 2);
-            Some(PhraseEchoItem {
+            let phrase = join_interned(&ids, interner);
+            let score = acc.count as i32 + max(0, ids.len() as i32 - 2);
+            PhraseEchoItem {
                 id: format!("echo:{}", phrase.replace(' ', "-")),
                 phrase,
-                occurrence_count: summary.count as i32,
+                occurrence_count: acc.count as i32,
                 severity: severity_from_score(score),
                 snippets,
                 highlight_ranges: highlights,
-            })
+            }
         })
         .collect::<Vec<_>>();
 
@@ -953,6 +924,7 @@ fn analyze_proximity(
     }
 
     let mut items = Vec::new();
+    let mut seen = FxHashSet::<u32>::default();
     for (root_id, group) in by_root {
         if group.len() < 2 {
             continue;
@@ -994,7 +966,7 @@ fn analyze_proximity(
         let left = tokens[left_index];
         let right = tokens[right_index];
 
-        let mut seen = FxHashSet::<u32>::default();
+        seen.clear();
         let mut surface_forms = Vec::new();
         for token_index in &group {
             let token = tokens[*token_index];

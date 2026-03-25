@@ -1,6 +1,2274 @@
 {
-  "generatedAt": 1774279139980,
+  "generatedAt": 1774415011354,
   "corpora": [
+    {
+      "corpusId": "shortrun",
+      "title": "Shortrun",
+      "path": "\\\\?\\C:\\Users\\shuga\\1kittroot\\1code\\Angular-build\\docs\\shortrun.md",
+      "inputBytes": 159085,
+      "inputChars": 153782,
+      "estimatedInputPages": 3,
+      "excerptBytes": 32768,
+      "selectedQueries": {
+        "lexical": [
+          "\"New Rome\"",
+          "Len",
+          "Ryan"
+        ],
+        "graph": [
+          "Ryan Ghoul",
+          "Ryan Len"
+        ]
+      },
+      "relationCounts": [
+        {
+          "relation": "phoenix_schema_state",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_sessions",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_commits",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_ingest_log",
+          "rows": 1
+        },
+        {
+          "relation": "phoenix_query_log",
+          "rows": 3
+        },
+        {
+          "relation": "notes",
+          "rows": 1
+        },
+        {
+          "relation": "entities",
+          "rows": 0
+        },
+        {
+          "relation": "edges",
+          "rows": 0
+        },
+        {
+          "relation": "folders",
+          "rows": 0
+        },
+        {
+          "relation": "threads",
+          "rows": 0
+        },
+        {
+          "relation": "thread_messages",
+          "rows": 0
+        },
+        {
+          "relation": "memories",
+          "rows": 0
+        },
+        {
+          "relation": "memory_threads",
+          "rows": 0
+        },
+        {
+          "relation": "om_records",
+          "rows": 0
+        },
+        {
+          "relation": "om_generations",
+          "rows": 0
+        },
+        {
+          "relation": "workspace_artifacts",
+          "rows": 2
+        },
+        {
+          "relation": "chat_runs",
+          "rows": 0
+        },
+        {
+          "relation": "chat_run_events",
+          "rows": 0
+        },
+        {
+          "relation": "chat_tool_calls",
+          "rows": 0
+        },
+        {
+          "relation": "chat_approval_requests",
+          "rows": 0
+        },
+        {
+          "relation": "hnsw_index",
+          "rows": 0
+        },
+        {
+          "relation": "docid_map",
+          "rows": 1
+        },
+        {
+          "relation": "chunkid_map",
+          "rows": 534
+        },
+        {
+          "relation": "chunks",
+          "rows": 534
+        },
+        {
+          "relation": "raptor_nodes",
+          "rows": 0
+        },
+        {
+          "relation": "raptor_edges",
+          "rows": 0
+        },
+        {
+          "relation": "episodes",
+          "rows": 0
+        },
+        {
+          "relation": "spans",
+          "rows": 2211
+        },
+        {
+          "relation": "wormholes",
+          "rows": 0
+        },
+        {
+          "relation": "span_mentions",
+          "rows": 0
+        },
+        {
+          "relation": "network_instance",
+          "rows": 0
+        },
+        {
+          "relation": "network_membership",
+          "rows": 0
+        },
+        {
+          "relation": "network_relationship",
+          "rows": 0
+        },
+        {
+          "relation": "discovery_candidates",
+          "rows": 2663
+        },
+        {
+          "relation": "entity_cards",
+          "rows": 0
+        },
+        {
+          "relation": "folder_schemas",
+          "rows": 0
+        },
+        {
+          "relation": "scoped_documents",
+          "rows": 1
+        },
+        {
+          "relation": "scoped_entity_fields",
+          "rows": 0
+        },
+        {
+          "relation": "scoped_definitions",
+          "rows": 3
+        },
+        {
+          "relation": "blocks",
+          "rows": 0
+        },
+        {
+          "relation": "graph_vertices",
+          "rows": 597
+        },
+        {
+          "relation": "graph_edges",
+          "rows": 596
+        },
+        {
+          "relation": "graph_node_index",
+          "rows": 0
+        },
+        {
+          "relation": "graph_properties",
+          "rows": 3973
+        },
+        {
+          "relation": "graph_vertex_labels",
+          "rows": 530
+        },
+        {
+          "relation": "graph_named_rules",
+          "rows": 0
+        },
+        {
+          "relation": "graph_rule_results",
+          "rows": 0
+        }
+      ],
+      "ingestSummary": {
+        "sessionId": "perf-shortrun",
+        "documentCount": 1,
+        "warningCount": 396,
+        "documents": [
+          {
+            "documentId": "perf-doc-shortrun",
+            "noteId": "perf-doc-shortrun",
+            "chapterCount": 11,
+            "parentCount": 129,
+            "leafCount": 394,
+            "entityCount": 0,
+            "edgeCount": 596,
+            "hasFrontMatterChapter": false
+          }
+        ],
+        "chunkStats": {
+          "documents": 1,
+          "totalChapters": 11,
+          "totalParents": 129,
+          "totalLeaves": 394
+        },
+        "graphSummary": {
+          "documents": 1,
+          "totalChapters": 11,
+          "totalLeaves": 394,
+          "totalEntities": 0,
+          "totalMentions": 0,
+          "totalEdges": 596,
+          "crossChapterLinks": 0
+        },
+        "entitySummary": {
+          "totalEntities": 0,
+          "totalAliases": 0,
+          "totalMentions": 0,
+          "multiChapterEntities": 0
+        },
+        "discoverySummary": {
+          "candidateCount": 3054,
+          "mentionCount": 3054,
+          "persistedCount": 3054
+        },
+        "retrievalSummary": {
+          "qgramDocuments": 1,
+          "gldrChunks": 394,
+          "gldrEntities": 0,
+          "gldrEdges": 596,
+          "raptorDocuments": 0,
+          "raptorLeaves": 0,
+          "raptorEnabled": false
+        },
+        "relationCounts": [
+          {
+            "relation": "phoenix_schema_state",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_sessions",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_commits",
+            "rows": 0
+          },
+          {
+            "relation": "phoenix_ingest_log",
+            "rows": 1
+          },
+          {
+            "relation": "phoenix_query_log",
+            "rows": 0
+          },
+          {
+            "relation": "notes",
+            "rows": 1
+          },
+          {
+            "relation": "entities",
+            "rows": 0
+          },
+          {
+            "relation": "edges",
+            "rows": 0
+          },
+          {
+            "relation": "folders",
+            "rows": 0
+          },
+          {
+            "relation": "threads",
+            "rows": 0
+          },
+          {
+            "relation": "thread_messages",
+            "rows": 0
+          },
+          {
+            "relation": "memories",
+            "rows": 0
+          },
+          {
+            "relation": "memory_threads",
+            "rows": 0
+          },
+          {
+            "relation": "om_records",
+            "rows": 0
+          },
+          {
+            "relation": "om_generations",
+            "rows": 0
+          },
+          {
+            "relation": "workspace_artifacts",
+            "rows": 2
+          },
+          {
+            "relation": "chat_runs",
+            "rows": 0
+          },
+          {
+            "relation": "chat_run_events",
+            "rows": 0
+          },
+          {
+            "relation": "chat_tool_calls",
+            "rows": 0
+          },
+          {
+            "relation": "chat_approval_requests",
+            "rows": 0
+          },
+          {
+            "relation": "hnsw_index",
+            "rows": 0
+          },
+          {
+            "relation": "docid_map",
+            "rows": 1
+          },
+          {
+            "relation": "chunkid_map",
+            "rows": 534
+          },
+          {
+            "relation": "chunks",
+            "rows": 534
+          },
+          {
+            "relation": "raptor_nodes",
+            "rows": 0
+          },
+          {
+            "relation": "raptor_edges",
+            "rows": 0
+          },
+          {
+            "relation": "episodes",
+            "rows": 0
+          },
+          {
+            "relation": "spans",
+            "rows": 2211
+          },
+          {
+            "relation": "wormholes",
+            "rows": 0
+          },
+          {
+            "relation": "span_mentions",
+            "rows": 0
+          },
+          {
+            "relation": "network_instance",
+            "rows": 0
+          },
+          {
+            "relation": "network_membership",
+            "rows": 0
+          },
+          {
+            "relation": "network_relationship",
+            "rows": 0
+          },
+          {
+            "relation": "discovery_candidates",
+            "rows": 2663
+          },
+          {
+            "relation": "entity_cards",
+            "rows": 0
+          },
+          {
+            "relation": "folder_schemas",
+            "rows": 0
+          },
+          {
+            "relation": "scoped_documents",
+            "rows": 1
+          },
+          {
+            "relation": "scoped_entity_fields",
+            "rows": 0
+          },
+          {
+            "relation": "scoped_definitions",
+            "rows": 3
+          },
+          {
+            "relation": "blocks",
+            "rows": 0
+          },
+          {
+            "relation": "graph_vertices",
+            "rows": 597
+          },
+          {
+            "relation": "graph_edges",
+            "rows": 596
+          },
+          {
+            "relation": "graph_node_index",
+            "rows": 0
+          },
+          {
+            "relation": "graph_properties",
+            "rows": 3973
+          },
+          {
+            "relation": "graph_vertex_labels",
+            "rows": 530
+          },
+          {
+            "relation": "graph_named_rules",
+            "rows": 0
+          },
+          {
+            "relation": "graph_rule_results",
+            "rows": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "code": "PX_GRAPTOR_CHUNKERX2",
+            "message": "ChunkerX2-style ingest produced 11 chapters, 129 parents, and 394 leaves."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:1:1100292637:413-870 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1148143530:828-1203 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1805453339:1204-1531 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1059224170:1532-1907 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1948450502:1896-2352 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1029915362:2294-2791 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:290222348:2704-3187 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:136673611:3153-3620 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1178700365:3575-4069 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:431216671:4070-4558 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:2003853021:4559-5052 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:60876735:4952-5411 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1813912935:5326-5820 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:756139481:5763-6244 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1100851309:6145-6546 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:708949503:6477-6924 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1094305961:6849-7340 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1836717382:7258-7753 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:25770854:7744-8220 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:4765729:8220-8689 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1854781845:8690-9160 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1249590649:9161-9616 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:671899553:9564-9985 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:767436922:9986-10472 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1122473178:10431-10938 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1897047139:10887-11304 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1703466284:11280-11732 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:2049560519:11694-12128 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1512056837:12102-12507 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1366551105:12428-12890 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1278336473:12859-13273 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1870344488:13178-13617 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1404772113:13544-14041 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1321329512:14019-14448 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1071331137:14367-14829 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:911523481:14750-15213 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:389604104:15117-15498 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1943946428:15437-15893 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1801203816:15858-16354 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:2:1415457792:16303-16716 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:2034872560:16618-17088 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1734687466:17089-17579 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:68214332:17580-18082 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:956798415:18083-18541 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:249454224:18542-19002 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:261416031:18954-19460 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1386742167:19381-19801 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:2026322692:19802-20295 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:2123057332:20296-20728 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1717899016:20644-21119 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1900157768:21030-21469 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1292781963:21405-21886 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1427744328:21856-22312 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1954824510:22218-22719 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1311908341:22680-23152 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1696200105:23152-23607 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1989097125:23565-24037 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:273627271:24007-24505 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:530240519:24409-24886 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1788735367:24887-25340 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:2056960590:25243-25698 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:206000045:25643-26131 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:144045120:26071-26521 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:408340098:26426-26912 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:3:1436475066:26835-27331 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1829353233:27332-27751 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:74670593:27752-28239 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:217862416:28186-28621 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1845576268:28568-29020 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:499467743:28929-29433 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:408066321:29434-29916 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1355795209:29917-30381 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:643262780:30286-30738 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1476961442:30681-31138 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:605995662:31072-31454 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1648372252:31381-31800 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1529059230:31719-32178 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1644154023:32094-32589 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:639752366:32590-33034 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1486442449:33035-33508 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:311139968:33418-33867 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:457860751:33775-34258 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:533459694:34162-34618 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:589505144:34574-35049 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1953955078:34956-35429 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1892008371:35354-35854 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:2113899005:35785-36279 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1728491427:36250-36716 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1350460217:36653-37141 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1156591192:37070-37537 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1996999390:37455-37868 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:22657227:37820-38321 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:522832160:38250-38696 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:1017801577:38697-39174 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:4:925555175:39101-39595 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:734375025:39528-40020 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:617967026:40021-40469 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:2133650346:40431-40840 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1337121459:40840-41303 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1857116337:41208-41674 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1774904938:41675-42128 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:291570403:42051-42522 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:2102468575:42514-42944 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:243436108:42945-43412 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:917526908:43413-43864 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1012147240:43781-44272 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:463471897:44174-44661 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:807364063:44588-44994 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1798534104:44940-45444 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1198341763:45396-45849 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:4347900:45790-46270 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:621406739:46216-46620 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:133994446:46524-46836 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1499811922:46736-47173 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1549283596:47174-47648 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:931988589:47601-48094 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1288004177:48095-48555 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:73464886:48491-48958 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:42242213:48917-49418 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:634695936:49319-49788 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1902631096:49721-50196 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1786000595:50130-50612 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:2074920984:50530-51005 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1803372914:51006-51460 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1073492189:51364-51800 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:599185626:51712-52177 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:117162883:52094-52471 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1342980780:52377-52771 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:645302525:52680-53080 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:2063337539:53015-53508 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:459029295:53413-53861 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:177488138:53820-54317 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1616478077:54227-54705 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:961396560:54623-54984 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1729013362:54985-55450 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:402475981:55451-55919 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1572941312:55877-56364 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1915871387:56317-56798 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:677083664:56712-57111 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:932032972:57055-57480 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:1407476457:57392-57775 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:621288359:57694-58155 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:362991853:58156-58593 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:5:2036818545:58564-59049 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:2106616101:58961-59365 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1217630021:59301-59748 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1236313260:59669-60032 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1687991648:59935-60429 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1233994074:60330-60730 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:776729092:60731-61183 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1186968461:61106-61547 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:902395765:61548-61996 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:2129963180:61900-62370 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:299356339:62340-62776 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:361264343:62683-63100 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:483347250:63101-63567 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1212162548:63473-63963 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1480190232:63890-64178 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:198192725:64179-64651 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:779094594:64652-65112 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:918455824:65113-65551 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1077011994:65539-66040 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1175567094:66041-66508 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:581106429:66417-66878 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:13848832:66865-67309 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:894770917:67219-67607 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:2087733243:67524-67989 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:592998521:67910-68334 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:846879682:68268-68699 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:745908587:68700-69173 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1100024029:69073-69528 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:913989278:69529-70022 produced 18 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:2022863411:69990-70465 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:1467481478:70466-70938 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:6:348846792:70851-71322 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:306985076:71323-71772 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1302637108:71773-72275 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1208732270:72260-72707 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1318237488:72708-73060 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:203222009:72999-73500 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1220544782:73501-73884 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1729361916:73885-74345 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1016669254:74337-74827 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1392269152:74828-75205 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1335389882:75126-75544 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1783251994:75545-76012 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:23792283:75951-76416 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1698630542:76323-76767 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1140419241:76691-77125 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1092762631:77076-77574 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1146020893:77489-77952 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:2127206035:77874-78339 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1351738090:78295-78772 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1913791330:78693-79175 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1023120538:79092-79544 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1259949768:79456-79876 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1721039490:79818-80036 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:571422954:80037-80510 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1829793167:80442-80939 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:81237356:80867-81264 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1196817227:81265-81767 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:606951568:81672-82114 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1125187818:82060-82521 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:51414620:82485-82898 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1419630486:82837-83203 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1003242286:83116-83578 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1296974226:83484-83952 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:7:1535306127:83916-84356 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1696783802:84357-84814 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:410214268:84815-85304 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:943956664:85305-85673 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:2017174479:85674-86100 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1495421476:86054-86434 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1587372219:86435-86919 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1869164608:86834-87303 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1027907545:87234-87671 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1559881987:87604-88071 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:2037388098:88000-88471 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:973269092:88472-88948 produced 1 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1354272908:88949-89430 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1596132242:89340-89735 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1111815387:89645-90086 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1517772283:89993-90471 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:103294669:90400-90881 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1260294464:90882-91371 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:249110441:91284-91731 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1713147673:91732-92215 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:404732671:92121-92544 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:2111610403:92496-92947 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:437027888:92861-93293 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1346572084:93204-93699 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1941891273:93657-94114 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1678227323:94066-94546 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:864462313:94474-94934 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1400156635:94907-95374 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:664662160:95281-95706 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1710651091:95628-96121 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:450138682:96122-96629 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1645552702:96533-97039 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1858950530:96945-97429 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1427699420:97378-97839 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:423571311:97777-98274 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:781019994:98275-98749 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1984191640:98678-99118 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:2038571081:99041-99422 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:399729688:99348-99746 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1911843020:99704-100158 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1890013819:100064-100500 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:508606544:100501-100932 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:1551213391:100933-101346 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:947227303:101280-101740 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:371838081:101659-102121 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:8:2142476157:102080-102522 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1374336817:102474-102954 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1170893249:102874-103276 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:546673224:103207-103713 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1100689951:103655-104130 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:632995391:104057-104443 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1660863184:104444-104932 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1492137131:104933-105386 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1321971660:105323-105820 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1964765267:105745-106248 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1835117079:106169-106632 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1153899626:106539-107008 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1311537629:106937-107393 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1840343491:107305-107788 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:58087621:107723-108224 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1409090789:108159-108642 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1455010800:108547-109007 produced 14 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1021170353:108936-109431 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1542072155:109332-109801 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:905525343:109707-110212 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:962576785:110135-110637 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:795572647:110603-110958 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:2077516965:110912-111336 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:852899777:111293-111771 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1514892780:111672-112097 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1377931651:112060-112511 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:761837521:112429-112855 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1248468153:112856-113348 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:2061569235:113273-113708 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1564677131:113631-114116 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:430211143:114051-114542 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1746330208:114445-114894 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1833174995:114834-115319 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:872064531:115280-115759 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:30587682:115701-116155 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1743543600:116132-116576 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:194486382:116499-116871 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:233162649:116856-117339 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:529896557:117262-117748 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:1058074106:117653-118069 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:336755093:118070-118563 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:9:2023855219:118516-118980 produced 18 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:523495922:118922-119428 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:283684190:119429-119922 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1427257955:119896-120400 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:759852450:120361-120862 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:239546644:120820-121289 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1536504690:121198-121677 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:2067619199:121618-122120 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:459843208:122033-122516 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1569623167:122447-122918 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1333257276:122919-123422 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1742419381:123423-123862 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1993664717:123790-124257 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:202909219:124230-124716 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1549296607:124672-125133 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:738734781:125134-125591 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1622838306:125591-126019 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1917100646:125920-126367 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:337627835:126289-126774 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:638958546:126743-127245 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1660679097:127246-127717 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:509066995:127619-128097 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:2093479376:128098-128595 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:474120440:128506-128991 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1847270345:128992-129455 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1036145970:129400-129756 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1639719227:129757-130165 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1711958817:130133-130550 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1229732647:130530-130908 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:485830225:130909-131332 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:229265415:131236-131736 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1478286276:131705-132139 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:888782449:132140-132534 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1440136844:132517-132959 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1136299015:132960-133465 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:631190609:133394-133896 produced 17 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:2131670626:133814-134303 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1629584942:134236-134737 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1522441633:134738-135169 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:476790172:135079-135572 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:615518957:135507-135982 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1654213829:135895-136381 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:1107706246:136303-136684 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:719528341:136609-137067 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:40999628:136966-137390 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:10:2073541651:137391-137853 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:2014220210:137854-138336 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:368770236:138337-138775 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1709798865:138759-139256 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:10243917:139168-139581 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:443721211:139518-139922 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1479120439:139842-140320 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:557587748:140221-140690 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:719020774:140611-141032 produced 15 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:329868253:141000-141458 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:911328476:141445-141894 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1622639257:141895-142383 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1793183211:142315-142808 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1321045506:142725-143199 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:384506276:143130-143628 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1585378701:143548-143956 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1296854594:143883-144374 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1832746851:144280-144751 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1889242108:144675-145102 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1709825748:145006-145503 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:921211890:145441-145786 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1731148062:145734-146148 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:2067204007:146068-146522 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1923289467:146523-147000 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1475225274:146932-147364 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:726576851:147288-147784 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1495371134:147716-148203 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1510684374:148204-148644 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:896367955:148645-149096 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:771755219:149015-149450 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1101400956:149451-149950 produced 8 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1314005939:149856-150299 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1942756629:150230-150666 produced 2 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1362262787:150667-151137 produced 5 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:947717491:151138-151537 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:81314484:151538-152003 produced 4 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:842988597:151902-152399 produced 7 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:82606046:152325-152815 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:254826552:152738-153214 produced 16 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:657872952:153114-153527 produced 6 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1328547914:153493-153974 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:892668865:153899-154349 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:406479105:154248-154720 produced 10 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:41355561:154685-155104 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:866993342:155023-155461 produced 9 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:342969491:155384-155882 produced 19 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:2067267766:155866-156328 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:544437277:156329-156779 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:380861684:156710-157124 produced 12 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:173293905:157039-157496 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:823212962:157404-157848 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:662096248:157764-158246 produced 11 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:917219326:158171-158661 produced 16 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:574077844:158565-159001 produced 13 speculative discovery candidates."
+          },
+          {
+            "code": "PX_GRAPTOR_DISCOVERY",
+            "message": "Leaf perf-doc-shortrun:11:1192924856:158969-159085 produced 3 speculative discovery candidates."
+          },
+          {
+            "code": "PX_INGEST_GRAPTOR",
+            "message": "Phoenix Graptor ingested canonical chunk and graph facts."
+          },
+          {
+            "code": "PX_LEX_REBUILT",
+            "message": "Rebuilt lexical index from 394 canonical spans."
+          }
+        ]
+      },
+      "sessionStats": {
+        "documentCount": 1,
+        "chapterCount": 11,
+        "parentCount": 129,
+        "leafCount": 394,
+        "entityCount": 0,
+        "discoveryCandidateCount": 2663,
+        "graphVertexCount": 597,
+        "graphEdgeCount": 596,
+        "spanCount": 2211
+      },
+      "phases": [
+        {
+          "name": "init_runtime",
+          "wallMs": 4,
+          "heapBeforeBytes": 3228596,
+          "heapAfterBytes": 3231764,
+          "heapPeakBytes": 3263466,
+          "heapPeakDeltaBytes": 34870,
+          "outputBytes": 0,
+          "note": null
+        },
+        {
+          "name": "create_session",
+          "wallMs": 0,
+          "heapBeforeBytes": 3230016,
+          "heapAfterBytes": 3230212,
+          "heapPeakBytes": 3246035,
+          "heapPeakDeltaBytes": 16019,
+          "outputBytes": 0,
+          "note": null
+        },
+        {
+          "name": "analyze_text",
+          "wallMs": 69,
+          "heapBeforeBytes": 3262994,
+          "heapAfterBytes": 4346325,
+          "heapPeakBytes": 27547182,
+          "heapPeakDeltaBytes": 24284188,
+          "outputBytes": 599954,
+          "note": null
+        },
+        {
+          "name": "excerpt_scan",
+          "wallMs": 8,
+          "heapBeforeBytes": 4346337,
+          "heapAfterBytes": 4850685,
+          "heapPeakBytes": 5373927,
+          "heapPeakDeltaBytes": 1027590,
+          "outputBytes": 1240567,
+          "note": null
+        },
+        {
+          "name": "excerpt_structure",
+          "wallMs": 2,
+          "heapBeforeBytes": 4850697,
+          "heapAfterBytes": 5297796,
+          "heapPeakBytes": 5634232,
+          "heapPeakDeltaBytes": 783535,
+          "outputBytes": 509263,
+          "note": null
+        },
+        {
+          "name": "ingest_document",
+          "wallMs": 299,
+          "heapBeforeBytes": 5298215,
+          "heapAfterBytes": 11160817,
+          "heapPeakBytes": 17284202,
+          "heapPeakDeltaBytes": 11985987,
+          "outputBytes": 57093,
+          "note": null
+        },
+        {
+          "name": "commit_session",
+          "wallMs": 32,
+          "heapBeforeBytes": 11160832,
+          "heapAfterBytes": 11163116,
+          "heapPeakBytes": 16065284,
+          "heapPeakDeltaBytes": 4904452,
+          "outputBytes": 1961,
+          "note": null
+        },
+        {
+          "name": "rebuild_lex",
+          "wallMs": 53,
+          "heapBeforeBytes": 11163130,
+          "heapAfterBytes": 11165409,
+          "heapPeakBytes": 16067400,
+          "heapPeakDeltaBytes": 4904270,
+          "outputBytes": 1967,
+          "note": null
+        },
+        {
+          "name": "session_state",
+          "wallMs": 0,
+          "heapBeforeBytes": 11165420,
+          "heapAfterBytes": 11166811,
+          "heapPeakBytes": 11183623,
+          "heapPeakDeltaBytes": 18203,
+          "outputBytes": 1242,
+          "note": null
+        },
+        {
+          "name": "session_stats",
+          "wallMs": 0,
+          "heapBeforeBytes": 11167592,
+          "heapAfterBytes": 11167605,
+          "heapPeakBytes": 11185795,
+          "heapPeakDeltaBytes": 18203,
+          "outputBytes": 233,
+          "note": null
+        },
+        {
+          "name": "graph_delta",
+          "wallMs": 9,
+          "heapBeforeBytes": 11167618,
+          "heapAfterBytes": 11295509,
+          "heapPeakBytes": 14379707,
+          "heapPeakDeltaBytes": 3212089,
+          "outputBytes": 108185,
+          "note": null
+        },
+        {
+          "name": "snapshot_export",
+          "wallMs": 63,
+          "heapBeforeBytes": 11297420,
+          "heapAfterBytes": 12934140,
+          "heapPeakBytes": 22180168,
+          "heapPeakDeltaBytes": 10882748,
+          "outputBytes": 931859,
+          "note": null
+        },
+        {
+          "name": "snapshot_import",
+          "wallMs": 104,
+          "heapBeforeBytes": 13048628,
+          "heapAfterBytes": 18829552,
+          "heapPeakBytes": 24596468,
+          "heapPeakDeltaBytes": 11547840,
+          "outputBytes": 931859,
+          "note": null
+        },
+        {
+          "name": "restore_query",
+          "wallMs": 0,
+          "heapBeforeBytes": 18829552,
+          "heapAfterBytes": 18833117,
+          "heapPeakBytes": 18883915,
+          "heapPeakDeltaBytes": 54363,
+          "outputBytes": 629,
+          "note": null
+        }
+      ],
+      "lexicalQueryBatch": {
+        "phase": {
+          "name": "lexical_query_batch",
+          "wallMs": 1,
+          "heapBeforeBytes": 11295754,
+          "heapAfterBytes": 11296403,
+          "heapPeakBytes": 11401367,
+          "heapPeakDeltaBytes": 105613,
+          "outputBytes": 140,
+          "note": null
+        },
+        "runs": [
+          {
+            "query": "\"New Rome\"",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Len",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Ryan",
+            "chunkHits": 8,
+            "nodeHits": 0
+          }
+        ]
+      },
+      "graphQueryBatch": {
+        "phase": {
+          "name": "graph_query_batch",
+          "wallMs": 9,
+          "heapBeforeBytes": 11296423,
+          "heapAfterBytes": 11297405,
+          "heapPeakBytes": 12148844,
+          "heapPeakDeltaBytes": 852421,
+          "outputBytes": 99,
+          "note": null
+        },
+        "runs": [
+          {
+            "query": "Ryan Ghoul",
+            "chunkHits": 8,
+            "nodeHits": 0
+          },
+          {
+            "query": "Ryan Len",
+            "chunkHits": 8,
+            "nodeHits": 0
+          }
+        ]
+      },
+      "snapshotBytes": 931859,
+      "snapshotRelationCount": 47,
+      "budget": {
+        "maxAnalyzeTextMs": 2000,
+        "maxExcerptScanMs": 1500,
+        "maxExcerptStructureMs": 1500,
+        "maxIngestMs": 25000,
+        "maxCommitMs": 1500,
+        "maxRebuildMs": 5000,
+        "maxGraphDeltaMs": 4000,
+        "maxLexicalQueryBatchMs": 2000,
+        "maxGraphQueryBatchMs": 4000,
+        "maxSnapshotExportMs": 4000,
+        "maxSnapshotImportMs": 6000,
+        "maxRestoreQueryMs": 1500,
+        "maxIngestPeakDeltaBytes": 268435456,
+        "maxGraphDeltaPeakDeltaBytes": 67108864,
+        "maxSnapshotImportPeakDeltaBytes": 268435456,
+        "maxSnapshotBytes": 67108864
+      },
+      "budgetCheck": {
+        "passed": true,
+        "failures": []
+      }
+    },
     {
       "corpusId": "perfect_run",
       "title": "Perfect Run",
@@ -131,7 +2399,7 @@
         },
         {
           "relation": "spans",
-          "rows": 41071
+          "rows": 40887
         },
         {
           "relation": "wormholes",
@@ -183,11 +2451,11 @@
         },
         {
           "relation": "graph_vertices",
-          "rows": 10734
+          "rows": 10623
         },
         {
           "relation": "graph_edges",
-          "rows": 10733
+          "rows": 10622
         },
         {
           "relation": "graph_node_index",
@@ -195,11 +2463,11 @@
         },
         {
           "relation": "graph_properties",
-          "rows": 173841
+          "rows": 70730
         },
         {
           "relation": "graph_vertex_labels",
-          "rows": 9834
+          "rows": 9612
         },
         {
           "relation": "graph_named_rules",
@@ -222,7 +2490,7 @@
             "parentCount": 2247,
             "leafCount": 6995,
             "entityCount": 0,
-            "edgeCount": 10733,
+            "edgeCount": 10622,
             "hasFrontMatterChapter": true
           }
         ],
@@ -238,7 +2506,7 @@
           "totalLeaves": 6995,
           "totalEntities": 0,
           "totalMentions": 0,
-          "totalEdges": 10733,
+          "totalEdges": 10622,
           "crossChapterLinks": 0
         },
         "entitySummary": {
@@ -256,7 +2524,7 @@
           "qgramDocuments": 1,
           "gldrChunks": 6995,
           "gldrEntities": 0,
-          "gldrEdges": 10733,
+          "gldrEdges": 10622,
           "raptorDocuments": 0,
           "raptorLeaves": 0,
           "raptorEnabled": false
@@ -372,7 +2640,7 @@
           },
           {
             "relation": "spans",
-            "rows": 41071
+            "rows": 40887
           },
           {
             "relation": "wormholes",
@@ -424,11 +2692,11 @@
           },
           {
             "relation": "graph_vertices",
-            "rows": 10734
+            "rows": 10623
           },
           {
             "relation": "graph_edges",
-            "rows": 10733
+            "rows": 10622
           },
           {
             "relation": "graph_node_index",
@@ -436,11 +2704,11 @@
           },
           {
             "relation": "graph_properties",
-            "rows": 173841
+            "rows": 70730
           },
           {
             "relation": "graph_vertex_labels",
-            "rows": 9834
+            "rows": 9612
           },
           {
             "relation": "graph_named_rules",
@@ -2521,97 +4789,97 @@
         "leafCount": 6995,
         "entityCount": 0,
         "discoveryCandidateCount": 54495,
-        "graphVertexCount": 10734,
-        "graphEdgeCount": 10733,
-        "spanCount": 41071
+        "graphVertexCount": 10623,
+        "graphEdgeCount": 10622,
+        "spanCount": 40887
       },
       "phases": [
         {
           "name": "init_runtime",
           "wallMs": 5,
-          "heapBeforeBytes": 3069556,
-          "heapAfterBytes": 3072724,
-          "heapPeakBytes": 3104426,
-          "heapPeakDeltaBytes": 34870,
+          "heapBeforeBytes": 3165367,
+          "heapAfterBytes": 3167511,
+          "heapPeakBytes": 3199213,
+          "heapPeakDeltaBytes": 33846,
           "outputBytes": 0,
           "note": null
         },
         {
           "name": "create_session",
           "wallMs": 0,
-          "heapBeforeBytes": 3070976,
-          "heapAfterBytes": 3071184,
-          "heapPeakBytes": 3087289,
+          "heapBeforeBytes": 3165763,
+          "heapAfterBytes": 3165971,
+          "heapPeakBytes": 3182076,
           "heapPeakDeltaBytes": 16313,
           "outputBytes": 0,
           "note": null
         },
         {
           "name": "analyze_text",
-          "wallMs": 723,
-          "heapBeforeBytes": 3103966,
-          "heapAfterBytes": 20047950,
-          "heapPeakBytes": 160892063,
-          "heapPeakDeltaBytes": 157788097,
+          "wallMs": 1554,
+          "heapBeforeBytes": 3198753,
+          "heapAfterBytes": 20137857,
+          "heapPeakBytes": 386082654,
+          "heapPeakDeltaBytes": 382883901,
           "outputBytes": 10536371,
           "note": null
         },
         {
           "name": "excerpt_scan",
-          "wallMs": 11,
-          "heapBeforeBytes": 20047962,
-          "heapAfterBytes": 20551743,
-          "heapPeakBytes": 21074601,
-          "heapPeakDeltaBytes": 1026639,
-          "outputBytes": 1206688,
+          "wallMs": 8,
+          "heapBeforeBytes": 20137869,
+          "heapAfterBytes": 20641682,
+          "heapPeakBytes": 21164572,
+          "heapPeakDeltaBytes": 1026703,
+          "outputBytes": 1215193,
           "note": null
         },
         {
           "name": "excerpt_structure",
           "wallMs": 1,
-          "heapBeforeBytes": 20551755,
-          "heapAfterBytes": 20986893,
-          "heapPeakBytes": 21314678,
-          "heapPeakDeltaBytes": 762923,
-          "outputBytes": 493698,
+          "heapBeforeBytes": 20641694,
+          "heapAfterBytes": 21080648,
+          "heapPeakBytes": 21411073,
+          "heapPeakDeltaBytes": 769379,
+          "outputBytes": 499321,
           "note": null
         },
         {
           "name": "ingest_document",
-          "wallMs": 8362,
-          "heapBeforeBytes": 20987330,
-          "heapAfterBytes": 137805844,
-          "heapPeakBytes": 356610094,
-          "heapPeakDeltaBytes": 335622764,
-          "outputBytes": 75212,
+          "wallMs": 6236,
+          "heapBeforeBytes": 21081085,
+          "heapAfterBytes": 110770819,
+          "heapPeakBytes": 202619291,
+          "heapPeakDeltaBytes": 181538206,
+          "outputBytes": 75211,
           "note": null
         },
         {
           "name": "commit_session",
-          "wallMs": 829,
-          "heapBeforeBytes": 137805859,
-          "heapAfterBytes": 137808158,
-          "heapPeakBytes": 353749302,
-          "heapPeakDeltaBytes": 215943443,
-          "outputBytes": 1978,
+          "wallMs": 891,
+          "heapBeforeBytes": 110770834,
+          "heapAfterBytes": 110773133,
+          "heapPeakBytes": 199758499,
+          "heapPeakDeltaBytes": 88987665,
+          "outputBytes": 1977,
           "note": null
         },
         {
           "name": "rebuild_lex",
-          "wallMs": 1548,
-          "heapBeforeBytes": 137808172,
-          "heapAfterBytes": 137810451,
-          "heapPeakBytes": 353751415,
-          "heapPeakDeltaBytes": 215943243,
-          "outputBytes": 1979,
+          "wallMs": 1442,
+          "heapBeforeBytes": 110773147,
+          "heapAfterBytes": 110775426,
+          "heapPeakBytes": 199760612,
+          "heapPeakDeltaBytes": 88987465,
+          "outputBytes": 1978,
           "note": null
         },
         {
           "name": "session_state",
           "wallMs": 0,
-          "heapBeforeBytes": 137810462,
-          "heapAfterBytes": 137817855,
-          "heapPeakBytes": 137846419,
+          "heapBeforeBytes": 110775437,
+          "heapAfterBytes": 110782830,
+          "heapPeakBytes": 110811394,
           "heapPeakDeltaBytes": 35957,
           "outputBytes": 4706,
           "note": null
@@ -2619,49 +4887,49 @@
         {
           "name": "session_stats",
           "wallMs": 0,
-          "heapBeforeBytes": 137818636,
-          "heapAfterBytes": 137818652,
-          "heapPeakBytes": 137854593,
+          "heapBeforeBytes": 110783611,
+          "heapAfterBytes": 110783627,
+          "heapPeakBytes": 110819568,
           "heapPeakDeltaBytes": 35957,
           "outputBytes": 245,
           "note": null
         },
         {
           "name": "graph_delta",
-          "wallMs": 211,
-          "heapBeforeBytes": 137818665,
-          "heapAfterBytes": 140355252,
-          "heapPeakBytes": 196173643,
-          "heapPeakDeltaBytes": 58354978,
-          "outputBytes": 2157579,
+          "wallMs": 444,
+          "heapBeforeBytes": 110783640,
+          "heapAfterBytes": 113306408,
+          "heapPeakBytes": 168197697,
+          "heapPeakDeltaBytes": 57414057,
+          "outputBytes": 2127312,
           "note": null
         },
         {
           "name": "snapshot_export",
-          "wallMs": 1503,
-          "heapBeforeBytes": 140357651,
-          "heapAfterBytes": 168337795,
-          "heapPeakBytes": 511465035,
-          "heapPeakDeltaBytes": 371107384,
-          "outputBytes": 20040428,
+          "wallMs": 1594,
+          "heapBeforeBytes": 113308807,
+          "heapAfterBytes": 141288951,
+          "heapPeakBytes": 305944103,
+          "heapPeakDeltaBytes": 192635296,
+          "outputBytes": 17333983,
           "note": null
         },
         {
           "name": "snapshot_import",
-          "wallMs": 2816,
-          "heapBeforeBytes": 168452283,
-          "heapAfterBytes": 287846356,
-          "heapPeakBytes": 527513859,
-          "heapPeakDeltaBytes": 359061576,
-          "outputBytes": 20040428,
+          "wallMs": 2179,
+          "heapBeforeBytes": 141403439,
+          "heapAfterBytes": 233157820,
+          "heapPeakBytes": 335421326,
+          "heapPeakDeltaBytes": 194017887,
+          "outputBytes": 17333983,
           "note": null
         },
         {
           "name": "restore_query",
           "wallMs": 1,
-          "heapBeforeBytes": 287846356,
-          "heapAfterBytes": 287892200,
-          "heapPeakBytes": 287948096,
+          "heapBeforeBytes": 233157820,
+          "heapAfterBytes": 233203664,
+          "heapPeakBytes": 233259560,
           "heapPeakDeltaBytes": 101740,
           "outputBytes": 664,
           "note": null
@@ -2670,10 +4938,10 @@
       "lexicalQueryBatch": {
         "phase": {
           "name": "lexical_query_batch",
-          "wallMs": 15,
-          "heapBeforeBytes": 140355497,
-          "heapAfterBytes": 140356936,
-          "heapPeakBytes": 142033331,
+          "wallMs": 22,
+          "heapBeforeBytes": 113306653,
+          "heapAfterBytes": 113308092,
+          "heapPeakBytes": 114984487,
           "heapPeakDeltaBytes": 1677834,
           "outputBytes": 140,
           "note": null
@@ -2699,11 +4967,11 @@
       "graphQueryBatch": {
         "phase": {
           "name": "graph_query_batch",
-          "wallMs": 409,
-          "heapBeforeBytes": 140356956,
-          "heapAfterBytes": 140357636,
-          "heapPeakBytes": 199435684,
-          "heapPeakDeltaBytes": 59078728,
+          "wallMs": 177,
+          "heapBeforeBytes": 113308112,
+          "heapAfterBytes": 113308792,
+          "heapPeakBytes": 125944705,
+          "heapPeakDeltaBytes": 12636593,
           "outputBytes": 99,
           "note": null
         },
@@ -2720,7 +4988,7 @@
           }
         ]
       },
-      "snapshotBytes": 20040428,
+      "snapshotBytes": 17333983,
       "snapshotRelationCount": 47,
       "budget": {
         "maxAnalyzeTextMs": 10000,

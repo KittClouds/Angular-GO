@@ -180,21 +180,26 @@ impl QgramIndex {
         self.trigram_postings.clear();
         self.bigram_postings.clear();
 
+        let mut grams_buffer = Vec::new();
         for ordinal in 0..self.catalog.len() as u32 {
             let Some(span) = self.catalog.span(SpanOrdinal(ordinal)) else {
                 continue;
             };
             for field in &span.fields {
                 let normalized = self.catalog.field_text(field);
-                for gram in extract_packed_grams(normalized, self.config.trigram_width) {
+                
+                extract_packed_grams(normalized, self.config.trigram_width, &mut grams_buffer);
+                for gram in &grams_buffer {
                     self.trigram_postings
-                        .entry(gram)
+                        .entry(*gram)
                         .or_default()
                         .add(ordinal, self.config.bitmap_threshold);
                 }
-                for gram in extract_packed_grams(normalized, self.config.bigram_width) {
+                
+                extract_packed_grams(normalized, self.config.bigram_width, &mut grams_buffer);
+                for gram in &grams_buffer {
                     self.bigram_postings
-                        .entry(gram)
+                        .entry(*gram)
                         .or_default()
                         .add(ordinal, self.config.bitmap_threshold);
                 }
@@ -203,19 +208,18 @@ impl QgramIndex {
     }
 
     fn clause_candidates(&self, clause: &Clause, scope: &ScopeKey) -> Vec<u32> {
+        let mut grams_buffer = Vec::new();
         match clause.pattern.len() {
             0 => Vec::new(),
             1 => self.catalog.filtered_ordinals(scope),
-            2 => self.candidates_for_grams(
-                &extract_packed_grams(&clause.pattern, self.config.bigram_width),
-                &self.bigram_postings,
-                scope,
-            ),
-            _ => self.candidates_for_grams(
-                &extract_packed_grams(&clause.pattern, self.config.trigram_width),
-                &self.trigram_postings,
-                scope,
-            ),
+            2 => {
+                extract_packed_grams(&clause.pattern, self.config.bigram_width, &mut grams_buffer);
+                self.candidates_for_grams(&grams_buffer, &self.bigram_postings, scope)
+            }
+            _ => {
+                extract_packed_grams(&clause.pattern, self.config.trigram_width, &mut grams_buffer);
+                self.candidates_for_grams(&grams_buffer, &self.trigram_postings, scope)
+            }
         }
     }
 
@@ -258,6 +262,7 @@ impl QgramIndex {
     }
 
     fn clause_idfs(&self, clauses: &[Clause], clause_dfs: &[usize]) -> Vec<f64> {
+        let mut grams_buffer = Vec::new();
         clauses
             .iter()
             .zip(clause_dfs.iter().copied())
@@ -265,16 +270,14 @@ impl QgramIndex {
                 let df = match clause.pattern.len() {
                     0 => self.catalog.stats().total_spans.max(1),
                     1 => fallback_df.max(1),
-                    2 => self.gram_df(
-                        &extract_packed_grams(&clause.pattern, self.config.bigram_width),
-                        &self.bigram_postings,
-                        fallback_df,
-                    ),
-                    _ => self.gram_df(
-                        &extract_packed_grams(&clause.pattern, self.config.trigram_width),
-                        &self.trigram_postings,
-                        fallback_df,
-                    ),
+                    2 => {
+                        extract_packed_grams(&clause.pattern, self.config.bigram_width, &mut grams_buffer);
+                        self.gram_df(&grams_buffer, &self.bigram_postings, fallback_df)
+                    }
+                    _ => {
+                        extract_packed_grams(&clause.pattern, self.config.trigram_width, &mut grams_buffer);
+                        self.gram_df(&grams_buffer, &self.trigram_postings, fallback_df)
+                    }
                 };
                 idf(self.catalog.stats().total_spans.max(1), df.max(1))
             })
@@ -301,7 +304,7 @@ impl QgramIndex {
         idfs: &[f64],
     ) -> f64 {
         let mut base_sum = 0.0;
-        let mut masks = Vec::new();
+        let mut masks: smallvec::SmallVec<[u32; 8]> = smallvec::SmallVec::new();
         let stats = self.catalog.stats();
 
         for (index, matched) in matches.iter().enumerate() {

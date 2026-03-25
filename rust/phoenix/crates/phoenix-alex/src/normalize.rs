@@ -41,7 +41,32 @@ fn lower_char(ch: char) -> char {
 }
 
 pub fn normalize_raw(text: &str) -> String {
-    canonicalize_with_offsets(text).0
+    let mut output = String::with_capacity(text.len());
+    let mut last_was_space = true;
+
+    for ch in text.chars() {
+        let mapped = lower_char(ch);
+        if mapped.is_ascii_alphanumeric() || mapped.is_whitespace() || is_joiner(mapped) {
+            if mapped.is_whitespace() {
+                if !last_was_space {
+                    output.push(' ');
+                    last_was_space = true;
+                }
+            } else {
+                output.push(mapped);
+                last_was_space = false;
+            }
+        } else if !last_was_space {
+            output.push(' ');
+            last_was_space = true;
+        }
+    }
+
+    while output.ends_with(' ') {
+        output.pop();
+    }
+
+    output
 }
 
 pub fn canonicalize_with_offsets(text: &str) -> (String, Vec<usize>) {

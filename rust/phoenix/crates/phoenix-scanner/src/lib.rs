@@ -435,7 +435,7 @@ fn guess_pos(token: &str, masked: bool) -> PosTag {
     if masked {
         return PosTag::ProperNoun;
     }
-    let lower = normalize_raw(token);
+    let lower = token.to_ascii_lowercase();
     if lower.is_empty() {
         return PosTag::Other;
     }

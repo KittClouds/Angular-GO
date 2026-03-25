@@ -1,10 +1,11 @@
-use phoenix_graptor::{load_graph_snapshot, GraptorGraph, GraptorVertex};
+use phoenix_graptor::{GraptorEdge, GraptorGraph, GraptorVertex};
 use phoenix_lex::LexIndex;
 use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
 use phoenix_types::{
     ChunkHit, Diagnostic, EntityId, NodeHit, QueryRequest, QueryResult, TemporalMarker,
 };
 use rustc_hash::FxHashMap;
+use serde_json::Value;
 
 #[derive(Clone, Debug)]
 pub struct GldrConfig {
@@ -52,7 +53,13 @@ impl PhoenixGldr {
             &request.scope,
             limit.max(self.config.seed_limit) * 2,
         );
-        let graph = load_graph_snapshot(store)?;
+        let seed_vertex_ids: Vec<String> = lexical
+            .span_hits
+            .iter()
+            .take(self.config.seed_limit.max(limit))
+            .map(|hit| leaf_vertex_id(&hit.span_id))
+            .collect();
+        let graph = load_subgraph(store, &seed_vertex_ids)?;
         let temporal = TemporalFilter::from_marker(request.temporal.as_ref());
         let wants_chunks = request.targets.is_empty()
             || request.targets.iter().any(|target| {
@@ -389,6 +396,178 @@ fn entity_vertex_id(entity_id: &str) -> String {
 
 fn chapter_vertex_id(document_id: &str, chapter_id: u32) -> String {
     format!("chapter::{document_id}::{chapter_id}")
+}
+
+/// Load only the sub-graph reachable within 2 hops of the given seed vertex IDs.
+/// This replaces the full `load_graph_snapshot` for query paths, reducing
+/// data transfer from tens of thousands of rows to typically <500.
+fn load_subgraph(
+    store: &PhoenixCozoStore,
+    seed_vertex_ids: &[String],
+) -> Result<GraptorGraph, StoreError> {
+    if seed_vertex_ids.is_empty() {
+        return Ok(GraptorGraph::default());
+    }
+
+    // Single unified Datalog query that returns both vertices and edges.
+    // Uses a 'kind' discriminator: 'v' for vertices, 'e' for edges.
+    // Columns: [kind, c0, c1, c2, c3, c4, c5]
+    // Vertices: ['v', id, weight_str, value, attributes, null, null]
+    // Edges:    ['e', source_id, target_id, edge_type, weight_str, attributes, data]
+    let script = r#"
+        seeds[id] <- $seeds
+
+        hop1_targets[tid] := seeds[sid],
+            *graph_edges{ source_id: sid, target_id: tid }
+        hop1_sources[sid] := seeds[tid],
+            *graph_edges{ source_id: sid, target_id: tid }
+        hop2_targets[tid] := hop1_targets[mid],
+            *graph_edges{ source_id: mid, target_id: tid }
+        hop2_sources[sid] := hop1_targets[mid],
+            *graph_edges{ source_id: sid, target_id: mid }
+
+        touched[id] := seeds[id]
+        touched[id] := hop1_targets[id]
+        touched[id] := hop1_sources[id]
+        touched[id] := hop2_targets[id]
+        touched[id] := hop2_sources[id]
+
+        ?[kind, c0, c1, c2, c3, c4, c5] := kind = "v", touched[c0],
+            *graph_vertices{ id: c0, weight: w, value: c2, attributes: c3 },
+            c1 = to_string(w), c4 = null, c5 = null
+
+        ?[kind, c0, c1, c2, c3, c4, c5] := kind = "e",
+            touched[c0], touched[c1],
+            *graph_edges{ source_id: c0, target_id: c1, edge_type: c2, weight: w, attributes: c4, data: c5 },
+            c3 = to_string(w)
+    "#;
+
+    let mut graph = GraptorGraph::default();
+
+    // Single query returns both vertices and edges
+    let rows = store.run_datalog_json(script, seed_vertex_ids)?;
+    for row in &rows {
+        let Some(kind) = row.first().and_then(Value::as_str) else {
+            continue;
+        };
+        match kind {
+            "v" => {
+                // Columns: ['v', id, weight_str, value, attributes, null, null]
+                let Some(id) = row.get(1).and_then(Value::as_str) else {
+                    continue;
+                };
+                let weight = row
+                    .get(2)
+                    .and_then(Value::as_str)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .or_else(|| row.get(2).and_then(Value::as_i64))
+                    .unwrap_or(1);
+                let value = row.get(3).cloned().unwrap_or(Value::Null);
+                let attributes = row.get(4).cloned().unwrap_or(Value::Null);
+
+                let vertex_kind = value
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_owned();
+                let entity_id = value
+                    .get("entityId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let search_chunk_id = value
+                    .get("searchChunkId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        attributes
+                            .get("searchChunkId")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    });
+                let document_id = attributes
+                    .get("documentId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let chapter_id = attributes
+                    .get("chapterId")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as u32);
+                let chapters = attributes
+                    .get("chapters")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_u64)
+                            .map(|v| v as u32)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                let vertex = GraptorVertex {
+                    id: id.to_owned(),
+                    kind: vertex_kind,
+                    weight,
+                    value,
+                    attributes: attributes.clone(),
+                    entity_id,
+                    search_chunk_id: search_chunk_id.clone(),
+                    document_id: document_id.clone(),
+                    chapter_id,
+                    chapters,
+                };
+                graph.vertices.insert(id.to_owned(), vertex);
+                if let (Some(doc_id), Some(ch_id), Some(_)) =
+                    (document_id, chapter_id, search_chunk_id)
+                {
+                    graph
+                        .chapter_leaves
+                        .entry((doc_id, ch_id))
+                        .or_default()
+                        .push(id.to_owned());
+                }
+            }
+            "e" => {
+                // Columns: ['e', source_id, target_id, edge_type, weight_str, attributes, data]
+                let Some(source_id) = row.get(1).and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(target_id) = row.get(2).and_then(Value::as_str) else {
+                    continue;
+                };
+                let edge_weight = row
+                    .get(4)
+                    .and_then(Value::as_str)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .or_else(|| row.get(4).and_then(Value::as_i64))
+                    .unwrap_or(1);
+                let edge = GraptorEdge {
+                    source_id: source_id.to_owned(),
+                    target_id: target_id.to_owned(),
+                    edge_type: row
+                        .get(3)
+                        .and_then(Value::as_str)
+                        .unwrap_or("edge")
+                        .to_owned(),
+                    weight: edge_weight,
+                    attributes: row.get(5).cloned().unwrap_or(Value::Null),
+                    data: row.get(6).cloned().filter(|v| !v.is_null()),
+                };
+                graph
+                    .outgoing
+                    .entry(source_id.to_owned())
+                    .or_default()
+                    .push(edge.clone());
+                graph
+                    .incoming
+                    .entry(target_id.to_owned())
+                    .or_default()
+                    .push(edge);
+            }
+            _ => continue,
+        }
+    }
+
+    Ok(graph)
 }
 
 #[cfg(test)]

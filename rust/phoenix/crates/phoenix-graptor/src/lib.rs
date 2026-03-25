@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::{max, min};
 
 use daachorse::{DoubleArrayAhoCorasick, DoubleArrayAhoCorasickBuilder, MatchKind};
@@ -1106,9 +1107,9 @@ impl Default for FlushPolicy {
     fn default() -> Self {
         if cfg!(target_arch = "wasm32") {
             Self {
-                text_heavy_limit: 128,
-                medium_limit: 256,
-                lightweight_limit: 512,
+                text_heavy_limit: 512,
+                medium_limit: 512,
+                lightweight_limit: 1024,
                 diagnostic_cap: 256,
             }
         } else {
@@ -1781,6 +1782,7 @@ fn process_document_chunks(
         }
     }
 
+    let mut current_chapter: Option<u32> = None;
     for leaf in leaves {
         buffers
             .chunk_rows
@@ -1821,6 +1823,19 @@ fn process_document_chunks(
         );
 
         let leaf_text = preserve_offsets_slice(&document.text[leaf.start..leaf.end]);
+        // Only rebuild the resolver seed (and thus the scanner's lexicon) at chapter boundaries.
+        // This avoids rebuilding the FST + Aho-Corasick automaton per-leaf when new entities
+        // are discovered, trading slight delay in recognizing new entities for a major
+        // reduction in lexicon rebuild overhead.
+        let chapter_crossed = current_chapter != Some(leaf.chapter_id);
+        if chapter_crossed {
+            current_chapter = Some(leaf.chapter_id);
+            // Invalidate cached version to force seed rebuild
+            resolver_scratch.version = u64::MAX;
+        } else {
+            // Pin version so intra-chapter entity discoveries don't trigger rebuild
+            resolver_scratch.version = registry.version;
+        }
         let resolver_seed = registry.refresh_resolver_seed(&document.scope, resolver_scratch);
         let scan = scanner.scan_parts(
             &leaf_text,
@@ -2143,19 +2158,10 @@ fn record_graph_json_properties(
     value: &Value,
     now: i64,
 ) {
+    // Store as a single JSON blob instead of recursing into sub-keys.
+    // Child properties are queryable via the parent blob, avoiding
+    // amplification that generated ~6-12 rows per vertex/edge.
     record_graph_property(rows, owner_id, owner_type, prefix, value.clone(), now);
-    if let Some(object) = value.as_object() {
-        for (key, value) in object {
-            record_graph_property(
-                rows,
-                owner_id,
-                owner_type,
-                &format!("{prefix}.{key}"),
-                value.clone(),
-                now,
-            );
-        }
-    }
 }
 
 fn record_graph_property(
@@ -3150,10 +3156,12 @@ fn normalize_key(text: &str) -> String {
     normalize_raw(text).trim().to_owned()
 }
 
-fn preserve_offsets_slice(text: &str) -> String {
-    text.chars()
-        .map(|ch| if ch == '\n' { ' ' } else { ch })
-        .collect()
+fn preserve_offsets_slice(text: &str) -> Cow<'_, str> {
+    if text.contains('\n') {
+        Cow::Owned(text.chars().map(|ch| if ch == '\n' { ' ' } else { ch }).collect())
+    } else {
+        Cow::Borrowed(text)
+    }
 }
 
 fn overlaps(left: TextRange, right: TextRange) -> bool {

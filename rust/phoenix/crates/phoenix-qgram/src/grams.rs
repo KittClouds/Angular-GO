@@ -1,22 +1,19 @@
-use rustc_hash::FxHashSet;
-
 pub type PackedGram = u32;
 
-pub fn extract_packed_grams(normalized: &str, width: usize) -> Vec<PackedGram> {
+pub fn extract_packed_grams(normalized: &str, width: usize, output: &mut Vec<PackedGram>) {
+    output.clear();
     if width == 0 || normalized.len() < width {
-        return Vec::new();
+        return;
     }
 
-    let mut grams = FxHashSet::default();
     let bytes = normalized.as_bytes();
     for start in 0..=bytes.len() - width {
         if let Some(packed) = pack_ngram(&bytes[start..start + width]) {
-            grams.insert(packed);
+            output.push(packed);
         }
     }
-    let mut grams = grams.into_iter().collect::<Vec<_>>();
-    grams.sort_unstable();
-    grams
+    output.sort_unstable();
+    output.dedup();
 }
 
 pub fn pack_ngram(bytes: &[u8]) -> Option<PackedGram> {
@@ -57,8 +54,10 @@ mod tests {
 
     #[test]
     fn extracts_deduped_trigrams_and_bigrams() {
-        let trigrams = extract_packed_grams("banana", 3);
-        let bigrams = extract_packed_grams("aa", 2);
+        let mut trigrams = Vec::new();
+        extract_packed_grams("banana", 3, &mut trigrams);
+        let mut bigrams = Vec::new();
+        extract_packed_grams("aa", 2, &mut bigrams);
 
         assert_eq!(trigrams.len(), 3);
         assert_eq!(bigrams.len(), 1);

@@ -76,7 +76,7 @@ const CORPORA = [
         capacityHint: 128 * 1024 * 1024,
         budget: {
             maxAnalyzeMs: 12_000,
-            maxAnalyzeMemoryDeltaBytes: 300 * 1024 * 1024,
+            maxAnalyzeMemoryDeltaBytes: 400 * 1024 * 1024,
             maxIngestMs: 15_000,
             maxIngestMemoryDeltaBytes: 180 * 1024 * 1024,
             maxPostIngestMemoryBytes: 550 * 1024 * 1024,

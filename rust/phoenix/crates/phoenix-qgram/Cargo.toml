@@ -13,3 +13,4 @@ roaring.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 rustc-hash.workspace = true
+smallvec.workspace = true

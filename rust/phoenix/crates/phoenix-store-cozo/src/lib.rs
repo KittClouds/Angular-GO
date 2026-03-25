@@ -17,7 +17,7 @@ pub mod schema;
 
 pub const SCHEMA_VERSION: &str = "phoenix.cozo.v1";
 const PUT_ROWS_BATCH_LIMIT: usize = if cfg!(target_arch = "wasm32") {
-    128
+    256
 } else {
     512
 };
@@ -458,6 +458,30 @@ impl PhoenixCozoStore {
             .rows
             .into_iter()
             .map(|row| row.into_iter().collect::<CompactRow>())
+            .collect())
+    }
+
+    pub fn run_datalog_json(
+        &self,
+        script: &str,
+        seed_strings: &[String],
+    ) -> Result<Vec<Vec<Value>>, StoreError> {
+        let seed_values: Vec<cozo::DataValue> = seed_strings
+            .iter()
+            .map(|s| cozo::DataValue::List(vec![cozo::DataValue::Str(s.clone().into())]))
+            .collect();
+        let params: BTreeMap<String, cozo::DataValue> =
+            [("seeds".to_owned(), cozo::DataValue::List(seed_values))]
+                .into_iter()
+                .collect();
+        let rows = self
+            .db
+            .run_script(script, params, cozo::ScriptMutability::Immutable)
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(rows
+            .rows
+            .into_iter()
+            .map(|row| row.into_iter().map(datavalue_to_json).collect())
             .collect())
     }
 
