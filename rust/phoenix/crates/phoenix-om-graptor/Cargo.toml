@@ -1,0 +1,20 @@
+[package]
+name = "phoenix-om-graptor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+phoenix-graptor = { path = "../phoenix-graptor" }
+phoenix-scanner = { path = "../phoenix-scanner" }
+phoenix-store-cozo = { path = "../phoenix-store-cozo" }
+phoenix-structure = { path = "../phoenix-structure" }
+phoenix-types = { path = "../phoenix-types" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rustc-hash.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
