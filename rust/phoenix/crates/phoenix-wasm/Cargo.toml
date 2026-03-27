@@ -10,6 +10,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 phoenix-runtime = { path = "../phoenix-runtime" }
+phoenix-store-cozo = { path = "../phoenix-store-cozo" }
 phoenix-types = { path = "../phoenix-types" }
 serde.workspace = true
 serde_json.workspace = true

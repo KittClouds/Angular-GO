@@ -81,6 +81,7 @@ pub struct ScopeKey {
 #[serde(rename_all = "camelCase")]
 pub enum TemporalSource {
     Chapter,
+    Boundary,
     Calendar,
     Story,
     Ordinal,
@@ -88,9 +89,74 @@ pub enum TemporalSource {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum BoundaryKind {
+    #[default]
+    Chapter,
+    Heading,
+    Section,
+    Act,
+    Other,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryRef {
+    pub document_id: DocumentId,
+    pub boundary_id: u32,
+    pub kind: BoundaryKind,
+    pub ordinal: u32,
+    pub depth: u8,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedBoundary {
+    pub start: u32,
+    pub end: Option<u32>,
+    pub boundary_id: u32,
+    pub parent_boundary_id: Option<u32>,
+    pub ordinal: u32,
+    pub kind: BoundaryKind,
+    pub depth: u8,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "mode")]
+pub enum BoundaryDetectionStrategy {
+    Disabled,
+    Keywords {
+        keywords: Vec<String>,
+    },
+    MarkdownHeadings {
+        max_depth: u8,
+    },
+    Both {
+        keywords: Vec<String>,
+        max_depth: u8,
+    },
+}
+
+impl Default for BoundaryDetectionStrategy {
+    fn default() -> Self {
+        Self::Both {
+            keywords: Vec::new(),
+            max_depth: 6,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TemporalMarker {
     pub source: Option<TemporalSource>,
     pub chapter: Option<u32>,
+    pub boundary_doc_id: Option<DocumentId>,
+    pub boundary_id: Option<u32>,
+    pub boundary_ordinal: Option<i64>,
+    pub boundary_end_ordinal: Option<i64>,
+    pub boundary_kind: Option<BoundaryKind>,
     pub calendar: Option<i64>,
     pub story_time: Option<String>,
     pub ordinal: Option<i64>,
@@ -211,11 +277,13 @@ pub struct IngestDocumentSummary {
     pub document_id: DocumentId,
     pub note_id: Option<NoteId>,
     pub chapter_count: usize,
+    pub boundary_count: usize,
     pub parent_count: usize,
     pub leaf_count: usize,
     pub entity_count: usize,
     pub edge_count: usize,
     pub has_front_matter_chapter: bool,
+    pub has_front_matter_boundary: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +291,7 @@ pub struct IngestDocumentSummary {
 pub struct ChunkStats {
     pub documents: usize,
     pub total_chapters: usize,
+    pub total_boundaries: usize,
     pub total_parents: usize,
     pub total_leaves: usize,
 }
@@ -232,6 +301,7 @@ pub struct ChunkStats {
 pub struct GraphSummary {
     pub documents: usize,
     pub total_chapters: usize,
+    pub total_boundaries: usize,
     pub total_leaves: usize,
     pub total_entities: usize,
     pub total_mentions: usize,
@@ -277,6 +347,25 @@ pub enum QueryTarget {
     Semantic,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SemanticQueryVector {
+    pub values: Vec<f32>,
+}
+
+impl PartialEq for SemanticQueryVector {
+    fn eq(&self, other: &Self) -> bool {
+        self.values.len() == other.values.len()
+            && self
+                .values
+                .iter()
+                .zip(other.values.iter())
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+    }
+}
+
+impl Eq for SemanticQueryVector {}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryRequest {
@@ -286,6 +375,7 @@ pub struct QueryRequest {
     pub targets: Vec<QueryTarget>,
     pub limit: Option<usize>,
     pub temporal: Option<TemporalMarker>,
+    pub semantic_query_vector: Option<SemanticQueryVector>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -349,6 +439,8 @@ pub struct GraphDeltaChunk {
     pub document_id: DocumentId,
     pub note_id: Option<NoteId>,
     pub chapter_id: u32,
+    pub boundary_id: Option<u32>,
+    pub boundary_ordinal: Option<u32>,
     pub range: TextRange,
 }
 
@@ -361,6 +453,8 @@ pub struct GraphDeltaNode {
     pub entity_id: Option<EntityId>,
     pub document_id: Option<DocumentId>,
     pub chapter_id: Option<u32>,
+    pub boundary_id: Option<u32>,
+    pub boundary_ordinal: Option<u32>,
     pub weight: i32,
 }
 
@@ -867,6 +961,8 @@ pub enum PacketKind {
     StructureBinaryRequest = 33,
     StoreCommandRequest = 34,
     StoreCommandResult = 35,
+    EmbedUpsertBinaryRequest = 36,
+    EmbedUpsertResult = 37,
     Ack = 255,
 }
 
@@ -914,6 +1010,8 @@ impl From<u32> for PacketKind {
             33 => Self::StructureBinaryRequest,
             34 => Self::StoreCommandRequest,
             35 => Self::StoreCommandResult,
+            36 => Self::EmbedUpsertBinaryRequest,
+            37 => Self::EmbedUpsertResult,
             255 => Self::Ack,
             _ => Self::None,
         }
@@ -964,12 +1062,15 @@ pub struct SessionDocumentState {
     pub document_id: DocumentId,
     pub note_id: Option<NoteId>,
     pub chapter_count: usize,
+    pub boundary_count: usize,
     pub chapter_titles: Vec<String>,
+    pub boundary_labels: Vec<String>,
     pub parent_count: usize,
     pub leaf_count: usize,
     pub entity_count: usize,
     pub discovery_count: usize,
     pub has_front_matter_chapter: bool,
+    pub has_front_matter_boundary: bool,
     pub updated_at: i64,
 }
 
@@ -988,6 +1089,7 @@ pub struct SessionStats {
     pub session_id: SessionId,
     pub document_count: usize,
     pub chapter_count: usize,
+    pub boundary_count: usize,
     pub parent_count: usize,
     pub leaf_count: usize,
     pub entity_count: usize,
@@ -1103,6 +1205,8 @@ pub struct ThreadMessage {
     pub created_at: i64,
     pub updated_at: i64,
     pub is_streaming: bool,
+    pub token_count: Option<i64>,
+    pub is_observed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1124,6 +1228,236 @@ pub struct ChatRuntimeConfig {
     pub reasoning_effort: ReasoningEffort,
     pub reasoning_max_tokens: Option<u32>,
     pub include_reasoning: bool,
+    pub om_enabled: bool,
+    pub om_model: Option<String>,
+    pub observe_threshold: Option<u32>,
+    pub reflect_threshold: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmRecord {
+    pub thread_id: String,
+    pub observations: String,
+    pub current_task: String,
+    pub suggested_continuation: Option<String>,
+    pub last_observed_at: i64,
+    pub obs_token_count: i64,
+    pub generation_num: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmGeneration {
+    pub id: String,
+    pub thread_id: String,
+    pub generation: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub input_text: String,
+    pub output_text: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmConfig {
+    pub enabled: bool,
+    pub model: String,
+    pub observe_threshold: u32,
+    pub reflect_threshold: u32,
+    pub graph_index_enabled: bool,
+    pub index_raw_messages: bool,
+    pub index_observations: bool,
+    pub index_reflections: bool,
+    pub reflector_tooling_enabled: bool,
+    pub reflector_max_tool_rounds: u8,
+}
+
+impl Default for OmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: String::new(),
+            observe_threshold: 2_000,
+            reflect_threshold: 4_000,
+            graph_index_enabled: true,
+            index_raw_messages: true,
+            index_observations: true,
+            index_reflections: true,
+            reflector_tooling_enabled: true,
+            reflector_max_tool_rounds: 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmObservationResult {
+    pub observations: String,
+    pub current_task: Option<String>,
+    pub suggested_continuation: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmPendingAction {
+    pub kind: String,
+    pub thread_id: String,
+    pub model: String,
+    pub system_prompt: String,
+    pub user_prompt: String,
+    pub message_ids: Vec<String>,
+    pub reflector_tooling_enabled: bool,
+    pub reflector_max_tool_rounds: u8,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorToolSpec {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub parameters_json: Value,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorToolResult {
+    pub tool_call_id: String,
+    pub name: String,
+    pub result_json: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorMessage {
+    pub role: String,
+    pub content: String,
+    pub name: Option<String>,
+    pub tool_call_id: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<OmReflectorToolCall>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorModelRequest {
+    pub session_id: String,
+    pub thread_id: String,
+    pub model: String,
+    pub allow_tools: bool,
+    #[serde(default)]
+    pub tools: Vec<OmReflectorToolSpec>,
+    #[serde(default)]
+    pub messages: Vec<OmReflectorMessage>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorModelResponse {
+    pub content: String,
+    #[serde(default)]
+    pub tool_calls: Vec<OmReflectorToolCall>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmReflectorSession {
+    pub session_id: String,
+    pub thread_id: String,
+    pub model: String,
+    pub tool_rounds_used: u8,
+    pub max_tool_rounds: u8,
+    pub final_request_sent: bool,
+    pub awaiting_tool_results: bool,
+    #[serde(default)]
+    pub messages: Vec<OmReflectorMessage>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OmReflectorStep {
+    ModelRequest {
+        request: OmReflectorModelRequest,
+    },
+    ToolCalls {
+        session_id: String,
+        thread_id: String,
+        #[serde(default)]
+        tool_calls: Vec<OmReflectorToolCall>,
+    },
+    Complete {
+        session_id: String,
+        thread_id: String,
+        response: String,
+    },
+}
+
+impl Default for OmReflectorStep {
+    fn default() -> Self {
+        Self::Complete {
+            session_id: String::new(),
+            thread_id: String::new(),
+            response: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmGraphIndexRecord {
+    pub thread_id: String,
+    pub kind: String,
+    pub source_key: String,
+    pub document_id: String,
+    pub entity_count: i64,
+    pub edge_count: i64,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmIndexResult {
+    pub kind: String,
+    pub source_key: String,
+    pub document_id: String,
+    pub entity_count: i64,
+    pub edge_count: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmMemorySearchHit {
+    pub label: String,
+    pub kind: String,
+    pub document_id: String,
+    pub source_kind: String,
+    pub source_key: String,
+    pub snippet: String,
+    pub relation_summaries: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmLostMemoryHit {
+    pub entity_id: String,
+    pub label: String,
+    pub total_mentions: i64,
+    pub source_keys: Vec<String>,
+    pub relation_summaries: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

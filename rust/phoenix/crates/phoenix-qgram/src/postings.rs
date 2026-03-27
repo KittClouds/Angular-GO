@@ -36,7 +36,7 @@ impl PostingSet {
                 } else if let Err(index) = values.binary_search(&ordinal) {
                     values.insert(index, ordinal);
                 }
-                
+
                 if values.len() >= threshold {
                     let mut bitmap = RoaringBitmap::new();
                     for value in values.iter().copied() {

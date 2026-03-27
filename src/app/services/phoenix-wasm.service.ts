@@ -1,5 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import {
+    BINARY_REQUEST_LAYOUT_VERSION,
     decodePacketHeader,
     DEFAULT_PACKET_REGION_SIZE,
     isRetriablePacketMessage,
@@ -8,9 +9,16 @@ import {
     PhoenixChatStreamEvent,
     PhoenixChatStreamRequest,
     PROTOCOL_VERSION,
+    REQUEST_FLAG_HAS_SESSION,
+    REQUEST_FLAG_HAS_TEMPORAL,
+    REQUEST_FLAG_TARGET_CHUNKS,
+    REQUEST_FLAG_TARGET_GRAPH,
+    REQUEST_FLAG_TARGET_NODES,
+    REQUEST_FLAG_TARGET_SEMANTIC,
     tryDecodeJson,
     writePacketHeader,
 } from '../lib/phoenix/wasm-protocol';
+import { EmbeddingWorkerService } from '../lib/services/embedding-worker.service';
 
 export interface PhoenixScope {
     worldId?: string;
@@ -127,8 +135,100 @@ type PhoenixChatStreamCallbacks = {
     onEvent?: (event: { stage: 'reasoning' | 'stream'; status: 'running' | 'done' | 'error'; detail?: string }) => void;
 };
 
+export interface PhoenixOmPendingAction {
+    kind: 'observe' | 'reflect';
+    threadId: string;
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    messageIds: string[];
+    reflectorToolingEnabled: boolean;
+    reflectorMaxToolRounds: number;
+}
+
+export interface PhoenixOmReflectorToolSpec {
+    name: string;
+    description: string;
+    parametersJson: unknown;
+}
+
+export interface PhoenixOmReflectorToolCall {
+    id: string;
+    name: string;
+    argumentsJson: string;
+}
+
+export interface PhoenixOmReflectorToolResult {
+    toolCallId: string;
+    name: string;
+    resultJson: string;
+}
+
+export interface PhoenixOmReflectorMessage {
+    role: string;
+    content: string;
+    name?: string | null;
+    toolCallId?: string | null;
+    toolCalls: PhoenixOmReflectorToolCall[];
+}
+
+export interface PhoenixOmReflectorModelRequest {
+    sessionId: string;
+    threadId: string;
+    model: string;
+    allowTools: boolean;
+    tools: PhoenixOmReflectorToolSpec[];
+    messages: PhoenixOmReflectorMessage[];
+}
+
+export interface PhoenixOmReflectorModelResponse {
+    content: string;
+    toolCalls: PhoenixOmReflectorToolCall[];
+}
+
+export type PhoenixOmReflectorStep =
+    | {
+          kind: 'modelRequest';
+          request: PhoenixOmReflectorModelRequest;
+      }
+    | {
+          kind: 'toolCalls';
+          sessionId: string;
+          threadId: string;
+          toolCalls: PhoenixOmReflectorToolCall[];
+      }
+    | {
+          kind: 'complete';
+          sessionId: string;
+          threadId: string;
+          response: string;
+      };
+
+export interface PhoenixOmTransportConfig {
+    apiKey: string;
+    defaultModel: string;
+    omModel?: string;
+    temperature?: number;
+    maxTokens?: number;
+}
+
+type PhoenixSemanticLeafChunk = {
+    spanId: string;
+    documentId: string;
+    text: string;
+    narrativeId?: string;
+    folderId?: string;
+};
+
+const SEMANTIC_EMBEDDING_MODEL_ID = 'mongodb-leaf';
+const SEMANTIC_VECTOR_DIM = 384;
+const SEMANTIC_EMBED_BATCH_SIZE = 16;
+const QUERY_BINARY_HEADER_LEN = 22 * 4;
+const EMBED_UPSERT_HEADER_LEN = 4 * 4;
+
 @Injectable({ providedIn: 'root' })
 export class PhoenixWasmService {
+    private readonly embeddingWorker = inject(EmbeddingWorkerService);
     private worker: Worker | null = null;
     private workerReady = false;
     private loadPromise: Promise<void> | null = null;
@@ -149,7 +249,10 @@ export class PhoenixWasmService {
             resolve: () => void;
         }
     >();
+    private readonly pendingOmByThread = new Map<string, Promise<boolean>>();
+    private readonly pendingSemanticDocsBySession = new Map<string, Set<string>>();
     private loggedTransferFallback = false;
+    private semanticEmbeddingQueue: Promise<void> = Promise.resolve();
 
     get isReady(): boolean {
         return this.workerReady;
@@ -186,7 +289,7 @@ export class PhoenixWasmService {
                     structure: true,
                     graptor: true,
                     gldr: true,
-                    semantic: false,
+                    semantic: true,
                 },
             },
             storagePath: null,
@@ -205,21 +308,47 @@ export class PhoenixWasmService {
 
     async ingest(request: Record<string, unknown>): Promise<any> {
         await this.loadWasm();
-        return (await this.sendJson(PACKET_KIND.ingestRequest, request, 512 * 1024)).json;
+        const sessionId = typeof request['sessionId'] === 'string' ? String(request['sessionId']) : null;
+        const documentIds = extractDocumentIds(request);
+        if (sessionId && documentIds.length) {
+            this.trackPendingSemanticDocuments(sessionId, documentIds);
+        }
+        const result = (await this.sendJson(PACKET_KIND.ingestRequest, request, 512 * 1024)).json;
+        if (sessionId && request['commit'] === true) {
+            this.scheduleSemanticIndexForSession(sessionId, documentIds);
+        }
+        return result;
     }
 
     async query(request: Record<string, unknown>): Promise<PhoenixQueryBinaryResult> {
         await this.loadWasm();
-        const payload = (await this.sendJson(PACKET_KIND.queryRequest, request, 512 * 1024)).bytes;
+        if (!queryTargetsIncludeSemantic(request['targets'])) {
+            const payload = (await this.sendJson(PACKET_KIND.queryRequest, request, 512 * 1024)).bytes;
+            return decodeQueryResult(payload);
+        }
+
+        const semanticVector =
+            this.normalizeSemanticVector(request['semanticQueryVector']) ??
+            (await this.embedQueryText(String(request['query'] ?? '')));
+        const payloadBytes = buildSemanticQueryBinaryPayload(request, semanticVector);
+        const payload = (
+            await this.sendBytes(
+                PACKET_KIND.queryBinaryRequest,
+                payloadBytes,
+                Math.max(512 * 1024, payloadBytes.byteLength + 4096),
+            )
+        ).bytes;
         return decodeQueryResult(payload);
     }
 
     async commit(sessionId: string, request: Record<string, unknown> = {}): Promise<any> {
         await this.loadWasm();
-        return (await this.sendJson(PACKET_KIND.commitRequest, {
+        const result = (await this.sendJson(PACKET_KIND.commitRequest, {
             sessionId,
             reason: request['reason'] ?? null,
         })).json;
+        this.scheduleSemanticIndexForSession(sessionId);
+        return result;
     }
 
     async rebuild(request: Record<string, unknown> = {}): Promise<any> {
@@ -389,6 +518,65 @@ export class PhoenixWasmService {
         });
     }
 
+    async chatPrepareOm(threadId: string): Promise<PhoenixOmPendingAction | null> {
+        return this.storeCommand('chat:prepareOm', { threadId });
+    }
+
+    async chatApplyOmAction(action: PhoenixOmPendingAction, response: string): Promise<boolean> {
+        return !!(await this.storeCommand('chat:applyOmAction', { action, response }));
+    }
+
+    async omStartReflector(action: PhoenixOmPendingAction): Promise<PhoenixOmReflectorStep> {
+        return this.storeCommand('om:startReflector', { action });
+    }
+
+    async omSubmitReflectorModelResponse(
+        sessionId: string,
+        response: PhoenixOmReflectorModelResponse,
+    ): Promise<PhoenixOmReflectorStep> {
+        return this.storeCommand('om:submitReflectorModelResponse', { sessionId, response });
+    }
+
+    async omSubmitReflectorToolResults(
+        sessionId: string,
+        results: PhoenixOmReflectorToolResult[],
+    ): Promise<PhoenixOmReflectorStep> {
+        return this.storeCommand('om:submitReflectorToolResults', { sessionId, results });
+    }
+
+    async omDropReflectorSession(sessionId: string): Promise<boolean> {
+        return !!(await this.storeCommand('om:dropReflectorSession', { sessionId }));
+    }
+
+    async omRecoverLostMemory(threadId: string, limit = 10, focus?: string): Promise<any[]> {
+        return this.storeCommand('om:recoverLostMemory', {
+            threadId,
+            limit,
+            ...(focus ? { focus } : {}),
+        });
+    }
+
+    async omMemoryGraphSearch(threadId: string, query: string, limit = 10): Promise<any[]> {
+        return this.storeCommand('om:memoryGraphSearch', {
+            threadId,
+            query,
+            limit,
+        });
+    }
+
+    async chatProcessOm(threadId: string, config: PhoenixOmTransportConfig): Promise<boolean> {
+        const existing = this.pendingOmByThread.get(threadId);
+        if (existing) {
+            return existing;
+        }
+
+        const task = this.chatProcessOmInternal(threadId, config).finally(() => {
+            this.pendingOmByThread.delete(threadId);
+        });
+        this.pendingOmByThread.set(threadId, task);
+        return task;
+    }
+
     async chatSubmitToolResults(runId: string, results: unknown[]): Promise<any> {
         return this.storeCommand('chat:submitToolResults', { runId, results });
     }
@@ -407,6 +595,140 @@ export class PhoenixWasmService {
         });
     }
 
+    private trackPendingSemanticDocuments(sessionId: string, documentIds: string[]): void {
+        if (!documentIds.length) {
+            return;
+        }
+        let pending = this.pendingSemanticDocsBySession.get(sessionId);
+        if (!pending) {
+            pending = new Set<string>();
+            this.pendingSemanticDocsBySession.set(sessionId, pending);
+        }
+        for (const documentId of documentIds) {
+            pending.add(documentId);
+        }
+    }
+
+    private drainPendingSemanticDocuments(sessionId: string, seedDocumentIds: string[] = []): string[] {
+        const pending = this.pendingSemanticDocsBySession.get(sessionId);
+        const drained = new Set<string>(seedDocumentIds);
+        if (pending) {
+            for (const documentId of pending) {
+                drained.add(documentId);
+            }
+            this.pendingSemanticDocsBySession.delete(sessionId);
+        }
+        return Array.from(drained);
+    }
+
+    private scheduleSemanticIndexForSession(sessionId: string, seedDocumentIds: string[] = []): void {
+        const documentIds = this.drainPendingSemanticDocuments(sessionId, seedDocumentIds);
+        if (!documentIds.length) {
+            return;
+        }
+        void this.enqueueEmbeddingTask(async () => {
+            await this.indexCommittedSemanticDocuments(documentIds);
+        }).catch((error) => {
+            console.warn('[PhoenixWasmService] Semantic indexing failed:', error);
+        });
+    }
+
+    private enqueueEmbeddingTask<T>(task: () => Promise<T>): Promise<T> {
+        const run = this.semanticEmbeddingQueue.then(task, task);
+        this.semanticEmbeddingQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    private async ensureSemanticEmbeddingWorker(): Promise<void> {
+        await this.embeddingWorker.initialize(SEMANTIC_EMBEDDING_MODEL_ID);
+    }
+
+    private async embedQueryText(queryText: string): Promise<Float32Array> {
+        return this.enqueueEmbeddingTask(async () => {
+            await this.ensureSemanticEmbeddingWorker();
+            const embeddings = await this.embeddingWorker.embed([queryText], 1);
+            return this.toSemanticVector(embeddings[0] || []);
+        });
+    }
+
+    private async indexCommittedSemanticDocuments(documentIds: string[]): Promise<void> {
+        if (!documentIds.length) {
+            return;
+        }
+        const rows = await this.storeCommand('semantic:listLeafChunks', { documentIds });
+        const chunks = normalizeSemanticLeafChunks(rows);
+        if (!chunks.length) {
+            return;
+        }
+
+        await this.ensureSemanticEmbeddingWorker();
+        let writeChain = Promise.resolve();
+        await this.embeddingWorker.embedStream(
+            chunks.map((chunk) => chunk.text),
+            (batch) => {
+                const batchStart = batch.batchIndex * SEMANTIC_EMBED_BATCH_SIZE;
+                const records = batch.embeddings
+                    .map((embedding, index) => {
+                        const chunk = chunks[batchStart + index];
+                        if (!chunk) {
+                            return null;
+                        }
+                        return {
+                            spanId: chunk.spanId,
+                            values: this.toSemanticVector(embedding),
+                        };
+                    })
+                    .filter((record): record is { spanId: string; values: Float32Array } => record !== null);
+                if (!records.length) {
+                    return;
+                }
+                writeChain = writeChain.then(() => this.upsertSemanticBatch(records));
+            },
+            SEMANTIC_EMBED_BATCH_SIZE,
+        );
+        await writeChain;
+    }
+
+    private async upsertSemanticBatch(
+        records: Array<{ spanId: string; values: Float32Array }>,
+    ): Promise<void> {
+        if (!records.length) {
+            return;
+        }
+        const payload = buildEmbedUpsertBinaryPayload(records);
+        await this.sendBytes(
+            PACKET_KIND.embedUpsertBinaryRequest,
+            payload,
+            Math.max(256 * 1024, payload.byteLength + 4096),
+        );
+    }
+
+    private normalizeSemanticVector(source: unknown): Float32Array | null {
+        if (source instanceof Float32Array) {
+            return this.toSemanticVector(source);
+        }
+        if (Array.isArray(source)) {
+            return this.toSemanticVector(source);
+        }
+        return null;
+    }
+
+    private toSemanticVector(source: ArrayLike<number>): Float32Array {
+        const vector = new Float32Array(source.length);
+        for (let index = 0; index < source.length; index += 1) {
+            vector[index] = Number(source[index] ?? 0);
+        }
+        if (vector.length !== SEMANTIC_VECTOR_DIM) {
+            throw new Error(
+                `Semantic vector dimension mismatch: expected ${SEMANTIC_VECTOR_DIM}, got ${vector.length}`,
+            );
+        }
+        return vector;
+    }
+
     async streamChat(request: PhoenixChatStreamRequest, callbacks: PhoenixChatStreamCallbacks): Promise<void> {
         await this.loadWasm();
         if (!this.worker) {
@@ -423,6 +745,238 @@ export class PhoenixWasmService {
                 request,
             } as PhoenixWorkerMessage);
         });
+    }
+
+    private async chatProcessOmInternal(threadId: string, config: PhoenixOmTransportConfig): Promise<boolean> {
+        if (!config.apiKey?.trim()) {
+            return false;
+        }
+
+        let mutated = false;
+        for (let iteration = 0; iteration < 4; iteration += 1) {
+            const action = await this.chatPrepareOm(threadId);
+            if (!action) {
+                break;
+            }
+
+            const response = await this.runOmAction(action, config);
+            mutated = (await this.chatApplyOmAction(action, response)) || mutated;
+        }
+
+        return mutated;
+    }
+
+    private async runOmAction(action: PhoenixOmPendingAction, config: PhoenixOmTransportConfig): Promise<string> {
+        if (action.kind === 'reflect' && action.reflectorToolingEnabled) {
+            return this.runReflectorWithRuntime(action, config);
+        }
+        return this.runSimpleOmAction(action, config);
+    }
+
+    private async runSimpleOmAction(action: PhoenixOmPendingAction, config: PhoenixOmTransportConfig): Promise<string> {
+        const model = action.model || config.omModel || config.defaultModel;
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${config.apiKey.trim()}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'HTTP-Referer': globalThis.location?.origin || 'http://localhost',
+                'X-Title': 'KittClouds Phoenix',
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: action.systemPrompt },
+                    { role: 'user', content: action.userPrompt },
+                ],
+                stream: false,
+                temperature: typeof config.temperature === 'number' ? config.temperature : 0.3,
+                max_tokens: typeof config.maxTokens === 'number' && config.maxTokens > 0
+                    ? config.maxTokens
+                    : 2_048,
+            }),
+        });
+
+        if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(detail || `OM request failed with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const content =
+            extractOmResponseText(payload?.choices?.[0]?.message?.content) ||
+            extractOmResponseText(payload?.choices?.[0]?.content);
+        if (!content) {
+            throw new Error('OM response did not include content.');
+        }
+        return content;
+    }
+
+    private async runReflectorWithRuntime(
+        action: PhoenixOmPendingAction,
+        config: PhoenixOmTransportConfig,
+    ): Promise<string> {
+        let step = await this.omStartReflector(action);
+        let sessionId: string | null = null;
+        try {
+            while (true) {
+                if (step.kind === 'complete') {
+                    return step.response;
+                }
+                if (step.kind === 'toolCalls') {
+                    sessionId = step.sessionId;
+                    const results: PhoenixOmReflectorToolResult[] = [];
+                    for (const toolCall of step.toolCalls) {
+                        results.push(await this.executeOmToolCall(step.threadId, toolCall));
+                    }
+                    step = await this.omSubmitReflectorToolResults(step.sessionId, results);
+                    continue;
+                }
+
+                sessionId = step.request.sessionId;
+                const payload = await this.fetchOmChatCompletion(
+                    step.request.model || action.model || config.omModel || config.defaultModel,
+                    config,
+                    this.buildReflectorRequestBody(step.request),
+                );
+                step = await this.omSubmitReflectorModelResponse(
+                    step.request.sessionId,
+                    this.buildReflectorModelResponse(payload),
+                );
+            }
+        } catch (error) {
+            if (sessionId) {
+                await this.omDropReflectorSession(sessionId).catch(() => undefined);
+            }
+            throw error;
+        }
+    }
+
+    private async fetchOmChatCompletion(
+        model: string,
+        config: PhoenixOmTransportConfig,
+        body: Record<string, unknown>,
+    ): Promise<any> {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${config.apiKey.trim()}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'HTTP-Referer': globalThis.location?.origin || 'http://localhost',
+                'X-Title': 'KittClouds Phoenix',
+            },
+            body: JSON.stringify({
+                model,
+                stream: false,
+                temperature: typeof config.temperature === 'number' ? config.temperature : 0.3,
+                max_tokens:
+                    typeof config.maxTokens === 'number' && config.maxTokens > 0
+                        ? config.maxTokens
+                        : 2_048,
+                ...body,
+            }),
+        });
+
+        if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(detail || `OM request failed with status ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    private buildReflectorRequestBody(request: PhoenixOmReflectorModelRequest): Record<string, unknown> {
+        return {
+            messages: request.messages.map((message) => ({
+                role: message.role,
+                content: message.content,
+                ...(message.name ? { name: message.name } : {}),
+                ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+                ...(message.toolCalls.length
+                    ? {
+                          tool_calls: message.toolCalls.map((toolCall) => ({
+                              id: toolCall.id,
+                              type: 'function',
+                              function: {
+                                  name: toolCall.name,
+                                  arguments: toolCall.argumentsJson,
+                              },
+                          })),
+                      }
+                    : {}),
+            })),
+            ...(request.allowTools
+                ? {
+                      tools: request.tools.map((tool) => ({
+                          type: 'function',
+                          function: {
+                              name: tool.name,
+                              description: tool.description,
+                              parameters: tool.parametersJson,
+                          },
+                      })),
+                      tool_choice: 'auto',
+                  }
+                : {}),
+        };
+    }
+
+    private buildReflectorModelResponse(payload: any): PhoenixOmReflectorModelResponse {
+        const choice = payload?.choices?.[0];
+        const toolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
+        return {
+            content:
+                extractOmResponseText(choice?.message?.content) ||
+                extractOmResponseText(choice?.content) ||
+                '',
+            toolCalls: toolCalls.map((toolCall: any) => ({
+                id: String(toolCall?.id || ''),
+                name: String(toolCall?.function?.name || ''),
+                argumentsJson: String(toolCall?.function?.arguments || '{}'),
+            })),
+        };
+    }
+
+    private async executeOmToolCall(
+        threadId: string,
+        toolCall: PhoenixOmReflectorToolCall,
+    ): Promise<PhoenixOmReflectorToolResult> {
+        const toolName = String(toolCall?.name || '');
+        const rawArgs = String(toolCall?.argumentsJson || '{}');
+        let args: Record<string, unknown> = {};
+        try {
+            args = JSON.parse(rawArgs) as Record<string, unknown>;
+        } catch {
+            args = {};
+        }
+
+        let result: unknown;
+        switch (toolName) {
+            case 'recover_lost_memory':
+                result = await this.omRecoverLostMemory(
+                    threadId,
+                    typeof args['limit'] === 'number' ? args['limit'] : 10,
+                    typeof args['focus'] === 'string' ? args['focus'] : undefined,
+                );
+                break;
+            case 'memory_graph_search':
+                result = await this.omMemoryGraphSearch(
+                    threadId,
+                    typeof args['query'] === 'string' ? args['query'] : '',
+                    typeof args['limit'] === 'number' ? args['limit'] : 10,
+                );
+                break;
+            default:
+                result = { error: `Unsupported OM tool: ${toolName}` };
+                break;
+        }
+        return {
+            toolCallId: toolCall.id,
+            name: toolName,
+            resultJson: JSON.stringify(result),
+        };
     }
 
     cancelStreamChat(streamId: number): void {
@@ -840,4 +1394,239 @@ function decodeSessionStatsResult(bytes: Uint8Array): PhoenixSessionStatsBinaryR
         spanCount: view.getUint32(base + 32, true),
         updatedAt: Number(view.getBigUint64(base + 36, true)),
     };
+}
+
+function extractDocumentIds(request: Record<string, unknown>): string[] {
+    const documents = Array.isArray(request['documents']) ? request['documents'] : [];
+    const unique = new Set<string>();
+    for (const document of documents) {
+        if (!document || typeof document !== 'object') {
+            continue;
+        }
+        const documentId = (document as Record<string, unknown>)['documentId'];
+        if (typeof documentId === 'string' && documentId) {
+            unique.add(documentId);
+        }
+    }
+    return Array.from(unique);
+}
+
+function queryTargetsIncludeSemantic(targets: unknown): boolean {
+    if (!Array.isArray(targets)) {
+        return false;
+    }
+    return targets.some((target) => String(target).toLowerCase() === 'semantic');
+}
+
+function normalizeSemanticLeafChunks(value: unknown): PhoenixSemanticLeafChunk[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const rows = value
+        .map((row): PhoenixSemanticLeafChunk | null => {
+            if (!row || typeof row !== 'object') {
+                return null;
+            }
+            const record = row as Record<string, unknown>;
+            if (typeof record['spanId'] !== 'string' || typeof record['text'] !== 'string') {
+                return null;
+            }
+            return {
+                spanId: record['spanId'],
+                documentId: typeof record['documentId'] === 'string' ? record['documentId'] : '',
+                text: record['text'],
+                narrativeId: typeof record['narrativeId'] === 'string' ? record['narrativeId'] : undefined,
+                folderId: typeof record['folderId'] === 'string' ? record['folderId'] : undefined,
+            };
+        });
+    return rows.filter((row): row is PhoenixSemanticLeafChunk => row !== null && !!row.text);
+}
+
+function buildSemanticQueryBinaryPayload(
+    request: Record<string, unknown>,
+    semanticVector: Float32Array,
+): Uint8Array {
+    const arena = new ArenaBuilder();
+    const sessionId = typeof request['sessionId'] === 'string' ? request['sessionId'] : undefined;
+    const query = typeof request['query'] === 'string' ? request['query'] : '';
+    const scope =
+        request['scope'] && typeof request['scope'] === 'object'
+            ? (request['scope'] as Record<string, unknown>)
+            : {};
+    const temporalJson =
+        request['temporal'] === null || request['temporal'] === undefined
+            ? undefined
+            : JSON.stringify(request['temporal']);
+    const flags =
+        (sessionId ? REQUEST_FLAG_HAS_SESSION : 0) |
+        (temporalJson ? REQUEST_FLAG_HAS_TEMPORAL : 0) |
+        buildQueryTargetFlags(request['targets']);
+
+    const sessionRef = arena.push(sessionId);
+    const queryRef = arena.push(query);
+    const worldRef = arena.push(typeof scope['worldId'] === 'string' ? scope['worldId'] : undefined);
+    const narrativeRef = arena.push(
+        typeof scope['narrativeId'] === 'string' ? scope['narrativeId'] : undefined,
+    );
+    const folderIdRef = arena.push(typeof scope['folderId'] === 'string' ? scope['folderId'] : undefined);
+    const folderPathRef = arena.push(
+        typeof scope['folderPath'] === 'string' ? scope['folderPath'] : undefined,
+    );
+    const temporalRef = arena.push(temporalJson);
+
+    const vectorOffset = alignTo(QUERY_BINARY_HEADER_LEN + arena.length, 4);
+    const totalLength = vectorOffset + semanticVector.byteLength;
+    const bytes = new Uint8Array(totalLength);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    view.setUint32(0, BINARY_REQUEST_LAYOUT_VERSION, true);
+    view.setUint32(4, flags, true);
+    view.setUint32(8, sessionRef.offset, true);
+    view.setUint32(12, sessionRef.length, true);
+    view.setUint32(16, queryRef.offset, true);
+    view.setUint32(20, queryRef.length, true);
+    view.setUint32(24, worldRef.offset, true);
+    view.setUint32(28, worldRef.length, true);
+    view.setUint32(32, narrativeRef.offset, true);
+    view.setUint32(36, narrativeRef.length, true);
+    view.setUint32(40, folderIdRef.offset, true);
+    view.setUint32(44, folderIdRef.length, true);
+    view.setUint32(48, folderPathRef.offset, true);
+    view.setUint32(52, folderPathRef.length, true);
+    view.setUint32(56, normalizeQueryLimit(request['limit']), true);
+    view.setUint32(60, temporalRef.offset, true);
+    view.setUint32(64, temporalRef.length, true);
+    view.setUint32(68, vectorOffset, true);
+    view.setUint32(72, semanticVector.length, true);
+    view.setUint32(76, semanticVector.length, true);
+    view.setUint32(80, QUERY_BINARY_HEADER_LEN, true);
+    view.setUint32(84, arena.length, true);
+    bytes.set(arena.bytes(), QUERY_BINARY_HEADER_LEN);
+    bytes.set(new Uint8Array(semanticVector.buffer, semanticVector.byteOffset, semanticVector.byteLength), vectorOffset);
+    return bytes;
+}
+
+function buildEmbedUpsertBinaryPayload(
+    records: Array<{ spanId: string; values: Float32Array }>,
+): Uint8Array {
+    const arena = new ArenaBuilder();
+    const refs = records.map((record) => arena.push(record.spanId));
+    const tableOffset = EMBED_UPSERT_HEADER_LEN;
+    const tableLength = records.length * 8;
+    const vectorOffset = tableOffset + tableLength;
+    const vectorLength = records.reduce((sum, record) => sum + record.values.byteLength, 0);
+    const arenaOffset = vectorOffset + vectorLength;
+    const totalLength = arenaOffset + arena.length;
+    const bytes = new Uint8Array(totalLength);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    view.setUint32(0, BINARY_REQUEST_LAYOUT_VERSION, true);
+    view.setUint32(4, records.length, true);
+    view.setUint32(8, SEMANTIC_VECTOR_DIM, true);
+    view.setUint32(12, arenaOffset, true);
+
+    let cursor = tableOffset;
+    for (const ref of refs) {
+        view.setUint32(cursor, ref.offset, true);
+        view.setUint32(cursor + 4, ref.length, true);
+        cursor += 8;
+    }
+
+    let vectorCursor = vectorOffset;
+    for (const record of records) {
+        bytes.set(
+            new Uint8Array(record.values.buffer, record.values.byteOffset, record.values.byteLength),
+            vectorCursor,
+        );
+        vectorCursor += record.values.byteLength;
+    }
+
+    bytes.set(arena.bytes(), arenaOffset);
+    return bytes;
+}
+
+function buildQueryTargetFlags(targets: unknown): number {
+    if (!Array.isArray(targets) || !targets.length) {
+        return REQUEST_FLAG_TARGET_CHUNKS;
+    }
+    let flags = 0;
+    for (const target of targets) {
+        switch (String(target).toLowerCase()) {
+            case 'chunks':
+                flags |= REQUEST_FLAG_TARGET_CHUNKS;
+                break;
+            case 'nodes':
+                flags |= REQUEST_FLAG_TARGET_NODES;
+                break;
+            case 'graph':
+                flags |= REQUEST_FLAG_TARGET_GRAPH;
+                break;
+            case 'semantic':
+                flags |= REQUEST_FLAG_TARGET_SEMANTIC;
+                break;
+        }
+    }
+    return flags || REQUEST_FLAG_TARGET_CHUNKS;
+}
+
+function normalizeQueryLimit(limit: unknown): number {
+    return typeof limit === 'number' && Number.isFinite(limit) && limit >= 0
+        ? Math.floor(limit)
+        : 0xffffffff;
+}
+
+function alignTo(value: number, alignment: number): number {
+    return Math.ceil(value / alignment) * alignment;
+}
+
+class ArenaBuilder {
+    private readonly encoder = new TextEncoder();
+    private readonly chunks: Uint8Array[] = [];
+    private size = 0;
+
+    push(text?: string): { offset: number; length: number } {
+        if (!text) {
+            return { offset: 0, length: 0 };
+        }
+        const bytes = this.encoder.encode(text);
+        const offset = this.size;
+        this.chunks.push(bytes);
+        this.size += bytes.byteLength;
+        return { offset, length: bytes.byteLength };
+    }
+
+    get length(): number {
+        return this.size;
+    }
+
+    bytes(): Uint8Array {
+        const merged = new Uint8Array(this.size);
+        let offset = 0;
+        for (const chunk of this.chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return merged;
+    }
+}
+
+function extractOmResponseText(value: unknown): string {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => {
+                if (typeof item === 'string') {
+                    return item;
+                }
+                if (item && typeof item === 'object' && typeof (item as Record<string, unknown>)['text'] === 'string') {
+                    return String((item as Record<string, unknown>)['text']);
+                }
+                return '';
+            })
+            .join('');
+    }
+    if (value && typeof value === 'object' && typeof (value as Record<string, unknown>)['text'] === 'string') {
+        return String((value as Record<string, unknown>)['text']);
+    }
+    return '';
 }

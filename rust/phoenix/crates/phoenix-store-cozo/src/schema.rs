@@ -5,16 +5,18 @@ pub enum PhoenixColumnType {
     Float,
     Bool,
     Json,
+    VectorF32(usize),
 }
 
 impl PhoenixColumnType {
-    pub const fn as_cozo(self) -> &'static str {
+    pub fn as_cozo(self) -> String {
         match self {
-            Self::String => "String",
-            Self::Int => "Int",
-            Self::Float => "Float",
-            Self::Bool => "Bool",
-            Self::Json => "Json",
+            Self::String => "String".to_owned(),
+            Self::Int => "Int".to_owned(),
+            Self::Float => "Float".to_owned(),
+            Self::Bool => "Bool".to_owned(),
+            Self::Json => "Json".to_owned(),
+            Self::VectorF32(dim) => format!("<F32; {dim}>"),
         }
     }
 }
@@ -199,6 +201,8 @@ const THREAD_MESSAGES: &[PhoenixColumnSpec] = &[
     col("created_at", PhoenixColumnType::Int, false, false),
     col("updated_at", PhoenixColumnType::Int, true, false),
     col("is_streaming", PhoenixColumnType::Bool, false, false),
+    col("token_count", PhoenixColumnType::Int, true, false),
+    col("is_observed", PhoenixColumnType::Bool, true, false),
 ];
 
 const MEMORIES: &[PhoenixColumnSpec] = &[
@@ -223,6 +227,12 @@ const OM_RECORDS: &[PhoenixColumnSpec] = &[
     col("thread_id", PhoenixColumnType::String, false, true),
     col("observations", PhoenixColumnType::String, false, false),
     col("current_task", PhoenixColumnType::String, false, false),
+    col(
+        "suggested_continuation",
+        PhoenixColumnType::String,
+        true,
+        false,
+    ),
     col("last_observed_at", PhoenixColumnType::Int, false, false),
     col("obs_token_count", PhoenixColumnType::Int, false, false),
     col("generation_num", PhoenixColumnType::Int, false, false),
@@ -239,6 +249,23 @@ const OM_GENERATIONS: &[PhoenixColumnSpec] = &[
     col("input_text", PhoenixColumnType::String, false, false),
     col("output_text", PhoenixColumnType::String, false, false),
     col("created_at", PhoenixColumnType::Int, false, false),
+];
+
+const OM_GRAPH_INDEX: &[PhoenixColumnSpec] = &[
+    col("thread_id", PhoenixColumnType::String, false, true),
+    col("kind", PhoenixColumnType::String, false, true),
+    col("source_key", PhoenixColumnType::String, false, true),
+    col("document_id", PhoenixColumnType::String, false, false),
+    col("entity_count", PhoenixColumnType::Int, false, false),
+    col("edge_count", PhoenixColumnType::Int, false, false),
+    col("created_at", PhoenixColumnType::Int, false, false),
+];
+
+const SEMANTIC_VECTORS: &[PhoenixColumnSpec] = &[
+    col("span_id", PhoenixColumnType::String, false, true),
+    col("vec", PhoenixColumnType::VectorF32(384), false, false),
+    col("model_id", PhoenixColumnType::String, false, false),
+    col("updated_at", PhoenixColumnType::Int, false, false),
 ];
 
 const WORKSPACE_ARTIFACTS: &[PhoenixColumnSpec] = &[
@@ -401,6 +428,8 @@ const EPISODES: &[PhoenixColumnSpec] = &[
     col("scope_id", PhoenixColumnType::String, false, false),
     col("note_id", PhoenixColumnType::String, true, false),
     col("ts", PhoenixColumnType::Int, false, false),
+    col("boundary_doc_id", PhoenixColumnType::String, true, false),
+    col("boundary_id", PhoenixColumnType::Int, true, false),
     col("action_type", PhoenixColumnType::String, false, false),
     col("target_id", PhoenixColumnType::String, false, false),
     col("target_kind", PhoenixColumnType::String, false, false),
@@ -590,8 +619,24 @@ const BLOCKS: &[PhoenixColumnSpec] = &[
     col("created_at", PhoenixColumnType::Int, true, false),
 ];
 
+const DOCUMENT_BOUNDARIES: &[PhoenixColumnSpec] = &[
+    col("doc_id", PhoenixColumnType::String, false, true),
+    col("boundary_id", PhoenixColumnType::Int, false, true),
+    col("kind", PhoenixColumnType::String, false, false),
+    col("depth", PhoenixColumnType::Int, false, false),
+    col("label", PhoenixColumnType::String, true, false),
+    col("ordinal", PhoenixColumnType::Int, false, false),
+    col("parent_boundary_id", PhoenixColumnType::Int, true, false),
+    col("note_id", PhoenixColumnType::String, true, false),
+    col("start_char", PhoenixColumnType::Int, false, false),
+    col("end_char", PhoenixColumnType::Int, true, false),
+    col("created_at", PhoenixColumnType::Int, false, false),
+];
+
 const GRAPH_VERTICES: &[PhoenixColumnSpec] = &[
     col("id", PhoenixColumnType::String, false, true),
+    col("document_id", PhoenixColumnType::String, true, false),
+    col("narrative_id", PhoenixColumnType::String, true, false),
     col("value", PhoenixColumnType::Json, false, false),
     col("weight", PhoenixColumnType::Int, false, false),
     col("attributes", PhoenixColumnType::Json, false, false),
@@ -600,6 +645,13 @@ const GRAPH_VERTICES: &[PhoenixColumnSpec] = &[
 const GRAPH_EDGES: &[PhoenixColumnSpec] = &[
     col("source_id", PhoenixColumnType::String, false, true),
     col("target_id", PhoenixColumnType::String, false, true),
+    col("document_id", PhoenixColumnType::String, true, false),
+    col("narrative_id", PhoenixColumnType::String, true, false),
+    col("valid_from_doc", PhoenixColumnType::String, true, false),
+    col("valid_from_boundary", PhoenixColumnType::Int, true, false),
+    col("valid_to_doc", PhoenixColumnType::String, true, false),
+    col("valid_to_boundary", PhoenixColumnType::Int, true, false),
+    col("assertion_kind", PhoenixColumnType::String, true, false),
     col("weight", PhoenixColumnType::Int, false, false),
     col("attributes", PhoenixColumnType::Json, false, false),
     col("data", PhoenixColumnType::Json, true, false),
@@ -657,6 +709,8 @@ pub const ALL_RELATIONS: &[PhoenixRelationSpec] = &[
     PhoenixRelationSpec::new("memory_threads", MEMORY_THREADS),
     PhoenixRelationSpec::new("om_records", OM_RECORDS),
     PhoenixRelationSpec::new("om_generations", OM_GENERATIONS),
+    PhoenixRelationSpec::new("om_graph_index", OM_GRAPH_INDEX),
+    PhoenixRelationSpec::new("semantic_vectors", SEMANTIC_VECTORS),
     PhoenixRelationSpec::new("workspace_artifacts", WORKSPACE_ARTIFACTS),
     PhoenixRelationSpec::new("chat_runs", CHAT_RUNS),
     PhoenixRelationSpec::new("chat_run_events", CHAT_RUN_EVENTS),
@@ -682,6 +736,7 @@ pub const ALL_RELATIONS: &[PhoenixRelationSpec] = &[
     PhoenixRelationSpec::new("scoped_entity_fields", SCOPED_ENTITY_FIELDS),
     PhoenixRelationSpec::new("scoped_definitions", SCOPED_DEFINITIONS),
     PhoenixRelationSpec::new("blocks", BLOCKS),
+    PhoenixRelationSpec::new("document_boundaries", DOCUMENT_BOUNDARIES),
     PhoenixRelationSpec::new("graph_vertices", GRAPH_VERTICES),
     PhoenixRelationSpec::new("graph_edges", GRAPH_EDGES),
     PhoenixRelationSpec::new("graph_node_index", GRAPH_NODE_INDEX),
@@ -698,6 +753,8 @@ pub const CORE_RELATIONS: &[&str] = &[
     "folders",
     "threads",
     "thread_messages",
+    "om_graph_index",
+    "semantic_vectors",
     "spans",
     "chunks",
     "raptor_nodes",
@@ -705,6 +762,7 @@ pub const CORE_RELATIONS: &[&str] = &[
     "scoped_documents",
     "scoped_entity_fields",
     "scoped_definitions",
+    "document_boundaries",
     "graph_vertices",
     "graph_edges",
     "graph_properties",

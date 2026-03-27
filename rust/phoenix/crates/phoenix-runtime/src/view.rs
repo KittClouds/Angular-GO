@@ -110,6 +110,7 @@ pub struct QueryRequestView<'a> {
     pub targets: &'a [QueryTarget],
     pub limit: Option<usize>,
     pub temporal: Option<&'a TemporalMarker>,
+    pub semantic_query_vector: Option<&'a [f32]>,
 }
 
 impl<'a> QueryRequestView<'a> {
@@ -121,6 +122,11 @@ impl<'a> QueryRequestView<'a> {
             targets: self.targets.to_vec(),
             limit: self.limit,
             temporal: self.temporal.cloned(),
+            semantic_query_vector: self.semantic_query_vector.map(|values| {
+                phoenix_types::SemanticQueryVector {
+                    values: values.to_vec(),
+                }
+            }),
         }
     }
 }
@@ -134,6 +140,10 @@ impl<'a> From<&'a QueryRequest> for QueryRequestView<'a> {
             targets: &value.targets,
             limit: value.limit,
             temporal: value.temporal.as_ref(),
+            semantic_query_vector: value
+                .semantic_query_vector
+                .as_ref()
+                .map(|vector| vector.values.as_slice()),
         }
     }
 }

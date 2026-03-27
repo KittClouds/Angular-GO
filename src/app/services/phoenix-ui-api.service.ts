@@ -498,10 +498,30 @@ export class PhoenixUiApiService {
 
     async gldrSearchWithEmbedding(
         query: string,
-        _embedding: Float32Array,
+        embedding: Float32Array,
         config: Record<string, unknown> = {},
     ): Promise<string> {
-        return this.gldrSearch(query, config);
+        await this.loadWasm();
+        const sessionId = await this.ensureGldrSession();
+        const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
+        const result = await this.phoenix.query({
+            sessionId,
+            query,
+            scope: {},
+            targets: ['chunks', 'semantic'],
+            limit,
+            temporal: null,
+            semanticQueryVector: embedding,
+        });
+        return JSON.stringify(
+            (result.chunkHits || []).map((hit) => ({
+                chunkId: hit.chunkId,
+                chunkScore: hit.score,
+                lexScore: hit.score,
+                graphScore: 0,
+                matchedEntities: [],
+            })),
+        );
     }
 
     async gldrSearchNodes(query: string, config: Record<string, unknown> = {}): Promise<string> {
@@ -528,10 +548,29 @@ export class PhoenixUiApiService {
 
     async gldrSearchNodesWithEmbedding(
         query: string,
-        _embedding: Float32Array,
+        embedding: Float32Array,
         config: Record<string, unknown> = {},
     ): Promise<string> {
-        return this.gldrSearchNodes(query, config);
+        await this.loadWasm();
+        const sessionId = await this.ensureGldrSession();
+        const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
+        const result = await this.phoenix.query({
+            sessionId,
+            query,
+            scope: {},
+            targets: ['nodes', 'semantic'],
+            limit,
+            temporal: null,
+            semanticQueryVector: embedding,
+        });
+        return JSON.stringify(
+            (result.nodeHits || []).map((hit) => ({
+                entityId: hit.entityId,
+                nodeScore: hit.score,
+                topChunks: [],
+                proximityFromQuery: hit.score,
+            })),
+        );
     }
 
     async gldrStats(): Promise<string> {

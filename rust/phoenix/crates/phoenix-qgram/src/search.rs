@@ -187,7 +187,7 @@ impl QgramIndex {
             };
             for field in &span.fields {
                 let normalized = self.catalog.field_text(field);
-                
+
                 extract_packed_grams(normalized, self.config.trigram_width, &mut grams_buffer);
                 for gram in &grams_buffer {
                     self.trigram_postings
@@ -195,7 +195,7 @@ impl QgramIndex {
                         .or_default()
                         .add(ordinal, self.config.bitmap_threshold);
                 }
-                
+
                 extract_packed_grams(normalized, self.config.bigram_width, &mut grams_buffer);
                 for gram in &grams_buffer {
                     self.bigram_postings
@@ -217,7 +217,11 @@ impl QgramIndex {
                 self.candidates_for_grams(&grams_buffer, &self.bigram_postings, scope)
             }
             _ => {
-                extract_packed_grams(&clause.pattern, self.config.trigram_width, &mut grams_buffer);
+                extract_packed_grams(
+                    &clause.pattern,
+                    self.config.trigram_width,
+                    &mut grams_buffer,
+                );
                 self.candidates_for_grams(&grams_buffer, &self.trigram_postings, scope)
             }
         }
@@ -271,11 +275,19 @@ impl QgramIndex {
                     0 => self.catalog.stats().total_spans.max(1),
                     1 => fallback_df.max(1),
                     2 => {
-                        extract_packed_grams(&clause.pattern, self.config.bigram_width, &mut grams_buffer);
+                        extract_packed_grams(
+                            &clause.pattern,
+                            self.config.bigram_width,
+                            &mut grams_buffer,
+                        );
                         self.gram_df(&grams_buffer, &self.bigram_postings, fallback_df)
                     }
                     _ => {
-                        extract_packed_grams(&clause.pattern, self.config.trigram_width, &mut grams_buffer);
+                        extract_packed_grams(
+                            &clause.pattern,
+                            self.config.trigram_width,
+                            &mut grams_buffer,
+                        );
                         self.gram_df(&grams_buffer, &self.trigram_postings, fallback_df)
                     }
                 };

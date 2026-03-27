@@ -7,15 +7,16 @@ use phoenix_scanner::PhoenixScanner;
 use phoenix_store_cozo::{CompactRelationBuffer, CompactRowView, PhoenixCozoStore, StoreError};
 use phoenix_structure::PhoenixStructure;
 use phoenix_types::{
-    ChunkStats, Diagnostic, DiscoverySummary, DocumentId, EntityId, EntityKind, EntitySummary,
-    EvidenceSpan, FrameSlot, GenderHint, GraphDeltaChunk, GraphDeltaEdge, GraphDeltaNode,
-    GraphDeltaRequest, GraphDeltaResult, GraphSummary, IngestDocument, IngestDocumentSummary,
-    IngestRequest, IngestResult, MentionEntityRef, MentionSource, NoteId, RelationCandidate,
-    ResolverEntitySeed, ResolverLinkKind, RetrievalSummary, ScopeKey, SessionDocumentState,
-    SessionId, SessionState, SessionStats, TextRange,
+    BoundaryDetectionStrategy, BoundaryKind, ChunkStats, Diagnostic, DiscoverySummary, DocumentId,
+    EntityId, EntityKind, EntitySummary, EvidenceSpan, FrameSlot, GenderHint, GraphDeltaChunk,
+    GraphDeltaEdge, GraphDeltaNode, GraphDeltaRequest, GraphDeltaResult, GraphSummary,
+    IngestDocument, IngestDocumentSummary, IngestRequest, IngestResult, MentionEntityRef,
+    MentionSource, NoteId, RelationCandidate, ResolverEntitySeed, ResolverLinkKind,
+    RetrievalSummary, ScopeKey, SessionDocumentState, SessionId, SessionState, SessionStats,
+    TextRange,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 const DEFAULT_CHAPTER_KEYWORDS: &[&str] = &[
     "chapter",
@@ -34,7 +35,7 @@ pub struct GraptorConfig {
     pub overlap: usize,
     pub parent_chunk_size: usize,
     pub parent_overlap: usize,
-    chapter_keywords: Vec<String>,
+    pub boundary_detection: BoundaryDetectionStrategy,
 }
 
 impl Default for GraptorConfig {
@@ -44,17 +45,33 @@ impl Default for GraptorConfig {
             overlap: 100,
             parent_chunk_size: 2_000,
             parent_overlap: 500,
-            chapter_keywords: DEFAULT_CHAPTER_KEYWORDS
-                .iter()
-                .map(|keyword| keyword.to_string())
-                .collect(),
+            boundary_detection: BoundaryDetectionStrategy::Both {
+                keywords: DEFAULT_CHAPTER_KEYWORDS
+                    .iter()
+                    .map(|keyword| keyword.to_string())
+                    .collect(),
+                max_depth: 6,
+            },
         }
+    }
+}
+
+impl GraptorConfig {
+    pub fn without_chapter_detection(mut self) -> Self {
+        self.boundary_detection = BoundaryDetectionStrategy::Disabled;
+        self
+    }
+
+    pub fn without_boundary_detection(mut self) -> Self {
+        self.boundary_detection = BoundaryDetectionStrategy::Disabled;
+        self
     }
 }
 
 pub struct PhoenixGraptor {
     config: GraptorConfig,
-    chapter_matcher: Option<DoubleArrayAhoCorasick>,
+    boundary_matcher: Option<DoubleArrayAhoCorasick>,
+    max_heading_depth: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +87,22 @@ pub struct BorrowedIngestDocument<'a> {
 pub struct BorrowedIngestRequest<'a> {
     pub session_id: Option<SessionId>,
     pub documents: &'a [BorrowedIngestDocument<'a>],
+}
+
+#[derive(Clone, Debug)]
+pub struct BorrowedThreadMessage<'a> {
+    pub message_id: &'a str,
+    pub role: &'a str,
+    pub content: &'a str,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct BorrowedIngestThread<'a> {
+    pub document_id: DocumentId,
+    pub title: &'a str,
+    pub messages: &'a [BorrowedThreadMessage<'a>],
+    pub scope: ScopeKey,
 }
 
 impl<'a> From<&'a IngestDocument> for BorrowedIngestDocument<'a> {
@@ -96,6 +129,10 @@ pub struct GraptorVertex {
     pub document_id: Option<String>,
     pub chapter_id: Option<u32>,
     pub chapters: Vec<u32>,
+    pub boundary_id: Option<u32>,
+    pub boundary_ordinal: Option<u32>,
+    pub boundary_kind: Option<BoundaryKind>,
+    pub boundary_ordinals: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -163,14 +200,14 @@ impl GraptorGraph {
 
 impl PhoenixGraptor {
     pub fn new(config: GraptorConfig) -> Self {
-        let chapter_matcher = if config.chapter_keywords.is_empty() {
+        let (keywords, max_heading_depth) = boundary_strategy_parts(&config.boundary_detection);
+        let boundary_matcher = if keywords.is_empty() {
             None
         } else {
             DoubleArrayAhoCorasickBuilder::new()
                 .match_kind(MatchKind::LeftmostLongest)
                 .build_with_values(
-                    config
-                        .chapter_keywords
+                    keywords
                         .iter()
                         .enumerate()
                         .map(|(index, keyword)| (keyword.as_bytes(), index as u32)),
@@ -179,7 +216,8 @@ impl PhoenixGraptor {
         };
         Self {
             config,
-            chapter_matcher,
+            boundary_matcher,
+            max_heading_depth,
         }
     }
 
@@ -225,6 +263,7 @@ impl PhoenixGraptor {
         let mut total_warning_count = 0usize;
         let mut documents = Vec::new();
         let mut total_chapters = 0usize;
+        let mut total_boundaries = 0usize;
         let mut total_parents = 0usize;
         let mut total_leaves = 0usize;
         let mut total_mentions = 0usize;
@@ -242,6 +281,7 @@ impl PhoenixGraptor {
                 &mut registry,
             )?;
             total_chapters += processed.summary.chapter_count;
+            total_boundaries += processed.summary.boundary_count;
             total_parents += processed.summary.parent_count;
             total_leaves += processed.summary.leaf_count;
             total_mentions += processed.persist_state.mention_count;
@@ -261,12 +301,14 @@ impl PhoenixGraptor {
             chunk_stats: Some(ChunkStats {
                 documents: request.documents.len(),
                 total_chapters,
+                total_boundaries,
                 total_parents,
                 total_leaves,
             }),
             graph_summary: Some(GraphSummary {
                 documents: request.documents.len(),
                 total_chapters,
+                total_boundaries,
                 total_leaves,
                 total_entities: registry.entities.len(),
                 total_mentions: total_mentions + registry.initial_mentions as usize,
@@ -302,6 +344,246 @@ impl PhoenixGraptor {
         }
 
         Ok(result)
+    }
+
+    pub fn ingest_message_thread_view(
+        &self,
+        store: &PhoenixCozoStore,
+        scanner: &PhoenixScanner,
+        structure: &PhoenixStructure,
+        thread: &BorrowedIngestThread<'_>,
+    ) -> Result<IngestResult, StoreError> {
+        let synthetic = build_thread_document(thread);
+        let document = BorrowedIngestDocument {
+            document_id: thread.document_id.clone(),
+            note_id: None,
+            title: thread.title,
+            text: &synthetic.text,
+            scope: thread.scope.clone(),
+        };
+        let note_id = NoteId(document.document_id.0.clone());
+        let boundaries = vec![BoundarySpec {
+            boundary_id: 0,
+            ordinal: 0,
+            kind: BoundaryKind::Chapter,
+            depth: 1,
+            label: "thread".to_owned(),
+            parent_boundary_id: None,
+            start: 0,
+            end: document.text.len(),
+        }];
+        let mut chapters = vec![ChapterSpec {
+            chunk_id: stable_int(
+                "chunk",
+                &[
+                    document.document_id.0.as_str(),
+                    "2",
+                    "0",
+                    &document.text.len().to_string(),
+                ],
+            ),
+            chapter_id: 0,
+            boundary_id: 0,
+            boundary_ordinal: 0,
+            boundary_kind: BoundaryKind::Chapter,
+            boundary_depth: 1,
+            start: 0,
+            end: document.text.len(),
+            title: "thread".to_owned(),
+            parents: Vec::new(),
+        }];
+        let mut leaves = build_thread_leaf_chunks(&document, thread, &synthetic, &self.config);
+        assign_leaves_to_boundaries(&boundaries, &mut leaves);
+        assign_leaves_to_chapters(&document, &chapters, &mut leaves);
+        build_parent_chunks(&document, &self.config, &mut chapters, &mut leaves);
+
+        let policy = FlushPolicy::default();
+        let mut diagnostics = DiagnosticCollector::new(policy.diagnostic_cap);
+        diagnostics.push(Diagnostic {
+            code: "PX_GRAPTOR_THREAD_INGEST".to_owned(),
+            message: format!(
+                "Thread ingest produced {} parent chunks and {} message-aware leaves.",
+                chapters
+                    .iter()
+                    .map(|chapter| chapter.parents.len())
+                    .sum::<usize>(),
+                leaves.len()
+            ),
+        });
+        let mut buffers = BufferSet::new();
+        let mut persist_state = DocumentPersistState::default();
+        let mut chapter_links = FxHashMap::<(u32, u32), FxHashSet<String>>::default();
+        let mut resolver_scratch = ResolverSeedScratch::default();
+        let mut registry = EntityRegistry::from_store(store)?;
+        let scan_session_id = SessionId(format!("thread-{}", document.document_id.0));
+        let now = now_ms();
+
+        persist_document_backbone(store, &document, &note_id, now)?;
+        for boundary in &boundaries {
+            buffers
+                .document_boundary_rows
+                .insert_value(document_boundary_row(&document, &note_id, boundary))
+                .expect("document boundary row");
+        }
+        insert_graph_vertex(
+            &mut buffers,
+            json!({
+                "id": document_vertex_id(&document.document_id),
+                "document_id": document.document_id.0,
+                "narrative_id": document.scope.narrative_id,
+                "value": {
+                    "kind": "thread_document",
+                    "documentId": document.document_id.0,
+                    "noteId": note_id.0,
+                    "title": document.title,
+                    "messageCount": thread.messages.len(),
+                },
+                "weight": 1,
+                "attributes": {
+                    "scope": document.scope,
+                    "messageIds": thread.messages.iter().map(|message| message.message_id).collect::<Vec<_>>(),
+                    "roles": thread.messages.iter().map(|message| message.role).collect::<Vec<_>>(),
+                },
+            }),
+        );
+        buffers
+            .graph_label_rows
+            .insert_value(json!({
+                "vertex_id": document_vertex_id(&document.document_id),
+                "label": document.title,
+            }))
+            .expect("thread document label row");
+
+        for chapter in &chapters {
+            buffers
+                .chunk_rows
+                .insert_value(chapter_chunk_row(&document, chapter, &document.scope))
+                .expect("chapter chunk row");
+            buffers
+                .chunkid_rows
+                .insert_value(chapter_chunkid_row(&document, chapter))
+                .expect("chapter chunk id row");
+            insert_graph_vertex(&mut buffers, chapter_vertex_row(&document, chapter));
+            buffers
+                .graph_label_rows
+                .insert_value(json!({
+                    "vertex_id": chapter_vertex_id(&document.document_id, chapter.chapter_id),
+                    "label": chapter.title.clone(),
+                }))
+                .expect("chapter label row");
+            insert_graph_edge(
+                &mut buffers,
+                &mut persist_state,
+                graph_edge_row(
+                    &document_vertex_id(&document.document_id),
+                    &chapter_vertex_id(&document.document_id, chapter.chapter_id),
+                    1,
+                    "contains",
+                    json!({
+                        "kind": "contains",
+                        "documentId": document.document_id.0,
+                        "boundaryId": chapter.boundary_id,
+                        "boundaryOrdinal": chapter.boundary_ordinal,
+                        "boundaryKind": boundary_kind_str(&chapter.boundary_kind),
+                        "assertionKind": "current",
+                    }),
+                    None,
+                    Some(document.document_id.0.clone()),
+                    document.scope.narrative_id.clone(),
+                ),
+            );
+        }
+
+        process_document_chunks(
+            store,
+            policy,
+            &document,
+            &note_id,
+            &chapters,
+            &leaves,
+            &scan_session_id,
+            scanner,
+            structure,
+            &mut registry,
+            &mut resolver_scratch,
+            &mut buffers,
+            &mut persist_state,
+            &mut chapter_links,
+            &mut diagnostics,
+        )?;
+
+        buffers.flush_all(store)?;
+
+        let summary = IngestDocumentSummary {
+            document_id: document.document_id.clone(),
+            note_id: Some(note_id.clone()),
+            chapter_count: chapters.len(),
+            boundary_count: boundaries.len(),
+            parent_count: chapters.iter().map(|chapter| chapter.parents.len()).sum(),
+            leaf_count: leaves.len(),
+            entity_count: persist_state.entity_ids.len(),
+            edge_count: persist_state.edge_count + persist_state.graph_edge_count,
+            has_front_matter_chapter: false,
+            has_front_matter_boundary: false,
+        };
+        persist_entity_rows(
+            store,
+            &document,
+            None,
+            &note_id,
+            &summary,
+            &chapters,
+            &boundaries,
+            &registry,
+            &persist_state,
+            now,
+        )?;
+        let (warning_count, diagnostics) = diagnostics.finish();
+        Ok(IngestResult {
+            session_id: None,
+            document_count: 1,
+            warning_count,
+            documents: vec![summary],
+            chunk_stats: Some(ChunkStats {
+                documents: 1,
+                total_chapters: chapters.len(),
+                total_boundaries: boundaries.len(),
+                total_parents: chapters.iter().map(|chapter| chapter.parents.len()).sum(),
+                total_leaves: leaves.len(),
+            }),
+            graph_summary: Some(GraphSummary {
+                documents: 1,
+                total_chapters: chapters.len(),
+                total_boundaries: boundaries.len(),
+                total_leaves: leaves.len(),
+                total_entities: persist_state.entity_ids.len(),
+                total_mentions: persist_state.mention_count,
+                total_edges: persist_state.edge_count + persist_state.graph_edge_count,
+                cross_chapter_links: persist_state.cross_chapter_links,
+            }),
+            entity_summary: Some(EntitySummary {
+                total_entities: persist_state.entity_ids.len(),
+                total_aliases: registry.total_aliases(),
+                total_mentions: persist_state.mention_count,
+                multi_chapter_entities: registry.multi_chapter_entities(),
+            }),
+            discovery_summary: Some(DiscoverySummary {
+                candidate_count: persist_state.discovery_count,
+                mention_count: persist_state.discovery_count,
+                persisted_count: persist_state.discovery_count,
+            }),
+            retrieval_summary: Some(RetrievalSummary {
+                qgram_documents: 1,
+                gldr_chunks: leaves.len(),
+                gldr_entities: persist_state.entity_ids.len(),
+                gldr_edges: persist_state.edge_count + persist_state.graph_edge_count,
+                raptor_documents: 0,
+                raptor_leaves: 0,
+                raptor_enabled: false,
+            }),
+            relation_counts: store.relation_counts()?,
+            diagnostics,
+        })
     }
 
     pub fn load_graph(&self, store: &PhoenixCozoStore) -> Result<GraptorGraph, StoreError> {
@@ -345,9 +627,11 @@ impl PhoenixGraptor {
             .note_id
             .clone()
             .unwrap_or_else(|| NoteId(document.document_id.0.clone()));
-        let boundaries = self.detect_chapter_boundaries(document.text);
+        let boundary_markers = self.detect_boundaries(document.text);
+        let boundaries = build_boundary_specs(document, &boundary_markers);
         let mut chapters = build_chapter_specs(document, &boundaries);
         let mut leaves = build_leaf_chunks(document, &self.config);
+        assign_leaves_to_boundaries(&boundaries, &mut leaves);
         assign_leaves_to_chapters(document, &chapters, &mut leaves);
         build_parent_chunks(document, &self.config, &mut chapters, &mut leaves);
 
@@ -356,7 +640,8 @@ impl PhoenixGraptor {
         diagnostics.push(Diagnostic {
             code: "PX_GRAPTOR_CHUNKERX2".to_owned(),
             message: format!(
-                "ChunkerX2-style ingest produced {} chapters, {} parents, and {} leaves.",
+                "ChunkerX2-style ingest produced {} boundaries, {} chapters, {} parents, and {} leaves.",
+                boundaries.len(),
                 chapters.len(),
                 chapters
                     .iter()
@@ -372,6 +657,12 @@ impl PhoenixGraptor {
         let now = now_ms();
 
         persist_document_backbone(store, document, &note_id, now)?;
+        for boundary in &boundaries {
+            buffers
+                .document_boundary_rows
+                .insert_value(document_boundary_row(document, &note_id, boundary))
+                .expect("document boundary row");
+        }
         insert_graph_vertex(
             &mut buffers,
             json!({
@@ -423,6 +714,8 @@ impl PhoenixGraptor {
                     "contains",
                     json!({ "kind": "contains" }),
                     None,
+                    Some(document.document_id.0.clone()),
+                    document.scope.narrative_id.clone(),
                 ),
             );
             buffers.flush_due(store, policy)?;
@@ -460,6 +753,7 @@ impl PhoenixGraptor {
             document_id: document.document_id.clone(),
             note_id: Some(note_id.clone()),
             chapter_count: chapters.len(),
+            boundary_count: boundaries.len(),
             parent_count: chapters.iter().map(|chapter| chapter.parents.len()).sum(),
             leaf_count: leaves.len(),
             entity_count: persist_state.entity_ids.len(),
@@ -467,6 +761,10 @@ impl PhoenixGraptor {
             has_front_matter_chapter: chapters
                 .first()
                 .map(|chapter| chapter.chapter_id == 0)
+                .unwrap_or(false),
+            has_front_matter_boundary: boundaries
+                .first()
+                .map(|boundary| boundary.boundary_id == 0)
                 .unwrap_or(false),
         };
 
@@ -477,6 +775,7 @@ impl PhoenixGraptor {
             &note_id,
             &summary,
             &chapters,
+            &boundaries,
             registry,
             &persist_state,
             now,
@@ -491,11 +790,16 @@ impl PhoenixGraptor {
         })
     }
 
-    fn detect_chapter_boundaries(&self, text: &str) -> Vec<ChapterBoundary> {
-        let Some(matcher) = &self.chapter_matcher else {
-            return Vec::new();
-        };
+    fn detect_boundaries(&self, text: &str) -> Vec<BoundaryMarker> {
         let mut boundaries = Vec::new();
+        if self.max_heading_depth > 0 {
+            boundaries.extend(scan_heading_boundaries(text, self.max_heading_depth));
+        }
+        let Some(matcher) = &self.boundary_matcher else {
+            boundaries.sort_by_key(|boundary| boundary.start);
+            boundaries.dedup_by_key(|boundary| boundary.start);
+            return boundaries;
+        };
         let bytes = text.as_bytes();
         let mut last_line_start = None;
         for matched in matcher.leftmost_find_iter(bytes) {
@@ -505,10 +809,12 @@ impl PhoenixGraptor {
             }
             last_line_start = Some(line_start);
             let line = text.get(line_start..line_end).unwrap_or_default();
-            if validate_chapter_line(line).is_some() {
-                boundaries.push(ChapterBoundary {
+            if let Some((kind, depth)) = validate_chapter_line(line, self.max_heading_depth) {
+                boundaries.push(BoundaryMarker {
                     start: line_start,
-                    title: line.trim().to_owned(),
+                    kind,
+                    depth,
+                    label: line.trim().to_owned(),
                 });
             }
         }
@@ -526,17 +832,28 @@ impl PhoenixGraptor {
                 continue;
             }
             let line = text.get(line_start..line_end).unwrap_or_default();
-            if validate_chapter_line(line).is_some() {
-                boundaries.push(ChapterBoundary {
+            if let Some((kind, depth)) = validate_chapter_line(line, self.max_heading_depth) {
+                boundaries.push(BoundaryMarker {
                     start: line_start,
-                    title: line.trim().to_owned(),
+                    kind,
+                    depth,
+                    label: line.trim().to_owned(),
                 });
             }
             line_start = offset + 1;
         }
-        boundaries.sort_by_key(|boundary| boundary.start);
+        boundaries.sort_by(|left, right| {
+            left.start
+                .cmp(&right.start)
+                .then_with(|| left.depth.cmp(&right.depth))
+        });
         boundaries.dedup_by_key(|boundary| boundary.start);
         boundaries
+    }
+
+    #[cfg(test)]
+    fn detect_chapter_boundaries(&self, text: &str) -> Vec<BoundaryMarker> {
+        self.detect_boundaries(text)
     }
 }
 
@@ -596,10 +913,19 @@ impl PhoenixGraptor {
 }
 
 pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, StoreError> {
-    const VERTEX_COLUMNS: &[&str] = &["id", "weight", "value", "attributes"];
+    const VERTEX_COLUMNS: &[&str] = &[
+        "id",
+        "document_id",
+        "narrative_id",
+        "weight",
+        "value",
+        "attributes",
+    ];
     const EDGE_COLUMNS: &[&str] = &[
         "source_id",
         "target_id",
+        "document_id",
+        "narrative_id",
         "edge_type",
         "weight",
         "attributes",
@@ -633,16 +959,41 @@ pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, Sto
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             });
-        let document_id = attributes
-            .get("documentId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let document_id = row.get_str("document_id").map(str::to_owned).or_else(|| {
+            attributes
+                .get("documentId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
         let chapter_id = attributes
             .get("chapterId")
             .and_then(Value::as_u64)
             .map(|value| value as u32);
         let chapters = attributes
             .get("chapters")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .map(|value| value as u32)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let boundary_id = attributes
+            .get("boundaryId")
+            .and_then(Value::as_u64)
+            .map(|value| value as u32);
+        let boundary_ordinal = attributes
+            .get("boundaryOrdinal")
+            .and_then(Value::as_u64)
+            .map(|value| value as u32);
+        let boundary_kind = attributes
+            .get("boundaryKind")
+            .and_then(Value::as_str)
+            .map(boundary_kind_from_str);
+        let boundary_ordinals = attributes
+            .get("boundaryOrdinals")
             .and_then(Value::as_array)
             .map(|values| {
                 values
@@ -663,6 +1014,10 @@ pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, Sto
             document_id: document_id.clone(),
             chapter_id,
             chapters,
+            boundary_id,
+            boundary_ordinal,
+            boundary_kind,
+            boundary_ordinals,
         };
         graph.vertices.insert(id.to_owned(), vertex);
         if let (Some(document_id), Some(chapter_id), Some(_)) =
@@ -688,7 +1043,22 @@ pub fn load_graph_snapshot(store: &PhoenixCozoStore) -> Result<GraptorGraph, Sto
             target_id: target_id.to_owned(),
             edge_type: row.get_str("edge_type").unwrap_or("edge").to_owned(),
             weight: row.get_i64("weight").unwrap_or(1),
-            attributes: row.get_json("attributes").unwrap_or(Value::Null),
+            attributes: {
+                let mut attributes = row.get_json("attributes").unwrap_or(Value::Null);
+                if let Some(object) = attributes.as_object_mut() {
+                    if !object.contains_key("documentId") {
+                        if let Some(document_id) = row.get_str("document_id") {
+                            object.insert("documentId".to_owned(), json!(document_id));
+                        }
+                    }
+                    if !object.contains_key("narrativeId") {
+                        if let Some(narrative_id) = row.get_str("narrative_id") {
+                            object.insert("narrativeId".to_owned(), json!(narrative_id));
+                        }
+                    }
+                }
+                attributes
+            },
             data: row.get_json("data").filter(|value| !value.is_null()),
         };
         graph
@@ -762,6 +1132,11 @@ pub fn load_session_state(
                     .and_then(|value| value.get("chapterCount"))
                     .and_then(Value::as_u64)
                     .unwrap_or_default() as usize,
+                boundary_count: payload
+                    .get("summary")
+                    .and_then(|value| value.get("boundaryCount"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default() as usize,
                 chapter_titles: payload
                     .get("chapters")
                     .and_then(Value::as_array)
@@ -769,6 +1144,17 @@ pub fn load_session_state(
                         values
                             .iter()
                             .filter_map(|value| value.get("title").and_then(Value::as_str))
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                boundary_labels: payload
+                    .get("boundaries")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.get("label").and_then(Value::as_str))
                             .map(str::to_owned)
                             .collect::<Vec<_>>()
                     })
@@ -795,6 +1181,11 @@ pub fn load_session_state(
                 has_front_matter_chapter: payload
                     .get("summary")
                     .and_then(|value| value.get("hasFrontMatterChapter"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                has_front_matter_boundary: payload
+                    .get("summary")
+                    .and_then(|value| value.get("hasFrontMatterBoundary"))
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 updated_at: payload
@@ -854,6 +1245,11 @@ pub fn load_session_stats(
             .documents
             .iter()
             .map(|document| document.chapter_count)
+            .sum(),
+        boundary_count: state
+            .documents
+            .iter()
+            .map(|document| document.boundary_count)
             .sum(),
         parent_count: state
             .documents
@@ -986,6 +1382,8 @@ pub fn build_graph_delta(
                 .and_then(Value::as_str)
                 .map(|value| NoteId(value.to_owned())),
             chapter_id: vertex.chapter_id.unwrap_or_default(),
+            boundary_id: vertex.boundary_id,
+            boundary_ordinal: vertex.boundary_ordinal,
             range: TextRange { start, end },
         });
     }
@@ -1015,6 +1413,8 @@ pub fn build_graph_delta(
                 .as_ref()
                 .map(|value| DocumentId(value.clone())),
             chapter_id: vertex.chapter_id,
+            boundary_id: vertex.boundary_id,
+            boundary_ordinal: vertex.boundary_ordinal,
             weight: vertex.weight as i32,
         });
     }
@@ -1056,22 +1456,34 @@ pub fn build_graph_delta(
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BoundaryKind {
-    Chapter,
-    Section,
+#[derive(Clone, Debug)]
+struct BoundaryMarker {
+    start: usize,
+    kind: BoundaryKind,
+    depth: u8,
+    label: String,
 }
 
 #[derive(Clone, Debug)]
-struct ChapterBoundary {
+struct BoundarySpec {
+    boundary_id: u32,
+    ordinal: u32,
+    kind: BoundaryKind,
+    depth: u8,
+    label: String,
+    parent_boundary_id: Option<u32>,
     start: usize,
-    title: String,
+    end: usize,
 }
 
 #[derive(Clone, Debug)]
 struct ChapterSpec {
     chunk_id: i64,
     chapter_id: u32,
+    boundary_id: u32,
+    boundary_ordinal: u32,
+    boundary_kind: BoundaryKind,
+    boundary_depth: u8,
     start: usize,
     end: usize,
     title: String,
@@ -1090,7 +1502,34 @@ struct LeafChunk {
     chunk_id: i64,
     search_id: String,
     chapter_id: u32,
+    boundary_id: u32,
+    boundary_ordinal: u32,
+    boundary_kind: BoundaryKind,
     parent_id: Option<i64>,
+    start: usize,
+    end: usize,
+    message_meta: Option<LeafMessageMeta>,
+}
+
+#[derive(Clone, Debug)]
+struct LeafMessageMeta {
+    message_ids: Vec<String>,
+    roles: Vec<String>,
+    start_index: usize,
+    end_index: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ThreadSyntheticDocument {
+    text: String,
+    messages: Vec<ThreadMessageRange>,
+}
+
+#[derive(Clone, Debug)]
+struct ThreadMessageRange {
+    message_id: String,
+    role: String,
+    message_index: usize,
     start: usize,
     end: usize,
 }
@@ -1190,6 +1629,7 @@ struct ProcessedDocument {
 struct BufferSet {
     chunk_rows: CompactRelationBuffer,
     chunkid_rows: CompactRelationBuffer,
+    document_boundary_rows: CompactRelationBuffer,
     span_rows: CompactRelationBuffer,
     span_mention_rows: CompactRelationBuffer,
     evidence_rows: CompactRelationBuffer,
@@ -1206,6 +1646,8 @@ impl BufferSet {
         Self {
             chunk_rows: CompactRelationBuffer::new("chunks").expect("chunks relation"),
             chunkid_rows: CompactRelationBuffer::new("chunkid_map").expect("chunkid_map relation"),
+            document_boundary_rows: CompactRelationBuffer::new("document_boundaries")
+                .expect("document_boundaries relation"),
             span_rows: CompactRelationBuffer::new("spans").expect("spans relation"),
             span_mention_rows: CompactRelationBuffer::new("span_mentions")
                 .expect("span_mentions relation"),
@@ -1232,6 +1674,7 @@ impl BufferSet {
         flush_relation_if_needed(store, &mut self.chunk_rows, policy.text_heavy_limit)?;
         flush_relation_if_needed(store, &mut self.span_rows, policy.text_heavy_limit)?;
         flush_relation_if_needed(store, &mut self.evidence_rows, policy.text_heavy_limit)?;
+        flush_relation_if_needed(store, &mut self.document_boundary_rows, policy.medium_limit)?;
         flush_relation_if_needed(store, &mut self.graph_vertex_rows, policy.text_heavy_limit)?;
         flush_relation_if_needed(store, &mut self.graph_edge_rows, policy.text_heavy_limit)?;
         flush_relation_if_needed(
@@ -1250,6 +1693,7 @@ impl BufferSet {
     fn flush_all(&mut self, store: &PhoenixCozoStore) -> Result<(), StoreError> {
         flush_relation_all(store, &mut self.chunk_rows)?;
         flush_relation_all(store, &mut self.chunkid_rows)?;
+        flush_relation_all(store, &mut self.document_boundary_rows)?;
         flush_relation_all(store, &mut self.span_rows)?;
         flush_relation_all(store, &mut self.span_mention_rows)?;
         flush_relation_all(store, &mut self.evidence_rows)?;
@@ -1278,6 +1722,7 @@ struct MentionRecord {
 struct DiscoveryRecord {
     key: String,
     chapter_id: u32,
+    boundary_id: u32,
     range: TextRange,
     confidence: f32,
 }
@@ -1289,6 +1734,7 @@ struct EntityState {
     kind: EntityKind,
     aliases: FxHashSet<String>,
     chapters: FxHashSet<u32>,
+    boundary_ordinals: FxHashSet<u32>,
     total_mentions: u32,
 }
 
@@ -1329,6 +1775,7 @@ impl EntityRegistry {
                 kind: kind_from_string(row.get_str("kind").unwrap_or("Other")),
                 aliases: aliases.clone(),
                 chapters: FxHashSet::default(),
+                boundary_ordinals: FxHashSet::default(),
                 total_mentions,
             };
             registry.initial_mentions += total_mentions;
@@ -1374,6 +1821,7 @@ impl EntityRegistry {
         explicit_id: Option<&EntityId>,
         kind: Option<EntityKind>,
         chapter_id: u32,
+        boundary_ordinal: u32,
     ) -> EntityId {
         if let Some(explicit_id) = explicit_id {
             let existed = self.entities.contains_key(&explicit_id.0);
@@ -1386,9 +1834,11 @@ impl EntityRegistry {
                     kind: kind.clone().unwrap_or(EntityKind::Other),
                     aliases: FxHashSet::default(),
                     chapters: FxHashSet::default(),
+                    boundary_ordinals: FxHashSet::default(),
                     total_mentions: 0,
                 });
             entry.chapters.insert(chapter_id);
+            entry.boundary_ordinals.insert(boundary_ordinal);
             self.surfaces
                 .insert(normalize_key(surface), explicit_id.clone());
             if !existed {
@@ -1401,6 +1851,7 @@ impl EntityRegistry {
         if let Some(existing) = self.surfaces.get(&normalized) {
             if let Some(entity) = self.entities.get_mut(&existing.0) {
                 entity.chapters.insert(chapter_id);
+                entity.boundary_ordinals.insert(boundary_ordinal);
             }
             return existing.clone();
         }
@@ -1411,6 +1862,8 @@ impl EntityRegistry {
         ));
         let mut chapters = FxHashSet::default();
         chapters.insert(chapter_id);
+        let mut boundary_ordinals = FxHashSet::default();
+        boundary_ordinals.insert(boundary_ordinal);
         self.entities.insert(
             entity_id.0.clone(),
             EntityState {
@@ -1419,6 +1872,7 @@ impl EntityRegistry {
                 kind: kind.unwrap_or(EntityKind::Other),
                 aliases: FxHashSet::default(),
                 chapters,
+                boundary_ordinals,
                 total_mentions: 0,
             },
         );
@@ -1439,10 +1893,11 @@ impl EntityRegistry {
         }
     }
 
-    fn record_mention(&mut self, entity_id: &EntityId, chapter_id: u32) {
+    fn record_mention(&mut self, entity_id: &EntityId, chapter_id: u32, boundary_ordinal: u32) {
         if let Some(entity) = self.entities.get_mut(&entity_id.0) {
             entity.total_mentions += 1;
             entity.chapters.insert(chapter_id);
+            entity.boundary_ordinals.insert(boundary_ordinal);
         }
     }
 
@@ -1508,11 +1963,80 @@ impl EntityRegistry {
     }
 }
 
+fn build_boundary_specs(
+    document: &BorrowedIngestDocument<'_>,
+    markers: &[BoundaryMarker],
+) -> Vec<BoundarySpec> {
+    if markers.is_empty() {
+        return vec![BoundarySpec {
+            boundary_id: 0,
+            ordinal: 0,
+            kind: BoundaryKind::Chapter,
+            depth: 1,
+            label: "document".to_owned(),
+            parent_boundary_id: None,
+            start: 0,
+            end: document.text.len(),
+        }];
+    }
+
+    let mut boundaries = Vec::with_capacity(markers.len() + 1);
+    let mut next_id = 1u32;
+    let mut next_ordinal = 1u32;
+    if markers[0].start > 0 && document.text[..markers[0].start].trim().len() > 0 {
+        boundaries.push(BoundarySpec {
+            boundary_id: 0,
+            ordinal: 0,
+            kind: BoundaryKind::Chapter,
+            depth: 1,
+            label: "front matter".to_owned(),
+            parent_boundary_id: None,
+            start: 0,
+            end: markers[0].start,
+        });
+    }
+    for (index, marker) in markers.iter().enumerate() {
+        let end = markers
+            .get(index + 1)
+            .map(|next| next.start)
+            .unwrap_or(document.text.len());
+        let parent_boundary_id = markers[..index]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, prior)| prior.depth < marker.depth && prior.start <= marker.start)
+            .map(|(prior_index, _)| {
+                if markers[0].start > 0 && document.text[..markers[0].start].trim().len() > 0 {
+                    prior_index as u32 + 1
+                } else {
+                    prior_index as u32 + 1
+                }
+            });
+        boundaries.push(BoundarySpec {
+            boundary_id: next_id,
+            ordinal: next_ordinal,
+            kind: marker.kind.clone(),
+            depth: marker.depth,
+            label: marker.label.clone(),
+            parent_boundary_id,
+            start: marker.start,
+            end,
+        });
+        next_id += 1;
+        next_ordinal += 1;
+    }
+    boundaries
+}
+
 fn build_chapter_specs(
     document: &BorrowedIngestDocument<'_>,
-    boundaries: &[ChapterBoundary],
+    boundaries: &[BoundarySpec],
 ) -> Vec<ChapterSpec> {
-    if boundaries.is_empty() {
+    let primary = boundaries
+        .iter()
+        .filter(|boundary| is_primary_boundary(boundary))
+        .collect::<Vec<_>>();
+    if primary.is_empty() {
         return vec![ChapterSpec {
             chunk_id: stable_int(
                 "chunk",
@@ -1524,6 +2048,10 @@ fn build_chapter_specs(
                 ],
             ),
             chapter_id: 0,
+            boundary_id: 0,
+            boundary_ordinal: 0,
+            boundary_kind: BoundaryKind::Chapter,
+            boundary_depth: 1,
             start: 0,
             end: document.text.len(),
             title: "document".to_owned(),
@@ -1531,50 +2059,29 @@ fn build_chapter_specs(
         }];
     }
 
-    let mut chapters = Vec::new();
-    let mut next_id = 1u32;
-    if boundaries[0].start > 0 && document.text[..boundaries[0].start].trim().len() > 0 {
-        chapters.push(ChapterSpec {
-            chunk_id: stable_int(
-                "chunk",
-                &[
-                    document.document_id.0.as_str(),
-                    "2",
-                    "0",
-                    &boundaries[0].start.to_string(),
-                ],
-            ),
-            chapter_id: 0,
-            start: 0,
-            end: boundaries[0].start,
-            title: "front matter".to_owned(),
-            parents: Vec::new(),
-        });
-    }
-    for (index, boundary) in boundaries.iter().enumerate() {
-        let end = boundaries
-            .get(index + 1)
-            .map(|next| next.start)
-            .unwrap_or(document.text.len());
-        chapters.push(ChapterSpec {
+    primary
+        .into_iter()
+        .map(|boundary| ChapterSpec {
             chunk_id: stable_int(
                 "chunk",
                 &[
                     document.document_id.0.as_str(),
                     "2",
                     &boundary.start.to_string(),
-                    &end.to_string(),
+                    &boundary.end.to_string(),
                 ],
             ),
-            chapter_id: next_id,
+            chapter_id: boundary.boundary_id,
+            boundary_id: boundary.boundary_id,
+            boundary_ordinal: boundary.ordinal,
+            boundary_kind: boundary.kind.clone(),
+            boundary_depth: boundary.depth,
             start: boundary.start,
-            end,
-            title: boundary.title.clone(),
+            end: boundary.end,
+            title: boundary.label.clone(),
             parents: Vec::new(),
-        });
-        next_id += 1;
-    }
-    chapters
+        })
+        .collect()
 }
 
 fn build_leaf_chunks(
@@ -1608,9 +2115,13 @@ fn build_leaf_chunks(
             ),
             search_id: String::new(),
             chapter_id: 0,
+            boundary_id: 0,
+            boundary_ordinal: 0,
+            boundary_kind: BoundaryKind::Chapter,
             parent_id: None,
             start,
             end,
+            message_meta: None,
         });
     };
 
@@ -1639,6 +2150,218 @@ fn build_leaf_chunks(
     leaves
 }
 
+fn build_thread_document(thread: &BorrowedIngestThread<'_>) -> ThreadSyntheticDocument {
+    let mut text = String::new();
+    let mut messages = Vec::new();
+
+    for (message_index, message) in thread.messages.iter().enumerate() {
+        let start = text.len();
+        text.push('[');
+        text.push_str(message.role.trim());
+        text.push_str("] ");
+        text.push_str(message.content.trim());
+        text.push('\n');
+        let end = text.len();
+        messages.push(ThreadMessageRange {
+            message_id: message.message_id.to_owned(),
+            role: message.role.to_owned(),
+            message_index,
+            start,
+            end,
+        });
+    }
+
+    ThreadSyntheticDocument { text, messages }
+}
+
+fn build_thread_leaf_chunks(
+    document: &BorrowedIngestDocument<'_>,
+    thread: &BorrowedIngestThread<'_>,
+    synthetic: &ThreadSyntheticDocument,
+    config: &GraptorConfig,
+) -> Vec<LeafChunk> {
+    if synthetic.messages.is_empty() {
+        return Vec::new();
+    }
+
+    let mut leaves = Vec::new();
+    let mut start_index = 0usize;
+
+    while start_index < synthetic.messages.len() {
+        let first = &synthetic.messages[start_index];
+        let first_len = first.end.saturating_sub(first.start);
+        let mut end_index = start_index;
+        let mut current_len = 0usize;
+
+        while end_index < synthetic.messages.len() {
+            let candidate = &synthetic.messages[end_index];
+            let candidate_len = candidate.end.saturating_sub(candidate.start);
+            if current_len > 0 && current_len + candidate_len > config.chunk_size {
+                break;
+            }
+            current_len += candidate_len;
+            end_index += 1;
+        }
+
+        if end_index == start_index {
+            let oversize = &synthetic.messages[start_index];
+            leaves.extend(split_oversize_thread_message(
+                document, oversize, synthetic, config,
+            ));
+            start_index += 1;
+            continue;
+        }
+        if end_index == start_index + 1 && first_len > config.chunk_size {
+            let oversize = &synthetic.messages[start_index];
+            leaves.extend(split_oversize_thread_message(
+                document, oversize, synthetic, config,
+            ));
+            start_index += 1;
+            continue;
+        }
+
+        let last = &synthetic.messages[end_index - 1];
+        leaves.push(thread_leaf_chunk(
+            document,
+            first.start,
+            last.end,
+            LeafMessageMeta {
+                message_ids: thread.messages[start_index..end_index]
+                    .iter()
+                    .map(|message| message.message_id.to_owned())
+                    .collect(),
+                roles: thread.messages[start_index..end_index]
+                    .iter()
+                    .map(|message| message.role.to_owned())
+                    .collect(),
+                start_index,
+                end_index: end_index - 1,
+            },
+        ));
+        start_index = end_index;
+    }
+
+    leaves
+}
+
+fn split_oversize_thread_message(
+    document: &BorrowedIngestDocument<'_>,
+    message: &ThreadMessageRange,
+    synthetic: &ThreadSyntheticDocument,
+    config: &GraptorConfig,
+) -> Vec<LeafChunk> {
+    let text = &synthetic.text[message.start..message.end];
+    let mut sentences = split_sentences(text);
+    if sentences.is_empty() {
+        sentences.push(TextRange {
+            start: 0,
+            end: text.len() as u32,
+        });
+    }
+
+    let mut leaves = Vec::new();
+    let mut window = Vec::<TextRange>::new();
+    let mut current_len = 0usize;
+
+    let emit = |window: &[TextRange], leaves: &mut Vec<LeafChunk>| {
+        if window.is_empty() {
+            return;
+        }
+        let start = message.start + window[0].start as usize;
+        let end = message.start + window[window.len() - 1].end as usize;
+        leaves.push(thread_leaf_chunk(
+            document,
+            start,
+            end,
+            LeafMessageMeta {
+                message_ids: vec![message.message_id.clone()],
+                roles: vec![message.role.clone()],
+                start_index: message.message_index,
+                end_index: message.message_index,
+            },
+        ));
+    };
+
+    for sentence in sentences {
+        let sentence_len = (sentence.end - sentence.start) as usize;
+        if current_len > 0 && current_len + sentence_len > config.chunk_size {
+            emit(&window, &mut leaves);
+            let mut overlap_len = 0usize;
+            let mut new_window = Vec::new();
+            for span in window.iter().rev() {
+                let span_len = (span.end - span.start) as usize;
+                if overlap_len + span_len > config.overlap {
+                    break;
+                }
+                overlap_len += span_len;
+                new_window.push(*span);
+            }
+            new_window.reverse();
+            window = new_window;
+            current_len = overlap_len;
+        }
+        window.push(sentence);
+        current_len += sentence_len;
+    }
+    emit(&window, &mut leaves);
+    leaves
+}
+
+fn thread_leaf_chunk(
+    document: &BorrowedIngestDocument<'_>,
+    start: usize,
+    end: usize,
+    message_meta: LeafMessageMeta,
+) -> LeafChunk {
+    let chunk_id = stable_int(
+        "chunk",
+        &[
+            document.document_id.0.as_str(),
+            "0",
+            &start.to_string(),
+            &end.to_string(),
+        ],
+    );
+    LeafChunk {
+        chunk_id,
+        search_id: format!(
+            "{}:{}:{}:{}:{}-{}",
+            document.document_id.0, 0, 0, chunk_id, start, end
+        ),
+        chapter_id: 0,
+        boundary_id: 0,
+        boundary_ordinal: 0,
+        boundary_kind: BoundaryKind::Chapter,
+        parent_id: None,
+        start,
+        end,
+        message_meta: Some(message_meta),
+    }
+}
+
+fn assign_leaves_to_boundaries(boundaries: &[BoundarySpec], leaves: &mut [LeafChunk]) {
+    for leaf in leaves {
+        let mut best_boundary = boundaries
+            .first()
+            .expect("document should always have a boundary");
+        let mut best_overlap = 0usize;
+        for boundary in boundaries {
+            let overlap = overlap_len(leaf.start, leaf.end, boundary.start, boundary.end);
+            if overlap > best_overlap
+                || (overlap == best_overlap
+                    && boundary.depth >= best_boundary.depth
+                    && boundary.start >= best_boundary.start)
+            {
+                best_overlap = overlap;
+                best_boundary = boundary;
+            }
+        }
+        leaf.boundary_id = best_boundary.boundary_id;
+        leaf.boundary_ordinal = best_boundary.ordinal;
+        leaf.boundary_kind = best_boundary.kind.clone();
+    }
+}
+
 fn assign_leaves_to_chapters(
     document: &BorrowedIngestDocument<'_>,
     chapters: &[ChapterSpec],
@@ -1659,8 +2382,13 @@ fn assign_leaves_to_chapters(
         }
         leaf.chapter_id = best_chapter;
         leaf.search_id = format!(
-            "{}:{}:{}:{}-{}",
-            document.document_id.0, leaf.chapter_id, leaf.chunk_id, leaf.start, leaf.end
+            "{}:{}:{}:{}:{}-{}",
+            document.document_id.0,
+            leaf.chapter_id,
+            leaf.boundary_id,
+            leaf.chunk_id,
+            leaf.start,
+            leaf.end
         );
     }
 }
@@ -1774,8 +2502,17 @@ fn process_document_chunks(
                     &parent_vertex,
                     1,
                     "contains",
-                    json!({ "kind": "contains" }),
+                    json!({
+                        "kind": "contains",
+                        "documentId": document.document_id.0,
+                        "boundaryId": chapter.boundary_id,
+                        "boundaryOrdinal": chapter.boundary_ordinal,
+                        "boundaryKind": boundary_kind_str(&chapter.boundary_kind),
+                        "assertionKind": "current",
+                    }),
                     None,
+                    Some(document.document_id.0.clone()),
+                    document.scope.narrative_id.clone(),
                 ),
             );
             buffers.flush_due(store, policy)?;
@@ -1817,8 +2554,17 @@ fn process_document_chunks(
                 &leaf_vertex,
                 1,
                 "contains",
-                json!({ "kind": "contains" }),
+                json!({
+                    "kind": "contains",
+                    "documentId": document.document_id.0,
+                    "boundaryId": leaf.boundary_id,
+                    "boundaryOrdinal": leaf.boundary_ordinal,
+                    "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                    "assertionKind": "current",
+                }),
                 None,
+                Some(document.document_id.0.clone()),
+                document.scope.narrative_id.clone(),
             ),
         );
 
@@ -1893,7 +2639,7 @@ fn process_document_chunks(
                 .entities
                 .get(&mention.entity_id.0)
                 .expect("entity should exist");
-            insert_graph_vertex(buffers, entity_vertex_row(entity));
+            insert_graph_vertex(buffers, entity_vertex_row(entity, document));
             buffers
                 .graph_label_rows
                 .insert_value(json!({
@@ -1918,8 +2664,17 @@ fn process_document_chunks(
                     &entity_vertex,
                     max(1, (mention.confidence * 100.0).round() as i64),
                     "mentions",
-                    json!({ "confidence": mention.confidence }),
+                    json!({
+                        "confidence": mention.confidence,
+                        "documentId": document.document_id.0,
+                        "boundaryId": leaf.boundary_id,
+                        "boundaryOrdinal": leaf.boundary_ordinal,
+                        "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                        "assertionKind": "current",
+                    }),
                     None,
+                    Some(document.document_id.0.clone()),
+                    document.scope.narrative_id.clone(),
                 ),
             );
         }
@@ -1978,8 +2733,10 @@ fn process_document_chunks(
                 &entity_vertex_id(&EntityId(right.clone())),
                 count,
                 "cooccurs",
-                json!({ "count": count }),
+                json!({ "count": count, "documentId": document.document_id.0 }),
                 None,
+                Some(document.document_id.0.clone()),
+                document.scope.narrative_id.clone(),
             ),
         );
         insert_graph_edge(
@@ -1990,8 +2747,10 @@ fn process_document_chunks(
                 &entity_vertex_id(&EntityId(left.clone())),
                 count,
                 "cooccurs",
-                json!({ "count": count }),
+                json!({ "count": count, "documentId": document.document_id.0 }),
                 None,
+                Some(document.document_id.0.clone()),
+                document.scope.narrative_id.clone(),
             ),
         );
     }
@@ -2028,8 +2787,17 @@ fn process_document_chunks(
                 &chapter_vertex_id(&document.document_id, *right),
                 shared_entities.len() as i64,
                 "cross_chapter",
-                json!({ "sharedEntityCount": shared_entities.len() }),
+                json!({
+                    "sharedEntityCount": shared_entities.len(),
+                    "documentId": document.document_id.0,
+                    "boundaryId": left,
+                    "boundaryOrdinal": left,
+                    "boundaryKind": "chapter",
+                    "assertionKind": "current",
+                }),
                 Some(json!({ "sharedEntities": shared_entities })),
+                Some(document.document_id.0.clone()),
+                document.scope.narrative_id.clone(),
             ),
         );
     }
@@ -2042,6 +2810,7 @@ fn build_document_manifest(
     document: &BorrowedIngestDocument<'_>,
     session_id: Option<&SessionId>,
     summary: &IngestDocumentSummary,
+    boundaries: &[BoundarySpec],
     chapters: &[ChapterSpec],
     discovery_count: usize,
     now: i64,
@@ -2054,9 +2823,23 @@ fn build_document_manifest(
         "scope": document.scope,
         "summary": summary,
         "discoveryCount": discovery_count,
+        "boundaries": boundaries.iter().map(|boundary| {
+            json!({
+                "boundaryId": boundary.boundary_id,
+                "ordinal": boundary.ordinal,
+                "kind": boundary_kind_str(&boundary.kind),
+                "depth": boundary.depth,
+                "label": boundary.label,
+                "parentBoundaryId": boundary.parent_boundary_id,
+                "start": boundary.start,
+                "end": boundary.end,
+            })
+        }).collect::<Vec<_>>(),
         "chapters": chapters.iter().map(|chapter| {
             json!({
                 "chapterId": chapter.chapter_id,
+                "boundaryId": chapter.boundary_id,
+                "boundaryOrdinal": chapter.boundary_ordinal,
                 "title": chapter.title,
                 "start": chapter.start,
                 "end": chapter.end,
@@ -2117,6 +2900,7 @@ fn scoped_entity_field_row(
             "kind": kind_to_string(&entity.kind),
             "aliases": entity.aliases.iter().cloned().collect::<Vec<_>>(),
             "chapters": entity.chapters.iter().copied().collect::<Vec<_>>(),
+            "boundaryOrdinals": entity.boundary_ordinals.iter().copied().collect::<Vec<_>>(),
             "totalMentions": entity.total_mentions,
         },
         "seeded_from_scope_folder_id": document.scope.folder_id,
@@ -2132,6 +2916,7 @@ fn discovery_row_id(document: &BorrowedIngestDocument<'_>, discovery: &Discovery
             document.document_id.0.as_str(),
             discovery.key.as_str(),
             &discovery.chapter_id.to_string(),
+            &discovery.boundary_id.to_string(),
             &discovery.range.start.to_string(),
             &discovery.range.end.to_string(),
         ],
@@ -2162,6 +2947,27 @@ fn record_graph_json_properties(
     // Child properties are queryable via the parent blob, avoiding
     // amplification that generated ~6-12 rows per vertex/edge.
     record_graph_property(rows, owner_id, owner_type, prefix, value.clone(), now);
+}
+
+fn graph_row_boundary_ordinal(row: &Value) -> Option<i64> {
+    row.get("attributes")
+        .and_then(Value::as_object)
+        .and_then(|attributes| {
+            attributes
+                .get("boundaryOrdinal")
+                .and_then(Value::as_i64)
+                .or_else(|| attributes.get("chapterId").and_then(Value::as_i64))
+        })
+        .or_else(|| {
+            row.get("value")
+                .and_then(Value::as_object)
+                .and_then(|value| {
+                    value
+                        .get("boundaryOrdinal")
+                        .and_then(Value::as_i64)
+                        .or_else(|| value.get("chapterId").and_then(Value::as_i64))
+                })
+        })
 }
 
 fn record_graph_property(
@@ -2219,7 +3025,40 @@ fn flush_relation_all(
 }
 
 fn insert_graph_vertex(buffers: &mut BufferSet, row: Value) {
+    let mut row = row;
+    if let Some(object) = row.as_object_mut() {
+        if !object.contains_key("document_id") {
+            if let Some(document_id) = object
+                .get("attributes")
+                .and_then(Value::as_object)
+                .and_then(|attributes| attributes.get("documentId"))
+                .cloned()
+            {
+                object.insert("document_id".to_owned(), document_id);
+            }
+        }
+        if !object.contains_key("narrative_id") {
+            if let Some(narrative_id) = object
+                .get("attributes")
+                .and_then(Value::as_object)
+                .and_then(|attributes| attributes.get("narrativeId"))
+                .cloned()
+                .or_else(|| {
+                    object
+                        .get("attributes")
+                        .and_then(Value::as_object)
+                        .and_then(|attributes| attributes.get("scope"))
+                        .and_then(Value::as_object)
+                        .and_then(|scope| scope.get("narrativeId"))
+                        .cloned()
+                })
+            {
+                object.insert("narrative_id".to_owned(), narrative_id);
+            }
+        }
+    }
     let now = now_ms();
+    let valid_from = graph_row_boundary_ordinal(&row).unwrap_or(now);
     if let Some(vertex_id) = row.get("id").and_then(Value::as_str) {
         if let Some(weight) = row.get("weight").cloned() {
             record_graph_property(
@@ -2228,7 +3067,7 @@ fn insert_graph_vertex(buffers: &mut BufferSet, row: Value) {
                 "vertex",
                 "weight",
                 weight,
-                now,
+                valid_from,
             );
         }
         if let Some(value) = row.get("value").filter(|value| !value.is_null()) {
@@ -2238,7 +3077,7 @@ fn insert_graph_vertex(buffers: &mut BufferSet, row: Value) {
                 "vertex",
                 "value",
                 value,
-                now,
+                valid_from,
             );
         }
         if let Some(attributes) = row.get("attributes").filter(|value| !value.is_null()) {
@@ -2248,7 +3087,7 @@ fn insert_graph_vertex(buffers: &mut BufferSet, row: Value) {
                 "vertex",
                 "attributes",
                 attributes,
-                now,
+                valid_from,
             );
         }
     }
@@ -2263,7 +3102,31 @@ fn insert_graph_edge(
     persist_state: &mut DocumentPersistState,
     row: Value,
 ) {
+    let mut row = row;
+    if let Some(object) = row.as_object_mut() {
+        if !object.contains_key("document_id") {
+            if let Some(document_id) = object
+                .get("attributes")
+                .and_then(Value::as_object)
+                .and_then(|attributes| attributes.get("documentId"))
+                .cloned()
+            {
+                object.insert("document_id".to_owned(), document_id);
+            }
+        }
+        if !object.contains_key("narrative_id") {
+            if let Some(narrative_id) = object
+                .get("attributes")
+                .and_then(Value::as_object)
+                .and_then(|attributes| attributes.get("narrativeId"))
+                .cloned()
+            {
+                object.insert("narrative_id".to_owned(), narrative_id);
+            }
+        }
+    }
     let now = now_ms();
+    let valid_from = graph_row_boundary_ordinal(&row).unwrap_or(now);
     let source_id = row
         .get("source_id")
         .and_then(Value::as_str)
@@ -2284,7 +3147,7 @@ fn insert_graph_edge(
             "edge",
             "weight",
             weight,
-            now,
+            valid_from,
         );
     }
     record_graph_property(
@@ -2293,7 +3156,7 @@ fn insert_graph_edge(
         "edge",
         "edge_type",
         json!(edge_type),
-        now,
+        valid_from,
     );
     if let Some(attributes) = row.get("attributes").filter(|value| !value.is_null()) {
         record_graph_json_properties(
@@ -2302,7 +3165,7 @@ fn insert_graph_edge(
             "edge",
             "attributes",
             attributes,
-            now,
+            valid_from,
         );
     }
     if let Some(data) = row.get("data").filter(|value| !value.is_null()) {
@@ -2312,7 +3175,7 @@ fn insert_graph_edge(
             "edge",
             "data",
             data,
-            now,
+            valid_from,
         );
     }
     buffers
@@ -2420,6 +3283,7 @@ fn persist_entity_rows(
     note_id: &NoteId,
     summary: &IngestDocumentSummary,
     chapters: &[ChapterSpec],
+    boundaries: &[BoundarySpec],
     registry: &EntityRegistry,
     persist_state: &DocumentPersistState,
     now: i64,
@@ -2441,6 +3305,7 @@ fn persist_entity_rows(
         document,
         session_id,
         summary,
+        boundaries,
         chapters,
         persist_state.discovery_count,
         now,
@@ -2492,6 +3357,7 @@ fn resolve_mentions(
                     _ => normalize_key(&mention.surface),
                 },
                 chapter_id: leaf.chapter_id,
+                boundary_id: leaf.boundary_id,
                 range: TextRange {
                     start: leaf.start as u32 + mention.range.start,
                     end: leaf.start as u32 + mention.range.end,
@@ -2509,8 +3375,9 @@ fn resolve_mentions(
             explicit_id,
             mention.kind.clone(),
             leaf.chapter_id,
+            leaf.boundary_ordinal,
         );
-        registry.record_mention(&entity_id, leaf.chapter_id);
+        registry.record_mention(&entity_id, leaf.chapter_id, leaf.boundary_ordinal);
         if let Some(entity) = registry.entities.get(&entity_id.0) {
             for chapter_id in entity
                 .chapters
@@ -2636,6 +3503,8 @@ fn materialize_relations(
             buffers,
             json!({
                 "id": event_id.clone(),
+                "document_id": document.document_id.0,
+                "narrative_id": document.scope.narrative_id,
                 "value": {
                     "kind": "event",
                     "lemma": relation.lemma,
@@ -2647,6 +3516,9 @@ fn materialize_relations(
                     "documentId": document.document_id.0,
                     "noteId": note_id.0,
                     "chapterId": leaf.chapter_id,
+                    "boundaryId": leaf.boundary_id,
+                    "boundaryOrdinal": leaf.boundary_ordinal,
+                    "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
                     "searchChunkId": leaf.search_id,
                     "verbRange": relation.verb_range,
                 },
@@ -2674,8 +3546,17 @@ fn materialize_relations(
                 &event_id,
                 1,
                 "has_event",
-                json!({ "kind": "event" }),
+                json!({
+                    "kind": "event",
+                    "documentId": document.document_id.0,
+                    "boundaryId": leaf.boundary_id,
+                    "boundaryOrdinal": leaf.boundary_ordinal,
+                    "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                    "assertionKind": "current",
+                }),
                 None,
+                Some(document.document_id.0.clone()),
+                document.scope.narrative_id.clone(),
             ),
         );
 
@@ -2688,8 +3569,17 @@ fn materialize_relations(
                     &event_id,
                     100,
                     "event_subject",
-                    json!({ "role": "subject" }),
+                    json!({
+                        "role": "subject",
+                        "documentId": document.document_id.0,
+                        "boundaryId": leaf.boundary_id,
+                        "boundaryOrdinal": leaf.boundary_ordinal,
+                        "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                        "assertionKind": "current",
+                    }),
                     None,
+                    Some(document.document_id.0.clone()),
+                    document.scope.narrative_id.clone(),
                 ),
             );
             if let Some(object_id) = resolve_slot_entity(relation.object.as_ref(), mentions) {
@@ -2701,8 +3591,17 @@ fn materialize_relations(
                         &entity_vertex_id(&object_id),
                         100,
                         "event_object",
-                        json!({ "role": "object" }),
+                        json!({
+                            "role": "object",
+                            "documentId": document.document_id.0,
+                            "boundaryId": leaf.boundary_id,
+                            "boundaryOrdinal": leaf.boundary_ordinal,
+                            "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                            "assertionKind": "current",
+                        }),
                         None,
+                        Some(document.document_id.0.clone()),
+                        document.scope.narrative_id.clone(),
                     ),
                 );
                 let edge_id = stable_hex(
@@ -2740,8 +3639,17 @@ fn materialize_relations(
                         &entity_vertex_id(&recipient_id),
                         90,
                         "event_recipient",
-                        json!({ "role": "recipient" }),
+                        json!({
+                            "role": "recipient",
+                            "documentId": document.document_id.0,
+                            "boundaryId": leaf.boundary_id,
+                            "boundaryOrdinal": leaf.boundary_ordinal,
+                            "boundaryKind": boundary_kind_str(&leaf.boundary_kind),
+                            "assertionKind": "current",
+                        }),
                         None,
+                        Some(document.document_id.0.clone()),
+                        document.scope.narrative_id.clone(),
                     ),
                 );
                 let edge_id = stable_hex(
@@ -2819,14 +3727,61 @@ fn split_sentences(text: &str) -> Vec<TextRange> {
     sentences
 }
 
-fn validate_chapter_line(line: &str) -> Option<BoundaryKind> {
+fn boundary_strategy_parts(strategy: &BoundaryDetectionStrategy) -> (Vec<String>, u8) {
+    match strategy {
+        BoundaryDetectionStrategy::Disabled => (Vec::new(), 0),
+        BoundaryDetectionStrategy::Keywords { keywords } => (keywords.clone(), 0),
+        BoundaryDetectionStrategy::MarkdownHeadings { max_depth } => (Vec::new(), *max_depth),
+        BoundaryDetectionStrategy::Both {
+            keywords,
+            max_depth,
+        } => (keywords.clone(), *max_depth),
+    }
+}
+
+fn is_primary_boundary(boundary: &BoundarySpec) -> bool {
+    matches!(
+        boundary.kind,
+        BoundaryKind::Chapter | BoundaryKind::Section | BoundaryKind::Act
+    ) || matches!(boundary.kind, BoundaryKind::Heading) && boundary.depth <= 1
+}
+
+fn scan_heading_boundaries(text: &str, max_depth: u8) -> Vec<BoundaryMarker> {
+    if max_depth == 0 {
+        return Vec::new();
+    }
+    let mut boundaries = Vec::new();
+    let bytes = text.as_bytes();
+    let mut line_start = 0usize;
+    for (offset, byte) in bytes.iter().enumerate() {
+        if *byte != b'\n' && offset + 1 != bytes.len() {
+            continue;
+        }
+        let line_end = if *byte == b'\n' { offset } else { bytes.len() };
+        let line = text.get(line_start..line_end).unwrap_or_default();
+        if let Some((kind, depth)) = validate_heading_line(line, max_depth) {
+            boundaries.push(BoundaryMarker {
+                start: line_start,
+                kind,
+                depth,
+                label: line.trim().to_owned(),
+            });
+        }
+        line_start = offset + 1;
+    }
+    boundaries
+}
+
+fn validate_chapter_line(line: &str, max_heading_depth: u8) -> Option<(BoundaryKind, u8)> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
     }
+    if let Some((kind, depth)) = validate_heading_line(trimmed, max_heading_depth) {
+        return Some((kind, depth));
+    }
     let lower = trimmed.to_ascii_lowercase();
-    if trimmed.starts_with('#')
-        || lower.starts_with("chapter")
+    if lower.starts_with("chapter")
         || lower.starts_with("part")
         || lower.starts_with("section")
         || lower.starts_with("introduction")
@@ -2834,12 +3789,31 @@ fn validate_chapter_line(line: &str) -> Option<BoundaryKind> {
         || lower.starts_with("summary")
         || lower.starts_with("appendix")
     {
-        return Some(BoundaryKind::Chapter);
+        return Some((BoundaryKind::Chapter, 1));
     }
     if validate_numbered_section(trimmed) {
-        return Some(BoundaryKind::Section);
+        return Some((BoundaryKind::Section, 2));
     }
     None
+}
+
+fn validate_heading_line(line: &str, max_heading_depth: u8) -> Option<(BoundaryKind, u8)> {
+    if max_heading_depth == 0 {
+        return None;
+    }
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+    let depth = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    if depth == 0 || depth > max_heading_depth as usize {
+        return None;
+    }
+    let rest = trimmed[depth..].trim();
+    if rest.is_empty() {
+        return None;
+    }
+    Some((BoundaryKind::Heading, depth as u8))
 }
 
 fn validate_numbered_section(line: &str) -> bool {
@@ -2853,6 +3827,46 @@ fn validate_numbered_section(line: &str) -> bool {
         index += 1;
     }
     index < bytes.len() && matches!(bytes[index], b' ' | b'\t' | b':' | b')')
+}
+
+fn document_boundary_row(
+    document: &BorrowedIngestDocument<'_>,
+    note_id: &NoteId,
+    boundary: &BoundarySpec,
+) -> Value {
+    json!({
+        "doc_id": document.document_id.0,
+        "boundary_id": boundary.boundary_id,
+        "kind": boundary_kind_str(&boundary.kind),
+        "depth": boundary.depth,
+        "label": boundary.label,
+        "ordinal": boundary.ordinal,
+        "parent_boundary_id": boundary.parent_boundary_id,
+        "note_id": note_id.0,
+        "start_char": boundary.start,
+        "end_char": boundary.end,
+        "created_at": now_ms(),
+    })
+}
+
+fn boundary_kind_str(kind: &BoundaryKind) -> &'static str {
+    match kind {
+        BoundaryKind::Chapter => "chapter",
+        BoundaryKind::Heading => "heading",
+        BoundaryKind::Section => "section",
+        BoundaryKind::Act => "act",
+        BoundaryKind::Other => "other",
+    }
+}
+
+fn boundary_kind_from_str(kind: &str) -> BoundaryKind {
+    match kind {
+        "chapter" => BoundaryKind::Chapter,
+        "heading" => BoundaryKind::Heading,
+        "section" => BoundaryKind::Section,
+        "act" => BoundaryKind::Act,
+        _ => BoundaryKind::Other,
+    }
 }
 
 fn chapter_chunk_row(
@@ -2886,14 +3900,23 @@ fn chapter_chunkid_row(document: &BorrowedIngestDocument<'_>, chapter: &ChapterS
 fn chapter_vertex_row(document: &BorrowedIngestDocument<'_>, chapter: &ChapterSpec) -> Value {
     json!({
         "id": chapter_vertex_id(&document.document_id, chapter.chapter_id),
+        "document_id": document.document_id.0,
+        "narrative_id": document.scope.narrative_id,
         "value": {
             "kind": "chapter",
             "chapterId": chapter.chapter_id,
+            "boundaryId": chapter.boundary_id,
+            "boundaryOrdinal": chapter.boundary_ordinal,
+            "boundaryKind": boundary_kind_str(&chapter.boundary_kind),
             "title": chapter.title,
         },
         "weight": 1,
         "attributes": {
             "documentId": document.document_id.0,
+            "boundaryId": chapter.boundary_id,
+            "boundaryOrdinal": chapter.boundary_ordinal,
+            "boundaryKind": boundary_kind_str(&chapter.boundary_kind),
+            "boundaryDepth": chapter.boundary_depth,
             "start": chapter.start,
             "end": chapter.end,
         },
@@ -2939,14 +3962,21 @@ fn parent_vertex_row(
 ) -> Value {
     json!({
         "id": parent_vertex_id(parent.chunk_id),
+        "document_id": document.document_id.0,
+        "narrative_id": document.scope.narrative_id,
         "value": {
             "kind": "parent",
             "chunkId": parent.chunk_id,
             "chapterId": chapter.chapter_id,
+            "boundaryId": chapter.boundary_id,
+            "boundaryOrdinal": chapter.boundary_ordinal,
         },
         "weight": 1,
         "attributes": {
             "documentId": document.document_id.0,
+            "boundaryId": chapter.boundary_id,
+            "boundaryOrdinal": chapter.boundary_ordinal,
+            "boundaryKind": boundary_kind_str(&chapter.boundary_kind),
             "start": parent.start,
             "end": parent.end,
             "chapterTitle": chapter.title,
@@ -2988,22 +4018,41 @@ fn leaf_vertex_row(
     chapter: &ChapterSpec,
     leaf: &LeafChunk,
 ) -> Value {
+    let mut attributes = Map::new();
+    attributes.insert("documentId".to_owned(), json!(document.document_id.0));
+    attributes.insert("noteId".to_owned(), json!(note_id.0));
+    attributes.insert("chapterId".to_owned(), json!(leaf.chapter_id));
+    attributes.insert("boundaryId".to_owned(), json!(leaf.boundary_id));
+    attributes.insert("boundaryOrdinal".to_owned(), json!(leaf.boundary_ordinal));
+    attributes.insert(
+        "boundaryKind".to_owned(),
+        json!(boundary_kind_str(&leaf.boundary_kind)),
+    );
+    attributes.insert("chapterTitle".to_owned(), json!(chapter.title));
+    attributes.insert("start".to_owned(), json!(leaf.start));
+    attributes.insert("end".to_owned(), json!(leaf.end));
+    if let Some(message_meta) = leaf.message_meta.as_ref() {
+        attributes.insert("messageIds".to_owned(), json!(message_meta.message_ids));
+        attributes.insert("roles".to_owned(), json!(message_meta.roles));
+        attributes.insert(
+            "messageStartIndex".to_owned(),
+            json!(message_meta.start_index),
+        );
+        attributes.insert("messageEndIndex".to_owned(), json!(message_meta.end_index));
+    }
     json!({
         "id": leaf_vertex_id(&leaf.search_id),
+        "document_id": document.document_id.0,
+        "narrative_id": document.scope.narrative_id,
         "value": {
             "kind": "leaf",
             "searchChunkId": leaf.search_id,
             "chunkId": leaf.chunk_id,
+            "boundaryId": leaf.boundary_id,
+            "boundaryOrdinal": leaf.boundary_ordinal,
         },
         "weight": 1,
-        "attributes": {
-            "documentId": document.document_id.0,
-            "noteId": note_id.0,
-            "chapterId": leaf.chapter_id,
-            "chapterTitle": chapter.title,
-            "start": leaf.start,
-            "end": leaf.end,
-        },
+        "attributes": Value::Object(attributes),
     })
 }
 
@@ -3023,9 +4072,11 @@ fn entity_row(entity: &EntityState, scope: &ScopeKey, note_id: &NoteId, now: i64
     })
 }
 
-fn entity_vertex_row(entity: &EntityState) -> Value {
+fn entity_vertex_row(entity: &EntityState, document: &BorrowedIngestDocument<'_>) -> Value {
     json!({
         "id": entity_vertex_id(&entity.id),
+        "document_id": document.document_id.0,
+        "narrative_id": document.scope.narrative_id,
         "value": {
             "kind": "entity",
             "entityId": entity.id.0,
@@ -3034,8 +4085,10 @@ fn entity_vertex_row(entity: &EntityState) -> Value {
         },
         "weight": entity.total_mentions,
         "attributes": {
+            "documentId": document.document_id.0,
             "aliases": entity.aliases.iter().cloned().collect::<Vec<_>>(),
             "chapters": entity.chapters.iter().copied().collect::<Vec<_>>(),
+            "boundaryOrdinals": entity.boundary_ordinals.iter().copied().collect::<Vec<_>>(),
         },
     })
 }
@@ -3121,10 +4174,29 @@ fn graph_edge_row(
     edge_type: &str,
     attributes: Value,
     data: Option<Value>,
+    document_id: Option<String>,
+    narrative_id: Option<String>,
 ) -> Value {
+    let (valid_from_boundary, valid_to_boundary, assertion_kind) = attributes
+        .as_object()
+        .map(|attributes| {
+            (
+                attributes.get("boundaryId").and_then(Value::as_u64),
+                attributes.get("validToBoundary").and_then(Value::as_u64),
+                attributes.get("assertionKind").and_then(Value::as_str),
+            )
+        })
+        .unwrap_or((None, None, None));
     json!({
         "source_id": source_id,
         "target_id": target_id,
+        "document_id": document_id,
+        "narrative_id": narrative_id,
+        "valid_from_doc": attributes.get("documentId").cloned().or_else(|| document_id.clone().map(Value::from)),
+        "valid_from_boundary": valid_from_boundary.map(|value| value as i64),
+        "valid_to_doc": attributes.get("validToDoc").cloned(),
+        "valid_to_boundary": valid_to_boundary.map(|value| value as i64),
+        "assertion_kind": assertion_kind,
         "weight": weight,
         "attributes": attributes,
         "data": data,
@@ -3158,7 +4230,11 @@ fn normalize_key(text: &str) -> String {
 
 fn preserve_offsets_slice(text: &str) -> Cow<'_, str> {
     if text.contains('\n') {
-        Cow::Owned(text.chars().map(|ch| if ch == '\n' { ' ' } else { ch }).collect())
+        Cow::Owned(
+            text.chars()
+                .map(|ch| if ch == '\n' { ' ' } else { ch })
+                .collect(),
+        )
     } else {
         Cow::Borrowed(text)
     }
@@ -3284,9 +4360,11 @@ mod tests {
             "Chapter 1\nRyan woke up. Ryan sharpened the blade. Ryan left.\n\nChapter 2\nRyan found Len. Len smiled.",
         );
         let borrowed = BorrowedIngestDocument::from(&document);
-        let boundaries = PhoenixGraptor::default().detect_chapter_boundaries(&document.text);
+        let markers = PhoenixGraptor::default().detect_chapter_boundaries(&document.text);
+        let boundaries = build_boundary_specs(&borrowed, &markers);
         let mut chapters = build_chapter_specs(&borrowed, &boundaries);
         let mut leaves = build_leaf_chunks(&borrowed, &GraptorConfig::default());
+        assign_leaves_to_boundaries(&boundaries, &mut leaves);
         assign_leaves_to_chapters(&borrowed, &chapters, &mut leaves);
         build_parent_chunks(
             &borrowed,
@@ -3303,11 +4381,12 @@ mod tests {
     #[test]
     fn registry_merges_aliases_across_chapters() {
         let mut registry = EntityRegistry::default();
-        let id = registry.resolve_or_register("Ryan", None, Some(EntityKind::Character), 1);
+        let id = registry.resolve_or_register("Ryan", None, Some(EntityKind::Character), 1, 1);
         registry.add_alias(&id, "Romano");
-        let resolved = registry.resolve_or_register("Romano", None, Some(EntityKind::Character), 2);
-        registry.record_mention(&id, 1);
-        registry.record_mention(&resolved, 2);
+        let resolved =
+            registry.resolve_or_register("Romano", None, Some(EntityKind::Character), 2, 2);
+        registry.record_mention(&id, 1, 1);
+        registry.record_mention(&resolved, 2, 2);
 
         assert_eq!(id, resolved);
         assert_eq!(registry.total_aliases(), 1);
@@ -3385,5 +4464,130 @@ mod tests {
             &text[ranges[2].start as usize..ranges[2].end as usize],
             "Wow?"
         );
+    }
+
+    #[test]
+    fn thread_ingest_preserves_message_metadata_and_bypasses_chapters() {
+        let store = PhoenixCozoStore::new().expect("store");
+        let scanner = PhoenixScanner::default();
+        let structure = PhoenixStructure::default();
+        let graptor = PhoenixGraptor::new(GraptorConfig::default().without_chapter_detection());
+        let messages = vec![
+            BorrowedThreadMessage {
+                message_id: "msg-1",
+                role: "user",
+                content: "Chapter 1: Ryan reaches the harbor.",
+                created_at: 1,
+            },
+            BorrowedThreadMessage {
+                message_id: "msg-2",
+                role: "assistant",
+                content: "Len is waiting there with the artifact.",
+                created_at: 2,
+            },
+        ];
+
+        let result = graptor
+            .ingest_message_thread_view(
+                &store,
+                &scanner,
+                &structure,
+                &BorrowedIngestThread {
+                    document_id: DocumentId("thread-doc-1".to_owned()),
+                    title: "Thread Window",
+                    messages: &messages,
+                    scope: ScopeKey {
+                        narrative_id: Some("thread-1".to_owned()),
+                        ..ScopeKey::default()
+                    },
+                },
+            )
+            .expect("thread ingest");
+
+        assert_eq!(result.documents[0].chapter_count, 1);
+
+        let leaf = store
+            .fetch_rows("graph_vertices")
+            .expect("graph vertices")
+            .into_iter()
+            .find(|row| {
+                row.get("value")
+                    .and_then(Value::as_object)
+                    .and_then(|value| value.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("leaf")
+            })
+            .expect("leaf vertex");
+        let attributes = leaf
+            .get("attributes")
+            .and_then(Value::as_object)
+            .expect("leaf attributes");
+        assert_eq!(
+            attributes
+                .get("messageIds")
+                .and_then(Value::as_array)
+                .map(|items| items.len()),
+            Some(2)
+        );
+        assert_eq!(
+            attributes
+                .get("roles")
+                .and_then(Value::as_array)
+                .map(|items| items.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn thread_ingest_splits_oversized_single_messages() {
+        let store = PhoenixCozoStore::new().expect("store");
+        let scanner = PhoenixScanner::default();
+        let structure = PhoenixStructure::default();
+        let graptor = PhoenixGraptor::new(GraptorConfig {
+            chunk_size: 40,
+            overlap: 10,
+            parent_chunk_size: 80,
+            parent_overlap: 20,
+            ..GraptorConfig::default().without_chapter_detection()
+        });
+        let content = "Ryan crossed the bridge. Ryan met Len. Ryan found the artifact. Ryan escaped before dawn.";
+        let messages = vec![BorrowedThreadMessage {
+            message_id: "msg-big",
+            role: "user",
+            content,
+            created_at: 1,
+        }];
+
+        let result = graptor
+            .ingest_message_thread_view(
+                &store,
+                &scanner,
+                &structure,
+                &BorrowedIngestThread {
+                    document_id: DocumentId("thread-doc-2".to_owned()),
+                    title: "Oversized Thread Window",
+                    messages: &messages,
+                    scope: ScopeKey {
+                        narrative_id: Some("thread-2".to_owned()),
+                        ..ScopeKey::default()
+                    },
+                },
+            )
+            .expect("thread ingest");
+
+        assert!(result.documents[0].leaf_count > 1);
+        let leaf_rows = store.fetch_rows("graph_vertices").expect("graph vertices");
+        let thread_leaf_count = leaf_rows
+            .iter()
+            .filter(|row| row.get("document_id").and_then(Value::as_str) == Some("thread-doc-2"))
+            .filter(|row| {
+                row.get("value")
+                    .and_then(Value::as_object)
+                    .and_then(|value| value.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("leaf")
+            })
+            .count();
+        assert!(thread_leaf_count > 1);
     }
 }

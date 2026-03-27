@@ -181,11 +181,27 @@ pub struct QueryBinaryRequestHeader {
     pub limit: [u8; 4],
     pub temporal_offset: [u8; 4],
     pub temporal_len: [u8; 4],
+    pub query_vector_offset: [u8; 4],
+    pub query_vector_len: [u8; 4],
+    pub query_vector_dim: [u8; 4],
     pub arena_offset: [u8; 4],
     pub arena_len: [u8; 4],
 }
 
 impl QueryBinaryRequestHeader {
+    pub const BYTE_LEN: usize = size_of::<Self>();
+}
+
+#[derive(AsBytes, FromBytes, FromZeroes, Unaligned, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct EmbedUpsertBinaryRequestHeader {
+    pub version: [u8; 4],
+    pub count: [u8; 4],
+    pub dim: [u8; 4],
+    pub arena_offset: [u8; 4],
+}
+
+impl EmbedUpsertBinaryRequestHeader {
     pub const BYTE_LEN: usize = size_of::<Self>();
 }
 
@@ -333,7 +349,7 @@ impl SessionStatsRecord {
 }
 
 pub const BINARY_LAYOUT_VERSION: u32 = 1;
-pub const BINARY_REQUEST_LAYOUT_VERSION: u32 = 1;
+pub const BINARY_REQUEST_LAYOUT_VERSION: u32 = 2;
 
 pub const FLAG_HAS_SESSION: u32 = 1 << 0;
 pub const FLAG_HAS_NOTE_ID: u32 = 1 << 1;

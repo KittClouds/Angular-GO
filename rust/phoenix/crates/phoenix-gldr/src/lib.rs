@@ -1,8 +1,9 @@
 use phoenix_graptor::{GraptorEdge, GraptorGraph, GraptorVertex};
 use phoenix_lex::LexIndex;
-use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
+use phoenix_store_cozo::{PhoenixCozoStore, SemanticNeighbor, StoreError};
 use phoenix_types::{
-    ChunkHit, Diagnostic, EntityId, NodeHit, QueryRequest, QueryResult, TemporalMarker,
+    BoundaryKind, ChunkHit, Diagnostic, EntityId, NodeHit, QueryRequest, QueryResult,
+    TemporalMarker,
 };
 use rustc_hash::FxHashMap;
 use serde_json::Value;
@@ -48,16 +49,43 @@ impl PhoenixGldr {
         request: &QueryRequest,
     ) -> Result<QueryResult, StoreError> {
         let limit = request.limit.unwrap_or(5).max(1);
+        let semantic_requested = request
+            .targets
+            .iter()
+            .any(|target| matches!(target, phoenix_types::QueryTarget::Semantic));
         let lexical = lex.search(
             &request.query,
             &request.scope,
             limit.max(self.config.seed_limit) * 2,
         );
+        let semantic_hits = if semantic_requested {
+            request
+                .semantic_query_vector
+                .as_ref()
+                .map(|vector| {
+                    store.query_semantic_neighbors(
+                        &vector.values,
+                        &request.scope,
+                        limit.max(self.config.seed_limit) * 2,
+                        limit.max(self.config.seed_limit) * 8,
+                    )
+                })
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let seed_vertex_ids: Vec<String> = lexical
             .span_hits
             .iter()
             .take(self.config.seed_limit.max(limit))
             .map(|hit| leaf_vertex_id(&hit.span_id))
+            .chain(
+                semantic_hits
+                    .iter()
+                    .take(self.config.seed_limit.max(limit))
+                    .map(|hit| leaf_vertex_id(&hit.span_id)),
+            )
             .collect();
         let graph = load_subgraph(store, &seed_vertex_ids)?;
         let temporal = TemporalFilter::from_marker(request.temporal.as_ref());
@@ -65,7 +93,9 @@ impl PhoenixGldr {
             || request.targets.iter().any(|target| {
                 matches!(
                     target,
-                    phoenix_types::QueryTarget::Chunks | phoenix_types::QueryTarget::Graph
+                    phoenix_types::QueryTarget::Chunks
+                        | phoenix_types::QueryTarget::Graph
+                        | phoenix_types::QueryTarget::Semantic
                 )
             });
         let wants_nodes = request.targets.iter().any(|target| {
@@ -77,12 +107,9 @@ impl PhoenixGldr {
 
         let mut chunk_scores = FxHashMap::<String, f64>::default();
         let mut node_scores = FxHashMap::<String, f64>::default();
+        let seed_limit = self.config.seed_limit.max(limit);
 
-        for hit in lexical
-            .span_hits
-            .iter()
-            .take(self.config.seed_limit.max(limit))
-        {
+        for (rank, hit) in lexical.span_hits.iter().take(seed_limit).enumerate() {
             let leaf_id = leaf_vertex_id(&hit.span_id);
             let Some(leaf_vertex) = graph.vertices.get(&leaf_id) else {
                 continue;
@@ -91,7 +118,13 @@ impl PhoenixGldr {
                 continue;
             }
 
-            accumulate_score(&mut chunk_scores, &hit.span_id, hit.score);
+            let seed_score = hit.score;
+            let direct_chunk_score = if semantic_requested {
+                reciprocal_rank_score(rank)
+            } else {
+                hit.score
+            };
+            accumulate_score(&mut chunk_scores, &hit.span_id, direct_chunk_score);
 
             if wants_nodes {
                 for edge in graph.outgoing_matching(&leaf_id, "mentions") {
@@ -103,7 +136,7 @@ impl PhoenixGldr {
                     }
                     if let Some(entity_id) = entity_vertex.entity_id.as_ref() {
                         let entity_score =
-                            scaled_score(hit.score, self.config.mention_bridge, edge.weight);
+                            scaled_score(seed_score, self.config.mention_bridge, edge.weight);
                         accumulate_score(&mut node_scores, entity_id, entity_score);
                         self.expand_entity(
                             &graph,
@@ -124,7 +157,7 @@ impl PhoenixGldr {
                 if !temporal.matches_vertex(event_vertex) {
                     continue;
                 }
-                let event_score = scaled_score(hit.score, self.config.event_bridge, edge.weight);
+                let event_score = scaled_score(seed_score, self.config.event_bridge, edge.weight);
                 for event_edge in graph.incoming_matching(&edge.target_id, "event_subject") {
                     if let Some(entity_vertex) = graph.vertices.get(&event_edge.source_id) {
                         if !temporal.matches_vertex(entity_vertex) {
@@ -186,7 +219,7 @@ impl PhoenixGldr {
                         continue;
                     };
                     let chapter_score = scaled_score(
-                        hit.score,
+                        seed_score,
                         self.config.cross_chapter_bridge,
                         chapter_edge.weight,
                     );
@@ -210,12 +243,43 @@ impl PhoenixGldr {
             }
         }
 
+        for (rank, hit) in semantic_hits.iter().take(seed_limit).enumerate() {
+            accumulate_semantic_hit(
+                &graph,
+                hit,
+                rank,
+                &temporal,
+                wants_nodes,
+                self,
+                &mut chunk_scores,
+                &mut node_scores,
+            );
+        }
+
         let mut diagnostics = lexical.diagnostics;
         diagnostics.push(Diagnostic {
             code: "PX_GLDR_OK".to_owned(),
             message: "GLDR graph expansion fused lexical anchors with canonical graph facts."
                 .to_owned(),
         });
+        if semantic_requested {
+            diagnostics.push(Diagnostic {
+                code: if request.semantic_query_vector.is_some() {
+                    "PX_GLDR_SEMANTIC".to_owned()
+                } else {
+                    "PX_GLDR_SEMANTIC_MISSING_VECTOR".to_owned()
+                },
+                message: if request.semantic_query_vector.is_some() {
+                    format!(
+                        "Semantic retrieval fused {} HNSW neighbors with lexical and graph expansion.",
+                        semantic_hits.len()
+                    )
+                } else {
+                    "Semantic target requested without a query vector; GLDR used lexical and graph retrieval only."
+                        .to_owned()
+                },
+            });
+        }
         if request.temporal.is_some() {
             diagnostics.push(Diagnostic {
                 code: "PX_GLDR_TEMPORAL".to_owned(),
@@ -305,19 +369,56 @@ impl Default for PhoenixGldr {
 #[derive(Clone, Debug, Default)]
 struct TemporalFilter {
     chapter: Option<u32>,
+    boundary_doc_id: Option<String>,
+    boundary_ordinal: Option<u32>,
+    boundary_end_ordinal: Option<u32>,
 }
 
 impl TemporalFilter {
     fn from_marker(marker: Option<&TemporalMarker>) -> Self {
-        let chapter = marker.and_then(|marker| {
+        let chapter = marker.and_then(|marker| marker.chapter);
+        let boundary_doc_id = marker.and_then(|marker| {
             marker
-                .chapter
-                .or_else(|| marker.ordinal.map(|value| value as u32))
+                .boundary_doc_id
+                .as_ref()
+                .map(|document_id| document_id.0.clone())
         });
-        Self { chapter }
+        let boundary_ordinal = marker.and_then(|marker| {
+            marker
+                .boundary_ordinal
+                .or(marker.ordinal)
+                .map(|value| value as u32)
+        });
+        let boundary_end_ordinal =
+            marker.and_then(|marker| marker.boundary_end_ordinal.map(|value| value as u32));
+        Self {
+            chapter,
+            boundary_doc_id,
+            boundary_ordinal,
+            boundary_end_ordinal,
+        }
     }
 
     fn matches_vertex(&self, vertex: &GraptorVertex) -> bool {
+        if let Some(boundary_ordinal) = self.boundary_ordinal {
+            if let Some(document_id) = self.boundary_doc_id.as_ref() {
+                if vertex.document_id.as_deref() != Some(document_id.as_str()) {
+                    return false;
+                }
+            }
+            let boundary_end = self.boundary_end_ordinal.unwrap_or(boundary_ordinal);
+            let matches_boundary = vertex
+                .boundary_ordinal
+                .map(|value| value >= boundary_ordinal && value <= boundary_end)
+                .unwrap_or(false)
+                || vertex
+                    .boundary_ordinals
+                    .iter()
+                    .any(|value| *value >= boundary_ordinal && *value <= boundary_end);
+            if !matches_boundary {
+                return false;
+            }
+        }
         match self.chapter {
             None => true,
             Some(chapter) => {
@@ -328,6 +429,18 @@ impl TemporalFilter {
     }
 
     fn diagnostic_message(&self) -> String {
+        if let Some(boundary_ordinal) = self.boundary_ordinal {
+            let boundary_end = self.boundary_end_ordinal.unwrap_or(boundary_ordinal);
+            let doc = self.boundary_doc_id.as_deref().unwrap_or("<any-document>");
+            if boundary_end == boundary_ordinal {
+                return format!(
+                    "Applied boundary-local temporal filtering at {doc} ordinal {boundary_ordinal}."
+                );
+            }
+            return format!(
+                "Applied boundary-range temporal filtering at {doc} ordinals {boundary_ordinal}..={boundary_end}."
+            );
+        }
         match self.chapter {
             Some(chapter) => {
                 format!("Applied chapter-local temporal filtering at chapter {chapter}.")
@@ -347,6 +460,59 @@ fn accumulate_score(scores: &mut FxHashMap<String, f64>, key: &str, score: f64) 
 fn scaled_score(seed: f64, bridge: f64, weight: i64) -> f64 {
     let weight_gain = 1.0 + (weight.max(1) as f64).ln() * 0.2;
     seed * bridge * weight_gain
+}
+
+fn reciprocal_rank_score(rank: usize) -> f64 {
+    1.0 / (60.0 + rank as f64 + 1.0)
+}
+
+fn semantic_seed_score(rank: usize, distance: f64) -> f64 {
+    reciprocal_rank_score(rank) * (1.0 / (1.0 + distance.max(0.0)))
+}
+
+fn accumulate_semantic_hit(
+    graph: &GraptorGraph,
+    hit: &SemanticNeighbor,
+    rank: usize,
+    temporal: &TemporalFilter,
+    wants_nodes: bool,
+    gldr: &PhoenixGldr,
+    chunk_scores: &mut FxHashMap<String, f64>,
+    node_scores: &mut FxHashMap<String, f64>,
+) {
+    let leaf_id = leaf_vertex_id(&hit.span_id);
+    let Some(leaf_vertex) = graph.vertices.get(&leaf_id) else {
+        return;
+    };
+    if !temporal.matches_vertex(leaf_vertex) {
+        return;
+    }
+    let seed_score = semantic_seed_score(rank, hit.distance);
+    accumulate_score(chunk_scores, &hit.span_id, seed_score);
+
+    if wants_nodes {
+        for edge in graph.outgoing_matching(&leaf_id, "mentions") {
+            let Some(entity_vertex) = graph.vertices.get(&edge.target_id) else {
+                continue;
+            };
+            if !temporal.matches_vertex(entity_vertex) {
+                continue;
+            }
+            if let Some(entity_id) = entity_vertex.entity_id.as_ref() {
+                let entity_score =
+                    scaled_score(seed_score, gldr.config.mention_bridge, edge.weight);
+                accumulate_score(node_scores, entity_id, entity_score);
+                gldr.expand_entity(
+                    graph,
+                    entity_id,
+                    entity_score,
+                    temporal,
+                    chunk_scores,
+                    node_scores,
+                );
+            }
+        }
+    }
 }
 
 fn ranked_chunk_hits(scores: FxHashMap<String, f64>, limit: usize) -> Vec<ChunkHit> {
@@ -392,6 +558,16 @@ fn leaf_vertex_id(search_chunk_id: &str) -> String {
 
 fn entity_vertex_id(entity_id: &str) -> String {
     format!("entity::{entity_id}")
+}
+
+fn boundary_kind_from_str(kind: &str) -> BoundaryKind {
+    match kind {
+        "chapter" => BoundaryKind::Chapter,
+        "heading" => BoundaryKind::Heading,
+        "section" => BoundaryKind::Section,
+        "act" => BoundaryKind::Act,
+        _ => BoundaryKind::Other,
+    }
 }
 
 fn chapter_vertex_id(document_id: &str, chapter_id: u32) -> String {
@@ -502,6 +678,28 @@ fn load_subgraph(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                let boundary_id = attributes
+                    .get("boundaryId")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as u32);
+                let boundary_ordinal = attributes
+                    .get("boundaryOrdinal")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as u32);
+                let boundary_kind = attributes
+                    .get("boundaryKind")
+                    .and_then(Value::as_str)
+                    .map(boundary_kind_from_str);
+                let boundary_ordinals = attributes
+                    .get("boundaryOrdinals")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_u64)
+                            .map(|v| v as u32)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
 
                 let vertex = GraptorVertex {
                     id: id.to_owned(),
@@ -514,6 +712,10 @@ fn load_subgraph(
                     document_id: document_id.clone(),
                     chapter_id,
                     chapters,
+                    boundary_id,
+                    boundary_ordinal,
+                    boundary_kind,
+                    boundary_ordinals,
                 };
                 graph.vertices.insert(id.to_owned(), vertex);
                 if let (Some(doc_id), Some(ch_id), Some(_)) =
@@ -751,6 +953,7 @@ mod tests {
                     targets: vec![phoenix_types::QueryTarget::Graph],
                     limit: Some(5),
                     temporal: None,
+                    semantic_query_vector: None,
                 },
             )
             .expect("gldr query");
@@ -873,7 +1076,9 @@ mod tests {
                         calendar: None,
                         story_time: None,
                         ordinal: None,
+                        ..Default::default()
                     }),
+                    semantic_query_vector: None,
                 },
             )
             .expect("temporal query");

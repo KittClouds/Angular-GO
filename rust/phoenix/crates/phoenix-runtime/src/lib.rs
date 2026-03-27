@@ -11,16 +11,19 @@ use phoenix_chat::PhoenixChat;
 use phoenix_gldr::PhoenixGldr;
 use phoenix_graptor::{BorrowedIngestDocument, BorrowedIngestRequest, PhoenixGraptor};
 use phoenix_lex::LexIndex;
+use phoenix_om::OmEngine;
+use phoenix_om_graptor::OmGraptorBridge;
 use phoenix_scanner::PhoenixScanner;
 use phoenix_store_cozo::{PhoenixCozoStore, SnapshotEnvelope, StoreConfig, StoreError};
 use phoenix_structure::PhoenixStructure;
 use phoenix_types::{
     ChatRuntimeConfig, CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic,
-    GraphDeltaRequest, GraphDeltaResult, IngestRequest, IngestResult, QueryRequest, QueryResult,
-    RebuildRequest, RebuildResult, RuntimeConfig, RuntimeInitResult, ScanArtifact, ScanRequest,
-    SavedNetworkView, SessionId, SessionRecord, SessionState, SessionStats, SnapshotDto,
-    StoreCommandRequest, StoreCommandResult, StructureArtifact, StructureRequest, EntityCard,
-    FolderSchema, NetworkInstance, RunOptions, ToolResultSubmission,
+    EntityCard, FolderSchema, GraphDeltaRequest, GraphDeltaResult, IngestRequest, IngestResult,
+    NetworkInstance, OmPendingAction, OmReflectorModelResponse, OmReflectorToolResult,
+    QueryRequest, QueryResult, RebuildRequest, RebuildResult, RunOptions, RuntimeConfig,
+    RuntimeInitResult, SavedNetworkView, ScanArtifact, ScanRequest, SessionId, SessionRecord,
+    SessionState, SessionStats, SnapshotDto, StoreCommandRequest, StoreCommandResult,
+    StructureArtifact, StructureRequest, ToolResultSubmission,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +38,8 @@ pub struct PhoenixRuntime {
     pub scanner: PhoenixScanner,
     pub structure: PhoenixStructure,
     pub graptor: PhoenixGraptor,
+    pub om_engine: OmEngine,
+    pub om_bridge: OmGraptorBridge,
     pub chat: PhoenixChat,
     pub lex: RefCell<Option<LexIndex>>,
     pub gldr: PhoenixGldr,
@@ -56,6 +61,8 @@ impl PhoenixRuntime {
             scanner: PhoenixScanner::default(),
             structure: PhoenixStructure::default(),
             graptor: PhoenixGraptor::default(),
+            om_engine: OmEngine::default(),
+            om_bridge: OmGraptorBridge::default(),
             chat: PhoenixChat::default(),
             lex: RefCell::new(None),
             gldr: PhoenixGldr::default(),
@@ -262,6 +269,7 @@ impl PhoenixRuntime {
                     "targets": request.targets,
                     "limit": request.limit,
                     "temporal": request.temporal,
+                    "hasSemanticVector": request.semantic_query_vector.is_some(),
                 }),
                 "created_at": created_at,
             }),
@@ -281,7 +289,13 @@ impl PhoenixRuntime {
                 .targets
                 .iter()
                 .any(|target| matches!(target, phoenix_types::QueryTarget::Semantic));
-            let owned_request = request.to_owned();
+            let mut owned_request = request.to_owned();
+            if semantic_requested && !self.config.feature_flags.semantic {
+                owned_request.semantic_query_vector = None;
+                owned_request
+                    .targets
+                    .retain(|target| !matches!(target, phoenix_types::QueryTarget::Semantic));
+            }
             let mut result = self.gldr.query(
                 &self.store,
                 self.lex
@@ -290,10 +304,10 @@ impl PhoenixRuntime {
                     .expect("lex should exist after ensure"),
                 &owned_request,
             )?;
-            if semantic_requested {
+            if semantic_requested && !self.config.feature_flags.semantic {
                 result.diagnostics.push(Diagnostic {
-                    code: "PX_QUERY_SEMANTIC_OFF".to_owned(),
-                    message: "Semantic retrieval is still disabled; GLDR returned deterministic graph results only.".to_owned(),
+                    code: "PX_QUERY_SEMANTIC_DISABLED".to_owned(),
+                    message: "Semantic retrieval is disabled in runtime feature flags; GLDR used lexical and graph retrieval only.".to_owned(),
                 });
             }
             return Ok(result);
@@ -460,7 +474,8 @@ impl PhoenixRuntime {
 
         self.store.upsert_network_instance(&view.instance)?;
         self.store.upsert_network_memberships(&view.members)?;
-        self.store.upsert_network_relationships(&view.relationships)?;
+        self.store
+            .upsert_network_relationships(&view.relationships)?;
 
         if let Some(existing) = existing {
             let new_member_keys = view
@@ -498,7 +513,8 @@ impl PhoenixRuntime {
                     ))
                 })
                 .collect::<Vec<_>>();
-            self.store.delete_network_relationships(&stale_relationships)?;
+            self.store
+                .delete_network_relationships(&stale_relationships)?;
         }
 
         Ok(())
@@ -596,7 +612,11 @@ impl PhoenixRuntime {
             }
             "chat:init" => {
                 let config: ChatRuntimeConfig = serde_json::from_value(
-                    request.payload.get("config").cloned().unwrap_or(Value::Null),
+                    request
+                        .payload
+                        .get("config")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 )
                 .map_err(|error| StoreError::Query(error.to_string()))?;
                 let config = self.init_chat_config(config);
@@ -669,9 +689,9 @@ impl PhoenixRuntime {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 let narrative_id = request.payload.get("narrativeId").and_then(Value::as_str);
-                let message = self
-                    .chat
-                    .add_message(&self.store, thread_id, role, content, narrative_id)?;
+                let message =
+                    self.chat
+                        .add_message(&self.store, thread_id, role, content, narrative_id)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -734,9 +754,9 @@ impl PhoenixRuntime {
             "chat:startStreamingMessage" => {
                 let thread_id = require_payload_str(&request.payload, "threadId")?;
                 let narrative_id = request.payload.get("narrativeId").and_then(Value::as_str);
-                let message = self
-                    .chat
-                    .start_streaming_message(&self.store, thread_id, narrative_id)?;
+                let message =
+                    self.chat
+                        .start_streaming_message(&self.store, thread_id, narrative_id)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -772,10 +792,16 @@ impl PhoenixRuntime {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 let options: RunOptions = serde_json::from_value(
-                    request.payload.get("options").cloned().unwrap_or(Value::Null),
+                    request
+                        .payload
+                        .get("options")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 )
                 .map_err(|error| StoreError::Query(error.to_string()))?;
-                let run = self.chat.start_run(&self.store, thread_id, prompt, options)?;
+                let run = self
+                    .chat
+                    .start_run(&self.store, thread_id, prompt, options)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -834,7 +860,9 @@ impl PhoenixRuntime {
                     .get("limit")
                     .and_then(Value::as_u64)
                     .unwrap_or(100) as usize;
-                let events = self.chat.list_run_events_for_thread(&self.store, thread_id, limit)?;
+                let events = self
+                    .chat
+                    .list_run_events_for_thread(&self.store, thread_id, limit)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -848,9 +876,9 @@ impl PhoenixRuntime {
                 let run_id = require_payload_str(&request.payload, "runId")?;
                 let assistant_message_id =
                     require_payload_str(&request.payload, "assistantMessageId")?;
-                let snapshot = self
-                    .chat
-                    .mark_run_streaming(&self.store, run_id, assistant_message_id)?;
+                let snapshot =
+                    self.chat
+                        .mark_run_streaming(&self.store, run_id, assistant_message_id)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: snapshot
@@ -890,13 +918,224 @@ impl PhoenixRuntime {
                     error: None,
                 })
             }
+            "chat:prepareOm" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let config = OmEngine::config_from_runtime(&self.chat.current_config());
+                let action = self
+                    .om_engine
+                    .prepare_pending_action_with_graph(
+                        &self.store,
+                        &self.scanner,
+                        &self.structure,
+                        &self.om_bridge,
+                        thread_id,
+                        &config,
+                    )
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: action
+                        .map(|value| {
+                            serde_json::to_value(value)
+                                .map_err(|error| StoreError::Query(error.to_string()))
+                        })
+                        .transpose()?,
+                    error: None,
+                })
+            }
+            "chat:applyOmAction" => {
+                let action: OmPendingAction = serde_json::from_value(
+                    request
+                        .payload
+                        .get("action")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let response = request
+                    .payload
+                    .get("response")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let config = OmEngine::config_from_runtime(&self.chat.current_config());
+                let applied = self
+                    .om_engine
+                    .apply_pending_action_with_graph(
+                        &self.store,
+                        &self.scanner,
+                        &self.structure,
+                        &self.om_bridge,
+                        &config,
+                        &action,
+                        response,
+                    )
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(Value::Bool(applied)),
+                    error: None,
+                })
+            }
+            "om:startReflector" => {
+                let action: OmPendingAction = serde_json::from_value(
+                    request
+                        .payload
+                        .get("action")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let step = self
+                    .om_engine
+                    .start_reflector(&action)
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(step)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "om:submitReflectorModelResponse" => {
+                let session_id = require_payload_str(&request.payload, "sessionId")?;
+                let response: OmReflectorModelResponse = serde_json::from_value(
+                    request
+                        .payload
+                        .get("response")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let step = self
+                    .om_engine
+                    .submit_reflector_model_response(session_id, response)
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(step)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "om:submitReflectorToolResults" => {
+                let session_id = require_payload_str(&request.payload, "sessionId")?;
+                let results: Vec<OmReflectorToolResult> = serde_json::from_value(
+                    request
+                        .payload
+                        .get("results")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let step = self
+                    .om_engine
+                    .submit_reflector_tool_results(session_id, &results)
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(step)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "om:dropReflectorSession" => {
+                let session_id = require_payload_str(&request.payload, "sessionId")?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(Value::Bool(
+                        self.om_engine.drop_reflector_session(session_id),
+                    )),
+                    error: None,
+                })
+            }
+            "om:recoverLostMemory" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let limit = request
+                    .payload
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(10) as usize;
+                let focus = request.payload.get("focus").and_then(Value::as_str);
+                let hits = self
+                    .om_bridge
+                    .recover_lost_memory(&self.store, thread_id, limit, focus)
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(hits)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "om:memoryGraphSearch" => {
+                let thread_id = require_payload_str(&request.payload, "threadId")?;
+                let query = request
+                    .payload
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let limit = request
+                    .payload
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(10) as usize;
+                let hits = self
+                    .om_bridge
+                    .memory_graph_search(&self.store, thread_id, query, limit)
+                    .map_err(|error| StoreError::Query(error.to_string()))?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(hits)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
+            "semantic:listLeafChunks" => {
+                let document_ids = request
+                    .payload
+                    .get("documentIds")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let chunks = self.store.list_leaf_chunks_for_documents(&document_ids)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(
+                        serde_json::to_value(chunks)
+                            .map_err(|error| StoreError::Query(error.to_string()))?,
+                    ),
+                    error: None,
+                })
+            }
             "chat:submitToolResults" => {
                 let run_id = require_payload_str(&request.payload, "runId")?;
                 let results: Vec<ToolResultSubmission> = serde_json::from_value(
-                    request.payload.get("results").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+                    request
+                        .payload
+                        .get("results")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
                 )
                 .map_err(|error| StoreError::Query(error.to_string()))?;
-                let snapshot = self.chat.submit_tool_results(&self.store, run_id, &results)?;
+                let snapshot = self
+                    .chat
+                    .submit_tool_results(&self.store, run_id, &results)?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -933,7 +1172,11 @@ impl PhoenixRuntime {
             }
             "entityCards:upsertBatch" => {
                 let cards: Vec<EntityCard> = serde_json::from_value(
-                    request.payload.get("cards").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+                    request
+                        .payload
+                        .get("cards")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
                 )
                 .map_err(|error| StoreError::Query(error.to_string()))?;
                 self.upsert_entity_cards_batch(&cards)?;
@@ -945,7 +1188,8 @@ impl PhoenixRuntime {
             }
             "entityCards:get" => {
                 let entity_id = require_payload_str(&request.payload, "entityId")?;
-                let cards = self.get_entity_cards(&phoenix_types::EntityId(entity_id.to_owned()))?;
+                let cards =
+                    self.get_entity_cards(&phoenix_types::EntityId(entity_id.to_owned()))?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -957,7 +1201,11 @@ impl PhoenixRuntime {
             }
             "folderSchema:upsert" => {
                 let schema: FolderSchema = serde_json::from_value(
-                    request.payload.get("schema").cloned().unwrap_or(Value::Null),
+                    request
+                        .payload
+                        .get("schema")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 )
                 .map_err(|error| StoreError::Query(error.to_string()))?;
                 self.upsert_folder_schema(&schema)?;
@@ -1368,6 +1616,7 @@ mod tests {
                 targets: vec![QueryTarget::Chunks],
                 limit: Some(3),
                 temporal: None,
+                semantic_query_vector: None,
             })
             .expect("query");
 
@@ -1457,6 +1706,7 @@ mod tests {
                 targets: vec![QueryTarget::Chunks],
                 limit: Some(5),
                 temporal: None,
+                semantic_query_vector: None,
             })
             .expect("query bytes");
         let graph_bytes = runtime
@@ -1681,7 +1931,9 @@ mod tests {
         assert!(view.relationships.is_empty());
         assert_eq!(listed.len(), 1);
 
-        runtime.delete_network_view("net-1").expect("delete network");
+        runtime
+            .delete_network_view("net-1")
+            .expect("delete network");
         assert!(runtime
             .get_network_view("net-1")
             .expect("network fetch after delete")

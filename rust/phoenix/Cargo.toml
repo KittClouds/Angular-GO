@@ -7,6 +7,8 @@ members = [
     "crates/phoenix-graptor",
     "crates/phoenix-lex",
     "crates/phoenix-native",
+    "crates/phoenix-om",
+    "crates/phoenix-om-graptor",
     "crates/phoenix-perf",
     "crates/phoenix-qgram",
     "crates/phoenix-runtime",

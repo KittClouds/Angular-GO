@@ -65,12 +65,21 @@ export const PACKET_KIND = {
     sessionStateRequest: 23,
     sessionStatsRequest: 25,
     analyzeTextRequest: 27,
+    queryBinaryRequest: 29,
     storeCommandRequest: 34,
+    embedUpsertBinaryRequest: 36,
 } as const;
 
 export const DEFAULT_PACKET_REGION_SIZE = 64 * 1024;
 export const PACKET_HEADER_SIZE = 16;
 export const PROTOCOL_VERSION = 6;
+export const BINARY_REQUEST_LAYOUT_VERSION = 2;
+export const REQUEST_FLAG_HAS_SESSION = 1 << 1;
+export const REQUEST_FLAG_HAS_TEMPORAL = 1 << 2;
+export const REQUEST_FLAG_TARGET_CHUNKS = 1 << 8;
+export const REQUEST_FLAG_TARGET_NODES = 1 << 9;
+export const REQUEST_FLAG_TARGET_GRAPH = 1 << 10;
+export const REQUEST_FLAG_TARGET_SEMANTIC = 1 << 11;
 export const PHOENIX_WASM_CANDIDATE_URLS = ['/assets/phoenix_wasm.wasm', '/assets/wasm/phoenix_wasm.wasm'];
 
 export type PacketHeader = {

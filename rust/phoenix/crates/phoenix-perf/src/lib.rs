@@ -560,6 +560,7 @@ fn run_corpus_suite(corpus: &CorpusDocument) -> Result<CorpusPerfReport, String>
                 targets: vec![QueryTarget::Chunks],
                 limit: Some(5),
                 temporal: None::<TemporalMarker>,
+                semantic_query_vector: None,
             })
             .map_err(|error| error.to_string())
     })?;
@@ -832,6 +833,7 @@ fn run_query_batch(
                     targets: targets.clone(),
                     limit: Some(8),
                     temporal: None,
+                    semantic_query_vector: None,
                 })
                 .map_err(|error| error.to_string())?;
             runs.push(QueryRunReport {

@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+phoenix-om = { path = "../phoenix-om" }
 phoenix-store-cozo = { path = "../phoenix-store-cozo" }
 phoenix-types = { path = "../phoenix-types" }
 serde.workspace = true

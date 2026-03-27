@@ -417,6 +417,7 @@ export class PhoenixChatService {
             const message = toThreadMessage(raw);
             this.messages.update((messages) => [...messages, message]);
             this.scheduleSnapshot();
+            void this.triggerOm(thread.id);
             return message;
         } catch (error) {
             console.error('[PhoenixChatService] Add message error:', error);
@@ -444,6 +445,7 @@ export class PhoenixChatService {
                 messages.map((current) => (current.id === messageId ? message : current)),
             );
             this.scheduleSnapshot();
+            void this.triggerOm(message.thread_id);
             return true;
         } catch (error) {
             console.error('[PhoenixChatService] Update message error:', error);
@@ -640,8 +642,12 @@ export class PhoenixChatService {
                 finalResponse,
                 finalError,
             );
+            const snapshot = payload ? toChatRunSnapshot(payload) : null;
             this.scheduleSnapshot();
-            return payload ? toChatRunSnapshot(payload) : null;
+            if (snapshot?.run.threadId) {
+                void this.triggerOm(snapshot.run.threadId);
+            }
+            return snapshot;
         } catch (error) {
             console.error('[PhoenixChatService] Complete run error:', error);
             return null;
@@ -728,6 +734,10 @@ export class PhoenixChatService {
             reasoningEffort: config?.reasoningEffort ?? 'medium',
             reasoningMaxTokens: config?.reasoningMaxTokens ?? null,
             includeReasoning: config?.includeReasoning ?? false,
+            omEnabled: config?.omEnabled ?? false,
+            omModel: config?.omModel ?? null,
+            observeThreshold: config?.observeThreshold ?? null,
+            reflectThreshold: config?.reflectThreshold ?? null,
         };
         await this.phoenix.chatInit(runtimeConfig);
     }
@@ -746,6 +756,28 @@ export class PhoenixChatService {
     private async ensureInitialized(): Promise<void> {
         if (!this.initialized()) {
             await this.init();
+        }
+    }
+
+    private async triggerOm(threadId: string): Promise<void> {
+        const config = getSetting<ChatConfig | null>('openrouter:config', null);
+        if (!threadId || !config?.omEnabled || !config.apiKey?.trim()) {
+            return;
+        }
+
+        try {
+            const mutated = await this.phoenix.chatProcessOm(threadId, {
+                apiKey: config.apiKey,
+                defaultModel: config.model || DEFAULT_CHAT_MODEL,
+                omModel: config.omModel,
+                temperature: config.temperature,
+                maxTokens: config.maxTokens,
+            });
+            if (mutated) {
+                this.scheduleSnapshot();
+            }
+        } catch (error) {
+            console.error('[PhoenixChatService] OM processing error:', error);
         }
     }
 

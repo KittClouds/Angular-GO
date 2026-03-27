@@ -9,10 +9,10 @@ use phoenix_runtime::{
 use phoenix_types::SnapshotPolicy;
 use phoenix_types::{
     AnalyzeTextBinaryRequestHeader, CommitRequest, CreateSessionRequest, Diagnostic,
-    GraphDeltaRequest, IngestBinaryRequestHeader, IngestDocumentBinaryRecord, PacketHeader,
-    PacketKind, QueryBinaryRequestHeader, QueryTarget, RebuildRequest, RuntimeInitRequest,
-    ScanBinaryRequestHeader, SessionId, SessionStateRequest, SessionStatsRequest,
-    StoreCommandRequest, StructureBinaryRequestHeader, TemporalMarker,
+    EmbedUpsertBinaryRequestHeader, GraphDeltaRequest, IngestBinaryRequestHeader,
+    IngestDocumentBinaryRecord, PacketHeader, PacketKind, QueryBinaryRequestHeader, QueryTarget,
+    RebuildRequest, RuntimeInitRequest, ScanBinaryRequestHeader, SessionId, SessionStateRequest,
+    SessionStatsRequest, StoreCommandRequest, StructureBinaryRequestHeader, TemporalMarker,
     BINARY_REQUEST_LAYOUT_VERSION,
 };
 use serde::Deserialize;
@@ -127,6 +127,12 @@ struct BorrowedQueryRequest<'a> {
     temporal: Option<TemporalMarker>,
 }
 
+#[derive(Debug)]
+struct BorrowedEmbedUpsertRecord<'a> {
+    span_id: &'a str,
+    values: &'a [f32],
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BorrowedAnalyzeTextRequest<'a> {
@@ -220,6 +226,14 @@ fn read_le_u32(bytes: [u8; 4]) -> u32 {
     u32::from_le_bytes(bytes)
 }
 
+fn read_f32_slice(bytes: &[u8]) -> Result<&[f32], String> {
+    let (prefix, values, suffix) = unsafe { bytes.align_to::<f32>() };
+    if !prefix.is_empty() || !suffix.is_empty() {
+        return Err("vector block is not aligned to f32".to_owned());
+    }
+    Ok(values)
+}
+
 fn read_string_from_arena<'a>(
     arena: &'a [u8],
     offset: u32,
@@ -284,6 +298,7 @@ fn with_query_json_request<T>(
         targets: &request.targets,
         limit: request.limit,
         temporal: request.temporal.as_ref(),
+        semantic_query_vector: None,
     };
     op(view)
 }
@@ -341,6 +356,24 @@ fn with_query_binary_request<T>(
         read_le_u32(header.temporal_offset),
         read_le_u32(header.temporal_len),
     )?;
+    let vector_dim = read_le_u32(header.query_vector_dim) as usize;
+    let vector_len = read_le_u32(header.query_vector_len) as usize;
+    let semantic_query_vector = if vector_len == 0 {
+        None
+    } else {
+        let vector_offset = read_le_u32(header.query_vector_offset) as usize;
+        let vector_bytes_len = vector_len
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| "query vector length overflow".to_owned())?;
+        let vector_bytes = bytes
+            .get(vector_offset..vector_offset + vector_bytes_len)
+            .ok_or_else(|| "query vector exceeds payload".to_owned())?;
+        let vector = read_f32_slice(vector_bytes)?;
+        if vector_dim != 0 && vector_dim != vector.len() {
+            return Err("query vector dimension does not match vector length".to_owned());
+        }
+        Some(vector)
+    };
     let flags = read_le_u32(header.flags);
     let targets = query_targets_from_flags(flags);
     let raw_limit = read_le_u32(header.limit);
@@ -356,8 +389,58 @@ fn with_query_binary_request<T>(
         targets: &targets,
         limit,
         temporal: temporal.as_ref(),
+        semantic_query_vector,
     };
     op(view)
+}
+
+fn parse_embed_upsert_binary_request(
+    bytes: &[u8],
+) -> Result<Vec<BorrowedEmbedUpsertRecord<'_>>, String> {
+    let header: EmbedUpsertBinaryRequestHeader =
+        parse_wire_header(bytes, EmbedUpsertBinaryRequestHeader::BYTE_LEN)?;
+    if read_le_u32(header.version) != BINARY_REQUEST_LAYOUT_VERSION {
+        return Err("unsupported embed upsert binary request version".to_owned());
+    }
+    let count = read_le_u32(header.count) as usize;
+    let dim = read_le_u32(header.dim) as usize;
+    let table_offset = EmbedUpsertBinaryRequestHeader::BYTE_LEN;
+    let table_len = count
+        .checked_mul(phoenix_types::StringRefRecord::BYTE_LEN)
+        .ok_or_else(|| "embed upsert record table overflow".to_owned())?;
+    let table = bytes
+        .get(table_offset..table_offset + table_len)
+        .ok_or_else(|| "embed upsert record table exceeds payload".to_owned())?;
+    let vector_offset = table_offset + table_len;
+    let vector_bytes_len = count
+        .checked_mul(dim)
+        .and_then(|size| size.checked_mul(std::mem::size_of::<f32>()))
+        .ok_or_else(|| "embed upsert vector block overflow".to_owned())?;
+    let vector_bytes = bytes
+        .get(vector_offset..vector_offset + vector_bytes_len)
+        .ok_or_else(|| "embed upsert vector block exceeds payload".to_owned())?;
+    let arena_offset = read_le_u32(header.arena_offset) as usize;
+    let arena = bytes
+        .get(arena_offset..)
+        .ok_or_else(|| "embed upsert arena exceeds payload".to_owned())?;
+    let vector_values = read_f32_slice(vector_bytes)?;
+    let mut records = Vec::with_capacity(count);
+    for index in 0..count {
+        let start = index * phoenix_types::StringRefRecord::BYTE_LEN;
+        let end = start + phoenix_types::StringRefRecord::BYTE_LEN;
+        let record: phoenix_types::StringRefRecord =
+            parse_wire_header(&table[start..end], phoenix_types::StringRefRecord::BYTE_LEN)?;
+        let span_id = read_string_from_arena(arena, record.offset, record.len)?
+            .ok_or_else(|| "embed upsert span id is required".to_owned())?;
+        let vector_start = index
+            .checked_mul(dim)
+            .ok_or_else(|| "embed upsert vector offset overflow".to_owned())?;
+        let values = vector_values
+            .get(vector_start..vector_start + dim)
+            .ok_or_else(|| "embed upsert vector slice exceeds payload".to_owned())?;
+        records.push(BorrowedEmbedUpsertRecord { span_id, values });
+    }
+    Ok(records)
 }
 
 fn with_analyze_json_request<T>(
@@ -780,6 +863,46 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
                         .encode_query_result_into(&result, payload)
                         .map_err(|error| error.to_string())
                 },
+            )
+        }),
+        PacketKind::EmbedUpsertBinaryRequest => with_runtime(|runtime| {
+            let records =
+                parse_embed_upsert_binary_request(&buffer[PacketHeader::BYTE_LEN..payload_end])?;
+            let now = {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    js_sys::Date::now() as i64
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock after epoch")
+                        .as_millis() as i64
+                }
+            };
+            let rows = records
+                .iter()
+                .map(|record| phoenix_store_cozo::SemanticVectorRow {
+                    span_id: record.span_id,
+                    values: record.values,
+                    model_id: phoenix_store_cozo::SEMANTIC_MODEL_ID,
+                    updated_at: now,
+                })
+                .collect::<Vec<_>>();
+            runtime
+                .store
+                .upsert_semantic_vectors(&rows)
+                .map_err(|error| error.to_string())?;
+            write_json_response(
+                buffer,
+                PacketKind::EmbedUpsertResult,
+                header.request_id,
+                &serde_json::json!({
+                    "inserted": rows.len(),
+                    "modelId": phoenix_store_cozo::SEMANTIC_MODEL_ID,
+                    "dimension": phoenix_store_cozo::SEMANTIC_VECTOR_DIM,
+                }),
             )
         }),
         PacketKind::ScanRequest => with_runtime(|runtime| {
@@ -1324,6 +1447,7 @@ mod tests {
             targets: vec![QueryTarget::Chunks],
             limit: Some(3),
             temporal: None,
+            semantic_query_vector: None,
         })
         .expect("query payload");
         let mut query_packet = packet(PacketKind::QueryRequest, 4, &query_payload);
@@ -1366,7 +1490,7 @@ mod tests {
                 ..PacketHeader::BYTE_LEN + import_header.payload_len as usize],
         )
         .expect("snapshot descriptor");
-        assert_eq!(snapshot_result.schema_version, "phoenix.cozo.v1");
+        assert_eq!(snapshot_result.schema_version, "phoenix.cozo.v3");
     }
 
     #[test]

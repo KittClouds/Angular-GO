@@ -27,7 +27,7 @@ const REQUEST_FLAG_TARGET_CHUNKS = 1 << 8;
 const REQUEST_FLAG_TARGET_NODES = 1 << 9;
 const REQUEST_FLAG_TARGET_GRAPH = 1 << 10;
 const REQUEST_FLAG_TARGET_SEMANTIC = 1 << 11;
-const REQUEST_LAYOUT_VERSION = 1;
+const REQUEST_LAYOUT_VERSION = 2;
 
 type WasmExports = {
     memory: WebAssembly.Memory;
@@ -547,7 +547,7 @@ function encodeQueryBinaryPayload(input: {
     const folderPath = arena.add(input.scope.folderPath ?? null);
     const temporal = arena.add(input.temporal ? JSON.stringify(input.temporal) : null);
     const arenaBytes = arena.finish();
-    const headerSize = 19 * 4;
+    const headerSize = 22 * 4;
     const bytes = new Uint8Array(headerSize + arenaBytes.length);
     const view = new DataView(bytes.buffer);
     [
@@ -568,6 +568,9 @@ function encodeQueryBinaryPayload(input: {
         input.limit ?? 0xffffffff,
         temporal.offset,
         temporal.len,
+        0,
+        0,
+        0,
         headerSize,
         arenaBytes.length,
     ].forEach((value, index) => view.setUint32(index * 4, value >>> 0, true));

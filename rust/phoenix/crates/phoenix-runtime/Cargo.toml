@@ -11,6 +11,8 @@ phoenix-chat = { path = "../phoenix-chat" }
 phoenix-gldr = { path = "../phoenix-gldr" }
 phoenix-graptor = { path = "../phoenix-graptor" }
 phoenix-lex = { path = "../phoenix-lex" }
+phoenix-om = { path = "../phoenix-om" }
+phoenix-om-graptor = { path = "../phoenix-om-graptor" }
 phoenix-scanner = { path = "../phoenix-scanner" }
 phoenix-store-cozo = { path = "../phoenix-store-cozo" }
 phoenix-structure = { path = "../phoenix-structure" }

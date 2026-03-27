@@ -151,7 +151,7 @@ export class SearchPanelComponent implements OnInit {
   ];
 
   readonly models: Array<{ id: ModelId; label: string; dims: number; desc: string }> = [
-    { id: 'mongodb-leaf', label: 'MDBR Leaf', dims: 256, desc: 'Fastest local TypeScript path.' },
+    { id: 'mongodb-leaf', label: 'MDBR Leaf', dims: 384, desc: 'Fastest local TypeScript path.' },
     { id: 'bge-small-en', label: 'BGE-small', dims: 384, desc: 'Balanced local embedding path.' },
     { id: 'gte-modernbert-base', label: 'ModernBERT', dims: 768, desc: 'Largest local embedding model.' },
   ];

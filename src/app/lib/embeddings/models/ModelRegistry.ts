@@ -40,9 +40,9 @@ export class EmbeddingModelRegistry {
             'mongodb-leaf',
             {
                 id: 'mongodb-leaf',
-                name: 'MDBR Leaf (256d)',
+                name: 'MDBR Leaf (384d)',
                 provider: 'local',
-                dimensions: 256,
+                dimensions: 384,
                 maxTokens: 512,
                 speed: 'fast',
                 quality: 'high',
@@ -52,7 +52,7 @@ export class EmbeddingModelRegistry {
                     quantization: 'q8',
                     memoryMB: 50,
                 },
-                description: 'MDBR Leaf - Fastest, smallest, excellent quality. Recommended.',
+                description: 'MDBR Leaf - Fastest local path at 384d. Recommended for Phoenix semantic retrieval.',
             },
         ],
         [

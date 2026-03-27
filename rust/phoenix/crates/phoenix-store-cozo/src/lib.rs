@@ -5,7 +5,7 @@ use cozo;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use phoenix_types::{
     EntityCard, EntityId, FolderSchema, NetworkInstance, NetworkMembership, NetworkRelationship,
-    RelationCount, SnapshotDto, StorageMode,
+    RelationCount, ScopeKey, SnapshotDto, StorageMode,
 };
 use rustc_hash::FxHashMap;
 use schema::{PhoenixColumnSpec, PhoenixColumnType, PhoenixRelationSpec, ALL_RELATIONS};
@@ -15,7 +15,9 @@ use smallvec::SmallVec;
 
 pub mod schema;
 
-pub const SCHEMA_VERSION: &str = "phoenix.cozo.v1";
+pub const SCHEMA_VERSION: &str = "phoenix.cozo.v3";
+pub const SEMANTIC_VECTOR_DIM: usize = 384;
+pub const SEMANTIC_MODEL_ID: &str = "MongoDB/mdbr-leaf-ir";
 const PUT_ROWS_BATCH_LIMIT: usize = if cfg!(target_arch = "wasm32") {
     256
 } else {
@@ -278,6 +280,30 @@ pub struct PhoenixCozoStore {
     schema_version: &'static str,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticVectorRow<'a> {
+    pub span_id: &'a str,
+    pub values: &'a [f32],
+    pub model_id: &'a str,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticLeafChunk {
+    pub span_id: String,
+    pub document_id: String,
+    pub text: String,
+    pub narrative_id: Option<String>,
+    pub folder_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SemanticNeighbor {
+    pub span_id: String,
+    pub distance: f64,
+}
+
 impl PhoenixCozoStore {
     pub fn new() -> Result<Self, StoreError> {
         Self::open(StoreConfig::default())
@@ -319,6 +345,8 @@ impl PhoenixCozoStore {
             }
         }
 
+        self.ensure_semantic_relations()?;
+
         self.put_row(
             "phoenix_schema_state",
             serde_json::json!({
@@ -328,6 +356,226 @@ impl PhoenixCozoStore {
         )?;
 
         Ok(())
+    }
+
+    pub fn ensure_semantic_relations(&self) -> Result<(), StoreError> {
+        let script = format!(
+            r#"
+::hnsw create semantic_vectors:vec_idx {{
+    dim: {dim},
+    dtype: F32,
+    fields: [vec],
+    distance: Cosine,
+    m: 16,
+    ef_construction: 200,
+    filter: model_id == "{model_id}",
+}}
+"#,
+            dim = SEMANTIC_VECTOR_DIM,
+            model_id = SEMANTIC_MODEL_ID,
+        );
+        match self
+            .db
+            .run_script(&script, Default::default(), cozo::ScriptMutability::Mutable)
+        {
+            Ok(_) => Ok(()),
+            Err(error) if relation_already_exists(&error.to_string()) => Ok(()),
+            Err(error) => Err(StoreError::Schema(error.to_string())),
+        }
+    }
+
+    pub fn upsert_semantic_vectors(
+        &self,
+        rows: &[SemanticVectorRow<'_>],
+    ) -> Result<(), StoreError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let data = rows
+            .iter()
+            .map(|row| {
+                if row.values.len() != SEMANTIC_VECTOR_DIM {
+                    return Err(StoreError::Query(format!(
+                        "semantic vector dimension mismatch for {}: expected {}, got {}",
+                        row.span_id,
+                        SEMANTIC_VECTOR_DIM,
+                        row.values.len()
+                    )));
+                }
+                if row.model_id != SEMANTIC_MODEL_ID {
+                    return Err(StoreError::Query(format!(
+                        "semantic model mismatch for {}: expected {}, got {}",
+                        row.span_id, SEMANTIC_MODEL_ID, row.model_id
+                    )));
+                }
+                Ok(cozo::DataValue::List(vec![
+                    cozo::DataValue::Str(row.span_id.to_owned().into()),
+                    cozo::DataValue::List(
+                        row.values
+                            .iter()
+                            .map(|value| cozo::DataValue::from(*value as f64))
+                            .collect(),
+                    ),
+                    cozo::DataValue::Str(row.model_id.to_owned().into()),
+                    cozo::DataValue::from(row.updated_at),
+                ]))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let params = [("rows".to_owned(), cozo::DataValue::List(data))]
+            .into_iter()
+            .collect();
+        self.db
+            .run_script(
+                r#"
+rows[span_id, raw_vec, model_id, updated_at] <- $rows
+?[span_id, vec, model_id, updated_at] := rows[span_id, raw_vec, model_id, updated_at],
+    vec = vec(raw_vec, "F32")
+:put semantic_vectors { span_id => vec, model_id, updated_at }
+"#,
+                params,
+                cozo::ScriptMutability::Mutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_leaf_chunks_for_documents(
+        &self,
+        document_ids: &[String],
+    ) -> Result<Vec<SemanticLeafChunk>, StoreError> {
+        if document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let params = [(
+            "docs".to_owned(),
+            cozo::DataValue::List(
+                document_ids
+                    .iter()
+                    .map(|value| {
+                        cozo::DataValue::List(vec![cozo::DataValue::Str(value.clone().into())])
+                    })
+                    .collect(),
+            ),
+        )]
+        .into_iter()
+        .collect();
+        let rows = self
+            .db
+            .run_script(
+                r#"
+selected[doc_id] <- $docs
+?[span_id, doc_id, text, narrative_id, folder_id] := selected[doc_id],
+    *chunks{chunk_id, doc_id, level, text, scope_narrative: narrative_id, scope_folder: folder_id},
+    level = 0,
+    *chunkid_map{id: chunk_id, chunk_key: span_id}
+:order doc_id, span_id
+"#,
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(rows
+            .rows
+            .into_iter()
+            .map(|row| SemanticLeafChunk {
+                span_id: row
+                    .first()
+                    .and_then(datavalue_as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                document_id: row
+                    .get(1)
+                    .and_then(datavalue_as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                text: row
+                    .get(2)
+                    .and_then(datavalue_as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                narrative_id: row.get(3).and_then(datavalue_as_str).map(str::to_owned),
+                folder_id: row.get(4).and_then(datavalue_as_str).map(str::to_owned),
+            })
+            .filter(|row| !row.span_id.is_empty() && !row.text.is_empty())
+            .collect())
+    }
+
+    pub fn query_semantic_neighbors(
+        &self,
+        query_vector: &[f32],
+        scope: &ScopeKey,
+        limit: usize,
+        oversample: usize,
+    ) -> Result<Vec<SemanticNeighbor>, StoreError> {
+        if query_vector.len() != SEMANTIC_VECTOR_DIM {
+            return Err(StoreError::Query(format!(
+                "semantic query vector dimension mismatch: expected {}, got {}",
+                SEMANTIC_VECTOR_DIM,
+                query_vector.len()
+            )));
+        }
+        let params = [
+            (
+                "query".to_owned(),
+                cozo::DataValue::List(
+                    query_vector
+                        .iter()
+                        .map(|value| cozo::DataValue::from(*value as f64))
+                        .collect(),
+                ),
+            ),
+            (
+                "k".to_owned(),
+                cozo::DataValue::from(oversample.max(limit) as i64),
+            ),
+            ("ef".to_owned(), cozo::DataValue::from(50_i64)),
+            (
+                "model_id".to_owned(),
+                cozo::DataValue::Str(SEMANTIC_MODEL_ID.to_owned().into()),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let rows = self
+            .db
+            .run_script(
+                r#"
+q_vec[v] := v = vec($query, "F32")
+?[span_id, dist, narrative_id, folder_id] := q_vec[q],
+    ~semantic_vectors:vec_idx{span_id | query: q, k: $k, ef: $ef, bind_distance: dist, filter: model_id == $model_id},
+    *chunkid_map{id: chunk_id, chunk_key: span_id},
+    *chunks{chunk_id, level, scope_narrative: narrative_id, scope_folder: folder_id},
+    level = 0
+:order dist
+"#,
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        let mut filtered = Vec::with_capacity(limit);
+        for row in rows.rows {
+            let Some(span_id) = row.first().and_then(datavalue_as_str) else {
+                continue;
+            };
+            if !matches_scope(
+                scope,
+                row.get(2).and_then(datavalue_as_str),
+                row.get(3).and_then(datavalue_as_str),
+            ) {
+                continue;
+            }
+            let Some(distance) = row.get(1).and_then(datavalue_to_f64) else {
+                continue;
+            };
+            filtered.push(SemanticNeighbor {
+                span_id: span_id.to_owned(),
+                distance,
+            });
+            if filtered.len() >= limit {
+                break;
+            }
+        }
+        Ok(filtered)
     }
 
     pub fn put_row(&self, relation: &str, row: Value) -> Result<(), StoreError> {
@@ -370,11 +618,7 @@ impl PhoenixCozoStore {
         self.put_compact_rows(relation, &rows)
     }
 
-    pub fn delete_key_rows(
-        &self,
-        relation: &str,
-        rows: &[CompactRow],
-    ) -> Result<(), StoreError> {
+    pub fn delete_key_rows(&self, relation: &str, rows: &[CompactRow]) -> Result<(), StoreError> {
         if rows.is_empty() {
             return Ok(());
         }
@@ -453,6 +697,68 @@ impl PhoenixCozoStore {
                 Default::default(),
                 cozo::ScriptMutability::Immutable,
             )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(rows
+            .rows
+            .into_iter()
+            .map(|row| row.into_iter().collect::<CompactRow>())
+            .collect())
+    }
+
+    pub fn fetch_compact_rows_where_str(
+        &self,
+        relation: &str,
+        columns: &[&str],
+        filter_column: &str,
+        filter_value: &str,
+    ) -> Result<Vec<CompactRow>, StoreError> {
+        let spec = relation_spec(relation)?;
+        let script = build_fetch_where_eq_script(spec, columns, filter_column)?;
+        let params = [(
+            "filter".to_owned(),
+            cozo::DataValue::Str(filter_value.to_owned().into()),
+        )]
+        .into_iter()
+        .collect();
+        let rows = self
+            .db
+            .run_script(&script, params, cozo::ScriptMutability::Immutable)
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(rows
+            .rows
+            .into_iter()
+            .map(|row| row.into_iter().collect::<CompactRow>())
+            .collect())
+    }
+
+    pub fn fetch_compact_rows_where_in_strings(
+        &self,
+        relation: &str,
+        columns: &[&str],
+        filter_column: &str,
+        filter_values: &[String],
+    ) -> Result<Vec<CompactRow>, StoreError> {
+        if filter_values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let spec = relation_spec(relation)?;
+        let script = build_fetch_where_in_script(spec, columns, filter_column)?;
+        let params = [(
+            "data".to_owned(),
+            cozo::DataValue::List(
+                filter_values
+                    .iter()
+                    .map(|value| {
+                        cozo::DataValue::List(vec![cozo::DataValue::Str(value.clone().into())])
+                    })
+                    .collect(),
+            ),
+        )]
+        .into_iter()
+        .collect();
+        let rows = self
+            .db
+            .run_script(&script, params, cozo::ScriptMutability::Immutable)
             .map_err(|error| StoreError::Query(error.to_string()))?;
         Ok(rows
             .rows
@@ -924,12 +1230,19 @@ impl PhoenixCozoStore {
                 (row.get_str("network_id") == Some(network_id)).then(|| NetworkRelationship {
                     network_id: row.get_str("network_id").unwrap_or_default().to_owned(),
                     source_entity_id: EntityId(
-                        row.get_str("source_entity_id").unwrap_or_default().to_owned(),
+                        row.get_str("source_entity_id")
+                            .unwrap_or_default()
+                            .to_owned(),
                     ),
                     target_entity_id: EntityId(
-                        row.get_str("target_entity_id").unwrap_or_default().to_owned(),
+                        row.get_str("target_entity_id")
+                            .unwrap_or_default()
+                            .to_owned(),
                     ),
-                    relationship_id: row.get_str("relationship_id").unwrap_or_default().to_owned(),
+                    relationship_id: row
+                        .get_str("relationship_id")
+                        .unwrap_or_default()
+                        .to_owned(),
                 })
             })
             .collect::<Vec<_>>();
@@ -949,7 +1262,9 @@ impl PhoenixCozoStore {
             .map(|relationship| {
                 let mut row = CompactRow::new();
                 row.push(cozo::DataValue::Str(relationship.network_id.clone().into()));
-                row.push(cozo::DataValue::Str(relationship.relationship_id.clone().into()));
+                row.push(cozo::DataValue::Str(
+                    relationship.relationship_id.clone().into(),
+                ));
                 row
             })
             .collect::<Vec<_>>();
@@ -1139,7 +1454,10 @@ fn build_delete_key_payload(
 ) -> Result<(String, BTreeMap<String, cozo::DataValue>), StoreError> {
     let key_columns = spec.key_columns().collect::<Vec<_>>();
     let key_count = key_columns.len();
-    let column_names = key_columns.iter().map(|column| column.name).collect::<Vec<_>>();
+    let column_names = key_columns
+        .iter()
+        .map(|column| column.name)
+        .collect::<Vec<_>>();
     let row_values = rows
         .iter()
         .map(|row| {
@@ -1163,31 +1481,81 @@ fn build_fetch_script(
     spec: &PhoenixRelationSpec,
     columns: Option<&[&str]>,
 ) -> Result<String, StoreError> {
-    let columns = match columns {
-        Some(columns) if !columns.is_empty() => columns
-            .iter()
-            .map(|name| {
-                spec.columns
-                    .iter()
-                    .find(|column| column.name == *name)
-                    .map(|column| column.name)
-                    .ok_or_else(|| StoreError::MissingColumn {
-                        relation: spec.name.to_owned(),
-                        column: (*name).to_owned(),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => spec
-            .columns
-            .iter()
-            .map(|column| column.name)
-            .collect::<Vec<_>>(),
-    };
+    let columns = resolve_column_names(spec, columns.unwrap_or(&[]), &[])?;
     let column_list = columns.join(", ");
     Ok(format!(
         "?[{column_list}] := *{}{{{column_list}}}",
         spec.name
     ))
+}
+
+fn build_fetch_where_eq_script(
+    spec: &PhoenixRelationSpec,
+    columns: &[&str],
+    filter_column: &str,
+) -> Result<String, StoreError> {
+    let head_columns = resolve_column_names(spec, columns, &[])?;
+    let body_columns = resolve_column_names(spec, columns, &[filter_column])?;
+    let head_list = head_columns.join(", ");
+    let body_list = body_columns.join(", ");
+    Ok(format!(
+        "?[{head_list}] := *{}{{{body_list}}}, {filter_column} = $filter",
+        spec.name
+    ))
+}
+
+fn build_fetch_where_in_script(
+    spec: &PhoenixRelationSpec,
+    columns: &[&str],
+    filter_column: &str,
+) -> Result<String, StoreError> {
+    let head_columns = resolve_column_names(spec, columns, &[])?;
+    let body_columns = resolve_column_names(spec, columns, &[filter_column])?;
+    let head_list = head_columns.join(", ");
+    let body_list = body_columns.join(", ");
+    Ok(format!(
+        "selected[{filter_column}] <- $data\n?[{head_list}] := selected[{filter_column}], *{}{{{body_list}}}",
+        spec.name
+    ))
+}
+
+fn resolve_column_names<'a>(
+    spec: &'a PhoenixRelationSpec,
+    requested: &[&str],
+    required: &[&str],
+) -> Result<Vec<&'a str>, StoreError> {
+    let mut names = if requested.is_empty() {
+        spec.columns
+            .iter()
+            .map(|column| column.name)
+            .collect::<Vec<_>>()
+    } else {
+        requested
+            .iter()
+            .map(|name| resolve_column_name(spec, name))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for required_name in required {
+        let column = resolve_column_name(spec, required_name)?;
+        if !names.contains(&column) {
+            names.push(column);
+        }
+    }
+    Ok(names)
+}
+
+fn resolve_column_name<'a>(
+    spec: &'a PhoenixRelationSpec,
+    name: &str,
+) -> Result<&'a str, StoreError> {
+    spec.columns
+        .iter()
+        .find(|column| column.name == name)
+        .map(|column| column.name)
+        .ok_or_else(|| StoreError::MissingColumn {
+            relation: spec.name.to_owned(),
+            column: name.to_owned(),
+        })
 }
 
 fn build_clear_script(spec: &PhoenixRelationSpec) -> String {
@@ -1247,7 +1615,10 @@ fn network_instance_from_row(row: &CompactRowView<'_>) -> NetworkInstance {
         name: row.get_str("name").unwrap_or_default().to_owned(),
         schema_id: row.get_str("schema_id").unwrap_or_default().to_owned(),
         network_kind: row.get_str("network_kind").unwrap_or_default().to_owned(),
-        network_subtype: row.get_str("network_subtype").unwrap_or_default().to_owned(),
+        network_subtype: row
+            .get_str("network_subtype")
+            .unwrap_or_default()
+            .to_owned(),
         root_folder_id: row.get_str("root_folder_id").unwrap_or_default().to_owned(),
         root_entity_id: row.get_str("root_entity_id").unwrap_or_default().to_owned(),
         namespace: row.get_str("namespace").unwrap_or_default().to_owned(),
@@ -1285,7 +1656,36 @@ fn row_datavalue(
         });
     }
     let datavalue = match column.ty {
-        PhoenixColumnType::Json => cozo::DataValue::from(value.clone()),
+        PhoenixColumnType::VectorF32(expected_dim) => {
+            let values = value
+                .as_array()
+                .ok_or_else(|| {
+                    StoreError::Query(format!(
+                        "vector column '{}' in relation '{}' must be an array",
+                        column.name, spec.name
+                    ))
+                })?
+                .iter()
+                .map(|item| {
+                    item.as_f64().map(|value| value as f32).ok_or_else(|| {
+                        StoreError::Query(format!(
+                            "vector column '{}' in relation '{}' must contain only numbers",
+                            column.name, spec.name
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if values.len() != expected_dim {
+                return Err(StoreError::Query(format!(
+                    "vector column '{}' in relation '{}' expected {} values, got {}",
+                    column.name,
+                    spec.name,
+                    expected_dim,
+                    values.len()
+                )));
+            }
+            cozo::DataValue::Vec(cozo::Vector::F32(values.into()))
+        }
         _ => cozo::DataValue::from(value.clone()),
     };
     Ok(datavalue)
@@ -1354,6 +1754,15 @@ fn datavalue_to_json_ref(value: &cozo::DataValue) -> Value {
     match value {
         DataValue::Null | DataValue::Bot => Value::Null,
         DataValue::Json(json) => serde_json::to_value(json).unwrap_or(Value::Null),
+        DataValue::Vec(cozo::Vector::F32(values)) => Value::Array(
+            values
+                .iter()
+                .map(|value| Value::from(*value as f64))
+                .collect(),
+        ),
+        DataValue::Vec(cozo::Vector::F64(values)) => {
+            Value::Array(values.iter().map(|value| Value::from(*value)).collect())
+        }
         other => match serde_json::to_value(&other) {
             Ok(Value::Object(map)) if map.len() == 1 => {
                 let inner = map.into_iter().next().expect("one value").1;
@@ -1438,6 +1847,27 @@ fn relation_already_exists(message: &str) -> bool {
     message.contains("exists")
         || message.contains("already")
         || message.contains("conflicts with an existing one")
+}
+
+fn datavalue_as_str(value: &cozo::DataValue) -> Option<&str> {
+    match value {
+        cozo::DataValue::Str(text) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+fn matches_scope(scope: &ScopeKey, narrative_id: Option<&str>, folder_id: Option<&str>) -> bool {
+    if let Some(expected) = scope.narrative_id.as_deref() {
+        if narrative_id != Some(expected) {
+            return false;
+        }
+    }
+    if let Some(expected) = scope.folder_id.as_deref() {
+        if folder_id != Some(expected) {
+            return false;
+        }
+    }
+    true
 }
 
 fn now_ms() -> i64 {

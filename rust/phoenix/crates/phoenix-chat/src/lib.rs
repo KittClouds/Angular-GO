@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use phoenix_om::{approx_token_count, OmEngine};
 use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
 use phoenix_types::{
     CapabilityProfile, ChatRun, ChatRunEvent, ChatRunSnapshot, ChatRunStatus, ChatRuntimeConfig,
-    Diagnostic, EvidenceItem, RunOptions, Thread, ThreadId, ThreadMessage,
+    Diagnostic, EvidenceItem, OmPendingAction, RunOptions, Thread, ThreadId, ThreadMessage,
     ToolResultSubmission,
 };
 use serde_json::{json, Value};
@@ -36,6 +37,7 @@ impl ContributorCoordinator {
 pub struct PhoenixChat {
     config: RefCell<ChatRuntimeConfig>,
     contributors: ContributorCoordinator,
+    om_engine: OmEngine,
 }
 
 impl PhoenixChat {
@@ -46,6 +48,28 @@ impl PhoenixChat {
 
     pub fn current_config(&self) -> ChatRuntimeConfig {
         self.config.borrow().clone()
+    }
+
+    pub fn prepare_om(
+        &self,
+        store: &PhoenixCozoStore,
+        thread_id: &str,
+    ) -> Result<Option<OmPendingAction>, StoreError> {
+        let config = OmEngine::config_from_runtime(&self.current_config());
+        self.om_engine
+            .prepare_pending_action(store, thread_id, &config)
+            .map_err(|error| StoreError::Query(error.to_string()))
+    }
+
+    pub fn apply_om_action(
+        &self,
+        store: &PhoenixCozoStore,
+        action: &OmPendingAction,
+        response: &str,
+    ) -> Result<bool, StoreError> {
+        self.om_engine
+            .apply_pending_action(store, action, response)
+            .map_err(|error| StoreError::Query(error.to_string()))
     }
 
     pub fn create_thread(
@@ -156,6 +180,8 @@ impl PhoenixChat {
             created_at: now,
             updated_at: now,
             is_streaming: false,
+            token_count: Some(estimate_token_count(content)),
+            is_observed: false,
         };
         self.persist_message(store, &message)?;
         self.touch_thread(store, thread_id, None, now)?;
@@ -174,7 +200,9 @@ impl PhoenixChat {
             .map(message_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         messages.sort_by(|left, right| {
-            left.created_at.cmp(&right.created_at).then_with(|| left.id.cmp(&right.id))
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
         });
         Ok(messages)
     }
@@ -191,6 +219,8 @@ impl PhoenixChat {
         message.content = content.to_owned();
         message.updated_at = now_ms();
         message.is_streaming = false;
+        message.token_count = Some(estimate_token_count(content));
+        message.is_observed = false;
         self.persist_message(store, &message)?;
         self.touch_thread(store, &message.thread_id, None, message.updated_at)?;
         Ok(Some(message))
@@ -208,6 +238,8 @@ impl PhoenixChat {
         message.content.push_str(chunk);
         message.updated_at = now_ms();
         message.is_streaming = true;
+        message.token_count = Some(estimate_token_count(&message.content));
+        message.is_observed = false;
         self.persist_message(store, &message)?;
         self.touch_thread(store, &message.thread_id, None, message.updated_at)?;
         Ok(Some(message))
@@ -229,13 +261,19 @@ impl PhoenixChat {
             created_at: now,
             updated_at: now,
             is_streaming: true,
+            token_count: Some(0),
+            is_observed: false,
         };
         self.persist_message(store, &message)?;
         self.touch_thread(store, thread_id, None, now)?;
         Ok(message)
     }
 
-    pub fn clear_thread(&self, store: &PhoenixCozoStore, thread_id: &str) -> Result<(), StoreError> {
+    pub fn clear_thread(
+        &self,
+        store: &PhoenixCozoStore,
+        thread_id: &str,
+    ) -> Result<(), StoreError> {
         delete_rows_with_filter(store, "thread_messages", |row| {
             row.get("thread_id").and_then(Value::as_str) == Some(thread_id)
         })?;
@@ -271,7 +309,7 @@ impl PhoenixChat {
             .ok_or_else(|| StoreError::Query(format!("thread not found: {thread_id}")))?;
         let now = now_ms();
         let deadline_at = now + options.deadline_ms.max(0);
-        let capabilities = default_capabilities();
+        let capabilities = default_capabilities(&self.current_config());
         let mut run = ChatRun {
             id: generate_id("run", now),
             thread_id: thread.id.clone(),
@@ -330,9 +368,28 @@ impl PhoenixChat {
 
         let messages = self.list_messages(store, thread_id)?;
         let gathered = self.contributors.gather(&thread, &messages, &options);
+        let mut evidence = gathered.evidence.clone();
+        let om_context = if options.om_enabled && self.current_config().om_enabled {
+            self.om_engine
+                .build_context_block(store, thread_id)
+                .map_err(|error| StoreError::Query(error.to_string()))?
+        } else {
+            None
+        };
+        if let Some(content) = om_context.as_deref() {
+            evidence.push(EvidenceItem {
+                id: generate_id("evidence", now_ms()),
+                source: "om_context".to_owned(),
+                title: Some("Observational memory".to_owned()),
+                content: content.to_owned(),
+                score: None,
+                metadata: None,
+            });
+        }
         run.prepared_context = build_prepared_context(&options, &gathered);
-        run.prepared_system_prompt = build_prepared_system_prompt(&options, &run.prepared_context);
-        run.evidence_json = serde_json::to_string(&gathered.evidence)
+        run.prepared_system_prompt =
+            build_prepared_system_prompt(&options, &run.prepared_context, om_context.as_deref());
+        run.evidence_json = serde_json::to_string(&evidence)
             .map_err(|error| StoreError::Query(error.to_string()))?;
         run.status = if gathered.diagnostics.is_empty() {
             ChatRunStatus::ReadyToAnswer
@@ -441,6 +498,16 @@ impl PhoenixChat {
         let Some(mut run) = self.get_run(store, run_id)? else {
             return Ok(None);
         };
+        if let Some(mut assistant_message) = self.get_message(store, assistant_message_id)? {
+            assistant_message.is_streaming = false;
+            assistant_message.updated_at = now_ms();
+            if !final_response.is_empty() && assistant_message.content != final_response {
+                assistant_message.content = final_response.to_owned();
+            }
+            assistant_message.token_count = Some(estimate_token_count(&assistant_message.content));
+            assistant_message.is_observed = false;
+            self.persist_message(store, &assistant_message)?;
+        }
         run.assistant_message_id = Some(assistant_message_id.to_owned());
         if let Some(error) = final_error {
             run.status = ChatRunStatus::Failed;
@@ -470,7 +537,9 @@ impl PhoenixChat {
                 } else {
                     "Answer completed".to_owned()
                 },
-                detail: final_error.map(str::to_owned).or_else(|| Some("Completed.".to_owned())),
+                detail: final_error
+                    .map(str::to_owned)
+                    .or_else(|| Some("Completed.".to_owned())),
                 status: Some(if final_error.is_some() {
                     "error".to_owned()
                 } else {
@@ -570,7 +639,7 @@ impl PhoenixChat {
             "main Phoenix agent does not support approval submission".to_owned(),
         ))
     }
-    
+
     fn touch_thread(
         &self,
         store: &PhoenixCozoStore,
@@ -626,6 +695,8 @@ impl PhoenixChat {
                 "created_at": message.created_at,
                 "updated_at": message.updated_at,
                 "is_streaming": message.is_streaming,
+                "token_count": message.token_count,
+                "is_observed": message.is_observed,
             }),
         )
     }
@@ -716,7 +787,9 @@ impl PhoenixChat {
             .map(event_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         events.sort_by(|left, right| {
-            left.created_at.cmp(&right.created_at).then_with(|| left.id.cmp(&right.id))
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
         });
         Ok(events)
     }
@@ -745,9 +818,9 @@ fn json_string_or_value(value: &str) -> Value {
     serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_owned()))
 }
 
-fn default_capabilities() -> CapabilityProfile {
+fn default_capabilities(config: &ChatRuntimeConfig) -> CapabilityProfile {
     CapabilityProfile {
-        om_enabled: false,
+        om_enabled: config.om_enabled,
         workspace_enabled: false,
         planner_enabled: false,
         go_tool_host: false,
@@ -771,15 +844,33 @@ fn build_prepared_context(options: &RunOptions, gathered: &GatheredContributions
     parts.join("\n\n")
 }
 
-fn build_prepared_system_prompt(options: &RunOptions, prepared_context: &str) -> String {
+fn build_prepared_system_prompt(
+    options: &RunOptions,
+    prepared_context: &str,
+    om_context: Option<&str>,
+) -> String {
+    let mut sections = Vec::new();
     let base = options.base_system_prompt.as_deref().unwrap_or("").trim();
     let context = prepared_context.trim();
-    match (base.is_empty(), context.is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => base.to_owned(),
-        (true, false) => format!("Use this context while answering:\n\n{context}"),
-        (false, false) => format!("{base}\n\nUse this context while answering:\n\n{context}"),
+    let om_context = om_context.unwrap_or("").trim();
+
+    if !om_context.is_empty() {
+        sections.push(format!(
+            "Use this observational memory while answering:\n\n{om_context}"
+        ));
     }
+    if !base.is_empty() {
+        sections.push(base.to_owned());
+    }
+    if !context.is_empty() {
+        sections.push(format!("Use this context while answering:\n\n{context}"));
+    }
+
+    sections.join("\n\n")
+}
+
+fn estimate_token_count(text: &str) -> i64 {
+    approx_token_count(text)
 }
 
 fn trim_preview(value: &str) -> String {
@@ -835,6 +926,8 @@ fn message_from_row(row: Value) -> Result<ThreadMessage, StoreError> {
         created_at: int_field(object, "created_at"),
         updated_at: int_field(object, "updated_at"),
         is_streaming: bool_field(object, "is_streaming"),
+        token_count: object.get("token_count").and_then(Value::as_i64),
+        is_observed: bool_field(object, "is_observed"),
     })
 }
 
@@ -950,7 +1043,7 @@ pub mod provider {
         }
 
         pub fn default_capabilities_profile() -> phoenix_types::CapabilityProfile {
-            default_capabilities()
+            default_capabilities(&phoenix_types::ChatRuntimeConfig::default())
         }
     }
 }
@@ -980,11 +1073,15 @@ mod tests {
             .create_thread(&store, Some("world-1"), Some("narrative-1"), Some("Thread"))
             .expect("thread");
         let message = chat
-            .add_message(&store, &thread.id.0, "user", "Hello there", Some("narrative-1"))
+            .add_message(
+                &store,
+                &thread.id.0,
+                "user",
+                "Hello there",
+                Some("narrative-1"),
+            )
             .expect("message");
-        let messages = chat
-            .list_messages(&store, &thread.id.0)
-            .expect("messages");
+        let messages = chat.list_messages(&store, &thread.id.0).expect("messages");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].id, message.id);
         assert_eq!(messages[0].content, "Hello there");
@@ -997,8 +1094,14 @@ mod tests {
         let thread = chat
             .create_thread(&store, Some("world-1"), Some("narrative-1"), Some("Thread"))
             .expect("thread");
-        chat.add_message(&store, &thread.id.0, "user", "Who are you?", Some("narrative-1"))
-            .expect("message");
+        chat.add_message(
+            &store,
+            &thread.id.0,
+            "user",
+            "Who are you?",
+            Some("narrative-1"),
+        )
+        .expect("message");
         let run = chat
             .start_run(
                 &store,
@@ -1013,7 +1116,10 @@ mod tests {
                 },
             )
             .expect("run");
-        assert!(matches!(run.status, ChatRunStatus::ReadyToAnswer | ChatRunStatus::Degraded));
+        assert!(matches!(
+            run.status,
+            ChatRunStatus::ReadyToAnswer | ChatRunStatus::Degraded
+        ));
 
         let assistant = chat
             .start_streaming_message(&store, &thread.id.0, Some("narrative-1"))
