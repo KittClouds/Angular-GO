@@ -46,6 +46,7 @@ export class TtsService {
     private readonly _loadProgress = signal<number>(0);
     private readonly _loadStatus = signal<string>('');
     private readonly _isPlaying = signal<boolean>(false);
+    private readonly _isPaused = signal<boolean>(false);
     private readonly _errorMessage = signal<string | null>(null);
     private readonly _selectedVoice = signal<TtsVoice>(TTS_VOICES[0]);
 
@@ -54,6 +55,7 @@ export class TtsService {
     readonly loadProgress = this._loadProgress.asReadonly();
     readonly loadStatus = this._loadStatus.asReadonly();
     readonly isPlaying = this._isPlaying.asReadonly();
+    readonly isPaused = this._isPaused.asReadonly();
     readonly errorMessage = this._errorMessage.asReadonly();
     readonly selectedVoice = this._selectedVoice.asReadonly();
 
@@ -163,6 +165,28 @@ export class TtsService {
     }
 
     /**
+     * Pause current playback.
+     */
+    pause(): void {
+        if (!this._isPlaying() || this._isPaused() || !this.audioContext) return;
+        this.audioContext.suspend().then(() => {
+            this._isPaused.set(true);
+            this.scheduleIdleUnload();
+        });
+    }
+
+    /**
+     * Resume current playback.
+     */
+    resume(): void {
+        if (!this._isPlaying() || !this._isPaused() || !this.audioContext) return;
+        this.audioContext.resume().then(() => {
+            this._isPaused.set(false);
+            this.cancelIdleUnloadTimer();
+        });
+    }
+
+    /**
      * Fully unload model/runtime resources.
      */
     async unloadModel(): Promise<void> {
@@ -262,6 +286,7 @@ export class TtsService {
         this.stopRequested = false;
         this.activePlaybackVoiceId = voice.id;
         this._isPlaying.set(true);
+        this._isPaused.set(false);
         this._errorMessage.set(null);
 
         try {
@@ -417,6 +442,7 @@ export class TtsService {
 
         this.activeSourceNodes = [];
         this._isPlaying.set(false);
+        this._isPaused.set(false);
 
         if (this.worker) {
             this.sendMessage({
@@ -733,6 +759,7 @@ export class TtsService {
         this._loadProgress.set(0);
         this._loadStatus.set('');
         this._isPlaying.set(false);
+        this._isPaused.set(false);
     }
 
     private createUnloadWaiter(): Promise<void> {

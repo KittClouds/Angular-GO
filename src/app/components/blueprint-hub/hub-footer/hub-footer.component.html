@@ -3,7 +3,6 @@
     <!-- Left: Hub Trigger -->
     <div class="flex items-center gap-4">
         <!-- Hub Toggle -->
-        <!-- Hub Toggle -->
         <button (click)="hubService.toggle()"
             class="flex items-center gap-2 pl-2 pr-3 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 group focus:outline-none">
 
@@ -34,48 +33,48 @@
         <app-tts-settings-popup></app-tts-settings-popup>
 
         <!-- TTS Controls -->
-        @switch (ttsService.modelState()) {
-        @case ('idle') {
-        <button (click)="onLoadModelClick()"
-            class="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-            title="Load Text-to-Speech Model">
-            <i class="pi pi-download text-[10px]"></i>
-        </button>
-        }
-        @case ('loading') {
-        <button disabled class="text-teal-600 dark:text-teal-400 flex items-center gap-1 cursor-wait"
-            title="Loading TTS model...">
-            <i class="pi pi-spin pi-spinner text-[10px]"></i>
-            <span class="text-[10px]">{{ ttsService.loadProgress() }}%</span>
-        </button>
-        }
-        @case ('ready') {
-        <button (click)="onSpeakClick()" class="transition-colors flex items-center gap-1"
-            [class.text-teal-600]="ttsService.isPlaying()" [class.dark:text-teal-400]="ttsService.isPlaying()"
-            [class.text-muted-foreground]="!ttsService.isPlaying()"
-            [class.hover:text-foreground]="!ttsService.isPlaying()"
-            [title]="ttsService.isPlaying() ? 'Stop reading' : 'Read note aloud'">
-            <i class="pi text-[10px]" [class.pi-volume-up]="!ttsService.isPlaying()"
-                [class.pi-stop]="ttsService.isPlaying()"></i>
-        </button>
-        }
-        @case ('error') {
-        <button (click)="onLoadModelClick()"
-            class="text-red-500 hover:text-red-600 transition-colors flex items-center gap-1"
-            title="Load failed - click to retry">
-            <i class="pi pi-exclamation-triangle text-[10px]"></i>
-        </button>
-        }
-        }
+        <div class="flex items-center gap-1.5 ml-1">
+            @if (ttsService.modelState() === 'loading') {
+            <button disabled class="text-teal-500 disabled:opacity-50 flex items-center gap-1 cursor-wait"
+                title="Loading TTS model...">
+                <i class="pi pi-spin pi-spinner text-[10px]"></i>
+                <span class="text-[10px]">{{ ttsService.loadProgress() }}%</span>
+            </button>
+            } @else {
+            <button (click)="onPlayClick()"
+                class="transition-colors flex items-center justify-center w-5 h-5 rounded-sm hover:bg-slate-200 dark:hover:bg-slate-800 focus:outline-none"
+                [class.text-teal-500]="ttsService.modelState() === 'ready'"
+                [class.text-red-500]="ttsService.modelState() !== 'ready'"
+                [title]="ttsService.modelState() === 'ready' ? (ttsService.isPlaying() && !ttsService.isPaused() ? 'Playing' : 'Play') : 'Load & Play'">
+                <i class="pi pi-play text-[10px]"></i>
+            </button>
+
+            @if (ttsService.modelState() === 'ready') {
+            <button (click)="onPauseClick()"
+                class="transition-colors flex items-center justify-center w-5 h-5 rounded-sm hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-teal-500 focus:outline-none"
+                [class.text-teal-500]="ttsService.isPaused()" title="Pause">
+                <i class="pi pi-pause text-[10px]"></i>
+            </button>
+
+            <button (click)="onStopClick()"
+                class="transition-colors flex items-center justify-center w-5 h-5 rounded-sm hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-red-500 focus:outline-none"
+                title="Stop">
+                <i class="pi pi-stop text-[10px]"></i>
+            </button>
+            }
+            }
+        </div>
     </div>
 
     <!-- Right: Editor Stats (LIVE DATA) -->
     <div class="flex items-center gap-4 text-muted-foreground">
         <span class="hover:text-foreground cursor-pointer transition-colors">{{ statsService.backlinks() }}
             backlinks</span>
-        <span class="hover:text-foreground cursor-pointer transition-colors">{{ statsService.wordCount() }} words</span>
+        <om-gradient-text [text]="wordCountText()" [gradientStart]="wordGradientStart()"
+            [gradientEnd]="wordGradientEnd()" styleClass="health-gradient">
+        </om-gradient-text>
         <om-gradient-text [text]="charCountText()" [gradientStart]="charGradientStart()"
-            [gradientEnd]="charGradientEnd()" styleClass="char-health-gradient">
+            [gradientEnd]="charGradientEnd()" styleClass="health-gradient">
         </om-gradient-text>
         <span>{{ statsService.totalNotes() }} notes</span>
 
