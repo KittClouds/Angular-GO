@@ -1,5 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { DOCUMENT, isPlatformBrowser } from '@angular/common';
+import { DestroyRef, Inject, Injectable, PLATFORM_ID, computed, effect, inject, signal } from '@angular/core';
 import { editorViewCtx } from '@milkdown/kit/core';
+import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { EditorService } from '../../services/editor.service';
 import { NoteEditorStore } from '../store/note-editor.store';
@@ -37,10 +39,54 @@ export interface WorkspaceEditResult {
     error?: string;
 }
 
+export interface WorkspaceStreamingEditResult extends WorkspaceEditResult {
+    sessionId?: string;
+    insertedLength?: number;
+    restoredOriginal?: boolean;
+    preservedPartial?: boolean;
+}
+
+interface WorkspaceStreamingSession {
+    id: string;
+    noteId: string;
+    originalFrom: number;
+    originalTo: number;
+    insertionPoint: number;
+    insertedLength: number;
+    originalText: string;
+    beforeRevision: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class EditorAgentWorkspaceService {
     private readonly editorService = inject(EditorService);
     private readonly noteEditorStore = inject(NoteEditorStore);
+    private readonly destroyRef = inject(DestroyRef);
+    private readonly selectionSignal = signal<WorkspaceSelectionSnapshot | null>(null);
+    private activeStreamingSession: WorkspaceStreamingSession | null = null;
+
+    readonly liveSelection = computed(() => this.selectionSignal());
+
+    constructor(
+        @Inject(PLATFORM_ID) platformId: Object,
+        @Inject(DOCUMENT) document: Document
+    ) {
+        effect(() => {
+            const activeNoteId = this.noteEditorStore.activeNoteId();
+            if (this.activeStreamingSession && activeNoteId !== this.activeStreamingSession.noteId) {
+                this.activeStreamingSession = null;
+            }
+            this.refreshLiveSelection();
+        }, { allowSignalWrites: true });
+
+        if (isPlatformBrowser(platformId)) {
+            const refresh = () => this.refreshLiveSelection();
+            document.addEventListener('selectionchange', refresh, { passive: true });
+            this.destroyRef.onDestroy(() => {
+                document.removeEventListener('selectionchange', refresh);
+            });
+        }
+    }
 
     hasOpenDocument(): boolean {
         return !!this.noteEditorStore.activeNoteId() && !!this.getEditorView();
@@ -190,6 +236,165 @@ export class EditorAgentWorkspaceService {
         }
     }
 
+    beginStreamReplace(
+        from: number,
+        to: number,
+        expectedRevision?: number
+    ): WorkspaceStreamingEditResult {
+        return this.beginStreamingSession(from, to, expectedRevision, true);
+    }
+
+    beginStreamInsert(
+        pos: number,
+        expectedRevision?: number
+    ): WorkspaceStreamingEditResult {
+        return this.beginStreamingSession(pos, pos, expectedRevision, false);
+    }
+
+    appendStreamChunk(sessionId: string, chunk: string): WorkspaceStreamingEditResult {
+        if (!chunk) {
+            return {
+                ok: true,
+                sessionId,
+                noteId: this.activeStreamingSession?.noteId,
+                insertedLength: this.activeStreamingSession?.insertedLength ?? 0,
+            };
+        }
+
+        const session = this.requireStreamingSession(sessionId);
+        if (this.isStreamingSessionError(session)) return session;
+
+        const view = this.getEditorView();
+        if (!view) {
+            return { ok: false, sessionId, error: 'no open note/editor' };
+        }
+
+        const insertAt = session.insertionPoint + session.insertedLength;
+        const tr = view.state.tr.insertText(chunk, insertAt, insertAt);
+        view.dispatch(tr);
+        session.insertedLength += chunk.length;
+        this.refreshLiveSelection();
+
+        return {
+            ok: true,
+            sessionId: session.id,
+            noteId: session.noteId,
+            beforeRevision: session.beforeRevision,
+            afterRevision: this.computeRevision(view),
+            insertedLength: session.insertedLength,
+        };
+    }
+
+    async finalizeStreamEdit(sessionId: string): Promise<WorkspaceStreamingEditResult> {
+        const session = this.requireStreamingSession(sessionId);
+        if (this.isStreamingSessionError(session)) return session;
+
+        const saveResult = await this.saveCurrentNote();
+        if (!saveResult.ok) {
+            return { ...saveResult, sessionId };
+        }
+
+        this.activeStreamingSession = null;
+        this.refreshLiveSelection();
+        return {
+            ...saveResult,
+            sessionId,
+            insertedLength: session.insertedLength,
+            restoredOriginal: false,
+            preservedPartial: false,
+        };
+    }
+
+    cancelStreamEdit(
+        sessionId: string,
+        options?: { preservePartial?: boolean }
+    ): WorkspaceStreamingEditResult {
+        const session = this.requireStreamingSession(sessionId);
+        if (this.isStreamingSessionError(session)) return session;
+
+        const preservePartial = !!options?.preservePartial || session.insertedLength > 0;
+        const view = this.getEditorView();
+        if (!view) {
+            this.activeStreamingSession = null;
+            return {
+                ok: false,
+                sessionId,
+                noteId: session.noteId,
+                insertedLength: session.insertedLength,
+                preservedPartial: preservePartial,
+                error: 'no open note/editor',
+            };
+        }
+
+        let restoredOriginal = false;
+        if (!preservePartial) {
+            const restoreTo = session.insertionPoint + session.insertedLength;
+            const tr = view.state.tr.insertText(
+                session.originalText,
+                session.insertionPoint,
+                restoreTo
+            );
+            if (session.originalText.length > 0) {
+                tr.setSelection(
+                    TextSelection.create(
+                        tr.doc,
+                        session.insertionPoint,
+                        session.insertionPoint + session.originalText.length
+                    )
+                );
+            }
+            view.dispatch(tr);
+            restoredOriginal = true;
+        }
+
+        this.activeStreamingSession = null;
+        this.refreshLiveSelection();
+        return {
+            ok: true,
+            sessionId,
+            noteId: session.noteId,
+            beforeRevision: session.beforeRevision,
+            afterRevision: this.computeRevision(view),
+            insertedLength: session.insertedLength,
+            restoredOriginal,
+            preservedPartial: preservePartial,
+        };
+    }
+
+    highlightRange(
+        from: number,
+        to: number
+    ): WorkspaceEditResult {
+        const view = this.getEditorView();
+        const note = this.noteEditorStore.currentNote();
+        if (!view || !note) {
+            return { ok: false, error: 'no open note/editor' };
+        }
+
+        const range = this.normalizeRange(view, from, to);
+        if (!range) {
+            return { ok: false, noteId: note.id, error: 'invalid range' };
+        }
+
+        const minPos = 1;
+        const maxPos = Math.max(minPos, view.state.doc.content.size - 1);
+        const anchor = Math.max(minPos, Math.min(range.from, maxPos));
+        const head = Math.max(minPos, Math.min(range.to, maxPos));
+        const tr = view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, anchor, head))
+            .scrollIntoView();
+        view.dispatch(tr);
+        view.focus();
+        this.refreshLiveSelection();
+        const revision = this.computeRevision(view);
+        return {
+            ok: true,
+            noteId: note.id,
+            beforeRevision: revision,
+            afterRevision: revision,
+        };
+    }
+
     private async applyTextEdit(
         expectedRevision: number | undefined,
         mutate: (view: EditorView) => void
@@ -235,6 +440,94 @@ export class EditorAgentWorkspaceService {
         }
     }
 
+    private beginStreamingSession(
+        from: number,
+        to: number,
+        expectedRevision: number | undefined,
+        removeOriginalText: boolean
+    ): WorkspaceStreamingEditResult {
+        if (this.activeStreamingSession) {
+            return { ok: false, error: 'another streaming edit is already active' };
+        }
+
+        const note = this.noteEditorStore.currentNote();
+        const view = this.getEditorView();
+        if (!note || !view) {
+            return { ok: false, error: 'no open note/editor' };
+        }
+
+        const beforeRevision = this.computeRevision(view);
+        if (expectedRevision !== undefined && expectedRevision !== beforeRevision) {
+            return {
+                ok: false,
+                noteId: note.id,
+                beforeRevision,
+                error: `revision mismatch: expected ${expectedRevision}, got ${beforeRevision}`,
+            };
+        }
+
+        const range = this.normalizeRange(view, from, to);
+        if (!range) {
+            return { ok: false, noteId: note.id, beforeRevision, error: 'invalid range' };
+        }
+
+        const originalText = view.state.doc.textBetween(range.from, range.to, '\n', '\n');
+        if (removeOriginalText && range.from !== range.to) {
+            view.dispatch(view.state.tr.insertText('', range.from, range.to));
+        } else if (range.from === range.to) {
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.from, range.to)));
+        }
+
+        view.focus();
+        const sessionId = this.generateId('stream-edit');
+        this.activeStreamingSession = {
+            id: sessionId,
+            noteId: note.id,
+            originalFrom: range.from,
+            originalTo: range.to,
+            insertionPoint: range.from,
+            insertedLength: 0,
+            originalText,
+            beforeRevision,
+        };
+        this.refreshLiveSelection();
+        return {
+            ok: true,
+            sessionId,
+            noteId: note.id,
+            beforeRevision,
+            afterRevision: this.computeRevision(view),
+            insertedLength: 0,
+            restoredOriginal: false,
+            preservedPartial: false,
+        };
+    }
+
+    private requireStreamingSession(sessionId: string): WorkspaceStreamingSession | WorkspaceStreamingEditResult {
+        const session = this.activeStreamingSession;
+        if (!session || session.id !== sessionId) {
+            return { ok: false, sessionId, error: `unknown streaming session: ${sessionId}` };
+        }
+        if (this.noteEditorStore.activeNoteId() !== session.noteId) {
+            this.activeStreamingSession = null;
+            return {
+                ok: false,
+                sessionId,
+                noteId: session.noteId,
+                insertedLength: session.insertedLength,
+                preservedPartial: session.insertedLength > 0,
+                error: 'active note changed during streaming edit',
+            };
+        }
+        return session;
+    }
+
+    private isStreamingSessionError(
+        value: WorkspaceStreamingSession | WorkspaceStreamingEditResult
+    ): value is WorkspaceStreamingEditResult {
+        return !('insertionPoint' in value);
+    }
+
     private normalizeRange(
         view: EditorView,
         from: number,
@@ -260,6 +553,10 @@ export class EditorAgentWorkspaceService {
         }
     }
 
+    private refreshLiveSelection(): void {
+        this.selectionSignal.set(this.getSelection());
+    }
+
     private computeRevision(view: EditorView): number {
         return this.hashString(JSON.stringify(view.state.doc.toJSON()));
     }
@@ -275,6 +572,13 @@ export class EditorAgentWorkspaceService {
 
     private toErrorMessage(err: unknown): string {
         return err instanceof Error ? err.message : String(err);
+    }
+
+    private generateId(prefix: string): string {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return `${prefix}-${crypto.randomUUID()}`;
+        }
+        return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
 }
 

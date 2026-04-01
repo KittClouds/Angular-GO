@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
-import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2, Settings } from 'lucide-angular';
+import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2, Settings, Pencil } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../lib/registry';
 import { GraphDetailComponent } from './graph-detail/graph-detail.component';
@@ -56,6 +56,7 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     // Icons
     PlusIcon = Plus;
     Trash2Icon = Trash2;
+    PencilIcon = Pencil;
     ChevronRightIcon = ChevronRight;
     ChevronDownIcon = ChevronDown;
     GlobeIcon = Globe;
@@ -246,8 +247,8 @@ export class GraphTabComponent implements OnInit, OnDestroy {
         this.isCreatorOpen.set(true);
     }
 
-    editEntity(entity: RegisteredEntity, event: MouseEvent) {
-        event.stopPropagation();
+    editEntity(entity: RegisteredEntity, event?: Event) {
+        event?.stopPropagation();
         this.editingEntity.set({
             id: entity.id,
             label: entity.label,
@@ -269,22 +270,23 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     async onSaveEntity(data: EntityCreatorData) {
         if (data.id) {
-            // Editing
-            await smartGraphRegistry.updateEntity(data.id, {
+            const updated = await smartGraphRegistry.updateEntity(data.id, {
                 label: data.label,
                 kind: data.kind as any,
                 aliases: data.aliases,
             });
+            if (updated && this.selectedEntity()?.id === updated.id) {
+                this.selectedEntity.set(updated);
+            }
         } else {
-            // Creating
-            await smartGraphRegistry.registerEntity(
+            const result = await smartGraphRegistry.registerEntity(
                 data.label,
                 data.kind as any,
                 'manual',
                 { source: 'user', aliases: data.aliases }
             );
+            this.selectedEntity.set(result.entity);
         }
-        // Entities auto-refresh via computed signal
     }
 
     async flushRegistry() {

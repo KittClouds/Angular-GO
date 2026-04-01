@@ -25,7 +25,11 @@ export type EntityKind =
     | 'CUSTOM'
     | 'UNKNOWN';
 
-export type AnalyticsHighlightKind = 'repetition' | 'proximity' | 'cadence';
+export type SentenceVariationBucket = '1' | '2-6' | '7-15' | '16-25' | '26-39' | '40+';
+
+export type AnalyticsHighlightKind = 'repetition' | 'proximity' | 'cadence' | 'sentence_variation';
+
+export type AnalyticsHighlightPaletteKey = AnalyticsHighlightKind | SentenceVariationBucket;
 
 /**
  * Types of detected spans
@@ -74,6 +78,8 @@ export interface DecorationSpan {
     selector?: TextQuoteSelector;
     /** Analytics highlight family for transient editor emphasis */
     highlightKind?: AnalyticsHighlightKind;
+    /** Optional analytics palette key when a highlight needs bucket-specific styling */
+    analyticsPaletteKey?: AnalyticsHighlightPaletteKey;
     /** Stable selection id for transient analytics highlights */
     annotationId?: string;
 }

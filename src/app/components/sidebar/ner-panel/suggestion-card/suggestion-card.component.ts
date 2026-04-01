@@ -1,43 +1,53 @@
-import { Component, Input, Output, EventEmitter, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NgIconComponent, provideIcons } from '@ng-icons/core';
-import { lucideCheckCircle2, lucideXCircle, lucideSparkles, lucideInfo } from '@ng-icons/lucide';
+import {
+  lucideCheckCircle2,
+  lucideInfo,
+  lucideSparkles,
+  lucideXCircle,
+} from '@ng-icons/lucide';
 import { NerSuggestion } from '../../../../services/ner.service';
 
 @Component({
   selector: 'app-suggestion-card',
   standalone: true,
   imports: [CommonModule, NgIconComponent],
-  providers: [provideIcons({ lucideCheckCircle2, lucideXCircle, lucideSparkles, lucideInfo })],
+  providers: [provideIcons({ lucideCheckCircle2, lucideInfo, lucideSparkles, lucideXCircle })],
   template: `
-    <div 
+    <div
       class="p-2.5 bg-muted/50 rounded-lg text-xs hover:bg-muted/80 transition-all border border-transparent hover:border-border/50"
       [class.ring-1]="suggestion.llmEnhanced"
       [class.ring-teal-500/30]="suggestion.llmEnhanced"
     >
-      <!-- Main Row -->
       <div class="flex items-start justify-between gap-2">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-1.5">
             <span class="font-semibold truncate">{{ suggestion.label }}</span>
             @if (suggestion.llmEnhanced) {
-              <ng-icon 
-                name="lucideSparkles" 
-                class="w-3 h-3 text-teal-400 shrink-0" 
+              <ng-icon
+                name="lucideSparkles"
+                class="w-3 h-3 text-teal-400 shrink-0"
                 title="LLM Enhanced"
               ></ng-icon>
             }
           </div>
+
           <div class="flex items-center gap-1.5 mt-1 text-muted-foreground">
-            <span 
-              class="uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded-sm"
-              [class.bg-purple-500/20]="true"
-              [class.text-purple-300]="true"
-            >{{ suggestion.kind }}</span>
-            <span class="text-[10px]">•</span>
-            <span 
+            <span
+              class="uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded-sm bg-purple-500/20 text-purple-300"
+            >
+              {{ suggestion.kind }}
+            </span>
+            @if (suggestion.source === 'lfm_local_experiment') {
+              <span class="uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded-sm bg-teal-500/10 text-teal-300 border border-teal-500/20">
+                LFM
+              </span>
+            }
+            <span class="text-[10px]">â€¢</span>
+            <span
               class="text-[10px] font-medium"
-              [class.text-green-400]="confidencePercent >= 80" 
+              [class.text-green-400]="confidencePercent >= 80"
               [class.text-amber-400]="confidencePercent >= 50 && confidencePercent < 80"
               [class.text-red-400]="confidencePercent < 50"
             >
@@ -45,8 +55,7 @@ import { NerSuggestion } from '../../../../services/ner.service';
             </span>
           </div>
         </div>
-        
-        <!-- Action Buttons -->
+
         <div class="flex gap-1 shrink-0">
           <button
             class="h-7 w-7 flex items-center justify-center rounded-md hover:bg-green-500/20 text-green-400 transition-colors disabled:opacity-50"
@@ -67,16 +76,20 @@ import { NerSuggestion } from '../../../../services/ner.service';
         </div>
       </div>
 
-      <!-- LLM Reasoning (if available) -->
+      @if (suggestion.context) {
+        <div class="mt-2 text-[10px] text-muted-foreground leading-relaxed">
+          {{ suggestion.context }}
+        </div>
+      }
+
       @if (suggestion.llmReasoning && showReasoning()) {
         <div class="mt-2 pt-2 border-t border-border/50 text-[10px] text-muted-foreground">
           <span class="italic">{{ suggestion.llmReasoning }}</span>
         </div>
       }
 
-      <!-- Toggle reasoning -->
       @if (suggestion.llmReasoning) {
-        <button 
+        <button
           class="mt-1.5 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1"
           (click)="showReasoning.set(!showReasoning())"
         >
@@ -85,7 +98,7 @@ import { NerSuggestion } from '../../../../services/ner.service';
         </button>
       }
     </div>
-  `
+  `,
 })
 export class SuggestionCardComponent {
   @Input({ required: true }) suggestion!: NerSuggestion;

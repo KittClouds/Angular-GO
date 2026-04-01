@@ -28,6 +28,9 @@ import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
 import { ChatToolHostService } from '../../../lib/services/chat-tool-host.service';
+import { AiSidebarModeService, type AiSidebarMode } from '../../../lib/services/ai-sidebar-mode.service';
+import { EditorAgentWorkspaceService } from '../../../lib/services/editor-agent-workspace.service';
+import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 
 interface SessionInfo {
     id: string;
@@ -121,6 +124,72 @@ Keep responses concise but helpful. If you don't know something specific about t
                     </button>
                 }
             </div>
+
+            @if (!showHistory()) {
+                <div class="px-3 py-2 border-b border-border/40 bg-black/10 shrink-0 space-y-2">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 flex gap-1 p-1 rounded-xl bg-muted/40 border border-border/50">
+                            <button
+                                class="flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
+                                [class.bg-teal-600]="aiMode() === 'chat'"
+                                [class.text-white]="aiMode() === 'chat'"
+                                [class.text-muted-foreground]="aiMode() !== 'chat'"
+                                (click)="setAiMode('chat')">
+                                Chat
+                            </button>
+                            <button
+                                class="flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
+                                [class.bg-teal-600]="aiMode() === 'canvas'"
+                                [class.text-white]="aiMode() === 'canvas'"
+                                [class.text-muted-foreground]="aiMode() !== 'canvas'"
+                                (click)="setAiMode('canvas')">
+                                Canvas
+                            </button>
+                        </div>
+                        @if (aiMode() === 'canvas') {
+                            <span class="text-[10px] uppercase tracking-[0.16em] text-teal-300/90">Note Editing</span>
+                        }
+                    </div>
+
+                    @if (aiMode() === 'canvas') {
+                        <div class="rounded-xl border border-teal-500/20 bg-teal-950/15 p-3 space-y-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="min-w-0">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-teal-300/80">Active Note</div>
+                                    <div class="text-[13px] font-medium text-foreground truncate">
+                                        {{ activeCanvasNote()?.title || activeCanvasNote()?.id || 'No open note' }}
+                                    </div>
+                                </div>
+                                @if (pendingApprovals().length > 0) {
+                                    <div class="text-[10px] font-medium text-amber-300">
+                                        {{ pendingApprovals().length }} approval{{ pendingApprovals().length === 1 ? '' : 's' }}
+                                    </div>
+                                }
+                            </div>
+                            <div class="grid grid-cols-1 gap-2">
+                                <div class="rounded-lg border border-white/5 bg-black/15 px-2.5 py-2">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-1">Editor</div>
+                                    <div class="text-[12px] text-foreground/90">{{ liveSelectionLabel() }}</div>
+                                </div>
+                                <div class="rounded-lg border border-white/5 bg-black/15 px-2.5 py-2">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-1">Attached To Chat</div>
+                                    <div class="text-[12px] text-foreground/90">{{ attachedSelectionLabel() }}</div>
+                                    @if (canvasSelectionContext()?.text) {
+                                        <div class="mt-2 text-[11px] leading-relaxed text-foreground/80 max-h-20 overflow-auto whitespace-pre-wrap">
+                                            {{ canvasSelectionContext()?.text }}
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            @if (!hasCanvasDocument()) {
+                                <div class="text-[11px] text-amber-300/90">
+                                    Open a note to let Canvas inspect, highlight, and propose edits.
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
 
             <!-- Settings Panel -->
             @if (showSettings()) {
@@ -593,7 +662,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                 <div class="shrink-0 border-t border-border/50 p-3 chat-input-area bg-gradient-to-t from-teal-900/10 to-transparent">
                     <div class="flex items-end gap-2 relative">
                         <textarea #messageInput class="w-full pl-3 pr-10 py-2.5 text-[13px] rounded-xl border border-border bg-background focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 resize-none transition-all placeholder:text-muted-foreground/60 shadow-sm"
-                            placeholder="Ask Kammi anything..." [(ngModel)]="currentMessage" (keydown.enter)="onEnterKey($event)" [disabled]="isStreaming()" rows="1" style="max-height: 120px"></textarea>
+                            [placeholder]="aiMode() === 'canvas' ? 'Ask Kammi to inspect or edit the open note...' : 'Ask Kammi anything...'" [(ngModel)]="currentMessage" (keydown.enter)="onEnterKey($event)" [disabled]="isStreaming()" rows="1" style="max-height: 120px"></textarea>
                         <button class="absolute right-1.5 bottom-1.5 w-7 h-7 rounded-lg flex items-center justify-center transition-all send-btn"
                             [class.active]="currentMessage.trim() && !isStreaming()" [disabled]="!currentMessage.trim() || isStreaming()" (click)="sendMessage()">
                             <lucide-icon [img]="SendIcon" class="h-3.5 w-3.5"></lucide-icon>
@@ -1033,7 +1102,29 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private orchestrator = inject(OrchestratorService);
     private readonly chatContextClipStore = inject(ChatContextClipStore);
     private readonly toolHost = inject(ChatToolHostService);
+    private readonly aiSidebarMode = inject(AiSidebarModeService);
+    private readonly workspace = inject(EditorAgentWorkspaceService);
+    private readonly noteEditorStore = inject(NoteEditorStore);
     private goChatInitialized = false;
+    readonly aiMode = this.aiSidebarMode.mode;
+    readonly canvasSelectionContext = this.aiSidebarMode.selectionContext;
+    readonly liveEditorSelection = this.workspace.liveSelection;
+    readonly activeCanvasNote = computed(() => this.noteEditorStore.currentNote());
+    readonly hasCanvasDocument = computed(() => !!this.activeCanvasNote());
+    readonly liveSelectionLabel = computed(() => {
+        const selection = this.liveEditorSelection();
+        if (!selection || selection.empty) {
+            return 'No live editor selection';
+        }
+        return `Live selection ${selection.from}-${selection.to} (${selection.text.length} chars)`;
+    });
+    readonly attachedSelectionLabel = computed(() => {
+        const selection = this.canvasSelectionContext();
+        if (!selection) {
+            return 'No attached note range';
+        }
+        return `Attached range ${selection.from}-${selection.to}${selection.autoApplyEligible ? ' • auto-apply ready' : ''}`;
+    });
 
     // Icon references for template
     readonly PlusIcon = Plus;
@@ -1062,6 +1153,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 this.restoreHistory();
             });
         });
+        effect(() => {
+            const ticket = this.aiSidebarMode.composerFocusTicket();
+            if (ticket === 0) return;
+            this.showHistory.set(false);
+            this.showSettings.set(false);
+            setTimeout(() => this.focusComposer(), 0);
+        });
     }
 
     onEnterKey(event: Event): void {
@@ -1069,6 +1167,18 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (kbEvent.shiftKey) return;
         kbEvent.preventDefault();
         this.sendMessage();
+    }
+
+    setAiMode(mode: AiSidebarMode): void {
+        if (mode === 'canvas') {
+            this.aiSidebarMode.switchToCanvas();
+            return;
+        }
+        this.aiSidebarMode.switchToChat();
+    }
+
+    private focusComposer(): void {
+        this.messageInput?.nativeElement?.focus();
     }
 
 
@@ -1568,6 +1678,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         const currentThread = this.goChatService.currentThread() as any;
         const narrativeId = appContext?.narrativeId || currentThread?.narrativeId || currentThread?.narrative_id || '';
         const folderId = appContext?.folderId || '';
+        const canvasMode = this.aiMode() === 'canvas';
+        const workspaceEnabled = this.indexEnabled() || canvasMode;
+        const plannerEnabled = workspaceEnabled && this.isGoConfigured();
 
         const externalParts: string[] = [];
         if (appContext?.activeNoteTitle || appContext?.activeNoteSnippet) {
@@ -1578,24 +1691,50 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (highlightedContext) {
             externalParts.push(highlightedContext);
         }
+        if (canvasMode) {
+            const liveSelection = this.workspace.getSelection();
+            externalParts.push(
+                `Canvas mode is enabled for the currently open note. The assistant may inspect the note, highlight candidate ranges, and use proposal tools for edits.`
+            );
+            if (liveSelection && !liveSelection.empty) {
+                externalParts.push(
+                    `Live editor selection range=${liveSelection.from}-${liveSelection.to}\n${liveSelection.text}`.trim()
+                );
+            }
+        }
 
         return {
             finalProvider: this.activeProvider(),
             finalModel: this.activeProvider() === 'google' ? this.googleModelInput() : this.selectedModel(),
             plannerModel: this.selectedModel(),
             omModel: this.omModelInput(),
-            plannerEnabled: this.indexEnabled() && this.isGoConfigured(),
+            plannerEnabled,
             omEnabled: this.omEnabledInput(),
-            workspaceEnabled: this.indexEnabled(),
-            mutationsEnabled: true,
+            workspaceEnabled,
+            mutationsEnabled: canvasMode,
             deadlineMs: 8000,
             mutationPolicy: 'confirm',
             narrativeId,
             folderId,
             scopeId: narrativeId,
-            baseSystemPrompt: this.systemPromptInput(),
+            baseSystemPrompt: this.buildBaseSystemPrompt(),
             initialExternalContext: externalParts.join('\n\n'),
         };
+    }
+
+    private buildBaseSystemPrompt(): string {
+        if (this.aiMode() !== 'canvas') {
+            return this.systemPromptInput();
+        }
+
+        return `${this.systemPromptInput().trim()}
+
+Canvas mode is enabled.
+- You are working against the currently open note in the editor.
+- You may inspect the active note, inspect the current selection, and highlight candidate ranges before editing.
+- Proposal tools create diffs or save actions that may require approval; never assume a proposal has already been applied.
+- Prefer focused edits tied to the user's request over broad rewrites.
+- After edits are approved/applied, describe what changed clearly.`;
     }
 
     private async waitForRunReady(runId: string): Promise<ChatRunSnapshot | null> {
@@ -1632,10 +1771,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 }
                 case 'queued':
                 case 'gathering':
-                case 'planning':
                 case 'executing_tools':
                 case 'streaming':
                     await this.sleep(200);
+                    continue;
+                case 'planning':
+                    await this.goChatService.processPlannerRun(runId);
+                    await this.sleep(100);
                     continue;
                 default:
                     return snapshot;

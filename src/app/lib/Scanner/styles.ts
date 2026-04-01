@@ -67,7 +67,7 @@ export function getDecorationStyle(span: DecorationSpan, mode: HighlightMode): s
     case 'keyword_focus':
       return getKeywordFocusStyle();
     case 'analytics_highlight':
-      return getAnalyticsHighlightStyle(span.highlightKind);
+      return getAnalyticsHighlightStyle(span.highlightKind, span.analyticsPaletteKey);
     default:
       return '';
   }
@@ -81,11 +81,27 @@ function getKeywordFocusStyle(): string {
   `;
 }
 
-function getAnalyticsHighlightStyle(kind: DecorationSpan['highlightKind']): string {
-  const palette = kind === 'repetition'
+function getAnalyticsHighlightStyle(
+  kind: DecorationSpan['highlightKind'],
+  paletteKey?: DecorationSpan['analyticsPaletteKey'],
+): string {
+  const resolved = paletteKey || kind;
+  const palette = resolved === 'repetition'
     ? { fill: 'rgba(245, 158, 11, 0.22)', stroke: 'rgba(245, 158, 11, 0.65)' }
-    : kind === 'proximity'
+    : resolved === 'proximity'
       ? { fill: 'rgba(244, 63, 94, 0.18)', stroke: 'rgba(244, 63, 94, 0.6)' }
+      : resolved === '1'
+        ? { fill: 'rgba(167, 139, 250, 0.22)', stroke: 'rgba(139, 92, 246, 0.68)' }
+        : resolved === '2-6'
+          ? { fill: 'rgba(96, 165, 250, 0.2)', stroke: 'rgba(59, 130, 246, 0.64)' }
+          : resolved === '7-15'
+            ? { fill: 'rgba(52, 211, 153, 0.2)', stroke: 'rgba(16, 185, 129, 0.64)' }
+            : resolved === '16-25'
+              ? { fill: 'rgba(251, 146, 60, 0.2)', stroke: 'rgba(234, 88, 12, 0.64)' }
+              : resolved === '26-39'
+                ? { fill: 'rgba(248, 113, 113, 0.18)', stroke: 'rgba(220, 38, 38, 0.62)' }
+                : resolved === '40+'
+                  ? { fill: 'rgba(251, 113, 133, 0.18)', stroke: 'rgba(244, 63, 94, 0.62)' }
       : { fill: 'rgba(34, 211, 238, 0.18)', stroke: 'rgba(34, 211, 238, 0.58)' };
 
   return `

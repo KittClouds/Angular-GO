@@ -1,10 +1,10 @@
 // src/app/components/analytics-panel/flow-score/flow-score.component.ts
-import { Component, input, computed, importProvidersFrom } from '@angular/core';
+import { Component, input, computed, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, TrendingUp, AlertCircle, Sparkles } from 'lucide-angular';
+import { LucideAngularModule, TrendingUp, AlertCircle, Sparkles, Highlighter } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
 
-import type { SentenceLengthDistribution, FlowInsights } from '../../../lib/analytics';
+import type { SentenceLengthDistribution, FlowInsights, CadenceSentence } from '../../../lib/analytics';
 
 interface CategoryConfig {
     key: keyof SentenceLengthDistribution;
@@ -114,7 +114,22 @@ const CATEGORIES: CategoryConfig[] = [
                             class="distribution-card"
                             [class]="cat.bgColor + ' ' + cat.borderColor"
                             [class.dominant]="cat.key === insights()?.dominantRange"
+                            [class.active-variation]="isVariationActive(cat.key)"
                         >
+                            <button
+                                type="button"
+                                class="variation-highlight-btn"
+                                [class.active]="isVariationActive(cat.key)"
+                                [disabled]="!hasSentences(cat.key)"
+                                [attr.aria-pressed]="isVariationActive(cat.key)"
+                                [attr.title]="hasSentences(cat.key)
+                                    ? (isVariationActive(cat.key) ? 'Clear sentence highlight' : 'Highlight these sentences')
+                                    : 'No sentences in this bucket'"
+                                (click)="toggleVariationHighlight($event, cat)"
+                            >
+                                <lucide-icon [img]="Highlighter" class="h-3.5 w-3.5"></lucide-icon>
+                            </button>
+
                             @if (cat.key === insights()?.dominantRange) {
                                 <lucide-icon [img]="Sparkles" class="dominant-sparkle"></lucide-icon>
                             }
@@ -259,6 +274,13 @@ const CATEGORIES: CategoryConfig[] = [
             transition: all 0.3s ease;
         }
 
+        .distribution-card.active-variation {
+            box-shadow:
+                inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+                0 0 0 1px rgba(255, 255, 255, 0.08),
+                0 10px 24px rgba(0, 0, 0, 0.22);
+        }
+
         .distribution-card:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -279,6 +301,46 @@ const CATEGORIES: CategoryConfig[] = [
             height: 1rem;
             color: hsl(var(--primary));
             fill: hsl(var(--primary));
+        }
+
+        .variation-highlight-btn {
+            position: absolute;
+            top: 0.4rem;
+            right: 0.4rem;
+            z-index: 2;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.6rem;
+            height: 1.6rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: rgba(15, 23, 42, 0.3);
+            color: rgba(255, 255, 255, 0.86);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .variation-highlight-btn:hover:not(:disabled) {
+            transform: translateY(-1px) scale(1.04);
+            background: rgba(15, 23, 42, 0.44);
+            border-color: rgba(255, 255, 255, 0.28);
+            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+        }
+
+        .variation-highlight-btn.active {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 255, 255, 0.34);
+            box-shadow:
+                0 10px 22px rgba(0, 0, 0, 0.24),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+        }
+
+        .variation-highlight-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+            box-shadow: none;
         }
 
         .mini-progress-track {
@@ -310,6 +372,9 @@ export class FlowScoreComponent {
     score = input<number>(0);
     distribution = input<SentenceLengthDistribution>();
     insights = input<FlowInsights>();
+    sentences = input<CadenceSentence[]>([]);
+    activeVariationBuckets = input<ReadonlySet<keyof SentenceLengthDistribution>>(new Set());
+    variationToggle = output<{ bucket: keyof SentenceLengthDistribution; label: string }>();
 
     readonly categories = CATEGORIES;
 
@@ -317,6 +382,7 @@ export class FlowScoreComponent {
     readonly TrendingUp = TrendingUp;
     readonly AlertCircle = AlertCircle;
     readonly Sparkles = Sparkles;
+    readonly Highlighter = Highlighter;
 
     grade = computed(() => {
         const s = this.score();
@@ -343,6 +409,23 @@ export class FlowScoreComponent {
         return Object.values(d).reduce((a, b) => a + b, 0);
     });
 
+    sentenceCountsByBucket = computed(() => {
+        const counts: Record<keyof SentenceLengthDistribution, number> = {
+            '1': 0,
+            '2-6': 0,
+            '7-15': 0,
+            '16-25': 0,
+            '26-39': 0,
+            '40+': 0,
+        };
+
+        for (const sentence of this.sentences() || []) {
+            counts[sentence.bucket] += 1;
+        }
+
+        return counts;
+    });
+
     getCount(key: keyof SentenceLengthDistribution): number {
         return this.distribution()?.[key] ?? 0;
     }
@@ -351,5 +434,25 @@ export class FlowScoreComponent {
         const total = this.totalSentences();
         if (total === 0) return 0;
         return Math.round((this.getCount(key) / total) * 100);
+    }
+
+    hasSentences(key: keyof SentenceLengthDistribution): boolean {
+        return (this.sentenceCountsByBucket()?.[key] ?? 0) > 0;
+    }
+
+    isVariationActive(key: keyof SentenceLengthDistribution): boolean {
+        return this.activeVariationBuckets().has(key);
+    }
+
+    toggleVariationHighlight(event: Event, cat: CategoryConfig): void {
+        event.stopPropagation();
+        if (!this.hasSentences(cat.key)) {
+            return;
+        }
+
+        this.variationToggle.emit({
+            bucket: cat.key,
+            label: cat.label,
+        });
     }
 }

@@ -21,6 +21,17 @@ import { FactSheetService } from './components/fact-sheets/fact-sheet.service';
 import { db } from './lib/dexie/db';
 import { PhoenixUiApiService } from './services/phoenix-ui-api.service';
 import { PhoenixStoreService } from './services/phoenix-store.service';
+import {
+  PhoenixWasmMismatchError,
+  isPhoenixWasmMismatchError,
+} from './lib/phoenix/phoenix-runtime-compat';
+
+interface FatalBootErrorState {
+  title: string;
+  message: string;
+  steps: string[];
+  detail?: string;
+}
 
 @Component({
   selector: 'app-root',
@@ -47,6 +58,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private navUnsubscribe: (() => void) | null = null;
   private bootStep = 'boot:start';
   private bootWatchdog: ReturnType<typeof setInterval> | null = null;
+  fatalBootError: FatalBootErrorState | null = null;
 
   async ngOnInit() {
     // Phase 0: Shell - spinner visible
@@ -120,53 +132,6 @@ export class AppComponent implements OnInit, OnDestroy {
       this.setBootStep('boot:ready');
 
       this.setBootStep('background:start');
-      const knowledgePromise = (async () => {
-        try {
-          await this.knowledgeService.init();
-          console.log('[AppComponent] Knowledge Graph hydrated (background)');
-        } catch (err) {
-          console.error('[AppComponent] Knowledge Graph hydration failed:', err);
-        }
-      })();
-
-      const docStorePromise = (async () => {
-        try {
-          const allNotes = await this.phoenixStore.listNotes();
-
-          const noteData = allNotes.map((n) => {
-            let text = '';
-            if (typeof n.content === 'string') {
-              if (n.content.trim().startsWith('{')) {
-                try {
-                  const json = JSON.parse(n.content);
-                  text = extractTextFromContent(json);
-                } catch {
-                  text = n.content;
-                }
-              } else {
-                text = n.content;
-              }
-            } else {
-              text = extractTextFromContent(n.content);
-            }
-
-            return {
-              id: n.id,
-              title: n.title || n.id,
-              text,
-              version: n.updatedAt ?? 0,
-              narrativeId: n.narrativeId || '',
-              folderPath: n.folderId || ''
-            };
-          });
-
-          await this.phoenixUiApi.hydrateNotes(noteData);
-          console.log(`[AppComponent] DocStore hydrated with ${noteData.length} notes (from Phoenix store)`);
-        } catch (err) {
-          console.error('[AppComponent] DocStore hydration failed:', err);
-        }
-      })();
-
       const factSheetPromise = (async () => {
         try {
           await this.factSheetService.syncToBackend();
@@ -176,13 +141,18 @@ export class AppComponent implements OnInit, OnDestroy {
         }
       })();
 
-      void Promise.all([knowledgePromise, docStorePromise, factSheetPromise]).then(() => {
+      void Promise.all([factSheetPromise]).then(() => {
         this.orchestrator.completePhase('background');
         this.setBootStep('background:complete');
       });
     } catch (err) {
       console.error('[AppComponent] Boot failed:', err);
-      this.setBootStep('boot:failed');
+      if (isPhoenixWasmMismatchError(err)) {
+        this.fatalBootError = this.toFatalBootErrorState(err);
+        this.setBootStep('boot:failed:phoenix-wasm-mismatch');
+      } else {
+        this.setBootStep('boot:failed');
+      }
     } finally {
       this.stopBootWatchdog();
       // Minimum display time for spinner
@@ -204,12 +174,19 @@ export class AppComponent implements OnInit, OnDestroy {
     this.phoenixStore.pauseSnapshots();
 
     try {
-      const [notes, entities, edges, folders] = await Promise.all([
-        this.phoenixStore.listNotes(),
+      const [noteHeaders, entities, edges, folders] = await Promise.all([
+        this.phoenixStore.listNoteHeaders(),
         this.phoenixStore.listEntities(),
         this.phoenixStore.listAllEdges(),
         this.phoenixStore.listFolders()
       ]);
+      const eventNoteIds = noteHeaders
+        .filter(note => note.entityKind === 'EVENT')
+        .map(note => note.id);
+      const eventNotes = eventNoteIds.length > 0
+        ? await this.phoenixStore.getNotesByIds(eventNoteIds)
+        : [];
+      const eventNoteMap = new Map(eventNotes.map(note => [note.id, note] as const));
 
       await db.transaction('rw', db.notes, db.entities, db.edges, db.folders, async () => {
         await Promise.all([
@@ -219,13 +196,15 @@ export class AppComponent implements OnInit, OnDestroy {
           db.folders.clear()
         ]);
 
-        if (notes.length > 0) await db.notes.bulkPut(notes.map(n => this.toNote(n)));
+        if (noteHeaders.length > 0) {
+          await db.notes.bulkPut(noteHeaders.map(n => this.toNote(n, eventNoteMap.get(n.id))));
+        }
         if (entities.length > 0) await db.entities.bulkPut(entities.map(e => this.toEntity(e)));
         if (edges.length > 0) await db.edges.bulkPut(edges.map(e => this.toEdge(e)));
         if (folders.length > 0) await db.folders.bulkPut(folders.map(f => this.toFolder(f)));
       });
 
-      console.log(`[AppComponent] Dexie hydrated in ${Date.now() - start}ms: ${notes.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
+      console.log(`[AppComponent] Dexie hydrated in ${Date.now() - start}ms: ${noteHeaders.length} notes, ${folders.length} folders, ${entities.length} entities, ${edges.length} edges`);
     } finally {
       this.phoenixStore.resumeSnapshots();
     }
@@ -235,14 +214,15 @@ export class AppComponent implements OnInit, OnDestroy {
   // Mappers (Store -> Dexie)
   // =========================================================================
 
-  private toNote(n: any): any {
+  private toNote(n: any, fullNote?: any): any {
     return {
-      id: n.id, worldId: n.worldId, title: n.title, content: n.content,
-      markdownContent: n.markdownContent, folderId: n.folderId,
+      id: n.id, worldId: n.worldId, title: n.title, content: fullNote?.content || '',
+      markdownContent: fullNote?.markdownContent || '', folderId: n.folderId,
       entityKind: n.entityKind, entitySubtype: n.entitySubtype,
       isEntity: n.isEntity, isPinned: n.isPinned, favorite: n.favorite,
       ownerId: n.ownerId, narrativeId: n.narrativeId, order: n.order,
-      createdAt: n.createdAt, updatedAt: n.updatedAt
+      createdAt: n.createdAt, updatedAt: n.updatedAt, version: n.version ?? fullNote?.version,
+      hasBody: !!fullNote,
     };
   }
 
@@ -308,6 +288,15 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
+  private toFatalBootErrorState(error: PhoenixWasmMismatchError): FatalBootErrorState {
+    return {
+      title: 'Phoenix WASM Is Out Of Date',
+      message: 'KittClouds stopped booting because the served Phoenix WASM asset does not match the current app code.',
+      steps: error.repairSteps,
+      detail: error.detail,
+    };
+  }
+
   /**
    * Wire up Navigation API for cross-note navigation from entity clicks.
    */
@@ -323,25 +312,4 @@ export class AppComponent implements OnInit, OnDestroy {
     });
     console.log('[AppComponent] Navigation API wired up');
   }
-}
-
-/**
- * Helper to recursively extract plain text from Prosemirror JSON.
- */
-function extractTextFromContent(content: any): string {
-  if (!content) return '';
-  if (typeof content === 'string') return content;
-
-  let text = '';
-  if (content.type === 'text' && content.text) return content.text;
-
-  if (content.content && Array.isArray(content.content)) {
-    for (const child of content.content) {
-      text += extractTextFromContent(child);
-      if (child.type === 'paragraph' || child.type === 'heading' || child.type === 'listItem') {
-        text += '\n';
-      }
-    }
-  }
-  return text;
 }

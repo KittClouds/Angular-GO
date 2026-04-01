@@ -3,7 +3,10 @@ use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use fst::{Map, MapBuilder};
-use phoenix_alex::{is_stop_word, normalize_raw, split_sentence_ranges, strip_possessive, Lexicon};
+use phoenix_alex::{
+    is_stop_word_with_profile, normalized_has_meaningful_token, normalize_raw,
+    split_sentence_ranges, strip_possessive, Lexicon,
+};
 use phoenix_types::{
     ChunkKind, ChunkSpan, DiscoveryThresholds, EntityKind, FuzzyMode, GenderHint, KnownMatch,
     KnownMatchSource, LexiconEntry, MentionEntityRef, MentionSource, MentionSpan, NarrativeRule,
@@ -85,7 +88,7 @@ impl PhoenixScanner {
         let fuzzy_candidates = if self.config.fuzzy_mode == FuzzyMode::Off {
             Vec::new()
         } else {
-            build_fuzzy_candidates(text, &base_tokens, scope, lexicon)
+            build_fuzzy_candidates(text, &base_tokens, scope, lexicon, &self.config.stopword_profile)
         };
 
         let mut mention_candidates = exact_candidates;
@@ -102,6 +105,7 @@ impl PhoenixScanner {
             &exact_and_fuzzy,
             scope,
             &self.config.discovery_thresholds,
+            &self.config.stopword_profile,
             discovery,
             lexicon,
         );
@@ -534,6 +538,7 @@ fn build_fuzzy_candidates(
     tokens: &[ScanToken],
     scope: &ScopeKey,
     lexicon: &Lexicon,
+    stopword_profile: &str,
 ) -> Vec<MentionCandidate> {
     let mut candidates = Vec::new();
     for token in tokens {
@@ -545,7 +550,10 @@ fn build_fuzzy_candidates(
         }
         let surface = slice(text, token.span.range);
         let normalized = normalize_raw(surface);
-        if normalized.is_empty() || is_stop_word(strip_possessive(&normalized)) {
+        if normalized.is_empty()
+            || !normalized_has_meaningful_token(&normalized, stopword_profile)
+            || is_stop_word_with_profile(strip_possessive(&normalized), stopword_profile)
+        {
             continue;
         }
         if let Some(mut matched) = lexicon.fuzzy_anchor(surface, scope) {
@@ -829,6 +837,7 @@ fn build_discovery_mentions(
     mentions: &[MentionSpan],
     scope: &ScopeKey,
     thresholds: &DiscoveryThresholds,
+    stopword_profile: &str,
     ledger: &mut HashMap<String, DiscoveryLedger>,
     lexicon: &Lexicon,
 ) -> Vec<MentionSpan> {
@@ -874,7 +883,10 @@ fn build_discovery_mentions(
             .trim_matches(|ch: char| ch.is_ascii_punctuation())
             .to_owned();
         let normalized = normalize_raw(&surface);
-        if normalized.is_empty() || is_stop_word(strip_possessive(&normalized)) {
+        if normalized.is_empty()
+            || !normalized_has_meaningful_token(&normalized, stopword_profile)
+            || is_stop_word_with_profile(strip_possessive(&normalized), stopword_profile)
+        {
             index = cursor;
             continue;
         }
@@ -1507,6 +1519,38 @@ mod tests {
     }
 
     #[test]
+    fn stopword_profile_blocks_sentence_openers_and_pronouns() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "He waited. Then he moved. What changed? What stayed?".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-stopwords".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(artifact
+            .mentions
+            .iter()
+            .all(|mention| mention.source != Some(MentionSource::Discovery)));
+    }
+
+    #[test]
+    fn discovery_noise_overlay_blocks_editorial_terms() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Image flashed. Gesture landed. Image blurred. Gesture held.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-noise".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(artifact
+            .mentions
+            .iter()
+            .all(|mention| mention.source != Some(MentionSource::Discovery)));
+    }
+
+    #[test]
     fn overlap_resolution_prefers_exact_multiword_mentions() {
         let scanner = PhoenixScanner::default();
         let artifact = scanner.scan(&ScanRequest {
@@ -1636,6 +1680,59 @@ mod tests {
             .mentions
             .iter()
             .any(|mention| mention.source == Some(MentionSource::Discovery)));
+    }
+
+    #[test]
+    fn repeated_real_names_still_emit_discovery_mentions() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Fiora answered. Kamaria waited. Fiora moved. Kamaria smiled.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-real-names".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        let discovery_surfaces = artifact
+            .mentions
+            .iter()
+            .filter(|mention| mention.source == Some(MentionSource::Discovery))
+            .map(|mention| mention.surface.as_str())
+            .collect::<Vec<_>>();
+        assert!(discovery_surfaces.contains(&"Fiora"));
+        assert!(discovery_surfaces.contains(&"Kamaria"));
+    }
+
+    #[test]
+    fn multiword_phrases_with_signal_survive_stopword_filtering() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "The Ember Gate opened. The Ember Gate cracked.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-multiword".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(artifact.mentions.iter().any(|mention| {
+            mention.source == Some(MentionSource::Discovery) && mention.surface == "The Ember Gate"
+        }));
+    }
+
+    #[test]
+    fn off_stopword_profile_disables_discovery_suppression() {
+        let scanner = PhoenixScanner::new(ScannerConfig {
+            stopword_profile: "off".to_owned(),
+            ..ScannerConfig::default()
+        });
+        let artifact = scanner.scan(&ScanRequest {
+            text: "He stayed. He waited.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-off-profile".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(artifact.mentions.iter().any(|mention| {
+            mention.source == Some(MentionSource::Discovery) && mention.surface == "He"
+        }));
     }
 
     #[test]

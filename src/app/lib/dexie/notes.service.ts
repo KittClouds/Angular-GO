@@ -91,11 +91,13 @@ export class NotesService {
     }
 
     async updateNote(id: string, updates: Partial<Note>): Promise<void> {
+        const existing = await db.notes.get(id);
+        const hadBody = !!existing?.hasBody;
         await ops.updateNote(id, updates);
 
         // Trigger embedding if content changed
         if (updates.content || updates.title || updates.markdownContent) {
-            const note = await db.notes.get(id);
+            const note = await ops.ensureNoteBodyLoaded(id);
             if (note) {
                 this.embeddingQueue.markDirty(
                     id,
@@ -103,6 +105,9 @@ export class NotesService {
                     note.title,
                     note.content
                 );
+                if (!hadBody) {
+                    void ops.trimNoteBody(id);
+                }
             }
         }
     }

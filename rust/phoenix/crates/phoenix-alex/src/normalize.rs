@@ -1,14 +1,35 @@
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
 use phoenix_types::{EntityKind, ScopeKey};
+use stop_words::{get, LANGUAGE};
 
 pub const MAX_PHRASE_TOKENS: usize = 4;
 pub const TOK_SEP: char = '\u{0001}';
 
-const STOP_WORDS: &[&str] = &[
+const LEGACY_STOP_WORDS: &[&str] = &[
     "mr", "mrs", "ms", "dr", "prof", "sir", "lady", "lord", "king", "queen", "the", "of", "and",
     "a", "an", "to", "in", "on", "for", "at", "by", "is", "it", "as", "be", "was", "are", "been",
     "with", "from", "into", "that", "this", "has", "have", "had", "his", "her", "its", "their",
     "chapter", "section", "profile", "profiles", "summary", "height", "species", "visuals", "vibe",
     "notes",
+];
+
+const DISCOVERY_NOISE_WORDS: &[&str] = &[
+    "chapter",
+    "gesture",
+    "image",
+    "images",
+    "note",
+    "notes",
+    "profile",
+    "profiles",
+    "scene",
+    "scenes",
+    "section",
+    "summary",
+    "visual",
+    "visuals",
 ];
 
 const SENTENCE_GUARDS: &[&str] = &[
@@ -107,7 +128,27 @@ pub fn canonicalize_with_offsets(text: &str) -> (String, Vec<usize>) {
 }
 
 pub fn is_stop_word(token: &str) -> bool {
-    STOP_WORDS.contains(&token)
+    let token = strip_possessive(token.trim());
+    !token.is_empty() && LEGACY_STOP_WORDS.contains(&token)
+}
+
+pub fn is_stop_word_with_profile(token: &str, profile: &str) -> bool {
+    let token = strip_possessive(token.trim());
+    if token.is_empty() {
+        return false;
+    }
+    match normalize_stopword_profile(profile) {
+        StopwordProfile::Off => false,
+        StopwordProfile::Default => default_stop_words().contains(token),
+    }
+}
+
+pub fn normalized_has_meaningful_token(normalized: &str, profile: &str) -> bool {
+    normalized
+        .split_whitespace()
+        .map(strip_possessive)
+        .filter(|token| !token.is_empty())
+        .any(|token| !is_stop_word_with_profile(token, profile))
 }
 
 pub fn is_sentence_guard(token: &str) -> bool {
@@ -218,6 +259,29 @@ fn field_matches(entry_value: Option<&String>, request_value: Option<&String>) -
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopwordProfile {
+    Default,
+    Off,
+}
+
+fn normalize_stopword_profile(profile: &str) -> StopwordProfile {
+    match profile.trim().to_ascii_lowercase().as_str() {
+        "off" => StopwordProfile::Off,
+        _ => StopwordProfile::Default,
+    }
+}
+
+fn default_stop_words() -> &'static HashSet<&'static str> {
+    static STOP_WORDS: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    STOP_WORDS.get_or_init(|| {
+        let mut words = get(LANGUAGE::English).iter().copied().collect::<HashSet<_>>();
+        words.extend(LEGACY_STOP_WORDS.iter().copied());
+        words.extend(DISCOVERY_NOISE_WORDS.iter().copied());
+        words
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +298,27 @@ mod tests {
             phrase_key("The Lord of the Rings"),
             Some("rings".to_owned())
         );
+    }
+
+    #[test]
+    fn default_profile_uses_stop_words_crate_and_overlay() {
+        assert!(is_stop_word_with_profile("he", "default"));
+        assert!(is_stop_word_with_profile("then", "default"));
+        assert!(is_stop_word_with_profile("what", "default"));
+        assert!(is_stop_word_with_profile("image", "default"));
+        assert!(is_stop_word_with_profile("gesture", "default"));
+    }
+
+    #[test]
+    fn off_profile_disables_stop_words() {
+        assert!(!is_stop_word_with_profile("he", "off"));
+        assert!(normalized_has_meaningful_token("he", "off"));
+    }
+
+    #[test]
+    fn meaningful_token_check_keeps_phrases_with_signal() {
+        assert!(normalized_has_meaningful_token("the ember gate", "default"));
+        assert!(!normalized_has_meaningful_token("the and of", "default"));
     }
 
     #[test]

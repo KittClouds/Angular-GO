@@ -8,7 +8,10 @@ use phoenix_types::{
     RelationCount, ScopeKey, SnapshotDto, StorageMode,
 };
 use rustc_hash::FxHashMap;
-use schema::{PhoenixColumnSpec, PhoenixColumnType, PhoenixRelationSpec, ALL_RELATIONS};
+use schema::{
+    CONTENT_SNAPSHOT_RELATIONS, DERIVED_SNAPSHOT_RELATIONS, PhoenixColumnSpec, PhoenixColumnType,
+    PhoenixRelationSpec, ALL_RELATIONS,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use smallvec::SmallVec;
@@ -278,6 +281,32 @@ pub struct PhoenixCozoStore {
     db: cozo::DbInstance,
     config: StoreConfig,
     schema_version: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotPartition {
+    All,
+    Content,
+    Derived,
+}
+
+impl SnapshotPartition {
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "content" => Some(Self::Content),
+            "derived" => Some(Self::Derived),
+            _ => None,
+        }
+    }
+
+    fn relation_names(self) -> &'static [&'static str] {
+        match self {
+            Self::All => &[],
+            Self::Content => CONTENT_SNAPSHOT_RELATIONS,
+            Self::Derived => DERIVED_SNAPSHOT_RELATIONS,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -800,9 +829,11 @@ q_vec[v] := v = vec($query, "F32")
         Ok(())
     }
 
-    pub fn clear_all_relations(&self) -> Result<(), StoreError> {
+    pub fn clear_relations(&self, relations: &[&str]) -> Result<(), StoreError> {
         for relation in ALL_RELATIONS.iter().rev() {
-            self.clear_relation(relation.name)?;
+            if relations.iter().any(|candidate| *candidate == relation.name) {
+                self.clear_relation(relation.name)?;
+            }
         }
         self.put_row(
             "phoenix_schema_state",
@@ -812,6 +843,19 @@ q_vec[v] := v = vec($query, "F32")
             }),
         )?;
         Ok(())
+    }
+
+    pub fn clear_relations_by_ids(&self, relation_ids: &[u16]) -> Result<(), StoreError> {
+        let relation_names = relation_ids
+            .iter()
+            .filter_map(|relation_id| ALL_RELATIONS.get(*relation_id as usize).map(|relation| relation.name))
+            .collect::<Vec<_>>();
+        self.clear_relations(&relation_names)
+    }
+
+    pub fn clear_all_relations(&self) -> Result<(), StoreError> {
+        let relation_names = ALL_RELATIONS.iter().map(|relation| relation.name).collect::<Vec<_>>();
+        self.clear_relations(&relation_names)
     }
 
     pub fn relation_counts(&self) -> Result<Vec<RelationCount>, StoreError> {
@@ -1282,23 +1326,32 @@ q_vec[v] := v = vec($query, "F32")
     }
 
     pub fn export_snapshot(&self) -> Result<Vec<u8>, StoreError> {
+        self.export_snapshot_partition(SnapshotPartition::All)
+    }
+
+    pub fn export_snapshot_partition(
+        &self,
+        partition: SnapshotPartition,
+    ) -> Result<Vec<u8>, StoreError> {
         let created_at = now_ms();
+        let relations = relations_for_partition(partition);
         let mut bytes =
-            Vec::with_capacity(ALL_RELATIONS.len() * SnapshotRelationBlockHeader::BYTE_LEN);
+            Vec::with_capacity(relations.len() * SnapshotRelationBlockHeader::BYTE_LEN);
         SnapshotWireHeader {
             magic: SNAPSHOT_MAGIC,
             version: SNAPSHOT_VERSION,
-            relation_count: ALL_RELATIONS.len() as u16,
+            relation_count: relations.len() as u16,
             created_at,
         }
         .encode(&mut bytes);
 
-        for (relation_id, relation) in ALL_RELATIONS.iter().enumerate() {
+        for relation in relations {
+            let relation_id = relation_id_for_name(relation.name)? as u16;
             let rows = self.fetch_compact_rows(relation.name)?;
             let payload = encode_snapshot_block(&rows)?;
             let (codec, block_bytes) = maybe_compress_snapshot_block(&payload);
             SnapshotRelationBlockHeader {
-                relation_id: relation_id as u16,
+                relation_id,
                 codec,
                 row_count: rows.len() as u32,
                 encoded_len: block_bytes.len() as u32,
@@ -1332,12 +1385,19 @@ impl PhoenixCozoStore {
             )));
         }
 
-        self.clear_all_relations()?;
-
+        let mut relation_ids = Vec::with_capacity(header.relation_count as usize);
+        let mut relation_blocks = Vec::with_capacity(header.relation_count as usize);
         for _ in 0..header.relation_count {
             let block_header = SnapshotRelationBlockHeader::decode(bytes, &mut offset)?;
             let payload = read_bytes(bytes, &mut offset, block_header.encoded_len as usize)?;
-            let decoded = decode_snapshot_block(block_header.codec, payload)?;
+            relation_ids.push(block_header.relation_id);
+            relation_blocks.push((block_header, payload.to_vec()));
+        }
+
+        self.clear_relations_by_ids(&relation_ids)?;
+
+        for (block_header, payload) in relation_blocks {
+            let decoded = decode_snapshot_block(block_header.codec, &payload)?;
             let rows = decode_snapshot_rows(&decoded)?;
             let relation = ALL_RELATIONS
                 .get(block_header.relation_id as usize)
@@ -1371,7 +1431,12 @@ impl PhoenixCozoStore {
     fn import_legacy_json_snapshot(&self, bytes: &[u8]) -> Result<SnapshotEnvelope, StoreError> {
         let mut envelope: SnapshotEnvelope = serde_json::from_slice(bytes)
             .map_err(|error| StoreError::Snapshot(error.to_string()))?;
-        self.clear_all_relations()?;
+        let relation_names = envelope
+            .relations
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        self.clear_relations(&relation_names)?;
 
         for (relation, rows) in &envelope.relations {
             relation_spec(relation)?;
@@ -1398,10 +1463,28 @@ fn open_db(config: &StoreConfig) -> Result<cozo::DbInstance, StoreError> {
     }
 }
 
+fn relations_for_partition(partition: SnapshotPartition) -> Vec<&'static PhoenixRelationSpec> {
+    match partition {
+        SnapshotPartition::All => ALL_RELATIONS.iter().collect(),
+        SnapshotPartition::Content | SnapshotPartition::Derived => partition
+            .relation_names()
+            .iter()
+            .filter_map(|name| ALL_RELATIONS.iter().find(|relation| relation.name == *name))
+            .collect(),
+    }
+}
+
 fn relation_spec(name: &str) -> Result<&'static PhoenixRelationSpec, StoreError> {
     ALL_RELATIONS
         .iter()
         .find(|relation| relation.name == name)
+        .ok_or_else(|| StoreError::UnknownRelation(name.to_owned()))
+}
+
+fn relation_id_for_name(name: &str) -> Result<usize, StoreError> {
+    ALL_RELATIONS
+        .iter()
+        .position(|relation| relation.name == name)
         .ok_or_else(|| StoreError::UnknownRelation(name.to_owned()))
 }
 

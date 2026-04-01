@@ -1649,6 +1649,81 @@ pub struct ChatApprovalRequest {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatWorkspaceArtifact {
+    pub key: String,
+    pub run_id: String,
+    pub narrative_id: String,
+    pub folder_id: String,
+    pub kind: String,
+    pub payload: Value,
+    pub pinned: bool,
+    pub produced_by: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPlannerToolSpec {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: Value,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPlannerToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPlannerMessage {
+    pub role: String,
+    pub content: String,
+    pub name: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub tool_calls: Vec<ChatPlannerToolCall>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPlannerModelRequest {
+    pub run_id: String,
+    pub thread_id: String,
+    pub model: String,
+    pub allow_tools: bool,
+    pub tools: Vec<ChatPlannerToolSpec>,
+    pub messages: Vec<ChatPlannerMessage>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPlannerModelResponse {
+    pub content: String,
+    pub tool_calls: Vec<ChatPlannerToolCall>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ChatPlannerStep {
+    ModelRequest {
+        request: ChatPlannerModelRequest,
+    },
+    ToolCalls {
+        run_id: String,
+        tool_calls: Vec<ChatPlannerToolCall>,
+    },
+    Complete {
+        run_id: String,
+        response: String,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRunSnapshot {
     pub run: ChatRun,
     pub events: Vec<ChatRunEvent>,
@@ -1656,6 +1731,8 @@ pub struct ChatRunSnapshot {
     pub approvals: Vec<ChatApprovalRequest>,
     pub evidence: Vec<EvidenceItem>,
     pub missing_capabilities: Vec<String>,
+    pub planner_step: Option<ChatPlannerStep>,
+    pub artifacts: Vec<ChatWorkspaceArtifact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

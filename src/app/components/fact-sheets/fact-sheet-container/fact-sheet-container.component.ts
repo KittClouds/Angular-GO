@@ -68,9 +68,22 @@ export interface ParsedEntity {
             >
                 @for (field of card.fields; track field.id) {
                   <div class="field-item">
-                    <label class="text-xs font-medium text-muted-foreground block mb-1">
-                      {{ field.label }}
-                    </label>
+                    @if (usesDirectFieldLabel(field)) {
+                      <label
+                        class="text-xs font-medium text-muted-foreground block mb-1"
+                        [id]="getFieldLabelId(card.schema.cardId, field.fieldName)"
+                        [attr.for]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                      >
+                        {{ field.label }}
+                      </label>
+                    } @else {
+                      <span
+                        class="text-xs font-medium text-muted-foreground block mb-1"
+                        [id]="getFieldLabelId(card.schema.cardId, field.fieldName)"
+                      >
+                        {{ field.label }}
+                      </span>
+                    }
 
                     @switch (field.fieldType) {
                       <!-- EDITABLE TEXT / TEXTAREA -->
@@ -78,18 +91,24 @@ export interface ParsedEntity {
                         @if (editingField() === field.fieldName) {
                           @if (isLongTextField(field.fieldName)) {
                             <textarea
+                              [id]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                              [attr.name]="getFieldControlName(card.schema.cardId, field.fieldName)"
                               class="w-full text-sm bg-background border border-border rounded p-2 min-h-[5rem] focus:outline-none focus:ring-1 focus:ring-primary"
                               [ngModel]="getValue(field.fieldName) || ''"
+                              [attr.aria-labelledby]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                               (ngModelChange)="onTextChange(field.fieldName, $event)"
                               (blur)="stopEditing()"
                               autofocus
                             ></textarea>
                           } @else {
                             <input
+                              [id]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                              [attr.name]="getFieldControlName(card.schema.cardId, field.fieldName)"
                               pInputText
                               type="text"
                               class="w-full text-sm"
                               [ngModel]="getValue(field.fieldName) || ''"
+                              [attr.aria-labelledby]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                               (ngModelChange)="onTextChange(field.fieldName, $event)"
                               (blur)="stopEditing()"
                               (keydown.enter)="stopEditing()"
@@ -112,6 +131,9 @@ export interface ParsedEntity {
                       @case ('number') {
                         <div class="flex items-center gap-2">
                           <p-inputNumber
+                            [inputId]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                            [name]="getFieldControlName(card.schema.cardId, field.fieldName)"
+                            [ariaLabelledBy]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                             [(ngModel)]="numberModels()[field.fieldName]"
                             (ngModelChange)="onNumberChange(field.fieldName, $event)"
                             [showButtons]="true"
@@ -134,8 +156,11 @@ export interface ParsedEntity {
                       <!-- DROPDOWN SELECT -->
                       @case ('dropdown') {
                         <select
+                          [id]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                          [attr.name]="getFieldControlName(card.schema.cardId, field.fieldName)"
                           class="w-full text-sm bg-background border border-border rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                           [ngModel]="getValue(field.fieldName) || ''"
+                          [attr.aria-labelledby]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                           (ngModelChange)="onDropdownChange(field.fieldName, $event)"
                         >
                           <option value="" disabled>Select {{ field.label }}...</option>
@@ -159,9 +184,12 @@ export interface ParsedEntity {
                           }
                         </div>
                         <input
+                          [id]="getFieldControlId(card.schema.cardId, field.fieldName)"
+                          [attr.name]="getFieldControlName(card.schema.cardId, field.fieldName)"
                           type="text"
                           class="w-full text-sm bg-transparent border-b border-border/50 focus:border-primary transition-colors py-1 outline-none placeholder:text-muted-foreground/50 italic"
                           [placeholder]="'Add ' + field.label.toLowerCase() + '... (Press Enter)'"
+                          [attr.aria-labelledby]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                           (keydown.enter)="addArrayItem(field.fieldName, $event)"
                         />
                       }
@@ -182,6 +210,7 @@ export interface ParsedEntity {
                             (ngModelChange)="onProgressChange(field, $event)"
                             [min]="0"
                             [max]="getCalculatedMax(field)"
+                            [ariaLabelledBy]="getFieldLabelId(card.schema.cardId, field.fieldName)"
                             [style]="{ width: '100%', '--progress-color': getProgressColor(field) }"
                           />
                         </div>
@@ -192,7 +221,10 @@ export interface ParsedEntity {
                         <div class="grid grid-cols-3 gap-3">
                           @for (stat of parseStats(field.stats); track stat.name) {
                             <div class="stat-knob text-center">
-                              <div class="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                              <div
+                                class="text-[10px] text-muted-foreground uppercase tracking-wider mb-1"
+                                [id]="getStatLabelId(card.schema.cardId, field.fieldName, stat.name)"
+                              >
                                 {{ stat.abbr }}
                               </div>
                               <p-knob
@@ -205,6 +237,8 @@ export interface ParsedEntity {
                                 valueColor="#a855f7"
                                 rangeColor="#374151"
                                 textColor="#e5e7eb"
+                                [ariaLabel]="stat.label"
+                                [ariaLabelledBy]="getStatLabelId(card.schema.cardId, field.fieldName, stat.name)"
                               />
                             </div>
                           }
@@ -551,6 +585,28 @@ export class FactSheetContainerComponent implements OnInit {
     return fieldName.replace('Current', '');
   }
 
+  usesDirectFieldLabel(field: FactSheetFieldSchema): boolean {
+    return field.fieldType === 'number'
+      || field.fieldType === 'dropdown'
+      || field.fieldType === 'array';
+  }
+
+  getFieldLabelId(cardId: string, fieldName: string): string {
+    return `${this.getFieldBaseId(cardId, fieldName)}-label`;
+  }
+
+  getFieldControlId(cardId: string, fieldName: string, part: string = 'input'): string {
+    return `${this.getFieldBaseId(cardId, fieldName)}-${this.sanitizeControlSegment(part)}`;
+  }
+
+  getFieldControlName(cardId: string, fieldName: string, part: string = 'input'): string {
+    return `${this.getFieldBaseId(cardId, fieldName)}-${this.sanitizeControlSegment(part)}`;
+  }
+
+  getStatLabelId(cardId: string, fieldName: string, statName: string): string {
+    return `${this.getFieldBaseId(cardId, fieldName)}-${this.sanitizeControlSegment(statName)}-label`;
+  }
+
   // =========================================================================
   // Editing handlers
   // =========================================================================
@@ -698,5 +754,26 @@ export class FactSheetContainerComponent implements OnInit {
     const cards = [...this.orderedCards()];
     moveItemInArray(cards, event.previousIndex, event.currentIndex);
     this.orderedCards.set(cards);
+  }
+
+  private getFieldBaseId(cardId: string, fieldName: string): string {
+    const ent = this.entity();
+    return [
+      'fact-sheet',
+      this.sanitizeControlSegment(this.contextId()),
+      this.sanitizeControlSegment(ent?.kind),
+      this.sanitizeControlSegment(ent?.id),
+      this.sanitizeControlSegment(cardId),
+      this.sanitizeControlSegment(fieldName),
+    ].join('-');
+  }
+
+  private sanitizeControlSegment(value: string | null | undefined): string {
+    const sanitized = (value ?? 'field')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    return sanitized || 'field';
   }
 }

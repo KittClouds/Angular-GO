@@ -1,7 +1,29 @@
 import { Injectable, inject } from '@angular/core';
 
-import { SqlitePersistenceService } from '../lib/sqlite/persistence/SqlitePersistenceService';
-import { PhoenixWasmService } from './phoenix-wasm.service';
+import {
+    SqlitePersistenceService,
+} from '../lib/sqlite/persistence/SqlitePersistenceService';
+import {
+    type LoadedPhoenixManifestState,
+    type PersistenceManifest,
+    type PhoenixWalBatch,
+    type RecoveryState,
+    PHOENIX_DERIVED_CHECKPOINT_MS,
+    PHOENIX_WAL_IDLE_CHECKPOINT_MS,
+    collectManifestFiles,
+    createEmptyPhoenixManifest,
+    decodeWalBytes,
+    finalizeContentCheckpointManifest,
+    finalizeDerivedCheckpointManifest,
+    nextManifestWithWalAppend,
+    shouldCheckpointContent,
+} from '../lib/sqlite/persistence/phoenix-wal';
+import {
+    assertPhoenixRuntimeCapabilities,
+    isPhoenixWasmMismatchError,
+    normalizePhoenixRuntimeCompatibilityError,
+} from '../lib/phoenix/phoenix-runtime-compat';
+import { PhoenixSnapshotPartition, PhoenixWasmService } from './phoenix-wasm.service';
 
 export interface StoreNote {
     id: string;
@@ -9,6 +31,24 @@ export interface StoreNote {
     title: string;
     content: string;
     markdownContent: string;
+    folderId: string;
+    entityKind: string;
+    entitySubtype: string;
+    isEntity: boolean;
+    isPinned: boolean;
+    favorite: boolean;
+    ownerId: string;
+    narrativeId: string;
+    order: number;
+    createdAt: number;
+    updatedAt: number;
+    version?: number;
+}
+
+export interface StoreNoteHeader {
+    id: string;
+    worldId: string;
+    title: string;
     folderId: string;
     entityKind: string;
     entitySubtype: string;
@@ -177,6 +217,44 @@ export interface StoreNetworkRelationship {
     updatedAt: number;
 }
 
+export function hasActivePhoenixPersistence(state: LoadedPhoenixManifestState): boolean {
+    return Boolean(
+        state.manifest ||
+        state.manifestBytes > 0 ||
+        state.backupManifestBytes > 0 ||
+        state.contentCheckpoint?.bytes ||
+        state.derivedCheckpoint?.bytes ||
+        state.closedSegments.some((segment) => segment.bytes > 0) ||
+        state.activeSegment?.bytes,
+    );
+}
+
+export function formatPhoenixPersistenceSummary(state: LoadedPhoenixManifestState): string {
+    const closedWalBytes = state.closedSegments.reduce((sum, segment) => sum + segment.bytes, 0);
+    return [
+        `manifest=${state.manifest ? 'yes' : 'no'}`,
+        `manifestBytes=${state.manifestBytes}`,
+        `backupManifestBytes=${state.backupManifestBytes}`,
+        `contentCheckpointBytes=${state.contentCheckpoint?.bytes || 0}`,
+        `derivedCheckpointBytes=${state.derivedCheckpoint?.bytes || 0}`,
+        `closedWalBytes=${closedWalBytes}`,
+        `activeWalBytes=${state.activeSegment?.bytes || 0}`,
+        `legacyArtifacts=${state.staleLegacyFiles.length}`,
+    ].join(', ');
+}
+
+interface PhoenixCheckpointBundle {
+    contentSnapshot: Uint8Array;
+    derivedSnapshot: Uint8Array;
+}
+
+interface ContentWalMutation {
+    command: string;
+    payload: Record<string, unknown>;
+}
+
+type DerivedLoadState = 'cold' | 'loading' | 'ready';
+
 @Injectable({ providedIn: 'root' })
 export class PhoenixStoreService {
     private readonly phoenix = inject(PhoenixWasmService);
@@ -184,8 +262,22 @@ export class PhoenixStoreService {
 
     private initialized = false;
     private initPromise: Promise<void> | null = null;
-    private snapshotTimeout: ReturnType<typeof setTimeout> | null = null;
+    private mutationChain: Promise<void> = Promise.resolve();
+    private contentCheckpointTimeout: ReturnType<typeof setTimeout> | null = null;
+    private derivedCheckpointTimeout: ReturnType<typeof setTimeout> | null = null;
     private snapshotsPaused = false;
+    private manifest: PersistenceManifest | null = null;
+    private manifestMeta: LoadedPhoenixManifestState | null = null;
+    private derivedDirty = false;
+    private derivedLoadState: DerivedLoadState = 'cold';
+    private derivedLoadPromise: Promise<void> | null = null;
+    private recoveryState: RecoveryState = {
+        contentRecovered: false,
+        derivedRecovered: false,
+        replayedRecords: 0,
+        lastRecoveredSeq: 0,
+        manifestGeneration: 0,
+    };
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
@@ -218,61 +310,162 @@ export class PhoenixStoreService {
         return this.phoenix.isReady;
     }
 
+    get isDerivedReady(): boolean {
+        return this.derivedLoadState === 'ready';
+    }
+
     pauseSnapshots(): void {
         this.snapshotsPaused = true;
-        if (this.snapshotTimeout) {
-            clearTimeout(this.snapshotTimeout);
-            this.snapshotTimeout = null;
-        }
+        this.clearCheckpointTimers();
     }
 
     resumeSnapshots(): void {
         this.snapshotsPaused = false;
+        if (this.initialized) {
+            this.scheduleContentCheckpoint();
+            if (this.derivedDirty && this.isDerivedReady) {
+                this.scheduleDerivedCheckpoint();
+            }
+        }
     }
 
     async triggerSnapshot(): Promise<void> {
         if (!this.initialized || this.snapshotsPaused) {
             return;
         }
-        const snapshot = await this.exportDatabase();
-        await this.persistence.saveSnapshot(snapshot);
+        await this.runSerialized(async () => {
+            await this.flushContentCheckpoint(true);
+            if (this.derivedDirty && this.isDerivedReady) {
+                await this.flushDerivedCheckpoint(true);
+            }
+        });
+    }
+
+    markDerivedDirty(): void {
+        if (!this.isDerivedReady) {
+            console.warn('[PhoenixStoreService] Ignoring derived dirty mark while the derived partition is still cold.');
+            return;
+        }
+        this.derivedDirty = true;
+        if (this.snapshotsPaused || !this.initialized) {
+            return;
+        }
+        this.scheduleDerivedCheckpoint();
+    }
+
+    async ensureDerivedLoaded(reason = 'unknown'): Promise<void> {
+        await this.ensureInitialized();
+        if (this.derivedLoadState === 'ready') {
+            return;
+        }
+        if (this.derivedLoadPromise) {
+            return this.derivedLoadPromise;
+        }
+
+        this.derivedLoadPromise = this.runSerialized(() => this.loadDerivedCheckpointIntoRuntime(reason)).finally(() => {
+            this.derivedLoadPromise = null;
+        });
+
+        return this.derivedLoadPromise;
+    }
+
+    private async loadDerivedCheckpointIntoRuntime(reason: string): Promise<void> {
+        if (this.derivedLoadState === 'ready') {
+            return;
+        }
+
+        const manifest = this.requireManifest();
+        const checkpointMeta = manifest.derived.checkpointFile
+            ? this.manifestMeta?.derivedCheckpoint || {
+                file: manifest.derived.checkpointFile,
+                bytes: 0,
+            }
+            : null;
+
+        if (!checkpointMeta?.file) {
+            this.derivedLoadState = 'ready';
+            this.recoveryState = {
+                ...this.recoveryState,
+                derivedRecovered: true,
+            };
+            return;
+        }
+
+        this.derivedLoadState = 'loading';
+        const startedAt = Date.now();
+        console.log(
+            `[PhoenixStoreService] Derived load requested (${reason}) -> ${checkpointMeta.file} (${checkpointMeta.bytes} bytes)`,
+        );
+
+        try {
+            const bytes = await this.persistence.readCheckpointFile(checkpointMeta.file);
+            if (!bytes?.byteLength) {
+                throw new Error(`Missing derived checkpoint: ${checkpointMeta.file}`);
+            }
+            await this.phoenix.importSnapshot(bytes);
+            await this.phoenix.storeCommand('persistence:clearDerivedEphemera');
+            this.derivedLoadState = 'ready';
+            this.recoveryState = {
+                ...this.recoveryState,
+                derivedRecovered: true,
+            };
+            console.log(
+                `[PhoenixStoreService] Derived load complete (${Date.now() - startedAt}ms, ${bytes.byteLength} bytes)`,
+            );
+        } catch (error) {
+            console.warn('[PhoenixStoreService] Derived checkpoint load failed; clearing derived partition.', error);
+            await this.phoenix.storeCommand('persistence:clearDerived');
+            this.derivedLoadState = 'ready';
+            this.derivedDirty = false;
+            this.recoveryState = {
+                ...this.recoveryState,
+                derivedRecovered: false,
+            };
+        }
     }
 
     async upsertNote(note: StoreNote): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('notes', { id: note.id });
-        await this.relationUpsert('notes', noteToRow(note));
-        this.scheduleSnapshot();
+        await this.runContentMutation([{ command: 'note:upsert', payload: { row: noteToRow(note) } }]);
     }
 
     async getNote(id: string): Promise<StoreNote | null> {
-        await this.ensureInitialized();
-        const rows = await this.relationList<any>('notes', { id, is_current: true });
-        const row = rows.sort((left, right) => (right.version || 0) - (left.version || 0))[0];
+        const row = await this.getNoteRow(id, true);
         return row ? rowToNote(row) : null;
     }
 
+    async getNoteHeader(id: string): Promise<StoreNoteHeader | null> {
+        const row = await this.getNoteRow(id, false);
+        return row ? rowToNoteHeader(row) : null;
+    }
+
     async deleteNote(id: string): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('notes', { id });
-        this.scheduleSnapshot();
+        await this.runContentMutation([{ command: 'note:delete', payload: { id } }]);
     }
 
     async listNotes(folderId?: string): Promise<StoreNote[]> {
+        const rows = await this.listNoteRows(folderId, true);
+        return rows.map(rowToNote);
+    }
+
+    async listNoteHeaders(folderId?: string): Promise<StoreNoteHeader[]> {
+        const rows = await this.listNoteRows(folderId, false);
+        return rows.map(rowToNoteHeader);
+    }
+
+    async getNotesByIds(ids: string[]): Promise<StoreNote[]> {
+        if (!ids.length) {
+            return [];
+        }
         await this.ensureInitialized();
-        const rows = await this.relationList<any>('notes', {
-            is_current: true,
-            ...(folderId !== undefined ? { folder_id: folderId } : {}),
+        const payload = await this.phoenix.storeCommand('note:listByIds', {
+            ids,
+            includeBody: true,
         });
-        return rows
-            .map(rowToNote)
-            .sort((left, right) => right.updatedAt - left.updatedAt || left.title.localeCompare(right.title));
+        return Array.isArray(payload) ? payload.map(rowToNote) : [];
     }
 
     async upsertEntity(entity: StoreEntity): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('entities', entityToRow(entity));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('entities', entityToRow(entity));
     }
 
     async getEntity(id: string): Promise<StoreEntity | null> {
@@ -290,9 +483,7 @@ export class PhoenixStoreService {
     }
 
     async deleteEntity(id: string): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('entities', { id });
-        this.scheduleSnapshot();
+        await this.runContentRelationDelete('entities', { id });
     }
 
     async listEntities(kind?: string): Promise<StoreEntity[]> {
@@ -304,9 +495,7 @@ export class PhoenixStoreService {
     }
 
     async upsertEdge(edge: StoreEdge): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('edges', edgeToRow(edge));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('edges', edgeToRow(edge));
     }
 
     async getEdge(id: string): Promise<StoreEdge | null> {
@@ -316,9 +505,7 @@ export class PhoenixStoreService {
     }
 
     async deleteEdge(id: string): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('edges', { id });
-        this.scheduleSnapshot();
+        await this.runContentRelationDelete('edges', { id });
     }
 
     async listEdgesForEntity(entityId: string): Promise<StoreEdge[]> {
@@ -336,9 +523,7 @@ export class PhoenixStoreService {
     }
 
     async upsertFolder(folder: StoreFolder): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('folders', folderToRow(folder));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('folders', folderToRow(folder));
     }
 
     async getFolder(id: string): Promise<StoreFolder | null> {
@@ -348,9 +533,7 @@ export class PhoenixStoreService {
     }
 
     async deleteFolder(id: string): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('folders', { id });
-        this.scheduleSnapshot();
+        await this.runContentRelationDelete('folders', { id });
     }
 
     async listFolders(parentId?: string): Promise<StoreFolder[]> {
@@ -365,9 +548,7 @@ export class PhoenixStoreService {
     }
 
     async upsertScopedDocument(document: StoreScopedDocument): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('scoped_documents', scopedDocumentToRow(document));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('scoped_documents', scopedDocumentToRow(document));
     }
 
     async getScopedDocument(
@@ -400,19 +581,15 @@ export class PhoenixStoreService {
         namespace: string,
         documentKey: string,
     ): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('scoped_documents', {
+        await this.runContentRelationDelete('scoped_documents', {
             scope_folder_id: scopeFolderId,
             namespace,
             document_key: documentKey,
         });
-        this.scheduleSnapshot();
     }
 
     async upsertScopedEntityField(field: StoreScopedEntityField): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('scoped_entity_fields', scopedEntityFieldToRow(field));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('scoped_entity_fields', scopedEntityFieldToRow(field));
     }
 
     async getScopedEntityField(
@@ -448,19 +625,15 @@ export class PhoenixStoreService {
         scopeFolderId: string,
         fieldKey: string,
     ): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('scoped_entity_fields', {
+        await this.runContentRelationDelete('scoped_entity_fields', {
             entity_id: entityId,
             scope_folder_id: scopeFolderId,
             field_key: fieldKey,
         });
-        this.scheduleSnapshot();
     }
 
     async upsertScopedDefinition(definition: StoreScopedDefinition): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationUpsert('scoped_definitions', scopedDefinitionToRow(definition));
-        this.scheduleSnapshot();
+        await this.runContentRelationUpsert('scoped_definitions', scopedDefinitionToRow(definition));
     }
 
     async getScopedDefinition(
@@ -493,18 +666,15 @@ export class PhoenixStoreService {
         namespace: string,
         definitionKey: string,
     ): Promise<void> {
-        await this.ensureInitialized();
-        await this.relationDelete('scoped_definitions', {
+        await this.runContentRelationDelete('scoped_definitions', {
             narrative_id: narrativeId,
             namespace,
             definition_key: definitionKey,
         });
-        this.scheduleSnapshot();
     }
 
     async storeUpsertDiscoveryCandidate(candidate: StoreDiscoveryCandidate): Promise<{ success: boolean; error?: string }> {
-        await this.ensureInitialized();
-        await this.relationUpsert('discovery_candidates', {
+        await this.runContentRelationUpsert('discovery_candidates', {
             token: candidate.token,
             kind: candidate.kind,
             score: candidate.score,
@@ -513,7 +683,6 @@ export class PhoenixStoreService {
             first_seen: candidate.firstSeen,
             count: candidate.count,
         });
-        this.scheduleSnapshot();
         return { success: true };
     }
 
@@ -534,11 +703,14 @@ export class PhoenixStoreService {
     }
 
     async upsertEntityCards(cards: StoreEntityCard[]): Promise<void> {
-        await this.ensureInitialized();
-        await this.phoenix.storeCommand('entityCards:upsertBatch', {
-            cards: cards.map(entityCardToPhoenix),
-        });
-        this.scheduleSnapshot();
+        await this.runContentMutation([
+            {
+                command: 'entityCards:upsertBatch',
+                payload: {
+                    cards: cards.map(entityCardToPhoenix),
+                },
+            },
+        ]);
     }
 
     async getEntityCards(entityId: string): Promise<StoreEntityCard[]> {
@@ -557,11 +729,14 @@ export class PhoenixStoreService {
     }
 
     async upsertFolderSchema(schema: StoreFolderSchema): Promise<void> {
-        await this.ensureInitialized();
-        await this.phoenix.storeCommand('folderSchema:upsert', {
-            schema: folderSchemaToPhoenix(schema),
-        });
-        this.scheduleSnapshot();
+        await this.runContentMutation([
+            {
+                command: 'folderSchema:upsert',
+                payload: {
+                    schema: folderSchemaToPhoenix(schema),
+                },
+            },
+        ]);
     }
 
     async getFolderSchema(id: string): Promise<StoreFolderSchema | null> {
@@ -584,11 +759,14 @@ export class PhoenixStoreService {
         members: StoreNetworkMembership[];
         relationships: StoreNetworkRelationship[];
     }): Promise<void> {
-        await this.ensureInitialized();
-        await this.phoenix.storeCommand('networkView:save', {
-            view: networkViewToPhoenix(view),
-        });
-        this.scheduleSnapshot();
+        await this.runContentMutation([
+            {
+                command: 'networkView:save',
+                payload: {
+                    view: networkViewToPhoenix(view),
+                },
+            },
+        ]);
     }
 
     async getNetworkView(id: string): Promise<{
@@ -608,9 +786,7 @@ export class PhoenixStoreService {
     }
 
     async deleteNetworkView(id: string): Promise<void> {
-        await this.ensureInitialized();
-        await this.phoenix.storeCommand('networkView:delete', { id });
-        this.scheduleSnapshot();
+        await this.runContentMutation([{ command: 'networkView:delete', payload: { id } }]);
     }
 
     async storeUpsertNetworkInstance(instance: StoreNetworkInstance): Promise<{ success: boolean; error?: string }> {
@@ -710,18 +886,31 @@ export class PhoenixStoreService {
         return { success: true };
     }
 
-    async exportDatabase(): Promise<Uint8Array> {
+    async exportDatabase(): Promise<PhoenixCheckpointBundle> {
         await this.ensureInitialized();
-        return this.phoenix.exportSnapshot();
+        const [contentSnapshot, derivedSnapshot] = await Promise.all([
+            this.exportSnapshotPartition('content'),
+            this.exportSnapshotPartition('derived'),
+        ]);
+        return {
+            contentSnapshot,
+            derivedSnapshot,
+        };
     }
 
     async importDatabase(data: Uint8Array): Promise<void> {
         await this.ensureInitialized();
-        await this.phoenix.importSnapshot(data);
+        await this.runSerialized(async () => {
+            await this.phoenix.importSnapshot(data);
+            this.manifest = createEmptyPhoenixManifest();
+            this.derivedDirty = true;
+            await this.flushContentCheckpoint(true);
+            await this.flushDerivedCheckpoint(true);
+        });
     }
 
     async countNotes(): Promise<number> {
-        const notes = await this.listNotes();
+        const notes = await this.listNoteHeaders();
         return notes.length;
     }
 
@@ -812,26 +1001,68 @@ export class PhoenixStoreService {
         console.log('[PhoenixStoreService] initialize:initRuntime:start');
         await this.phoenix.initRuntime(false);
         console.log(`[PhoenixStoreService] initialize:initRuntime:complete (${Date.now() - startedAt}ms)`);
+        console.log('[PhoenixStoreService] initialize:runtime.compat:start');
+        await this.ensureRuntimeCompatibility();
+        console.log(`[PhoenixStoreService] initialize:runtime.compat:complete (${Date.now() - startedAt}ms)`);
 
         console.log('[PhoenixStoreService] initialize:persistence.load:start');
-        const { snapshot } = await this.persistence.load();
+        const persisted = await this.persistence.loadManifestMeta();
+        this.manifestMeta = persisted;
+        const closedWalBytes = persisted.closedSegments.reduce((sum, segment) => sum + segment.bytes, 0);
         console.log(
-            `[PhoenixStoreService] initialize:persistence.load:complete (${Date.now() - startedAt}ms, snapshot=${snapshot?.byteLength || 0} bytes)`,
+            `[PhoenixStoreService] initialize:persistence.load:complete (${Date.now() - startedAt}ms, manifest=${persisted.manifest ? 'yes' : 'no'}, manifestBytes=${persisted.manifestBytes}, content=${persisted.contentCheckpoint?.bytes || 0} bytes, derived=${persisted.derivedCheckpoint?.bytes || 0} bytes, closedWal=${closedWalBytes} bytes, activeWal=${persisted.activeSegment?.bytes || 0} bytes)`,
         );
-        if (snapshot && snapshot.byteLength > 0) {
+        console.log(`[PhoenixStoreService] Persistence state -> ${formatPhoenixPersistenceSummary(persisted)}`);
+        if (persisted.recoveredFromBackup) {
+            console.warn('[PhoenixStoreService] Recovered Phoenix manifest from backup copy.');
+        }
+        if (persisted.staleLegacyFiles.length) {
+            console.warn(
+                `[PhoenixStoreService] Ignoring legacy Phoenix snapshot artifacts (not used for restore): ${persisted.staleLegacyFiles.join(', ')}`,
+            );
+        }
+        if (!hasActivePhoenixPersistence(persisted)) {
+            console.log(
+                '[PhoenixStoreService] No active Phoenix manifest/WAL state found. Boot will start from an empty Phoenix manifest; Dexie hydration should stay empty unless data is reseeded elsewhere.',
+            );
+        }
+
+        if (persisted.manifest) {
+            this.manifest = persisted.manifest;
             try {
-                console.log('[PhoenixStoreService] initialize:snapshot.import:start');
-                await this.phoenix.importSnapshot(snapshot);
-                console.log(`[PhoenixStoreService] initialize:snapshot.import:complete (${Date.now() - startedAt}ms)`);
+                this.recoveryState = await this.recoverRuntimeFromManifest(persisted);
+                this.derivedLoadState = persisted.derivedCheckpoint?.file ? 'cold' : 'ready';
+                if (this.derivedLoadState === 'cold') {
+                    console.log('[PhoenixStoreService] Derived checkpoint recovery intentionally deferred until first use.');
+                }
             } catch (error) {
-                console.error('[PhoenixStoreService] Snapshot import failed, resetting Phoenix runtime.', error);
+                console.error('[PhoenixStoreService] Phoenix WAL recovery failed. Resetting Phoenix runtime.', error);
+                await this.resetPhoenixPersistence(persisted.manifest);
                 await this.phoenix.initRuntime(true);
-                await this.persistence.clear();
+                this.manifest = createEmptyPhoenixManifest();
+                this.manifestMeta = null;
+                this.derivedLoadState = 'ready';
             }
+        } else {
+            this.manifest = createEmptyPhoenixManifest();
+            this.derivedLoadState = 'ready';
         }
 
         this.initialized = true;
         console.log(`[PhoenixStoreService] initialize:complete (${Date.now() - startedAt}ms)`);
+    }
+
+    private async ensureRuntimeCompatibility(): Promise<void> {
+        try {
+            const payload = await this.phoenix.storeCommand('runtime:capabilities');
+            assertPhoenixRuntimeCapabilities(payload);
+        } catch (error) {
+            const normalized = normalizePhoenixRuntimeCompatibilityError(error);
+            if (normalized !== error || isPhoenixWasmMismatchError(normalized)) {
+                console.error('[PhoenixStoreService] Phoenix WASM compatibility check failed.', normalized);
+            }
+            throw normalized;
+        }
     }
 
     private async ensureInitialized(): Promise<void> {
@@ -840,22 +1071,85 @@ export class PhoenixStoreService {
         }
     }
 
-    private scheduleSnapshot(): void {
-        if (this.snapshotsPaused) return;
-
-        if (this.snapshotTimeout) {
-            clearTimeout(this.snapshotTimeout);
+    private clearCheckpointTimers(): void {
+        if (this.contentCheckpointTimeout) {
+            clearTimeout(this.contentCheckpointTimeout);
+            this.contentCheckpointTimeout = null;
         }
-
-        this.snapshotTimeout = setTimeout(() => {
-            void this.triggerSnapshot().catch((error) => {
-                console.error('[PhoenixStoreService] Failed to persist Phoenix snapshot:', error);
-            });
-        }, 1500);
+        if (this.derivedCheckpointTimeout) {
+            clearTimeout(this.derivedCheckpointTimeout);
+            this.derivedCheckpointTimeout = null;
+        }
     }
 
-    private async relationUpsert(relation: string, row: Record<string, unknown>): Promise<void> {
-        await this.phoenix.storeCommand('relation:upsert', { relation, row });
+    private scheduleContentCheckpoint(delayMs = PHOENIX_WAL_IDLE_CHECKPOINT_MS): void {
+        const manifest = this.manifest;
+        if (!manifest || this.snapshotsPaused) {
+            return;
+        }
+        const lastSeq = manifest.content.nextSeq - 1;
+        if (lastSeq <= manifest.content.lastCheckpointSeq && !shouldCheckpointContent(manifest)) {
+            return;
+        }
+        if (shouldCheckpointContent(manifest)) {
+            delayMs = 0;
+        }
+        if (this.contentCheckpointTimeout) {
+            clearTimeout(this.contentCheckpointTimeout);
+        }
+        this.contentCheckpointTimeout = setTimeout(() => {
+            void this.runSerialized(async () => {
+                try {
+                    await this.flushContentCheckpoint(false);
+                } catch (error) {
+                    console.error('[PhoenixStoreService] Failed to checkpoint Phoenix content partition:', error);
+                }
+            });
+        }, delayMs);
+    }
+
+    private scheduleDerivedCheckpoint(delayMs = PHOENIX_DERIVED_CHECKPOINT_MS): void {
+        if (!this.initialized || this.snapshotsPaused || !this.derivedDirty || !this.isDerivedReady) {
+            return;
+        }
+        if (this.derivedCheckpointTimeout) {
+            clearTimeout(this.derivedCheckpointTimeout);
+        }
+        this.derivedCheckpointTimeout = setTimeout(() => {
+            void this.runSerialized(async () => {
+                try {
+                    await this.flushDerivedCheckpoint(false);
+                } catch (error) {
+                    console.error('[PhoenixStoreService] Failed to checkpoint Phoenix derived partition:', error);
+                }
+            });
+        }, delayMs);
+    }
+
+    private async exportSnapshotPartition(partition: PhoenixSnapshotPartition): Promise<Uint8Array> {
+        if (partition === 'derived') {
+            await this.ensureDerivedLoaded('snapshot-export');
+        }
+        return this.phoenix.exportSnapshot(partition);
+    }
+
+    private async getNoteRow(id: string, includeBody: boolean): Promise<any | null> {
+        await this.ensureInitialized();
+        const payload = await this.phoenix.storeCommand('note:get', { id, includeBody });
+        return payload || null;
+    }
+
+    private async listNoteRows(folderId: string | undefined, includeBody: boolean): Promise<any[]> {
+        await this.ensureInitialized();
+        const payload = await this.phoenix.storeCommand('note:list', {
+            includeBody,
+            ...(folderId !== undefined ? { folderId } : {}),
+        });
+        return Array.isArray(payload) ? payload : [];
+    }
+
+    private async runContentRelationUpsert(relation: string, row: Record<string, unknown>): Promise<void> {
+        await this.runContentMutation([{ command: 'relation:upsert', payload: { relation, row } }]);
     }
 
     private async relationGetFirst<T>(relation: string, filter: Record<string, unknown>): Promise<T | null> {
@@ -871,8 +1165,281 @@ export class PhoenixStoreService {
         return Array.isArray(payload) ? (payload as T[]) : [];
     }
 
-    private async relationDelete(relation: string, filter: Record<string, unknown>): Promise<void> {
-        await this.phoenix.storeCommand('relation:delete', { relation, filter });
+    private async runContentRelationDelete(relation: string, filter: Record<string, unknown>): Promise<void> {
+        await this.runContentMutation([{ command: 'relation:delete', payload: { relation, filter } }]);
+    }
+
+    private async runContentMutation(mutations: ContentWalMutation[]): Promise<void> {
+        if (!mutations.length) {
+            return;
+        }
+        await this.ensureInitialized();
+        await this.runSerialized(async () => {
+            const manifest = this.requireManifest();
+            const batch = this.buildWalBatch(mutations, manifest.content.nextSeq);
+            const appendResult = await this.persistence.appendWalBatch(batch);
+            const nextManifest = nextManifestWithWalAppend(manifest, batch, appendResult);
+
+            await this.persistence.commitManifest(nextManifest);
+
+            try {
+                await this.phoenix.storeCommand('persistence:applyWalBatch', { records: batch.records });
+            } catch (error) {
+                console.error('[PhoenixStoreService] Runtime apply failed after WAL commit. Rebuilding runtime.', error);
+                await this.reloadRuntimeFromPersistence();
+                this.scheduleContentCheckpoint();
+                return;
+            }
+
+            this.manifest = nextManifest;
+            this.recoveryState = {
+                ...this.recoveryState,
+                contentRecovered: true,
+                replayedRecords: this.recoveryState.replayedRecords + batch.records.length,
+                lastRecoveredSeq: batch.records[batch.records.length - 1]?.seq || this.recoveryState.lastRecoveredSeq,
+                manifestGeneration: nextManifest.generation,
+            };
+            this.scheduleContentCheckpoint();
+        });
+    }
+
+    private buildWalBatch(mutations: ContentWalMutation[], nextSeq: number): PhoenixWalBatch {
+        const writtenAt = Date.now();
+        return {
+            records: mutations.map((mutation, index) => ({
+                seq: nextSeq + index,
+                command: mutation.command,
+                payload: mutation.payload,
+                partition: 'content',
+                writtenAt,
+            })),
+        };
+    }
+
+    private async runSerialized<T>(task: () => Promise<T>): Promise<T> {
+        const run = this.mutationChain.then(task, task);
+        this.mutationChain = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    private async flushContentCheckpoint(force: boolean): Promise<void> {
+        if (this.contentCheckpointTimeout) {
+            clearTimeout(this.contentCheckpointTimeout);
+            this.contentCheckpointTimeout = null;
+        }
+        const manifest = this.requireManifest();
+        const lastSeq = manifest.content.nextSeq - 1;
+        if (!force && lastSeq <= manifest.content.lastCheckpointSeq && !shouldCheckpointContent(manifest)) {
+            return;
+        }
+
+        const snapshot = await this.exportSnapshotPartition('content');
+        const checkpoint = await this.persistence.writeCheckpoint('content', manifest.generation + 1, snapshot);
+        const finalized = finalizeContentCheckpointManifest(manifest, checkpoint.file, lastSeq);
+        await this.persistence.commitManifest(finalized.manifest);
+        if (finalized.pruneFiles.length) {
+            await this.persistence.pruneFiles(finalized.pruneFiles);
+        }
+        this.manifest = finalized.manifest;
+        this.recoveryState = {
+            ...this.recoveryState,
+            contentRecovered: true,
+            lastRecoveredSeq: Math.max(this.recoveryState.lastRecoveredSeq, lastSeq),
+            manifestGeneration: finalized.manifest.generation,
+        };
+    }
+
+    private async flushDerivedCheckpoint(force: boolean): Promise<void> {
+        if (this.derivedCheckpointTimeout) {
+            clearTimeout(this.derivedCheckpointTimeout);
+            this.derivedCheckpointTimeout = null;
+        }
+        if ((!this.derivedDirty && !force) || !this.isDerivedReady) {
+            return;
+        }
+
+        const manifest = this.requireManifest();
+        const snapshot = await this.exportSnapshotPartition('derived');
+        const checkpoint = await this.persistence.writeCheckpoint('derived', manifest.generation + 1, snapshot);
+        const finalized = finalizeDerivedCheckpointManifest(manifest, checkpoint.file, checkpoint.writtenAt);
+        await this.persistence.commitManifest(finalized.manifest);
+        if (finalized.pruneFiles.length) {
+            await this.persistence.pruneFiles(finalized.pruneFiles);
+        }
+        this.manifest = finalized.manifest;
+        this.derivedDirty = false;
+        this.recoveryState = {
+            ...this.recoveryState,
+            derivedRecovered: true,
+            manifestGeneration: finalized.manifest.generation,
+        };
+    }
+
+    private requireManifest(): PersistenceManifest {
+        if (!this.manifest) {
+            this.manifest = createEmptyPhoenixManifest();
+        }
+        return this.manifest;
+    }
+
+    private async reloadRuntimeFromPersistence(): Promise<void> {
+        const restoreDerivedAfterReload = this.isDerivedReady;
+        await this.phoenix.initRuntime(true);
+        const persisted = await this.persistence.loadManifestMeta();
+        this.manifestMeta = persisted;
+        if (!persisted.manifest) {
+            this.manifest = createEmptyPhoenixManifest();
+            this.derivedLoadState = 'ready';
+            this.recoveryState = {
+                contentRecovered: false,
+                derivedRecovered: false,
+                replayedRecords: 0,
+                lastRecoveredSeq: 0,
+                manifestGeneration: 0,
+            };
+            return;
+        }
+        this.manifest = persisted.manifest;
+        this.recoveryState = await this.recoverRuntimeFromManifest(persisted);
+        this.derivedLoadState = persisted.derivedCheckpoint?.file ? 'cold' : 'ready';
+        if (restoreDerivedAfterReload && persisted.derivedCheckpoint?.file) {
+            await this.loadDerivedCheckpointIntoRuntime('runtime-reload');
+        }
+    }
+
+    private async recoverRuntimeFromManifest(persisted: LoadedPhoenixManifestState): Promise<RecoveryState> {
+        const manifest = persisted.manifest;
+        if (!manifest) {
+            return {
+                contentRecovered: false,
+                derivedRecovered: false,
+                replayedRecords: 0,
+                lastRecoveredSeq: 0,
+                manifestGeneration: 0,
+            };
+        }
+
+        if (manifest.content.checkpointFile) {
+            if (!persisted.contentCheckpoint?.bytes) {
+                throw new Error(`Missing content checkpoint: ${manifest.content.checkpointFile}`);
+            }
+            console.log(
+                `[PhoenixStoreService] Content recovery importing ${persisted.contentCheckpoint.file} (${persisted.contentCheckpoint.bytes} bytes)`,
+            );
+            const bytes = await this.persistence.readCheckpointFile(persisted.contentCheckpoint.file);
+            if (!bytes?.byteLength) {
+                throw new Error(`Missing content checkpoint: ${manifest.content.checkpointFile}`);
+            }
+            await this.phoenix.importSnapshot(bytes);
+        }
+
+        console.log('[PhoenixStoreService] Content recovery replaying Phoenix WAL incrementally.');
+        const replayResult = await this.replayWalSegments(persisted, manifest);
+        console.log(
+            `[PhoenixStoreService] Content recovery complete (${replayResult.replayedRecords} records replayed, lastSeq=${replayResult.lastRecoveredSeq}).`,
+        );
+
+        return {
+            contentRecovered: true,
+            derivedRecovered: false,
+            replayedRecords: replayResult.replayedRecords,
+            lastRecoveredSeq: replayResult.lastRecoveredSeq,
+            manifestGeneration: manifest.generation,
+        };
+    }
+
+    private async replayWalSegments(
+        persisted: LoadedPhoenixManifestState,
+        manifest: PersistenceManifest,
+    ): Promise<{ replayedRecords: number; lastRecoveredSeq: number }> {
+        const seenSeq = new Set<number>();
+        const maxSeqExclusive = manifest.content.nextSeq;
+        let replayedRecords = 0;
+        let lastRecoveredSeq = manifest.content.lastCheckpointSeq;
+
+        const closedOrder = new Map(manifest.content.closedSegments.map((segment, index) => [segment.file, index]));
+        const sortedClosed = [...persisted.closedSegments].sort(
+            (left, right) => (closedOrder.get(left.file) || 0) - (closedOrder.get(right.file) || 0),
+        );
+        for (const segment of sortedClosed) {
+            if (!segment.bytes) {
+                throw new Error(`Missing closed WAL segment: ${segment.file}`);
+            }
+            const result = await this.applyReplaySegment(
+                segment.file,
+                false,
+                manifest.content.lastCheckpointSeq,
+                maxSeqExclusive,
+                seenSeq,
+            );
+            replayedRecords += result.replayedRecords;
+            lastRecoveredSeq = Math.max(lastRecoveredSeq, result.lastRecoveredSeq);
+        }
+        if (persisted.activeSegment?.bytes) {
+            const result = await this.applyReplaySegment(
+                persisted.activeSegment.file,
+                true,
+                manifest.content.lastCheckpointSeq,
+                maxSeqExclusive,
+                seenSeq,
+            );
+            replayedRecords += result.replayedRecords;
+            lastRecoveredSeq = Math.max(lastRecoveredSeq, result.lastRecoveredSeq);
+        }
+
+        return { replayedRecords, lastRecoveredSeq };
+    }
+
+    private async applyReplaySegment(
+        file: string,
+        allowTailCorruption: boolean,
+        lastCheckpointSeq: number,
+        maxSeqExclusive: number,
+        seenSeq: Set<number>,
+    ): Promise<{ replayedRecords: number; lastRecoveredSeq: number }> {
+        const bytes = await this.persistence.readWalSegment(file);
+        if (!bytes?.byteLength) {
+            if (allowTailCorruption) {
+                return { replayedRecords: 0, lastRecoveredSeq: lastCheckpointSeq };
+            }
+            throw new Error(`Missing closed WAL segment: ${file}`);
+        }
+
+        const decoded = decodeWalBytes(bytes, { maxSeqExclusive });
+        if (decoded.tailCorrupted) {
+            if (!allowTailCorruption) {
+                throw new Error(`Corrupt WAL segment: ${file}`);
+            }
+            console.warn(`[PhoenixStoreService] Ignoring corrupt WAL tail in ${file}.`);
+        }
+
+        const records = decoded.records.filter((record) => {
+            if (record.seq <= lastCheckpointSeq || seenSeq.has(record.seq)) {
+                return false;
+            }
+            seenSeq.add(record.seq);
+            return true;
+        });
+
+        if (!records.length) {
+            return {
+                replayedRecords: 0,
+                lastRecoveredSeq: lastCheckpointSeq,
+            };
+        }
+
+        await this.phoenix.storeCommand('persistence:applyWalBatch', { records });
+        return {
+            replayedRecords: records.length,
+            lastRecoveredSeq: records[records.length - 1]?.seq || lastCheckpointSeq,
+        };
+    }
+
+    private async resetPhoenixPersistence(manifest: PersistenceManifest): Promise<void> {
+        await this.persistence.pruneFiles(collectManifestFiles(manifest));
     }
 }
 
@@ -906,11 +1473,17 @@ function noteToRow(note: StoreNote): Record<string, unknown> {
 
 function rowToNote(row: any): StoreNote {
     return {
+        ...rowToNoteHeader(row),
+        content: String(row.content || ''),
+        markdownContent: String(row.markdown_content || ''),
+    };
+}
+
+function rowToNoteHeader(row: any): StoreNoteHeader {
+    return {
         id: String(row.id || ''),
         worldId: String(row.world_id || ''),
         title: String(row.title || ''),
-        content: String(row.content || ''),
-        markdownContent: String(row.markdown_content || ''),
         folderId: String(row.folder_id || ''),
         entityKind: String(row.entity_kind || ''),
         entitySubtype: String(row.entity_subtype || ''),

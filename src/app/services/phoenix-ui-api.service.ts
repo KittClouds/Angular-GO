@@ -1,6 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 
 import type { DecorationSpan, EntityKind } from '../lib/Scanner/types';
+import {
+    type PhoenixDiscoveryCandidate,
+    groupDiscoveryMentions,
+} from '../lib/phoenix/phoenix-discovery';
 import { smartGraphRegistry } from '../lib/registry';
 import { PhoenixStoreService } from './phoenix-store.service';
 import { PhoenixWasmService } from './phoenix-wasm.service';
@@ -37,7 +41,7 @@ export interface KnowledgeGraphData {
     edges: KnowledgeGraphEdge[];
 }
 
-type IndexedNote = {
+type NoteIngestInput = {
     id: string;
     title: string;
     text: string;
@@ -64,8 +68,6 @@ export class PhoenixUiApiService {
 
     private mainSessionId: string | null = null;
     private gldrSessionId: string | null = null;
-
-    private readonly indexedNotes = new Map<string, IndexedNote>();
     private dictionary: DictionaryEntry[] = [];
     private knowledgeGraph: KnowledgeGraphData = { nodes: {}, edges: [] };
 
@@ -137,18 +139,14 @@ export class PhoenixUiApiService {
     ): Promise<{ success: boolean; error?: string }> {
         await this.loadWasm();
         const sessionId = await this.ensureMainSession();
-        const documents = notes.map((note) => {
-            const indexedNote: IndexedNote = {
-                id: note.id,
-                title: note.title || note.id,
-                text: note.text || '',
-                narrativeId: note.narrativeId || undefined,
-                folderPath: note.folderPath || undefined,
-                version: note.version,
-            };
-            this.indexedNotes.set(note.id, indexedNote);
-            return this.indexedNoteToDocument(indexedNote);
-        });
+        const documents = notes.map((note) => this.noteInputToDocument({
+            id: note.id,
+            title: note.title || note.id,
+            text: note.text || '',
+            narrativeId: note.narrativeId || undefined,
+            folderPath: note.folderPath || undefined,
+            version: note.version,
+        }));
 
         if (!documents.length) {
             return { success: true };
@@ -158,35 +156,25 @@ export class PhoenixUiApiService {
         return { success: true };
     }
 
-    async upsertNote(id: string, text: string, version?: number): Promise<{ success: boolean; error?: string }> {
+    async upsertNote(
+        id: string,
+        text: string,
+        version?: number,
+        meta?: { title?: string; narrativeId?: string; folderPath?: string },
+    ): Promise<{ success: boolean; error?: string }> {
         await this.loadWasm();
-        const existing = this.indexedNotes.get(id);
-        const indexedNote: IndexedNote = {
-            id,
-            title: existing?.title || id,
-            text,
-            narrativeId: existing?.narrativeId,
-            folderPath: existing?.folderPath,
-            version,
-        };
-        this.indexedNotes.set(id, indexedNote);
-        await this.ingestIndexedNotes([indexedNote], await this.ensureMainSession());
+        const note = await this.resolveNoteIngestInput(id, text, version, meta);
+        await this.ingestNoteInputs([note], await this.ensureMainSession());
         return { success: true };
     }
 
     async indexNote(id: string, text: string, scope?: SearchScope): Promise<void> {
         await this.loadWasm();
-        const existing = this.indexedNotes.get(id);
-        const indexedNote: IndexedNote = {
-            id,
-            title: existing?.title || id,
-            text,
-            narrativeId: scope?.narrativeId || existing?.narrativeId,
-            folderPath: scope?.folderPath || existing?.folderPath,
-            version: existing?.version,
-        };
-        this.indexedNotes.set(id, indexedNote);
-        await this.ingestIndexedNotes([indexedNote], await this.ensureMainSession());
+        const note = await this.resolveNoteIngestInput(id, text, undefined, {
+            narrativeId: scope?.narrativeId,
+            folderPath: scope?.folderPath,
+        });
+        await this.ingestNoteInputs([note], await this.ensureMainSession());
     }
 
     async search(query: string, limit = 20): Promise<any[]> {
@@ -246,7 +234,7 @@ export class PhoenixUiApiService {
         };
     }
 
-    async scanDiscovery(text: string): Promise<any[]> {
+    async scanDiscovery(text: string): Promise<PhoenixDiscoveryCandidate[]> {
         await this.loadWasm();
         const scan = await this.phoenix.scan({
             text,
@@ -256,14 +244,7 @@ export class PhoenixUiApiService {
         });
 
         const mentions = Array.isArray(scan?.mentions) ? scan.mentions : [];
-        return mentions
-            .filter((mention: any) => String(mention?.source || '').toLowerCase() === 'discovery')
-            .map((mention: any) => ({
-                token: String(mention.surface || sliceRange(text, mention.range)),
-                kind: mention.kind || 'UNKNOWN',
-                score: Number(mention.confidence || 0),
-                status: 0,
-            }));
+        return groupDiscoveryMentions(text, mentions);
     }
 
     async scanImplicitAsync(text: string): Promise<DecorationSpan[]> {
@@ -281,18 +262,21 @@ export class PhoenixUiApiService {
 
     async knowledgeInit(): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('knowledge-init');
         await this.refreshKnowledgeGraph();
         return { success: true, message: 'Phoenix knowledge graph ready' };
     }
 
     async knowledgeLoad(): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('knowledge-load');
         await this.refreshKnowledgeGraph();
         return { success: true, message: 'Phoenix knowledge graph loaded' };
     }
 
     async knowledgeSync(): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('knowledge-sync');
         await this.refreshKnowledgeGraph();
         return { success: true, message: 'Phoenix knowledge graph synced' };
     }
@@ -309,6 +293,7 @@ export class PhoenixUiApiService {
         props?: Record<string, unknown>;
     }): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('knowledge-add-node');
         await this.phoenix.storeCommand('relation:upsert', {
             relation: 'graph_vertices',
             row: {
@@ -329,6 +314,7 @@ export class PhoenixUiApiService {
                 label: node.label || node.id,
             },
         });
+        this.store.markDerivedDirty();
         await this.refreshKnowledgeGraph();
         return { success: true };
     }
@@ -341,6 +327,7 @@ export class PhoenixUiApiService {
         props?: Record<string, unknown>;
     }): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('knowledge-add-edge');
         await this.phoenix.storeCommand('relation:upsert', {
             relation: 'graph_edges',
             row: {
@@ -352,6 +339,7 @@ export class PhoenixUiApiService {
                 edge_type: edge.relation,
             },
         });
+        this.store.markDerivedDirty();
         await this.refreshKnowledgeGraph();
         return { success: true };
     }
@@ -406,6 +394,7 @@ export class PhoenixUiApiService {
 
     async gldrInit(): Promise<{ success: boolean; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-init');
         const session = await this.phoenix.createSession('phoenix-ui-gldr', {});
         this.gldrSessionId = String(session?.sessionId || '');
         return { success: true };
@@ -422,6 +411,7 @@ export class PhoenixUiApiService {
         _mentions: Array<{ entityId: string; count: number }>,
     ): Promise<{ success: boolean; error?: string }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-index-chunk');
         const sessionId = await this.ensureGldrSession();
         await this.ingestDocumentsIntoSession(sessionId, [{
             documentId: chunkId,
@@ -442,6 +432,7 @@ export class PhoenixUiApiService {
         }>,
     ): Promise<{ success: boolean; error?: string; count?: number; dim?: number }> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-index-embeddings');
         const sessionId = await this.ensureGldrSession();
         await this.ingestDocumentsIntoSession(
             sessionId,
@@ -475,6 +466,7 @@ export class PhoenixUiApiService {
 
     async gldrSearch(query: string, config: Record<string, unknown> = {}): Promise<string> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-search');
         const sessionId = await this.ensureGldrSession();
         const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
         const result = await this.phoenix.query({
@@ -502,6 +494,7 @@ export class PhoenixUiApiService {
         config: Record<string, unknown> = {},
     ): Promise<string> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-search-embedding');
         const sessionId = await this.ensureGldrSession();
         const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
         const result = await this.phoenix.query({
@@ -526,6 +519,7 @@ export class PhoenixUiApiService {
 
     async gldrSearchNodes(query: string, config: Record<string, unknown> = {}): Promise<string> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-search-nodes');
         const sessionId = await this.ensureGldrSession();
         const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
         const result = await this.phoenix.query({
@@ -552,6 +546,7 @@ export class PhoenixUiApiService {
         config: Record<string, unknown> = {},
     ): Promise<string> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-search-nodes-embedding');
         const sessionId = await this.ensureGldrSession();
         const limit = typeof config['topChunks'] === 'number' ? Number(config['topChunks']) : 12;
         const result = await this.phoenix.query({
@@ -575,6 +570,7 @@ export class PhoenixUiApiService {
 
     async gldrStats(): Promise<string> {
         await this.loadWasm();
+        await this.store.ensureDerivedLoaded('gldr-stats');
         if (!this.gldrSessionId) {
             return JSON.stringify({ entities: 0, chunks: 0, edges: 0 });
         }
@@ -596,7 +592,10 @@ export class PhoenixUiApiService {
 
     async systemIngest<T = any>(sessionId: string, request: Record<string, unknown>): Promise<T> {
         await this.loadWasm();
-        return this.phoenix.ingest({ sessionId, ...request }) as Promise<T>;
+        await this.store.ensureDerivedLoaded('system-ingest');
+        const result = await (this.phoenix.ingest({ sessionId, ...request }) as Promise<T>);
+        this.store.markDerivedDirty();
+        return result;
     }
 
     async systemSearch<T = any>(sessionId: string, request: Record<string, unknown>): Promise<T> {
@@ -619,31 +618,42 @@ export class PhoenixUiApiService {
         return this.phoenix.sessionStats(sessionId) as Promise<T>;
     }
 
-    async systemClose(_sessionId: string): Promise<{ success: boolean; error?: string }> {
+    async systemClose(sessionId: string): Promise<{ success: boolean; error?: string }> {
         await this.loadWasm();
+        await this.phoenix.storeCommand('session:close', { sessionId });
         return { success: true };
     }
 
     async systemRun<T = any>(request: Record<string, unknown>): Promise<T> {
         await this.loadWasm();
-        const created = await this.systemCreateSession({});
-        const sessionId = typeof request['sessionId'] === 'string' ? String(request['sessionId']) : created.sessionId;
+        const created = typeof request['sessionId'] === 'string' ? null : await this.systemCreateSession({});
+        const sessionId = typeof request['sessionId'] === 'string' ? String(request['sessionId']) : created!.sessionId;
         const result: Record<string, unknown> = { sessionId };
 
-        if (request['ingest']) {
-            result['ingest'] = await this.systemIngest(sessionId, request['ingest'] as Record<string, unknown>);
-        }
-        if (request['search']) {
-            result['search'] = await this.systemSearch(sessionId, request['search'] as Record<string, unknown>);
-        }
-        if (request['commit']) {
-            result['commit'] = await this.systemCommit(sessionId, request['commit'] as Record<string, unknown>);
-        }
-        if (request['state']) {
-            result['state'] = await this.systemGetState(sessionId);
-        }
-        if (request['stats']) {
-            result['stats'] = await this.systemGetStats(sessionId);
+        try {
+            if (request['ingest']) {
+                result['ingest'] = await this.systemIngest(sessionId, request['ingest'] as Record<string, unknown>);
+            }
+            if (request['search']) {
+                result['search'] = await this.systemSearch(sessionId, request['search'] as Record<string, unknown>);
+            }
+            if (request['commit']) {
+                result['commit'] = await this.systemCommit(sessionId, request['commit'] as Record<string, unknown>);
+            }
+            if (request['state']) {
+                result['state'] = await this.systemGetState(sessionId);
+            }
+            if (request['stats']) {
+                result['stats'] = await this.systemGetStats(sessionId);
+            }
+        } finally {
+            if (created) {
+                try {
+                    await this.systemClose(created.sessionId);
+                } catch (error) {
+                    console.warn('[PhoenixUiApi] Failed to close disposable Phoenix session:', error);
+                }
+            }
         }
 
         return result as T;
@@ -700,10 +710,10 @@ export class PhoenixUiApiService {
         return this.gldrSessionId;
     }
 
-    private async ingestIndexedNotes(notes: IndexedNote[], sessionId: string): Promise<void> {
+    private async ingestNoteInputs(notes: NoteIngestInput[], sessionId: string): Promise<void> {
         await this.ingestDocumentsIntoSession(
             sessionId,
-            notes.map((note) => this.indexedNoteToDocument(note)),
+            notes.map((note) => this.noteInputToDocument(note)),
         );
     }
 
@@ -720,14 +730,16 @@ export class PhoenixUiApiService {
         if (!documents.length) {
             return;
         }
+        await this.store.ensureDerivedLoaded('session-ingest');
         await this.phoenix.ingest({
             sessionId,
             documents,
             commit: false,
         });
+        this.store.markDerivedDirty();
     }
 
-    private indexedNoteToDocument(note: IndexedNote): {
+    private noteInputToDocument(note: NoteIngestInput): {
         documentId: string;
         noteId: string;
         title: string;
@@ -743,6 +755,34 @@ export class PhoenixUiApiService {
                 narrativeId: note.narrativeId,
                 folderPath: note.folderPath,
             }),
+        };
+    }
+
+    private async resolveNoteIngestInput(
+        id: string,
+        text: string,
+        version?: number,
+        meta?: { title?: string; narrativeId?: string; folderPath?: string },
+    ): Promise<NoteIngestInput> {
+        if (meta?.title && (meta?.narrativeId !== undefined || meta?.folderPath !== undefined)) {
+            return {
+                id,
+                title: meta.title || id,
+                text,
+                narrativeId: meta.narrativeId || undefined,
+                folderPath: meta.folderPath || undefined,
+                version,
+            };
+        }
+
+        const header = await this.store.getNoteHeader(id);
+        return {
+            id,
+            title: meta?.title || header?.title || id,
+            text,
+            narrativeId: meta?.narrativeId ?? header?.narrativeId ?? undefined,
+            folderPath: meta?.folderPath ?? header?.folderId ?? undefined,
+            version,
         };
     }
 
@@ -763,6 +803,7 @@ export class PhoenixUiApiService {
         if (Object.keys(this.knowledgeGraph.nodes).length || this.knowledgeGraph.edges.length) {
             return;
         }
+        await this.store.ensureDerivedLoaded('knowledge-graph-cache');
         await this.refreshKnowledgeGraph();
     }
 

@@ -1,23 +1,22 @@
-import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, User, Users, MapPin, Calendar, Hash, FileText, Zap, Tag } from 'lucide-angular';
+import { LucideAngularModule, Pencil, User, Users, MapPin, Calendar, Hash, FileText, Zap, Tag } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../../lib/registry';
 import { ConnectionGroup, ConnectionGroupComponent } from './connection-group/connection-group.component';
 import { EntityKind } from '../../../../../lib/Scanner/types';
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
-// Entity icons (colors come from entityColorStore)
 const ENTITY_ICONS: Record<string, any> = {
-    'CHARACTER': User,
-    'FACTION': Users,
-    'LOCATION': MapPin,
-    'EVENT': Calendar,
-    'OBJECT': Hash,
-    'LORE': FileText,
-    'SPECIES': Users,
-    'ABILITY': Zap,
-    'UNKNOWN': Tag
+    CHARACTER: User,
+    FACTION: Users,
+    LOCATION: MapPin,
+    EVENT: Calendar,
+    OBJECT: Hash,
+    LORE: FileText,
+    SPECIES: Users,
+    ABILITY: Zap,
+    UNKNOWN: Tag,
 };
 
 @Component({
@@ -26,59 +25,73 @@ const ENTITY_ICONS: Record<string, any> = {
     imports: [CommonModule, LucideAngularModule, ConnectionGroupComponent],
     template: `
         <div class="p-4 space-y-6 animate-in fade-in duration-300">
-            <!-- Entity Focus Node -->
             <div class="flex flex-col items-center">
-                <div class="relative w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg transition-transform hover:scale-105"
-                     [style.backgroundColor]="getBgColor(entity.kind)"
-                     [style.border]="'2px solid ' + getBorderColor(entity.kind)">
-                    
+                <div
+                    class="relative flex h-20 w-20 items-center justify-center rounded-2xl shadow-lg transition-transform hover:scale-105"
+                    [style.backgroundColor]="getBgColor(entity.kind)"
+                    [style.border]="'2px solid ' + getBorderColor(entity.kind)"
+                >
                     <lucide-icon [img]="getIcon(entity.kind)" [class]="'w-10 h-10'" [style.color]="getColor(entity.kind)"></lucide-icon>
-                    
-                    <div class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-background border-2 flex items-center justify-center text-[10px] font-bold"
-                         [style.borderColor]="getColor(entity.kind)"
-                         [style.color]="getColor(entity.kind)">
+
+                    <div
+                        class="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-background text-[10px] font-bold"
+                        [style.borderColor]="getColor(entity.kind)"
+                        [style.color]="getColor(entity.kind)"
+                    >
                         {{ totalConnections }}
                     </div>
                 </div>
-                
+
                 <h2 class="mt-3 text-lg font-semibold text-foreground">{{ entity.label }}</h2>
-                
-                <div class="flex items-center gap-2 mt-1">
-                    <span class="text-xs px-2 py-0.5 rounded-full border"
-                          [style.borderColor]="getColor(entity.kind)"
-                          [style.color]="getColor(entity.kind)">
+
+                <div class="mt-1 flex items-center gap-2">
+                    <span
+                        class="rounded-full border px-2 py-0.5 text-xs"
+                        [style.borderColor]="getColor(entity.kind)"
+                        [style.color]="getColor(entity.kind)"
+                    >
                         {{ entity.kind }}
                     </span>
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-accent/40"
+                        [style.borderColor]="getColor(entity.kind)"
+                        [style.color]="getColor(entity.kind)"
+                        (click)="editRequested.emit(entity)"
+                    >
+                        <lucide-icon [img]="PencilIcon" class="h-3 w-3"></lucide-icon>
+                        Edit
+                    </button>
                 </div>
             </div>
 
-            <!-- Connection Lines Visual -->
             <div *ngIf="totalConnections > 0" class="flex justify-center">
-                <div class="w-px h-6 bg-gradient-to-b from-border to-transparent"></div>
+                <div class="h-6 w-px bg-gradient-to-b from-border to-transparent"></div>
             </div>
 
-            <!-- Connections Grid -->
             <div *ngIf="groupedRelationships.length > 0; else emptyState" class="space-y-4">
                 <app-connection-group
                     *ngFor="let group of groupedRelationships"
                     [group]="group"
-                    (onNavigate)="onNavigate($event)">
-                </app-connection-group>
+                    (onNavigate)="onNavigate($event)"
+                ></app-connection-group>
             </div>
 
             <ng-template #emptyState>
-                <div class="text-center py-6 text-muted-foreground text-sm">
+                <div class="py-6 text-center text-sm text-muted-foreground">
                     No connections yet
                 </div>
             </ng-template>
         </div>
-    `
+    `,
 })
 export class GraphDetailComponent implements OnChanges {
     @Input() entity!: RegisteredEntity;
+    @Output() editRequested = new EventEmitter<RegisteredEntity>();
 
     groupedRelationships: ConnectionGroup[] = [];
     totalConnections = 0;
+    readonly PencilIcon = Pencil;
 
     ngOnChanges(changes: SimpleChanges) {
         if (changes['entity'] && this.entity) {
@@ -87,12 +100,13 @@ export class GraphDetailComponent implements OnChanges {
     }
 
     refreshConnections() {
-        if (!this.entity) return;
+        if (!this.entity) {
+            return;
+        }
 
         const edges = smartGraphRegistry.getEdgesForEntity(this.entity.id);
         this.totalConnections = edges.length;
 
-        // Group by Type (e.g. "RIVALS_WITH")
         const groups: Record<string, ConnectionGroup> = {};
 
         for (const edge of edges) {
@@ -109,7 +123,7 @@ export class GraphDetailComponent implements OnChanges {
                     id: edge.id,
                     entity: otherEntity,
                     direction: isSource ? 'outgoing' : 'incoming',
-                    confidence: edge.confidence
+                    confidence: edge.confidence,
                 });
             }
         }
@@ -118,7 +132,6 @@ export class GraphDetailComponent implements OnChanges {
     }
 
     onNavigate(target: RegisteredEntity) {
-        // TODO: Bubble up navigation event to parent tab
         console.log('[GraphDetail] Navigate to:', target.label);
     }
 

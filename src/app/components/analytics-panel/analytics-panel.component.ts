@@ -1,19 +1,21 @@
 // src/app/components/analytics-panel/analytics-panel.component.ts
-import { Component, inject, computed, signal } from '@angular/core';
+import { Component, DestroyRef, inject, computed, effect, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { LucideAngularModule, FileText, Clock, MessageSquare, BookOpen, TrendingUp, Hash, ChevronDown, ChevronUp, Sparkles, Target, X } from 'lucide-angular';
 import { NgxNumberTickerComponent } from '@omnedia/ngx-number-ticker';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { distinctUntilChanged } from 'rxjs';
 
 import { getPrettyTextApi } from '../../api/pretty-text-api';
 import { FlowScoreComponent } from './flow-score/flow-score.component';
-import { AnalyticsHighlightRange, parseContentToPlainText, TextAnalytics } from '../../lib/analytics';
+import { AnalyticsHighlightRange, TextAnalytics } from '../../lib/analytics';
 import { createKeywordFocusSpans, parseSearchHighlightTerms } from '../../lib/Scanner/keyword-focus';
-import { AnalyticsHighlightKind } from '../../lib/Scanner/types';
+import { AnalyticsHighlightKind, AnalyticsHighlightPaletteKey, SentenceVariationBucket } from '../../lib/Scanner/types';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
+import { analyticsHighlightStore, type AnalyticsHighlightSelection } from '../../lib/store/analyticsHighlightStore';
 import { keywordHighlightStore } from '../../lib/store/keywordHighlightStore';
-import { EditorService } from '../../services/editor.service';
+import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 import { FooterStatsService } from '../../services/footer-stats.service';
 import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { NotesService } from '../../lib/dexie/notes.service';
@@ -24,6 +26,8 @@ interface AnalyticsSearchResult {
     title: string;
     localMatchCount?: number;
 }
+
+const ANALYTICS_VIEW_STORAGE_KEY = 'analytics-panel:active-view';
 
 @Component({
     selector: 'app-analytics-panel',
@@ -191,6 +195,9 @@ interface AnalyticsSearchResult {
                         [score]="analytics().flowScore"
                         [distribution]="analytics().sentenceLengthDistribution"
                         [insights]="analytics().flowInsights"
+                        [sentences]="analytics().cadence.sentences"
+                        [activeVariationBuckets]="activeVariationBuckets()"
+                        (variationToggle)="toggleSentenceVariationHighlight($event.bucket, $event.label)"
                     />
                 </section>
 
@@ -201,7 +208,7 @@ interface AnalyticsSearchResult {
                             <lucide-icon [img]="Hash" class="h-4 w-4 text-primary"></lucide-icon>
                             <span class="capitalize">{{ activeAnalyticsView() }}</span>
                         </div>
-                        @if (activeHighlightId()) {
+                        @if (hasActiveAnalyticsHighlights()) {
                             <button class="text-[0.65rem] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 bg-white/5 hover:bg-white/10 px-1.5 py-0.5 rounded border border-white/5" (click)="clearActiveHighlight()" title="Clear Highlight">
                                 <lucide-icon [img]="X" class="h-3 w-3"></lucide-icon> Clear
                             </button>
@@ -580,10 +587,10 @@ interface AnalyticsSearchResult {
     `]
 })
 export class AnalyticsPanelComponent {
+    private destroyRef = inject(DestroyRef);
     private phoenixUiApi = inject(PhoenixUiApiService);
     private notesService = inject(NotesService);
     private noteStore = inject(NoteEditorStore);
-    private editorService = inject(EditorService);
     private footerStatsService = inject(FooterStatsService);
     private router = inject(Router);
     private prettyTextApi = getPrettyTextApi();
@@ -596,15 +603,17 @@ export class AnalyticsPanelComponent {
 
     // Note Lookup Map (ID -> Title)
     private noteTitleMap = new Map<string, string>();
-    private currentPlainText = signal('');
 
     // View state
-    activeAnalyticsView = signal<'keyword' | 'repetition' | 'proximity' | 'cadence'>('keyword');
+    activeAnalyticsView = signal<'keyword' | 'repetition' | 'proximity' | 'cadence'>(
+        getSetting<'keyword' | 'repetition' | 'proximity' | 'cadence'>(ANALYTICS_VIEW_STORAGE_KEY, 'keyword'),
+    );
     activeHighlightId = signal<string | null>(null);
 
     // existing state
     isKeywordsExpanded = signal(false);
     keywordSelectionVersion = signal(0);
+    activeVariationBuckets = signal<Set<SentenceVariationBucket>>(new Set());
 
     // ... Icons ...
     readonly FileText = FileText;
@@ -620,26 +629,54 @@ export class AnalyticsPanelComponent {
     readonly X = X;
 
     constructor() {
+        this.restoreAnalyticsPanelState(this.noteStore.activeNoteId());
+
         // Build note title map
-        this.notesService.getAllNotes$().subscribe(notes => {
-            this.noteTitleMap.clear();
-            notes.forEach(n => this.noteTitleMap.set(n.id, n.title || 'Untitled'));
-        });
+        this.notesService.getAllNotes$()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(notes => {
+                this.noteTitleMap.clear();
+                notes.forEach(n => this.noteTitleMap.set(n.id, n.title || 'Untitled'));
+            });
 
-        this.noteStore.activeNote$.pipe(
-            distinctUntilChanged((a, b) => a?.id === b?.id && a?.content === b?.content)
-        ).subscribe(note => {
-            const fallbackContent = note?.content || note?.markdownContent || '';
-            this.currentPlainText.set(parseContentToPlainText(fallbackContent));
-            this.activeHighlightId.set(null);
-        });
+        this.noteStore.activeNote$
+            .pipe(
+                distinctUntilChanged((a, b) => a?.id === b?.id),
+                takeUntilDestroyed(this.destroyRef),
+            )
+            .subscribe(note => {
+                const noteId = note?.id ?? this.noteStore.activeNoteId();
+                this.prettyTextApi.clearAnalyticsDetailHighlights();
+                this.activeHighlightId.set(null);
+                this.restoreAnalyticsPanelState(noteId);
+            });
 
-        this.editorService.content$.subscribe(({ json }) => {
-            this.currentPlainText.set(parseContentToPlainText(JSON.stringify(json)));
-        });
-
-        keywordHighlightStore.subscribe(() => {
+        const unsubscribeKeywordStore = keywordHighlightStore.subscribe(() => {
             this.keywordSelectionVersion.update(version => version + 1);
+        });
+        this.destroyRef.onDestroy(unsubscribeKeywordStore);
+
+        const unsubscribeAnalyticsHighlightStore = analyticsHighlightStore.subscribe(() => {
+            this.restoreAnalyticsPanelState(this.noteStore.activeNoteId());
+        });
+        this.destroyRef.onDestroy(unsubscribeAnalyticsHighlightStore);
+
+        effect(() => {
+            const noteId = this.noteStore.activeNoteId();
+            const activeBuckets = this.activeVariationBuckets();
+            const analytics = this.analytics();
+            const text = this.currentPlainText();
+
+            if (!noteId || activeBuckets.size === 0 || !text) {
+                this.prettyTextApi.clearSentenceVariationHighlights(noteId ?? undefined);
+                return;
+            }
+
+            this.prettyTextApi.setSentenceVariationHighlights(
+                noteId,
+                activeBuckets,
+                this.buildSentenceVariationSelections(noteId, activeBuckets, text, analytics),
+            );
         });
     }
 
@@ -658,10 +695,16 @@ export class AnalyticsPanelComponent {
         return this.isKeywordsExpanded() ? keywords : keywords.slice(0, 5);
     });
 
+    currentPlainText = computed(() => this.footerStatsService.plainText());
+
     selectedKeywords = computed(() => {
         this.keywordSelectionVersion();
         return new Set(keywordHighlightStore.getKeywordsForNote(this.noteStore.activeNoteId()));
     });
+
+    hasActiveAnalyticsHighlights = computed(() => (
+        !!this.activeHighlightId() || this.activeVariationBuckets().size > 0
+    ));
 
     updateSearchInput(event: Event): void {
         const target = event.target as HTMLInputElement | null;
@@ -733,29 +776,55 @@ export class AnalyticsPanelComponent {
 
     setActiveView(view: 'keyword' | 'repetition' | 'proximity' | 'cadence') {
         this.activeAnalyticsView.set(view);
-        this.clearActiveHighlight();
+        setSetting(ANALYTICS_VIEW_STORAGE_KEY, view);
+        this.prettyTextApi.clearAnalyticsDetailHighlights();
+        this.activeHighlightId.set(null);
     }
 
     clearActiveHighlight() {
         this.prettyTextApi.clearAnalyticsHighlights();
         this.activeHighlightId.set(null);
+        this.activeVariationBuckets.set(new Set());
     }
 
-    toggleAnalyticsHighlight(id: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[] | null | undefined) {
+    toggleAnalyticsHighlight(
+        id: string,
+        kind: AnalyticsHighlightKind,
+        label: string,
+        ranges: AnalyticsHighlightRange[] | null | undefined,
+        paletteKey?: AnalyticsHighlightPaletteKey,
+    ) {
         const noteId = this.noteStore.activeNoteId();
         if (!noteId || !ranges?.length) return;
 
-        if (this.activeHighlightId() !== id) {
-            this.prettyTextApi.clearAnalyticsHighlights();
+        const enrichedRanges = this.enrichAnalyticsHighlightRanges(ranges);
+        if (enrichedRanges.length === 0) {
+            return;
         }
 
-        this.prettyTextApi.toggleAnalyticsHighlights(noteId, id, kind, label, ranges);
+        this.prettyTextApi.toggleAnalyticsHighlights(noteId, id, kind, label, enrichedRanges, paletteKey);
 
         if (this.activeHighlightId() === id) {
             this.activeHighlightId.set(null);
         } else {
             this.activeHighlightId.set(id);
         }
+    }
+
+    toggleSentenceVariationHighlight(bucket: SentenceVariationBucket, _label?: string): void {
+        if (!this.hasSentenceVariationBucket(bucket)) {
+            return;
+        }
+
+        this.activeVariationBuckets.update(current => {
+            const next = new Set(current);
+            if (next.has(bucket)) {
+                next.delete(bucket);
+            } else {
+                next.add(bucket);
+            }
+            return next;
+        });
     }
 
     private buildOpenNoteMatchResult(query: string): AnalyticsSearchResult | null {
@@ -765,7 +834,6 @@ export class AnalyticsPanelComponent {
             : undefined;
         const textCandidates = [
             this.currentPlainText(),
-            parseContentToPlainText(currentNote?.content || ''),
             currentNote?.markdownContent || '',
         ];
         const text = textCandidates.find(candidate => candidate.trim().length > 0) || '';
@@ -805,4 +873,62 @@ export class AnalyticsPanelComponent {
         if (seconds === 0) return `${minutes} min`;
         return `${minutes} min ${seconds} sec`;
     }
+
+    private buildSentenceVariationSelections(
+        noteId: string,
+        buckets: ReadonlySet<SentenceVariationBucket>,
+        text: string,
+        analytics: TextAnalytics,
+    ): AnalyticsHighlightSelection[] {
+        return Array.from(buckets)
+            .map(bucket => ({
+                noteId,
+                key: `sentence-variation:${bucket}`,
+                kind: 'sentence_variation' as const,
+                label: this.getSentenceVariationLabel(bucket),
+                paletteKey: bucket,
+                ranges: analytics.cadence.sentences
+                    .filter(sentence => sentence.bucket === bucket && sentence.to > sentence.from)
+                    .map(sentence => ({
+                        from: sentence.from,
+                        to: sentence.to,
+                        text: text.slice(sentence.from, sentence.to),
+                    }))
+                    .filter(range => range.text.length > 0),
+            }))
+            .filter(selection => selection.ranges.length > 0);
+    }
+
+    private hasSentenceVariationBucket(bucket: SentenceVariationBucket): boolean {
+        return this.analytics().cadence.sentences.some(
+            sentence => sentence.bucket === bucket && sentence.to > sentence.from,
+        );
+    }
+
+    private enrichAnalyticsHighlightRanges(ranges: AnalyticsHighlightRange[]): AnalyticsHighlightRange[] {
+        return ranges.filter(range => range.to > range.from && range.text.trim().length > 0);
+    }
+
+    private getSentenceVariationLabel(bucket: SentenceVariationBucket): string {
+        switch (bucket) {
+            case '1':
+                return '1 word';
+            case '2-6':
+                return '2-6 words';
+            case '7-15':
+                return '7-15 words';
+            case '16-25':
+                return '16-25 words';
+            case '26-39':
+                return '26-39 words';
+            case '40+':
+                return '40+ words';
+        }
+    }
+
+    private restoreAnalyticsPanelState(noteId: string | null | undefined): void {
+        const normalizedNoteId = noteId ?? null;
+        this.activeVariationBuckets.set(analyticsHighlightStore.getActiveVariationBuckets(normalizedNoteId));
+    }
+
 }

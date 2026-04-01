@@ -31,30 +31,40 @@
 
     <!-- Content Area -->
     <div class="flex-1 overflow-hidden bg-hub relative">
-        <!-- Inline [style.display] to guarantee tab visibility toggling (CSS classes were losing specificity battles) -->
-        <app-graph-tab class="h-full w-full"
-            [style.display]="activeTab() === 'graph' ? 'block' : 'none'"></app-graph-tab>
-        <app-theme-tab class="h-full w-full"
-            [style.display]="activeTab() === 'theme' ? 'block' : 'none'"></app-theme-tab>
-        <app-patterns-tab class="h-full w-full"
-            [style.display]="activeTab() === 'patterns' ? 'block' : 'none'"></app-patterns-tab>
-        <app-plot-threads-tab class="h-full w-full"
-            [style.display]="activeTab() === 'plot-threads' ? 'block' : 'none'"></app-plot-threads-tab>
-        <app-worldbuilding-tab class="h-full w-full"
-            [style.display]="activeTab() === 'worldbuilding' ? 'block' : 'none'"></app-worldbuilding-tab>
+        @switch (activeTab()) {
+            @case ('graph') {
+                <app-graph-tab class="h-full w-full"></app-graph-tab>
+            }
 
-        @if (!['graph', 'theme', 'patterns', 'plot-threads', 'worldbuilding'].includes(activeTab())) {
-        <div class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
-            <div
-                class="text-center p-8 border rounded-xl bg-background/50 backdrop-blur-sm border-dashed border-border/60">
-                <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                    <i [class]="'text-2xl ' + activeTabIcon"></i>
+            @case ('theme') {
+                <app-theme-tab class="h-full w-full"></app-theme-tab>
+            }
+
+            @case ('patterns') {
+                <app-patterns-tab class="h-full w-full"></app-patterns-tab>
+            }
+
+            @case ('plot-threads') {
+                <app-plot-threads-tab class="h-full w-full"></app-plot-threads-tab>
+            }
+
+            @case ('worldbuilding') {
+                <app-worldbuilding-tab class="h-full w-full"></app-worldbuilding-tab>
+            }
+
+            @default {
+                <div class="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
+                    <div
+                        class="text-center p-8 border rounded-xl bg-background/50 backdrop-blur-sm border-dashed border-border/60">
+                        <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                            <i [class]="'text-2xl ' + activeTabIcon"></i>
+                        </div>
+                        <h3 class="font-medium text-lg text-foreground">{{ activeTabLabel }}</h3>
+                        <p class="text-sm mt-2 max-w-xs mx-auto">This module is not yet implemented in the Angular build.
+                        </p>
+                    </div>
                 </div>
-                <h3 class="font-medium text-lg text-foreground">{{ activeTabLabel }}</h3>
-                <p class="text-sm mt-2 max-w-xs mx-auto">This module is not yet implemented in the Angular build.
-                </p>
-            </div>
-        </div>
+            }
         }
     </div>
 </div>

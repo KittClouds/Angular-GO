@@ -3,8 +3,8 @@
     width: 100%;
 }
 
-/* Character count health gradient styling */
-::ng-deep .char-health-gradient {
+/* Shared note health gradient styling */
+::ng-deep .health-gradient {
     font-size: 12px !important;
     font-weight: 500;
     /* Subtle text shadow for glow effect */

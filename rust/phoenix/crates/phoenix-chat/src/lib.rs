@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use phoenix_om::{approx_token_count, OmEngine};
 use phoenix_store_cozo::{PhoenixCozoStore, StoreError};
 use phoenix_types::{
-    CapabilityProfile, ChatRun, ChatRunEvent, ChatRunSnapshot, ChatRunStatus, ChatRuntimeConfig,
-    Diagnostic, EvidenceItem, OmPendingAction, RunOptions, Thread, ThreadId, ThreadMessage,
-    ToolResultSubmission,
+    CapabilityProfile, ChatApprovalRequest, ChatPlannerMessage, ChatRun, ChatRunEvent,
+    ChatRunSnapshot, ChatRunStatus, ChatRuntimeConfig, ChatToolCall, Diagnostic, EvidenceItem,
+    OmPendingAction, RunOptions, Thread, ThreadId, ThreadMessage, ToolResultSubmission,
 };
 use serde_json::{json, Value};
 
@@ -151,6 +151,11 @@ impl PhoenixChat {
             })?;
             delete_rows_with_filter(store, "chat_approval_requests", |row| {
                 row.get("run_id").and_then(Value::as_str) == Some(run_id.as_str())
+            })?;
+            delete_rows_with_filter(store, "workspace_artifacts", |row| {
+                row.get("thread_id").and_then(Value::as_str) == Some(run_id.as_str())
+                    && row.get("produced_by").and_then(Value::as_str)
+                        == Some("phoenix-chat-rlm")
             })?;
         }
         delete_rows_with_filter(store, "chat_runs", |row| {
@@ -309,7 +314,12 @@ impl PhoenixChat {
             .ok_or_else(|| StoreError::Query(format!("thread not found: {thread_id}")))?;
         let now = now_ms();
         let deadline_at = now + options.deadline_ms.max(0);
-        let capabilities = default_capabilities(&self.current_config());
+        let planner_enabled = options.planner_enabled && options.workspace_enabled;
+        let mut capabilities = default_capabilities(&self.current_config());
+        capabilities.workspace_enabled = options.workspace_enabled;
+        capabilities.planner_enabled = planner_enabled;
+        capabilities.block_search = planner_enabled;
+        capabilities.ts_tool_host = planner_enabled && options.mutations_enabled;
         let mut run = ChatRun {
             id: generate_id("run", now),
             thread_id: thread.id.clone(),
@@ -391,7 +401,9 @@ impl PhoenixChat {
             build_prepared_system_prompt(&options, &run.prepared_context, om_context.as_deref());
         run.evidence_json = serde_json::to_string(&evidence)
             .map_err(|error| StoreError::Query(error.to_string()))?;
-        run.status = if gathered.diagnostics.is_empty() {
+        run.status = if planner_enabled {
+            ChatRunStatus::Planning
+        } else if gathered.diagnostics.is_empty() {
             ChatRunStatus::ReadyToAnswer
         } else {
             ChatRunStatus::Degraded
@@ -405,9 +417,21 @@ impl PhoenixChat {
                 run_id: run.id.clone(),
                 phase: "answer".to_owned(),
                 kind: "status".to_owned(),
-                label: "Ready to answer".to_owned(),
-                detail: Some("Prepared the final reply prompt.".to_owned()),
-                status: Some("done".to_owned()),
+                label: if planner_enabled {
+                    "Planning".to_owned()
+                } else {
+                    "Ready to answer".to_owned()
+                },
+                detail: Some(if planner_enabled {
+                    "Planner session started.".to_owned()
+                } else {
+                    "Prepared the final reply prompt.".to_owned()
+                }),
+                status: Some(if planner_enabled {
+                    "running".to_owned()
+                } else {
+                    "done".to_owned()
+                }),
                 payload: None,
                 latency_ms: None,
                 created_at: run.updated_at,
@@ -435,13 +459,17 @@ impl PhoenixChat {
         } else {
             serde_json::from_str(&run.missing_capabilities_json).unwrap_or_default()
         };
+        let tool_calls = self.list_tool_calls(store, run_id)?;
+        let approvals = self.list_approvals(store, run_id)?;
         Ok(Some(ChatRunSnapshot {
             run,
             events,
-            tool_calls: Vec::new(),
-            approvals: Vec::new(),
+            tool_calls,
+            approvals,
             evidence,
             missing_capabilities,
+            planner_step: None,
+            artifacts: Vec::new(),
         }))
     }
 
@@ -618,26 +646,238 @@ impl PhoenixChat {
 
     pub fn submit_tool_results(
         &self,
-        _store: &PhoenixCozoStore,
-        _run_id: &str,
-        _results: &[ToolResultSubmission],
+        store: &PhoenixCozoStore,
+        run_id: &str,
+        results: &[ToolResultSubmission],
     ) -> Result<ChatRunSnapshot, StoreError> {
-        Err(StoreError::Query(
-            "main Phoenix agent does not support tool result submission".to_owned(),
-        ))
+        let Some(mut run) = self.get_run(store, run_id)? else {
+            return Err(StoreError::Query(format!("run not found: {run_id}")));
+        };
+
+        let mut messages = self.parse_planner_messages(&run);
+        let mut evidence = self.parse_evidence(&run);
+        let mut created_approval = false;
+        let now = now_ms();
+
+        for result in results {
+            let Some(mut call) = self.resolve_tool_call(store, run_id, result)? else {
+                continue;
+            };
+
+            call.completed_at = Some(now);
+            if let Some(started_at) = call.started_at {
+                call.latency_ms = Some(now.saturating_sub(started_at));
+            }
+
+            if let Some(error) = result.error.as_ref().filter(|value| !value.trim().is_empty()) {
+                let payload = serde_json::to_string(&json!({ "error": error }))
+                    .map_err(|err| StoreError::Query(err.to_string()))?;
+                call.status = "failed".to_owned();
+                call.error = Some(error.clone());
+                call.result_json = Some(payload.clone());
+                messages.push(tool_message(&call.tool_name, &call.tool_call_id, payload.clone()));
+                self.persist_event(
+                    store,
+                    &ChatRunEvent {
+                        id: generate_id("event", now),
+                        run_id: run.id.clone(),
+                        phase: "executing_tools".to_owned(),
+                        kind: "tool".to_owned(),
+                        label: call.tool_name.clone(),
+                        detail: Some(error.clone()),
+                        status: Some("error".to_owned()),
+                        payload: Some(payload),
+                        latency_ms: call.latency_ms,
+                        created_at: now,
+                    },
+                )?;
+            } else if let Some(mut proposal) = result.proposal.clone() {
+                created_approval = true;
+                let approval_id = if proposal.proposal_id.trim().is_empty() {
+                    generate_id("approval", now)
+                } else {
+                    proposal.proposal_id.clone()
+                };
+                proposal.proposal_id = approval_id.clone();
+                let proposal_json = serde_json::to_string(&proposal)
+                    .map_err(|err| StoreError::Query(err.to_string()))?;
+                let approval = ChatApprovalRequest {
+                    id: approval_id.clone(),
+                    run_id: run_id.to_owned(),
+                    tool_call_id: call.tool_call_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    status: "pending".to_owned(),
+                    affected_note_id: proposal.affected_note_id.clone(),
+                    summary: proposal.summary.clone(),
+                    diff_preview: proposal.diff_preview.clone(),
+                    expected_revision: proposal.expected_revision,
+                    rollback_token: proposal.rollback_token.clone(),
+                    proposal_json: Some(proposal_json.clone()),
+                    decision_json: None,
+                    created_at: now,
+                    updated_at: now,
+                };
+                self.persist_approval(store, &approval)?;
+                call.approval_id = Some(approval_id);
+                call.status = "awaiting_approval".to_owned();
+                self.persist_event(
+                    store,
+                    &ChatRunEvent {
+                        id: generate_id("event", now),
+                        run_id: run.id.clone(),
+                        phase: "awaiting_approval".to_owned(),
+                        kind: "tool".to_owned(),
+                        label: call.tool_name.clone(),
+                        detail: Some(proposal.summary.clone()),
+                        status: Some("running".to_owned()),
+                        payload: Some(proposal_json),
+                        latency_ms: call.latency_ms,
+                        created_at: now,
+                    },
+                )?;
+            } else {
+                let payload = normalize_json_payload(result.result_json.as_deref());
+                call.status = "completed".to_owned();
+                call.result_json = Some(payload.clone());
+                messages.push(tool_message(&call.tool_name, &call.tool_call_id, payload.clone()));
+                evidence.push(make_tool_evidence(&run.id, &call.tool_name, &payload));
+                self.persist_event(
+                    store,
+                    &ChatRunEvent {
+                        id: generate_id("event", now),
+                        run_id: run.id.clone(),
+                        phase: "executing_tools".to_owned(),
+                        kind: "tool".to_owned(),
+                        label: call.tool_name.clone(),
+                        detail: Some("Tool host returned result".to_owned()),
+                        status: Some("done".to_owned()),
+                        payload: Some(payload),
+                        latency_ms: call.latency_ms,
+                        created_at: now,
+                    },
+                )?;
+            }
+
+            self.persist_tool_call(store, &call)?;
+        }
+
+        let pending_host = self
+            .list_tool_calls(store, run_id)?
+            .into_iter()
+            .any(|call| call.host == "typescript" && call.status == "pending_host");
+        let pending_approvals = self
+            .list_approvals(store, run_id)?
+            .into_iter()
+            .any(|approval| approval.status == "pending");
+
+        run.planner_messages_json =
+            serde_json::to_string(&messages).map_err(|err| StoreError::Query(err.to_string()))?;
+        run.evidence_json =
+            serde_json::to_string(&evidence).map_err(|err| StoreError::Query(err.to_string()))?;
+        run.updated_at = now;
+        run.status = if pending_host {
+            ChatRunStatus::AwaitingToolHost
+        } else if created_approval || pending_approvals {
+            ChatRunStatus::AwaitingApproval
+        } else {
+            ChatRunStatus::Planning
+        };
+        self.persist_run(store, &run)?;
+        self.poll_run(store, run_id)?
+            .ok_or_else(|| StoreError::Query(format!("run not found: {run_id}")))
     }
 
     pub fn submit_approval(
         &self,
-        _store: &PhoenixCozoStore,
-        _run_id: &str,
-        _approval_id: &str,
-        _approved: bool,
-        _decision_json: Option<&str>,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+        approval_id: &str,
+        approved: bool,
+        decision_json: Option<&str>,
     ) -> Result<ChatRunSnapshot, StoreError> {
-        Err(StoreError::Query(
-            "main Phoenix agent does not support approval submission".to_owned(),
-        ))
+        let Some(mut run) = self.get_run(store, run_id)? else {
+            return Err(StoreError::Query(format!("run not found: {run_id}")));
+        };
+        let Some(mut approval) = self.get_approval(store, run_id, approval_id)? else {
+            return Err(StoreError::Query(format!("approval not found: {approval_id}")));
+        };
+
+        let now = now_ms();
+        let status = if approved { "approved" } else { "rejected" };
+        let decision_json = normalize_json_payload(
+            decision_json.or_else(|| {
+                if approved {
+                    Some(r#"{"approved":true}"#)
+                } else {
+                    Some(r#"{"approved":false}"#)
+                }
+            }),
+        );
+
+        approval.status = status.to_owned();
+        approval.decision_json = Some(decision_json.clone());
+        approval.updated_at = now;
+        self.persist_approval(store, &approval)?;
+
+        if let Some(mut call) = self.find_tool_call_by_tool_call_id(store, run_id, &approval.tool_call_id)? {
+            call.status = status.to_owned();
+            call.result_json = Some(decision_json.clone());
+            call.completed_at = Some(now);
+            if let Some(started_at) = call.started_at {
+                call.latency_ms = Some(now.saturating_sub(started_at));
+            }
+            self.persist_tool_call(store, &call)?;
+        }
+
+        let mut messages = self.parse_planner_messages(&run);
+        if !approval.tool_call_id.trim().is_empty() {
+            messages.push(tool_message(
+                &approval.tool_name,
+                &approval.tool_call_id,
+                decision_json.clone(),
+            ));
+        }
+        let mut evidence = self.parse_evidence(&run);
+        if approved {
+            evidence.push(make_tool_evidence(&run.id, &approval.tool_name, &decision_json));
+        }
+
+        let has_pending_approvals = self
+            .list_approvals(store, run_id)?
+            .into_iter()
+            .any(|item| item.status == "pending");
+        run.planner_messages_json =
+            serde_json::to_string(&messages).map_err(|err| StoreError::Query(err.to_string()))?;
+        run.evidence_json =
+            serde_json::to_string(&evidence).map_err(|err| StoreError::Query(err.to_string()))?;
+        run.status = if has_pending_approvals {
+            ChatRunStatus::AwaitingApproval
+        } else {
+            ChatRunStatus::Planning
+        };
+        run.updated_at = now;
+        self.persist_run(store, &run)?;
+        self.persist_event(
+            store,
+            &ChatRunEvent {
+                id: generate_id("event", now),
+                run_id: run.id.clone(),
+                phase: "awaiting_approval".to_owned(),
+                kind: "status".to_owned(),
+                label: approval.tool_name.clone(),
+                detail: Some(if approved {
+                    "Proposal approved".to_owned()
+                } else {
+                    "Proposal rejected".to_owned()
+                }),
+                status: Some("done".to_owned()),
+                payload: Some(decision_json),
+                latency_ms: None,
+                created_at: now,
+            },
+        )?;
+        self.poll_run(store, run_id)?
+            .ok_or_else(|| StoreError::Query(format!("run not found: {run_id}")))
     }
 
     fn touch_thread(
@@ -701,7 +941,7 @@ impl PhoenixChat {
         )
     }
 
-    fn persist_run(&self, store: &PhoenixCozoStore, run: &ChatRun) -> Result<(), StoreError> {
+    pub fn persist_run(&self, store: &PhoenixCozoStore, run: &ChatRun) -> Result<(), StoreError> {
         store.put_row(
             "chat_runs",
             json!({
@@ -727,7 +967,7 @@ impl PhoenixChat {
         )
     }
 
-    fn persist_event(
+    pub fn persist_event(
         &self,
         store: &PhoenixCozoStore,
         event: &ChatRunEvent,
@@ -762,7 +1002,7 @@ impl PhoenixChat {
             .transpose()?)
     }
 
-    fn get_run(
+    pub fn get_run(
         &self,
         store: &PhoenixCozoStore,
         run_id: &str,
@@ -775,7 +1015,7 @@ impl PhoenixChat {
             .transpose()?)
     }
 
-    fn list_run_events(
+    pub fn list_run_events(
         &self,
         store: &PhoenixCozoStore,
         run_id: &str,
@@ -792,6 +1032,187 @@ impl PhoenixChat {
                 .then_with(|| left.id.cmp(&right.id))
         });
         Ok(events)
+    }
+
+    pub fn list_tool_calls(
+        &self,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+    ) -> Result<Vec<ChatToolCall>, StoreError> {
+        let mut calls = store
+            .fetch_rows("chat_tool_calls")?
+            .into_iter()
+            .filter(|row| row.get("run_id").and_then(Value::as_str) == Some(run_id))
+            .map(tool_call_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        calls.sort_by(|left, right| {
+            left.started_at
+                .cmp(&right.started_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(calls)
+    }
+
+    pub fn get_tool_call(
+        &self,
+        store: &PhoenixCozoStore,
+        call_id: &str,
+    ) -> Result<Option<ChatToolCall>, StoreError> {
+        Ok(store
+            .fetch_rows("chat_tool_calls")?
+            .into_iter()
+            .find(|row| row.get("id").and_then(Value::as_str) == Some(call_id))
+            .map(tool_call_from_row)
+            .transpose()?)
+    }
+
+    pub fn find_tool_call_by_tool_call_id(
+        &self,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+        tool_call_id: &str,
+    ) -> Result<Option<ChatToolCall>, StoreError> {
+        Ok(store
+            .fetch_rows("chat_tool_calls")?
+            .into_iter()
+            .find(|row| {
+                row.get("run_id").and_then(Value::as_str) == Some(run_id)
+                    && row.get("tool_call_id").and_then(Value::as_str) == Some(tool_call_id)
+            })
+            .map(tool_call_from_row)
+            .transpose()?)
+    }
+
+    pub fn persist_tool_call(
+        &self,
+        store: &PhoenixCozoStore,
+        call: &ChatToolCall,
+    ) -> Result<(), StoreError> {
+        store.put_row(
+            "chat_tool_calls",
+            json!({
+                "id": call.id,
+                "run_id": call.run_id,
+                "tool_call_id": call.tool_call_id,
+                "tool_name": call.tool_name,
+                "host": call.host,
+                "class": call.class,
+                "status": call.status,
+                "arguments_json": json_string_or_value(&call.arguments_json),
+                "result_json": call.result_json.clone().unwrap_or_default(),
+                "error": call.error.clone().unwrap_or_default(),
+                "idempotency_key": call.idempotency_key.clone().unwrap_or_default(),
+                "approval_id": call.approval_id.clone().unwrap_or_default(),
+                "started_at": call.started_at.unwrap_or_default(),
+                "completed_at": call.completed_at.unwrap_or_default(),
+                "latency_ms": call.latency_ms.unwrap_or_default(),
+            }),
+        )
+    }
+
+    pub fn list_approvals(
+        &self,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+    ) -> Result<Vec<ChatApprovalRequest>, StoreError> {
+        let mut approvals = store
+            .fetch_rows("chat_approval_requests")?
+            .into_iter()
+            .filter(|row| row.get("run_id").and_then(Value::as_str) == Some(run_id))
+            .map(approval_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        approvals.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(approvals)
+    }
+
+    pub fn get_approval(
+        &self,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+        approval_id: &str,
+    ) -> Result<Option<ChatApprovalRequest>, StoreError> {
+        Ok(store
+            .fetch_rows("chat_approval_requests")?
+            .into_iter()
+            .find(|row| {
+                row.get("run_id").and_then(Value::as_str) == Some(run_id)
+                    && row.get("id").and_then(Value::as_str) == Some(approval_id)
+            })
+            .map(approval_from_row)
+            .transpose()?)
+    }
+
+    pub fn persist_approval(
+        &self,
+        store: &PhoenixCozoStore,
+        approval: &ChatApprovalRequest,
+    ) -> Result<(), StoreError> {
+        store.put_row(
+            "chat_approval_requests",
+            json!({
+                "id": approval.id,
+                "run_id": approval.run_id,
+                "tool_call_id": approval.tool_call_id,
+                "tool_name": approval.tool_name,
+                "status": approval.status,
+                "affected_note_id": approval.affected_note_id.clone().unwrap_or_default(),
+                "summary": approval.summary,
+                "diff_preview": approval.diff_preview.clone().unwrap_or_default(),
+                "expected_revision": approval.expected_revision.unwrap_or(-1),
+                "rollback_token": approval.rollback_token.clone().unwrap_or_default(),
+                "proposal_json": approval
+                    .proposal_json
+                    .as_deref()
+                    .map(json_string_or_value)
+                    .unwrap_or_else(|| Value::String(String::new())),
+                "decision_json": approval
+                    .decision_json
+                    .as_deref()
+                    .map(json_string_or_value)
+                    .unwrap_or_else(|| Value::String(String::new())),
+                "created_at": approval.created_at,
+                "updated_at": approval.updated_at,
+            }),
+        )
+    }
+
+    fn resolve_tool_call(
+        &self,
+        store: &PhoenixCozoStore,
+        run_id: &str,
+        result: &ToolResultSubmission,
+    ) -> Result<Option<ChatToolCall>, StoreError> {
+        if let Some(call_id) = result.call_id.as_deref().filter(|value| !value.trim().is_empty()) {
+            return self.get_tool_call(store, call_id);
+        }
+        if let Some(tool_call_id) = result
+            .tool_call_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            return self.find_tool_call_by_tool_call_id(store, run_id, tool_call_id);
+        }
+        Ok(None)
+    }
+
+    fn parse_planner_messages(&self, run: &ChatRun) -> Vec<ChatPlannerMessage> {
+        if run.planner_messages_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&run.planner_messages_json).unwrap_or_default()
+        }
+    }
+
+    fn parse_evidence(&self, run: &ChatRun) -> Vec<EvidenceItem> {
+        if run.evidence_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&run.evidence_json).unwrap_or_default()
+        }
     }
 }
 
@@ -978,6 +1399,59 @@ fn event_from_row(row: Value) -> Result<ChatRunEvent, StoreError> {
     })
 }
 
+fn tool_call_from_row(row: Value) -> Result<ChatToolCall, StoreError> {
+    let object = row.as_object().ok_or(StoreError::InvalidRow)?;
+    Ok(ChatToolCall {
+        id: string_field(object, "id"),
+        run_id: string_field(object, "run_id"),
+        tool_call_id: string_field(object, "tool_call_id"),
+        tool_name: string_field(object, "tool_name"),
+        host: string_field(object, "host"),
+        class: string_field(object, "class"),
+        status: string_field(object, "status"),
+        arguments_json: json_column_to_string(object.get("arguments_json")),
+        result_json: string_opt_field(object, "result_json"),
+        error: string_opt_field(object, "error"),
+        idempotency_key: string_opt_field(object, "idempotency_key"),
+        approval_id: string_opt_field(object, "approval_id"),
+        started_at: object
+            .get("started_at")
+            .and_then(Value::as_i64)
+            .filter(|value| *value > 0),
+        completed_at: object
+            .get("completed_at")
+            .and_then(Value::as_i64)
+            .filter(|value| *value > 0),
+        latency_ms: object
+            .get("latency_ms")
+            .and_then(Value::as_i64)
+            .filter(|value| *value > 0),
+    })
+}
+
+fn approval_from_row(row: Value) -> Result<ChatApprovalRequest, StoreError> {
+    let object = row.as_object().ok_or(StoreError::InvalidRow)?;
+    Ok(ChatApprovalRequest {
+        id: string_field(object, "id"),
+        run_id: string_field(object, "run_id"),
+        tool_call_id: string_field(object, "tool_call_id"),
+        tool_name: string_field(object, "tool_name"),
+        status: string_field(object, "status"),
+        affected_note_id: string_opt_field(object, "affected_note_id"),
+        summary: string_field(object, "summary"),
+        diff_preview: string_opt_field(object, "diff_preview"),
+        expected_revision: object
+            .get("expected_revision")
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 0),
+        rollback_token: string_opt_field(object, "rollback_token"),
+        proposal_json: json_opt_column_to_string(object.get("proposal_json")),
+        decision_json: json_opt_column_to_string(object.get("decision_json")),
+        created_at: int_field(object, "created_at"),
+        updated_at: int_field(object, "updated_at"),
+    })
+}
+
 fn string_field(object: &serde_json::Map<String, Value>, key: &str) -> String {
     object
         .get(key)
@@ -1008,6 +1482,66 @@ fn json_column_to_string(value: Option<&Value>) -> String {
         Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "[]".to_owned()),
         None => "[]".to_owned(),
     }
+}
+
+fn json_opt_column_to_string(value: Option<&Value>) -> Option<String> {
+    value.and_then(|raw| match raw {
+        Value::Null => None,
+        Value::String(text) if text.trim().is_empty() => None,
+        Value::String(text) => Some(text.clone()),
+        other => serde_json::to_string(other).ok(),
+    })
+}
+
+fn normalize_json_payload(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "null".to_owned();
+    };
+    if serde_json::from_str::<Value>(value).is_ok() {
+        value.to_owned()
+    } else {
+        serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned())
+    }
+}
+
+fn tool_message(tool_name: &str, tool_call_id: &str, payload: String) -> ChatPlannerMessage {
+    ChatPlannerMessage {
+        role: "tool".to_owned(),
+        content: payload,
+        name: Some(tool_name.to_owned()),
+        tool_call_id: Some(tool_call_id.to_owned()),
+        tool_calls: Vec::new(),
+    }
+}
+
+fn make_tool_evidence(run_id: &str, tool_name: &str, payload: &str) -> EvidenceItem {
+    EvidenceItem {
+        id: generate_id("evidence", now_ms()),
+        source: tool_name.to_owned(),
+        title: Some(pretty_tool_label(tool_name)),
+        content: payload.trim().chars().take(2_000).collect(),
+        score: None,
+        metadata: Some(
+            [("runId".to_owned(), Value::String(run_id.to_owned()))]
+                .into_iter()
+                .collect(),
+        ),
+    }
+}
+
+fn pretty_tool_label(tool_name: &str) -> String {
+    tool_name
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(not(target_arch = "wasm32"))]

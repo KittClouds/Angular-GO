@@ -56,10 +56,13 @@ vi.mock('../lib/store/highlightingStore', () => ({
 vi.mock('../lib/store/analyticsHighlightStore', () => ({
     analyticsHighlightStore: {
         subscribe: vi.fn(),
-        getSelection: vi.fn(() => null),
+        getSelections: vi.fn(() => []),
         clearForNote: vi.fn(),
         setSelection: vi.fn(),
         toggleSelection: vi.fn(),
+        setSentenceVariationHighlights: vi.fn(),
+        clearSentenceVariationHighlights: vi.fn(),
+        clearDetailSelection: vi.fn(),
         clear: vi.fn(),
     }
 }));
@@ -129,45 +132,50 @@ describe('PrettyTextAPI implicit discovery behavior', () => {
         return { mod, api };
     }
 
-    it('uses skipDiscovery=true for implicit note-open scans', async () => {
+    it('uses skipDiscovery=true and skipGraph=true for note-open implicit priming', async () => {
         const { api } = await loadApi();
         api.setNoteId('note-1', 'world-1');
 
-        api.getDecorations({ type: 'doc' } as any);
+        api.primeImplicitDecorations({ type: 'doc' } as any);
+        await Promise.resolve();
         await Promise.resolve();
 
         expect(runMock).toHaveBeenCalledTimes(1);
         expect(runMock.mock.calls[0][1]).toMatchObject({
             skipDiscovery: true,
-            noteId: 'note-1',
+            skipGraph: true,
         });
         expect(addCandidatesMock).not.toHaveBeenCalled();
     });
 
-    it('keeps gokitt-ready rescans discovery-free', async () => {
+    it('keeps gokitt-ready rescans highlight-only', async () => {
         const { api } = await loadApi();
         api.setNoteId('note-1', 'world-1');
+        api.primeImplicitDecorations({ type: 'doc' } as any);
+        await Promise.resolve();
+        runMock.mockClear();
 
         window.dispatchEvent(new Event('gokitt-ready'));
-        api.getDecorations({ type: 'doc' } as any);
+        await Promise.resolve();
         await Promise.resolve();
 
         expect(runMock.mock.calls.length).toBeGreaterThan(0);
-        expect(runMock.mock.calls.every(([, opts]) => opts.skipDiscovery === true)).toBe(true);
+        expect(runMock.mock.calls.every(([, opts]) => opts.skipDiscovery === true && opts.skipGraph === true)).toBe(true);
     });
 
-    it('keeps forceRescan discovery-free', async () => {
+    it('keeps forceRescan highlight-only', async () => {
         const { api } = await loadApi();
         api.setNoteId('note-1', 'world-1');
         (api as any).lastDoc = { type: 'doc' };
 
         api.forceRescan();
         await Promise.resolve();
+        await Promise.resolve();
 
         expect(runMock).toHaveBeenCalledTimes(1);
         expect(runMock.mock.calls[0][1]).toMatchObject({
             skipDiscovery: true,
-            noteId: 'note-1',
+            skipGraph: true,
         });
     });
 });

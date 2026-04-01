@@ -137,6 +137,69 @@ export interface EvidenceItem {
     metadata?: Record<string, unknown>;
 }
 
+export interface ChatWorkspaceArtifact {
+    key: string;
+    runId: string;
+    narrativeId: string;
+    folderId: string;
+    kind: string;
+    payload: unknown;
+    pinned: boolean;
+    producedBy: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface ChatPlannerToolSpec {
+    name: string;
+    description: string;
+    parametersJson: unknown;
+}
+
+export interface ChatPlannerToolCall {
+    id: string;
+    name: string;
+    argumentsJson: string;
+}
+
+export interface ChatPlannerMessage {
+    role: string;
+    content: string;
+    name?: string;
+    toolCallId?: string;
+    toolCalls: ChatPlannerToolCall[];
+}
+
+export interface ChatPlannerModelRequest {
+    runId: string;
+    threadId: string;
+    model: string;
+    allowTools: boolean;
+    tools: ChatPlannerToolSpec[];
+    messages: ChatPlannerMessage[];
+}
+
+export interface ChatPlannerModelResponse {
+    content: string;
+    toolCalls: ChatPlannerToolCall[];
+}
+
+export type ChatPlannerStep =
+    | {
+          kind: 'modelRequest';
+          request: ChatPlannerModelRequest;
+      }
+    | {
+          kind: 'toolCalls';
+          runId: string;
+          toolCalls: ChatPlannerToolCall[];
+      }
+    | {
+          kind: 'complete';
+          runId: string;
+          response: string;
+      };
+
 export interface ChatRun {
     id: string;
     threadId: string;
@@ -224,6 +287,8 @@ export interface ChatRunSnapshot {
     approvals: ChatApprovalRequest[];
     evidence: EvidenceItem[];
     missingCapabilities: string[];
+    plannerStep?: ChatPlannerStep | null;
+    artifacts: ChatWorkspaceArtifact[];
 }
 
 export interface ToolResultSubmission {
@@ -566,19 +631,132 @@ export class PhoenixChatService {
         }
     }
 
-    async submitToolResults(runId: string, _results: ToolResultSubmission[]): Promise<ChatRunSnapshot | null> {
-        console.warn('[PhoenixChatService] Main Phoenix agent does not support tool result submission', runId);
-        return null;
+    async getPlannerStep(runId: string): Promise<ChatPlannerStep | null> {
+        await this.ensureInitialized();
+        try {
+            const raw = await this.phoenix.chatGetPlannerStep(runId);
+            return raw ? toChatPlannerStep(raw) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Get planner step error:', error);
+            return null;
+        }
+    }
+
+    async submitPlannerModelResponse(
+        runId: string,
+        response: ChatPlannerModelResponse,
+    ): Promise<ChatPlannerStep | null> {
+        await this.ensureInitialized();
+        try {
+            const raw = await this.phoenix.chatSubmitPlannerModelResponse(runId, response);
+            return raw ? toChatPlannerStep(raw) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Submit planner model response error:', error);
+            return null;
+        }
+    }
+
+    async advancePlannerRun(runId: string): Promise<ChatPlannerStep | null> {
+        await this.ensureInitialized();
+        try {
+            const raw = await this.phoenix.chatAdvancePlannerRun(runId);
+            return raw ? toChatPlannerStep(raw) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Advance planner run error:', error);
+            return null;
+        }
+    }
+
+    async degradePlannerRun(runId: string, reason: string): Promise<ChatRunSnapshot | null> {
+        await this.ensureInitialized();
+        try {
+            const raw = await this.phoenix.chatDegradePlannerRun(runId, reason);
+            this.scheduleSnapshot();
+            return raw ? toChatRunSnapshot(raw) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Degrade planner run error:', error);
+            return null;
+        }
+    }
+
+    async listPlannerArtifacts(runId: string): Promise<ChatWorkspaceArtifact[]> {
+        await this.ensureInitialized();
+        try {
+            const payload = await this.phoenix.chatListPlannerArtifacts(runId);
+            return Array.isArray(payload) ? payload.map(toChatWorkspaceArtifact) : [];
+        } catch (error) {
+            console.error('[PhoenixChatService] List planner artifacts error:', error);
+            return [];
+        }
+    }
+
+    async pinPlannerArtifact(
+        runId: string,
+        key: string,
+        pinned = true,
+    ): Promise<ChatWorkspaceArtifact | null> {
+        await this.ensureInitialized();
+        try {
+            const payload = await this.phoenix.chatPinPlannerArtifact(runId, key, pinned);
+            return payload ? toChatWorkspaceArtifact(payload) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Pin planner artifact error:', error);
+            return null;
+        }
+    }
+
+    async processPlannerRun(runId: string): Promise<boolean> {
+        await this.ensureInitialized();
+        const config = getSetting<ChatConfig | null>('openrouter:config', null);
+        if (!config?.apiKey?.trim()) {
+            await this.degradePlannerRun(runId, 'Planner requires an OpenRouter API key.');
+            return false;
+        }
+
+        try {
+            const processed = await this.phoenix.chatProcessPlannerRun(runId, {
+                apiKey: config.apiKey,
+                defaultModel: config.model || DEFAULT_CHAT_MODEL,
+                temperature: config.temperature,
+                maxTokens: config.maxTokens,
+            });
+            this.scheduleSnapshot();
+            return processed;
+        } catch (error) {
+            console.error('[PhoenixChatService] Planner processing error:', error);
+            const reason = error instanceof Error ? error.message : String(error);
+            await this.degradePlannerRun(runId, reason);
+            return false;
+        }
+    }
+
+    async submitToolResults(runId: string, results: ToolResultSubmission[]): Promise<ChatRunSnapshot | null> {
+        await this.ensureInitialized();
+        try {
+            const payload = await this.phoenix.chatSubmitToolResults(runId, results);
+            this.scheduleSnapshot();
+            return payload ? toChatRunSnapshot(payload) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Submit tool results error:', error);
+            return null;
+        }
     }
 
     async submitApproval(
         runId: string,
-        _approvalId: string,
-        _approved: boolean,
-        _decisionJSON?: string,
+        approvalId: string,
+        approved: boolean,
+        decisionJSON?: string,
     ): Promise<ChatRunSnapshot | null> {
-        console.warn('[PhoenixChatService] Main Phoenix agent does not support approval submission', runId);
-        return null;
+        await this.ensureInitialized();
+        try {
+            const payload = await this.phoenix.chatSubmitApproval(runId, approvalId, approved, decisionJSON);
+            this.scheduleSnapshot();
+            return payload ? toChatRunSnapshot(payload) : null;
+        } catch (error) {
+            console.error('[PhoenixChatService] Submit approval error:', error);
+            return null;
+        }
     }
 
     async resumeRun(runId: string): Promise<ChatRun | null> {
@@ -898,6 +1076,83 @@ function toChatRunEvent(raw: any): ChatRunEvent {
     };
 }
 
+function toChatWorkspaceArtifact(raw: any): ChatWorkspaceArtifact {
+    return {
+        key: stringValue(raw?.key),
+        runId: stringValue(raw?.runId),
+        narrativeId: stringValue(raw?.narrativeId),
+        folderId: stringValue(raw?.folderId),
+        kind: stringValue(raw?.kind),
+        payload: raw?.payload ?? null,
+        pinned: !!raw?.pinned,
+        producedBy: stringValue(raw?.producedBy),
+        createdAt: numeric(raw?.createdAt),
+        updatedAt: numeric(raw?.updatedAt),
+    };
+}
+
+function toChatPlannerToolCall(raw: any): ChatPlannerToolCall {
+    return {
+        id: stringValue(raw?.id),
+        name: stringValue(raw?.name),
+        argumentsJson: stringValue(raw?.argumentsJson, '{}'),
+    };
+}
+
+function toChatPlannerMessage(raw: any): ChatPlannerMessage {
+    return {
+        role: stringValue(raw?.role),
+        content: stringValue(raw?.content),
+        name: raw?.name ? String(raw.name) : undefined,
+        toolCallId: raw?.toolCallId ? String(raw.toolCallId) : undefined,
+        toolCalls: Array.isArray(raw?.toolCalls) ? raw.toolCalls.map(toChatPlannerToolCall) : [],
+    };
+}
+
+function toChatPlannerModelRequest(raw: any): ChatPlannerModelRequest {
+    return {
+        runId: stringValue(raw?.runId),
+        threadId: stringValue(raw?.threadId),
+        model: stringValue(raw?.model),
+        allowTools: !!raw?.allowTools,
+        tools: Array.isArray(raw?.tools)
+            ? raw.tools.map((tool: any) => ({
+                  name: stringValue(tool?.name),
+                  description: stringValue(tool?.description),
+                  parametersJson: tool?.parametersJson ?? null,
+              }))
+            : [],
+        messages: Array.isArray(raw?.messages) ? raw.messages.map(toChatPlannerMessage) : [],
+    };
+}
+
+function toChatPlannerStep(raw: any): ChatPlannerStep | null {
+    const kind = stringValue(raw?.kind);
+    switch (kind) {
+        case 'modelRequest':
+            return {
+                kind,
+                request: toChatPlannerModelRequest(raw?.request),
+            };
+        case 'toolCalls':
+            return {
+                kind,
+                runId: stringValue(raw?.runId),
+                toolCalls: Array.isArray(raw?.toolCalls)
+                    ? raw.toolCalls.map(toChatPlannerToolCall)
+                    : [],
+            };
+        case 'complete':
+            return {
+                kind,
+                runId: stringValue(raw?.runId),
+                response: stringValue(raw?.response),
+            };
+        default:
+            return null;
+    }
+}
+
 function toChatRunSnapshot(raw: any): ChatRunSnapshot {
     return {
         run: toChatRun(raw?.run),
@@ -906,5 +1161,7 @@ function toChatRunSnapshot(raw: any): ChatRunSnapshot {
         approvals: Array.isArray(raw?.approvals) ? raw.approvals : [],
         evidence: Array.isArray(raw?.evidence) ? raw.evidence : [],
         missingCapabilities: Array.isArray(raw?.missingCapabilities) ? raw.missingCapabilities : [],
+        plannerStep: raw?.plannerStep ? toChatPlannerStep(raw.plannerStep) : null,
+        artifacts: Array.isArray(raw?.artifacts) ? raw.artifacts.map(toChatWorkspaceArtifact) : [],
     };
 }

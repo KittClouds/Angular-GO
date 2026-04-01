@@ -1,271 +1,380 @@
-// src/app/components/editor/plugins/prettyTextPlugin.ts
-// =============================================================================
-// PRETTY TEXT PLUGIN: TRUE MARK-BASED (Like Text Color)
-// =============================================================================
-//
-// The key insight: Text color doesn't flicker because it's a MARK stored in
-// the document JSON, applied ONCE and ProseMirror just renders it.
-//
-// This highlighter:
-// - Uses entity MARKS (stored in document JSON, like text color)
-// - Applies marks ONCE on note open
-// - NO constant scanning/rebuilding on every keystroke
-// - NO decorations (those are view-layer only and cause flicker)
-//
-// =============================================================================
-
+import { isDevMode } from '@angular/core';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { $prose } from '@milkdown/kit/utils';
+import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import type { EditorState, Transaction } from '@milkdown/kit/prose/state';
 
 import { getPrettyTextApi } from '../../../api/pretty-text-api';
+import { docContent } from '../../../lib/Scanner/prosemirror-bridge';
 import type { DecorationSpan } from '../../../lib/Scanner/types';
-
-// =============================================================================
-// PLUGIN KEY
-// =============================================================================
+import { smartGraphRegistry } from '../../../lib/registry';
+import {
+    classifyExplicitEntityAttrs,
+    type EntityLookup,
+} from '../entity-mark-sanitizer';
 
 const PRETTY_TEXT_PLUGIN_KEY = new PluginKey('PRETTY_TEXT');
+const WORD_BOUNDARY_RE = /[\s.,!?;:\-\n\r]/;
 
-export const prettyTextPlugin = $prose((ctx) => {
-    const prettyTextApi = getPrettyTextApi();
-    let hasAppliedInitialMarks = false;
-    let lastNoteId = '';
+type EntityAttrs = {
+    type?: string;
+    kind?: string;
+    label?: string;
+    id?: string;
+    mode?: string;
+};
 
-    /**
-     * Apply entity marks to text ranges that don't already have them.
-     * This is the equivalent of clicking the color picker - one-time application.
-     */
-    function applyEntityMarksOnce(view: EditorView, spans: DecorationSpan[]): void {
-        const { state } = view;
-        const entityMarkType = state.schema.marks['entity'];
+type ExplicitEntityOverlap = {
+    hasBlockingMark: boolean;
+    staleRanges: Array<{ from: number; to: number; reason: 'stale' | 'derived'; attrs: EntityAttrs }>;
+};
 
-        if (!entityMarkType) {
-            console.warn('[PrettyTextPlugin] Entity mark type not found in schema');
+type ReconcileImplicitMarksOptions = {
+    mode: string;
+    lookup: EntityLookup;
+    logAutoPrune?: (range: { from: number; to: number; reason: 'stale' | 'derived'; attrs: EntityAttrs }) => void;
+};
+
+function normalizeEntityAttrs(attrs: unknown): EntityAttrs {
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) {
+        return {};
+    }
+
+    const record = attrs as Record<string, unknown>;
+    return {
+        type: typeof record['type'] === 'string' ? record['type'] : undefined,
+        kind: typeof record['kind'] === 'string' ? record['kind'] : undefined,
+        label: typeof record['label'] === 'string' ? record['label'] : undefined,
+        id: typeof record['id'] === 'string' ? record['id'] : undefined,
+        mode: typeof record['mode'] === 'string' ? record['mode'] : undefined,
+    };
+}
+
+function isRangeOverlapping(leftFrom: number, leftTo: number, rightFrom: number, rightTo: number): boolean {
+    return leftFrom < rightTo && rightFrom < leftTo;
+}
+
+function getTextNodeRange(pos: number, nodeSize: number): { from: number; to: number } {
+    return {
+        from: pos,
+        to: pos + nodeSize,
+    };
+}
+
+export function inspectExplicitEntityOverlap(
+    state: EditorState,
+    explicitMarkType: MarkType | undefined,
+    from: number,
+    to: number,
+    lookup: EntityLookup,
+): ExplicitEntityOverlap {
+    if (!explicitMarkType) {
+        return { hasBlockingMark: false, staleRanges: [] };
+    }
+
+    const staleRanges: ExplicitEntityOverlap['staleRanges'] = [];
+    const seenRanges = new Set<string>();
+    let hasBlockingMark = false;
+
+    state.doc.descendants((node, pos) => {
+        if (!node.isText) {
             return;
         }
 
-        let tr = state.tr;
-        let anyAdded = false;
+        const range = getTextNodeRange(pos, node.nodeSize);
+        if (!isRangeOverlapping(range.from, range.to, from, to)) {
+            return;
+        }
 
-        for (const span of spans) {
-            // Skip invalid positions
-            if (span.from < 0 || span.to > state.doc.content.size) continue;
-            if (span.from >= span.to) continue;
-
-            // Check if this text range already has an entity mark
-            let hasEntityMark = false;
-            state.doc.nodesBetween(span.from, span.to, (node, pos) => {
-                if (node.isText && node.marks.some(m => m.type.name === 'entity')) {
-                    hasEntityMark = true;
-                    return false; // stop iteration
-                }
-                return true; // continue iteration
-            });
-
-            if (!hasEntityMark) {
-                // Apply entity mark (like applying text color)
-                const mark = entityMarkType.create({
-                    type: span.type || 'entity_implicit',
-                    kind: span.kind || '',
-                    label: span.label || '',
-                    id: span.entityId || '',
-                    mode: prettyTextApi.getMode(),
-                });
-                tr = tr.addMark(span.from, span.to, mark);
-                anyAdded = true;
+        for (const mark of node.marks) {
+            if (mark.type !== explicitMarkType) {
+                continue;
             }
-        }
 
-        if (anyAdded) {
-            // Dispatch the transaction to add marks to document
-            view.dispatch(tr);
-            console.log(`[PrettyTextPlugin] Applied ${spans.length} entity marks. Sample: ${spans[0]?.label} (${spans[0]?.from}-${spans[0]?.to})`);
-        } else {
-            console.log(`[PrettyTextPlugin] No new marks applied (all ${spans.length} already exist or invalid)`);
+            const attrs = normalizeEntityAttrs(mark.attrs);
+            const status = classifyExplicitEntityAttrs(attrs, lookup);
+            if (status === 'valid') {
+                hasBlockingMark = true;
+                continue;
+            }
+
+            const reason = status === 'derived' ? 'derived' : 'stale';
+            const key = `${range.from}:${range.to}:${reason}`;
+            if (seenRanges.has(key)) {
+                continue;
+            }
+
+            staleRanges.push({ ...range, reason, attrs });
+            seenRanges.add(key);
         }
+    });
+
+    return { hasBlockingMark, staleRanges };
+}
+
+export function reconcileImplicitEntityMarks(
+    state: EditorState,
+    spans: DecorationSpan[],
+    explicitMarkType: MarkType | undefined,
+    implicitMarkType: MarkType | undefined,
+    options: ReconcileImplicitMarksOptions,
+): Transaction | null {
+    if (!implicitMarkType) {
+        return null;
     }
 
-    /**
-     * Scan and apply marks - called only on note open or explicit trigger
-     * This is ASYNC because we need to wait for GoKitt scan to complete
-     */
-    async function scanAndApplyMarks(view: EditorView): Promise<void> {
-        // Use the async method that waits for scan to complete
-        console.log('[PrettyTextPlugin] scanAndApplyMarks: Requesting implicit scan...');
-        const spans = await prettyTextApi.scanForSpansAsync(view.state.doc);
+    let tr = state.tr.removeMark(0, state.doc.content.size, implicitMarkType);
+    let changed = tr.steps.length > 0;
+    const removedExplicitRanges = new Set<string>();
 
-        const entitySpans = spans.filter(s =>
-            s.type === 'entity' ||
-            s.type === 'entity_implicit' ||
-            s.type === 'entity_ref'
-        );
-
-        console.log(`[PrettyTextPlugin] Received ${spans.length} spans. Filtered to ${entitySpans.length} entities.`);
-
-        if (entitySpans.length > 0) {
-            applyEntityMarksOnce(view, entitySpans);
+    for (const span of spans) {
+        if (span.type !== 'entity_implicit') {
+            continue;
         }
-        // No warning if empty - normal for notes without entities
+        if (span.from < 0 || span.to > state.doc.content.size || span.from >= span.to) {
+            continue;
+        }
+
+        const overlap = inspectExplicitEntityOverlap(state, explicitMarkType, span.from, span.to, options.lookup);
+        for (const staleRange of overlap.staleRanges) {
+            const key = `${staleRange.from}:${staleRange.to}`;
+            if (removedExplicitRanges.has(key)) {
+                continue;
+            }
+
+            tr = tr.removeMark(staleRange.from, staleRange.to, explicitMarkType);
+            changed = true;
+            removedExplicitRanges.add(key);
+            options.logAutoPrune?.(staleRange);
+        }
+
+        if (overlap.hasBlockingMark) {
+            continue;
+        }
+
+        const mark = implicitMarkType.create({
+            type: 'entity_implicit',
+            kind: span.kind || '',
+            label: span.label || '',
+            id: span.entityId || '',
+            mode: options.mode,
+        });
+        tr = tr.addMark(span.from, span.to, mark);
+        changed = true;
     }
+
+    return changed ? tr : null;
+}
+
+export const prettyTextPlugin = $prose(() => {
+    const prettyTextApi = getPrettyTextApi();
+    const entityLookup: EntityLookup = {
+        hasEntityId: (id) => !!smartGraphRegistry.getEntityById(id),
+        hasEntityLabel: (label) => !!smartGraphRegistry.findEntityByLabel(label),
+    };
 
     return new Plugin({
         key: PRETTY_TEXT_PLUGIN_KEY,
 
-        // NO STATE - we don't use decorations at all
-        // Marks are stored in the document JSON
-
         view(editorView: EditorView) {
-            // Apply marks on initial load (after a brief delay for content to load)
-            setTimeout(() => {
-                if (!hasAppliedInitialMarks) {
-                    hasAppliedInitialMarks = true;
-                    scanAndApplyMarks(editorView);
-                }
-            }, 500);
+            let suppressedUpdates = 0;
+            let lastImplicitSignature = '';
 
-            // Also listen for gokitt-ready event to rescan when WASM is ready
-            const handleGoKittReady = () => {
-                console.log('[PrettyTextPlugin] GoKitt ready event - rescanning');
-                scanAndApplyMarks(editorView);
+            const dispatchInternal = (view: EditorView, transaction: Transaction) => {
+                suppressedUpdates += 1;
+                view.dispatch(transaction);
             };
-            window.addEventListener('gokitt-ready', handleGoKittReady);
 
-            // Listen for dictionary-rebuilt to rescan with updated entity list
-            const handleDictRebuilt = async () => {
-                console.log('[PrettyTextPlugin] Dictionary rebuilt - stripping old marks and rescanning');
-                // Strip all existing entity marks so scanAndApplyMarks can reapply fresh
-                const entityMarkType = editorView.state.schema.marks['entity'];
-                if (entityMarkType) {
-                    const tr = editorView.state.tr.removeMark(0, editorView.state.doc.content.size, entityMarkType);
-                    editorView.dispatch(tr);
+            const getMarkTypes = (view: EditorView) => ({
+                explicit: view.state.schema.marks['entity'] as MarkType | undefined,
+                implicit: view.state.schema.marks['entity_implicit'] as MarkType | undefined,
+            });
+
+            const spanSignature = (spans: DecorationSpan[]) =>
+                spans
+                    .map(span => `${span.from}:${span.to}:${span.label}:${span.kind || ''}:${span.entityId || ''}`)
+                    .join('|');
+
+            const syncImplicitMarks = (view: EditorView, spans: DecorationSpan[]) => {
+                const { explicit, implicit } = getMarkTypes(view);
+                const tr = reconcileImplicitEntityMarks(view.state, spans, explicit, implicit, {
+                    mode: prettyTextApi.getMode(),
+                    lookup: entityLookup,
+                    logAutoPrune: (range) => {
+                        if (!isDevMode()) {
+                            return;
+                        }
+                        const label = range.attrs.label?.trim() || '(unlabeled)';
+                        console.debug(
+                            `[PrettyTextPlugin] Auto-pruned ${range.reason} explicit entity mark for "${label}" at ${range.from}-${range.to}`,
+                        );
+                    },
+                });
+
+                if (tr) {
+                    dispatchInternal(view, tr);
                 }
-                // Force the API to re-scan (clear cached context)
-                prettyTextApi.forceRescan();
-                await scanAndApplyMarks(editorView);
             };
-            window.addEventListener('dictionary-rebuilt', handleDictRebuilt);
 
-            // Subscribe to mode changes to update mark attributes
-            const unsubscribe = prettyTextApi.subscribe(() => {
-                // Also try to apply marks if we haven't yet (GoKitt may have just become ready)
-                const spans = prettyTextApi.getDecorations(editorView.state.doc);
-                if (spans.length > 0) {
-                    const entitySpans = spans.filter(s =>
-                        s.type === 'entity' ||
-                        s.type === 'entity_implicit' ||
-                        s.type === 'entity_ref'
-                    );
-                    if (entitySpans.length > 0) {
-                        console.log('[PrettyTextPlugin] Subscribe notified with spans - applying marks');
-                        applyEntityMarksOnce(editorView, entitySpans);
+            const resolveExplicitAttrs = (attrs: EntityAttrs): EntityAttrs => {
+                const id = typeof attrs.id === 'string' ? attrs.id.trim() : '';
+                const label = typeof attrs.label === 'string' ? attrs.label.trim() : '';
+                const kind = typeof attrs.kind === 'string' ? attrs.kind : '';
+                const entity = (id ? smartGraphRegistry.getEntityById(id) : null) || (label ? smartGraphRegistry.findEntityByLabel(label) : null);
+
+                return {
+                    type: 'entity',
+                    mode: prettyTextApi.getMode(),
+                    id: entity?.id || id,
+                    label: entity?.label || label,
+                    kind: entity?.kind || kind,
+                };
+            };
+
+            const attrsEqual = (a: EntityAttrs, b: EntityAttrs) =>
+                (a.type || '') === (b.type || '') &&
+                (a.kind || '') === (b.kind || '') &&
+                (a.label || '') === (b.label || '') &&
+                (a.id || '') === (b.id || '') &&
+                (a.mode || '') === (b.mode || '');
+
+            const refreshEntityMarkPresentation = (view: EditorView) => {
+                const { explicit, implicit } = getMarkTypes(view);
+                if (!explicit && !implicit) {
+                    return;
+                }
+
+                let tr = view.state.tr;
+                let changed = false;
+                const mode = prettyTextApi.getMode();
+
+                view.state.doc.descendants((node, pos) => {
+                    if (!node.isText) {
+                        return;
                     }
-                }
 
-                // When mode changes, we need to update the mark attributes
-                const entityMarkType = editorView.state.schema.marks['entity'];
-                if (!entityMarkType) return;
-
-                const newMode = prettyTextApi.getMode();
-                let tr = editorView.state.tr;
-                let anyUpdated = false;
-
-                // Find all entity marks and update their mode attribute
-                editorView.state.doc.descendants((node, pos) => {
-                    if (node.isText) {
-                        node.marks.forEach(mark => {
-                            if (mark.type.name === 'entity' && mark.attrs['mode'] !== newMode) {
-                                // Remove old mark, add new one with updated mode
-                                const newMark = entityMarkType.create({
-                                    ...mark.attrs,
-                                    mode: newMode,
-                                });
-                                tr = tr.removeMark(pos, pos + node.nodeSize, mark.type);
-                                tr = tr.addMark(pos, pos + node.nodeSize, newMark);
-                                anyUpdated = true;
+                    for (const mark of node.marks) {
+                        if (explicit && mark.type === explicit) {
+                            const attrs = normalizeEntityAttrs(mark.attrs);
+                            const status = classifyExplicitEntityAttrs(attrs, entityLookup);
+                            if (status !== 'valid') {
+                                tr = tr.removeMark(pos, pos + node.nodeSize, explicit);
+                                changed = true;
+                                continue;
                             }
-                        });
+
+                            const nextAttrs = resolveExplicitAttrs(mark.attrs as EntityAttrs);
+                            if (!attrsEqual(mark.attrs as EntityAttrs, nextAttrs)) {
+                                tr = tr.removeMark(pos, pos + node.nodeSize, explicit);
+                                tr = tr.addMark(pos, pos + node.nodeSize, explicit.create(nextAttrs));
+                                changed = true;
+                            }
+                        } else if (implicit && mark.type === implicit) {
+                            const nextAttrs: EntityAttrs = {
+                                ...mark.attrs,
+                                type: 'entity_implicit',
+                                mode,
+                            };
+                            if (!attrsEqual(mark.attrs as EntityAttrs, nextAttrs)) {
+                                tr = tr.removeMark(pos, pos + node.nodeSize, implicit);
+                                tr = tr.addMark(pos, pos + node.nodeSize, implicit.create(nextAttrs));
+                                changed = true;
+                            }
+                        }
                     }
                 });
 
-                if (anyUpdated) {
-                    editorView.dispatch(tr);
+                if (changed) {
+                    dispatchInternal(view, tr);
                 }
-            });
+            };
 
-            let lastDocSize = 0;
-            let pendingScanTimer: ReturnType<typeof setTimeout> | null = null;
+            const syncFromApi = (view: EditorView) => {
+                const implicitSpans = prettyTextApi.getImplicitDecorations(view.state.doc);
+                const nextSignature = spanSignature(implicitSpans);
+                if (nextSignature !== lastImplicitSignature) {
+                    syncImplicitMarks(view, implicitSpans);
+                    lastImplicitSignature = nextSignature;
+                }
+
+                refreshEntityMarkPresentation(view);
+            };
+
+            const scheduleRefreshForEdit = (view: EditorView, prevState: EditorState) => {
+                const prevText = docContent(prevState.doc);
+                const nextText = docContent(view.state.doc);
+                if (prevText === nextText) {
+                    return;
+                }
+
+                const delta = Math.abs(nextText.length - prevText.length);
+                const isDelete = nextText.length < prevText.length;
+                const isPaste = delta > 3;
+                const cursorPos = view.state.selection.from;
+                const boundaryChar = view.state.doc.textBetween(
+                    Math.max(0, cursorPos - 1),
+                    cursorPos,
+                    '\n',
+                    '\n',
+                );
+                const isBoundary = WORD_BOUNDARY_RE.test(boundaryChar);
+
+                const delayMs = isBoundary || isPaste
+                    ? 90
+                    : isDelete
+                        ? 160
+                        : 325;
+
+                prettyTextApi.scheduleImplicitRefresh(view.state.doc, {
+                    delayMs,
+                    allowRealign: false,
+                });
+            };
+
+            const handleGoKittReady = () => {
+                prettyTextApi.scheduleImplicitRefresh(editorView.state.doc, {
+                    immediate: true,
+                    force: true,
+                });
+            };
+
+            const handleDictionaryRebuilt = () => {
+                refreshEntityMarkPresentation(editorView);
+                prettyTextApi.scheduleImplicitRefresh(editorView.state.doc, {
+                    immediate: true,
+                    force: true,
+                    allowRealign: false,
+                });
+            };
+
+            const unsubscribe = prettyTextApi.subscribe(() => syncFromApi(editorView));
+
+            window.addEventListener('gokitt-ready', handleGoKittReady);
+            window.addEventListener('dictionary-rebuilt', handleDictionaryRebuilt);
+
+            setTimeout(() => {
+                syncFromApi(editorView);
+            }, 0);
 
             return {
-                // Called when view updates - detect note loading
                 update(view: EditorView, prevState: EditorState) {
-                    const currentDocSize = view.state.doc.content.size;
-                    const docSizeChange = Math.abs(currentDocSize - lastDocSize);
+                    if (suppressedUpdates > 0) {
+                        suppressedUpdates -= 1;
+                        return;
+                    }
 
-                    // Detect note load: large doc change (> 100 chars) or noteChanged meta
-                    const isNoteLoad = docSizeChange > 100 || view.state.tr.getMeta('noteChanged');
-
-                    if (isNoteLoad && currentDocSize > 50) {
-                        console.log(`[PrettyTextPlugin] Detected note load (size: ${lastDocSize} -> ${currentDocSize})`);
-                        lastDocSize = currentDocSize;
-
-                        // Debounce to avoid multiple scans
-                        if (pendingScanTimer) clearTimeout(pendingScanTimer);
-                        pendingScanTimer = setTimeout(() => {
-                            console.log('[PrettyTextPlugin] Triggering scan after note load');
-                            scanAndApplyMarks(view);
-                            pendingScanTimer = null;
-                        }, 500);
-                    } else {
-                        lastDocSize = currentDocSize;
+                    if (!view.state.doc.eq(prevState.doc)) {
+                        scheduleRefreshForEdit(view, prevState);
                     }
                 },
 
                 destroy() {
                     unsubscribe();
                     window.removeEventListener('gokitt-ready', handleGoKittReady);
-                    window.removeEventListener('dictionary-rebuilt', handleDictRebuilt);
-                    if (pendingScanTimer) clearTimeout(pendingScanTimer);
-                }
+                    window.removeEventListener('dictionary-rebuilt', handleDictionaryRebuilt);
+                },
             };
         },
-
-        // Handle word boundary - detect when user finishes typing an entity name
-        appendTransaction(transactions: readonly Transaction[], oldState: EditorState, newState: EditorState) {
-            // Only check if text was inserted
-            const textInserted = transactions.some(tr => tr.docChanged);
-            if (!textInserted) return null;
-
-            // Check for word boundary (space, punctuation)
-            const lastChar = newState.doc.textBetween(
-                Math.max(0, newState.selection.from - 1),
-                newState.selection.from
-            );
-
-            if (!/[\s.,!?;:\-\n\r]/.test(lastChar)) {
-                return null; // Not a word boundary, don't scan
-            }
-
-            // Word boundary detected - scan for new entities
-            // But do it async to not block typing
-            // (We use setTimeout in appendTransaction which isn't ideal,
-            // but the actual mark application happens in view.update)
-            return null;
-        }
     });
 });
-
-// =============================================================================
-// USAGE: In editor.component.ts:
-//
-// 1. Import the entity schema:
-//    import { entitySchema } from './plugins/marks/entity';
-//
-// 2. Use both schema and plugin:
-//    .use(entitySchema)
-//    .use(prettyTextPlugin)
-//
-// The entity schema defines HOW marks are rendered (like textColor).
-// This plugin decides WHEN to apply them (on note open).
-// =============================================================================

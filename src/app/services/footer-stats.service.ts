@@ -1,16 +1,15 @@
 // src/app/services/footer-stats.service.ts
 // Live stats service for the hub footer - computes real data from Dexie and editor
 
-import { Injectable, signal, computed, inject } from '@angular/core';
-import { toSignal, toObservable } from '@angular/core/rxjs-interop';
+import { DestroyRef, Injectable, signal, computed, inject } from '@angular/core';
+import { toSignal, toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { of, switchMap, startWith, distinctUntilChanged, debounceTime } from 'rxjs';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from } from 'rxjs';
 import { db, Mention } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
-import { parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
-import { PhoenixUiApiService } from './phoenix-ui-api.service';
+import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
 
 export interface FooterStats {
     backlinks: number;
@@ -227,16 +226,16 @@ function normalizeTextAnalytics(value: unknown): TextAnalytics | null {
     providedIn: 'root'
 })
 export class FooterStatsService {
+    private destroyRef = inject(DestroyRef);
     private noteEditorStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
-    private phoenixUiApi = inject(PhoenixUiApiService);
 
     // ─────────────────────────────────────────────────────────────
     // Internal state
     // ─────────────────────────────────────────────────────────────
 
-    /** Current JSON content from editor (for analytics) */
-    private currentContent = signal<string>('');
+    /** Current plain text from editor (for analytics and local search) */
+    private currentPlainText = signal('');
 
     /** Latest live analytics calculated from current editor text */
     private _liveAnalytics = signal<TextAnalytics>(getEmptyAnalytics());
@@ -246,54 +245,68 @@ export class FooterStatsService {
 
     /** Save state tracking (derived from store) */
     readonly isSaved = computed(() => !this.noteEditorStore.isSaving());
+    readonly plainText = computed(() => this.currentPlainText());
 
     constructor() {
         // Listen to editor content changes for analytics
-        this.editorService.content$.subscribe(({ json }) => {
-            this.updateCurrentContent(JSON.stringify(json));
-        });
+        this.editorService.liveUpdate$
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(({ plainText }) => {
+                this.updateCurrentPlainText(plainText);
+            });
 
         // Also load initial content when note changes
         this.noteEditorStore.activeNote$.pipe(
-            distinctUntilChanged((a, b) => a?.id === b?.id)
+            distinctUntilChanged((a, b) => a?.id === b?.id),
+            takeUntilDestroyed(this.destroyRef),
         ).subscribe(note => {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
 
             if (note) {
-                this.updateCurrentContent(note.content || '');
+                this.updateCurrentPlainText(
+                    parseContentToPlainText(note.content || note.markdownContent || '')
+                );
             } else {
-                this.updateCurrentContent('');
+                this.updateCurrentPlainText('');
             }
         });
 
         // Analyze the live editor text directly instead of piggybacking on scans.
-        toObservable(this.currentContent).pipe(
+        toObservable(this.currentPlainText).pipe(
             debounceTime(300),
-        ).subscribe(async (content) => {
+            takeUntilDestroyed(this.destroyRef),
+        ).subscribe((content) => {
             if (!content) {
                 return;
             }
 
-            const plainText = parseContentToPlainText(content);
-            if (!plainText.trim()) {
+            if (!content.trim()) {
                 return;
             }
 
             const requestVersion = ++this.analyticsRequestVersion;
-            const res = await this.phoenixUiApi.analyzeText(plainText);
-            if (requestVersion !== this.analyticsRequestVersion) {
-                return;
-            }
+            try {
+                const analytics = normalizeTextAnalytics(analyzeText(content)) ?? getEmptyAnalytics();
+                if (requestVersion !== this.analyticsRequestVersion) {
+                    return;
+                }
 
-            this._liveAnalytics.set(normalizeTextAnalytics(res) ?? getEmptyAnalytics());
+                this._liveAnalytics.set(analytics);
+            } catch (error) {
+                console.error('[FooterStatsService] Local text analytics failed:', error);
+                if (requestVersion !== this.analyticsRequestVersion) {
+                    return;
+                }
+
+                this._liveAnalytics.set(getEmptyAnalytics());
+            }
         });
     }
 
-    private updateCurrentContent(content: string): void {
-        this.currentContent.set(content);
+    private updateCurrentPlainText(plainText: string): void {
+        this.currentPlainText.set(plainText);
 
-        const plainText = parseContentToPlainText(content);
         if (!plainText.trim()) {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
@@ -349,7 +362,7 @@ export class FooterStatsService {
     // Computed Stats from Editor Content (using text-analytics)
     // ─────────────────────────────────────────────────────────────
 
-    /** Full text analytics from direct Go analysis of the live editor text */
+    /** Full text analytics from direct TypeScript analysis of the live editor text */
     readonly analytics = computed<TextAnalytics>(() => this._liveAnalytics());
 
     /** Word count - from analytics */

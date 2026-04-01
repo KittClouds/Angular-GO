@@ -12,6 +12,7 @@ fst.workspace = true
 memchr.workspace = true
 phoenix-types = { path = "../phoenix-types" }
 serde.workspace = true
+stop-words.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

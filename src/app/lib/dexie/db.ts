@@ -14,6 +14,8 @@ export interface Note {
     title: string;
     content: string;
     markdownContent: string;
+    hasBody?: boolean;
+    version?: number;
     folderId: string;
     entityKind: string;
     entitySubtype: string;

@@ -3,7 +3,7 @@ use std::cell::RefCell;
 
 use phoenix_runtime::{
     AnalyzeTextRequestView, IngestDocumentView, IngestRequestView, PhoenixRuntime,
-    QueryRequestView, ScanRequestView, ScopeKeyView, StructureRequestView,
+    QueryRequestView, ScanRequestView, ScopeKeyView, SnapshotPartition, StructureRequestView,
 };
 #[cfg(target_arch = "wasm32")]
 use phoenix_types::SnapshotPolicy;
@@ -180,6 +180,12 @@ struct BorrowedStructureRequest<'a> {
     #[serde(borrow)]
     text: Cow<'a, str>,
     scan: phoenix_types::ScanArtifact,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotExportRequest {
+    partition: Option<String>,
 }
 
 pub fn packet_header_size() -> usize {
@@ -1010,8 +1016,18 @@ pub fn process_packet_buffer(buffer: &mut [u8]) -> Result<(), String> {
             )
         }),
         PacketKind::SnapshotExportRequest => with_runtime(|runtime| {
+            let request = if header.payload_len == 0 {
+                SnapshotExportRequest { partition: None }
+            } else {
+                decode_json::<SnapshotExportRequest>(&buffer[PacketHeader::BYTE_LEN..payload_end])?
+            };
+            let partition = match request.partition.as_deref() {
+                Some(value) => SnapshotPartition::from_str(value)
+                    .ok_or_else(|| format!("unsupported snapshot partition: {value}"))?,
+                None => SnapshotPartition::All,
+            };
             let bytes = runtime
-                .export_snapshot()
+                .export_snapshot_partition(partition)
                 .map_err(|error| error.to_string())?;
             write_binary_response(
                 buffer,

@@ -31,6 +31,7 @@ import { SemanticSearchService } from '../../lib/services/semantic-search.servic
 import { EmbeddingEngine } from '../../lib/embeddings/EmbeddingEngine';
 import type { Entity } from '../../lib/dexie/db';
 import { buildScopedCanonicalEntityMap, collectScopedRegistrationNames } from './search-panel.graptor';
+import * as ops from '../../lib/operations';
 
 type SearchMode = 'notes' | 'vector' | 'graptor';
 type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
@@ -51,6 +52,7 @@ interface SearchPanelNote {
   content: string;
   narrativeId: string;
   folderId: string;
+  hasBody?: boolean;
 }
 
 interface SearchResultView {
@@ -210,6 +212,7 @@ export class SearchPanelComponent implements OnInit {
           content: note.markdownContent || note.content || '',
           narrativeId: note.narrativeId || '',
           folderId: note.folderId || '',
+          hasBody: !!note.hasBody,
         })));
       });
 
@@ -297,7 +300,7 @@ export class SearchPanelComponent implements OnInit {
     this.vectorStatus.set('indexing');
     this.error.set(null);
     try {
-      const notes = this.scopedNotes();
+      const notes = await this.loadScopedNotesWithBodies();
       await this.semanticSearch.indexNotes(notes.map((note) => ({
         id: note.id,
         narrativeId: note.narrativeId,
@@ -323,7 +326,7 @@ export class SearchPanelComponent implements OnInit {
         throw new Error(init.error || 'Failed to initialize GLDR');
       }
 
-      const notes = this.scopedNotes();
+      const notes = await this.loadScopedNotesWithBodies();
       const pendingEmbeddingBatch: GraptorBatchEntry[] = [];
       const canEmbed = EmbeddingEngine.isReady();
 
@@ -432,7 +435,7 @@ export class SearchPanelComponent implements OnInit {
 
   private async runNotesSearch(): Promise<void> {
     const rawResults = await this.phoenixUiApi.searchScoped(this.query(), 60, this.buildScope());
-    this.results.set(this.mapGoResults(rawResults, 'notes'));
+    this.results.set(await this.mapGoResults(rawResults, 'notes'));
   }
 
   private async runVectorSearch(): Promise<void> {
@@ -440,7 +443,7 @@ export class SearchPanelComponent implements OnInit {
       this.notice.set('Load the embedding model to manage vector indexing. Query results still come from the live Go note path until a dedicated vector retrieval UI replaces the retired Cozo stack.');
     }
     const rawResults = await this.phoenixUiApi.searchScoped(this.query(), 60, this.buildScope());
-    this.results.set(this.mapGoResults(rawResults, 'vector'));
+    this.results.set(await this.mapGoResults(rawResults, 'vector'));
   }
 
   private async runGraptorSearch(): Promise<void> {
@@ -465,7 +468,7 @@ export class SearchPanelComponent implements OnInit {
       matchedEntities?: Array<{ entityId: string }>;
     }>;
 
-    const noteMap = new Map(this.notes().map((note) => [note.id, note]));
+    const noteMap = await this.loadNoteMapByIds(parsed.map((result) => result.chunkId));
     this.results.set(parsed.map((result) => {
       const note = noteMap.get(result.chunkId);
       return {
@@ -585,17 +588,13 @@ export class SearchPanelComponent implements OnInit {
     }
   }
 
-  private mapGoResults(rawResults: any[], source: 'notes' | 'vector'): SearchResultView[] {
-    const noteMap = new Map(this.notes().map((note) => [note.id, note]));
+  private async mapGoResults(rawResults: any[], source: 'notes' | 'vector'): Promise<SearchResultView[]> {
     const allowedNoteIds = new Set(this.scopedNotes().map((note) => note.id));
-    return rawResults
+    const baseResults = rawResults
       .map((result) => {
         const noteId = result.DocID || result.docID || result.id || '';
-        const note = noteMap.get(noteId);
         return {
           noteId,
-          title: note?.title || 'Untitled',
-          excerpt: this.buildSnippet(note?.content || '', this.query()),
           score: result.Score || result.score || 0,
           source,
           sourceLabel: source === 'notes' ? 'Notes' : 'Vector fallback',
@@ -604,6 +603,15 @@ export class SearchPanelComponent implements OnInit {
       })
       .filter((result) => allowedNoteIds.has(result.noteId))
       .slice(0, 12);
+    const noteMap = await this.loadNoteMapByIds(baseResults.map((result) => result.noteId));
+    return baseResults.map((result) => {
+      const note = noteMap.get(result.noteId);
+      return {
+        ...result,
+        title: note?.title || 'Untitled',
+        excerpt: this.buildSnippet(note?.content || '', this.query()),
+      };
+    });
   }
 
   private async refreshGraptorStats(): Promise<void> {
@@ -677,5 +685,39 @@ export class SearchPanelComponent implements OnInit {
     }
 
     return embedding;
+  }
+
+  private async loadScopedNotesWithBodies(): Promise<SearchPanelNote[]> {
+    return this.loadNotesByIds(this.scopedNotes().map((note) => note.id));
+  }
+
+  private async loadNoteMapByIds(ids: string[]): Promise<Map<string, SearchPanelNote>> {
+    const notes = await this.loadNotesByIds(ids);
+    return new Map(notes.map((note) => [note.id, note]));
+  }
+
+  private async loadNotesByIds(ids: string[]): Promise<SearchPanelNote[]> {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (!uniqueIds.length) {
+      return [];
+    }
+
+    const cachedMap = new Map(this.notes().map((note) => [note.id, note]));
+    const idsToLoad = uniqueIds.filter((id) => !cachedMap.get(id)?.hasBody);
+    const loaded = idsToLoad.length > 0 ? await ops.getNotesByIds(idsToLoad) : [];
+    const loadedMap = new Map(loaded.map((note) => [note.id, note]));
+
+    return uniqueIds.map((id) => {
+      const full = loadedMap.get(id);
+      const cached = cachedMap.get(id);
+      return {
+        id,
+        title: full?.title || cached?.title || 'Untitled',
+        content: full?.markdownContent || full?.content || cached?.content || '',
+        narrativeId: full?.narrativeId || cached?.narrativeId || '',
+        folderId: full?.folderId || cached?.folderId || '',
+        hasBody: !!full || !!cached?.hasBody,
+      };
+    });
   }
 }

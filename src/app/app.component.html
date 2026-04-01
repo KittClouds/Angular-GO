@@ -2,6 +2,29 @@
     <p class="loading-text">Loading KittClouds...</p>
 </ngx-spinner>
 
-<app-main-layout>
-    <router-outlet></router-outlet>
-</app-main-layout>
+@if (fatalBootError; as error) {
+    <section class="fatal-boot-shell">
+        <div class="fatal-boot-card">
+            <p class="fatal-boot-kicker">Boot blocked</p>
+            <h1>{{ error.title }}</h1>
+            <p class="fatal-boot-message">{{ error.message }}</p>
+
+            @if (error.detail) {
+                <p class="fatal-boot-detail">{{ error.detail }}</p>
+            }
+
+            <div class="fatal-boot-steps">
+                <p>Repair steps</p>
+                <ol>
+                    @for (step of error.steps; track step) {
+                        <li>{{ step }}</li>
+                    }
+                </ol>
+            </div>
+        </div>
+    </section>
+} @else {
+    <app-main-layout>
+        <router-outlet></router-outlet>
+    </app-main-layout>
+}

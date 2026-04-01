@@ -8,7 +8,14 @@
  * - All CRUD goes directly to Go SQLite via the WASM worker
  */
 import { db } from './dexie/db';
-import { PhoenixStoreService, StoreNote, StoreFolder, StoreEntity, StoreEdge } from '../services/phoenix-store.service';
+import {
+    PhoenixStoreService,
+    StoreEdge,
+    StoreEntity,
+    StoreFolder,
+    StoreNote,
+    StoreNoteHeader,
+} from '../services/phoenix-store.service';
 
 // =============================================================================
 // INTERFACES
@@ -29,8 +36,10 @@ export interface Note {
     ownerId: string;
     createdAt: number;
     updatedAt: number;
+    version?: number;
     narrativeId?: string;
     order: number;
+    hasBody?: boolean;
 }
 
 export interface Folder {
@@ -117,7 +126,36 @@ export function getBridge(): PhoenixStoreService | null {
 // =============================================================================
 
 function warmDexieNote(note: Note): void {
-    db.notes.put(note as any).catch(() => { });
+    db.notes.put({ ...note, hasBody: note.hasBody ?? true } as any).catch(() => { });
+}
+
+function warmDexieNoteHeader(note: Note | StoreNoteHeader): void {
+    const existing = note as Partial<Note>;
+    db.notes.put({
+        id: note.id,
+        worldId: note.worldId || '',
+        title: note.title || '',
+        content: '',
+        markdownContent: '',
+        folderId: note.folderId || '',
+        entityKind: note.entityKind || '',
+        entitySubtype: note.entitySubtype || '',
+        isEntity: note.isEntity || false,
+        isPinned: note.isPinned || false,
+        favorite: note.favorite || false,
+        ownerId: note.ownerId || '',
+        createdAt: note.createdAt || Date.now(),
+        updatedAt: note.updatedAt || Date.now(),
+        version: existing.version,
+        narrativeId: note.narrativeId || '',
+        order: Number(note.order || 0),
+        hasBody: false,
+        ...(existing.hasBody ? {
+            content: existing.content || '',
+            markdownContent: existing.markdownContent || '',
+            hasBody: true,
+        } : {}),
+    } as any).catch(() => { });
 }
 
 function warmDexieFolder(folder: Folder): void {
@@ -144,36 +182,45 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         order,
         createdAt: now,
         updatedAt: now,
+        version: now,
     } as Note;
 
     await store.upsertNote(PhoenixStoreService.fromDexieNote(fullNote));
-    warmDexieNote(fullNote);
+    warmDexieNote({ ...fullNote, hasBody: true });
     return id;
 }
 
-export async function updateNote(id: string, updates: Partial<Note>): Promise<void> {
+export async function updateNote(id: string, updates: Partial<Note>): Promise<Note | undefined> {
     const store = await waitForStore();
     const existing = await store.getNote(id);
     if (!existing) {
         console.warn(`[Operations] Note ${id} not found`);
-        return;
+        return undefined;
     }
 
-    const merged = { ...existing, ...updates, updatedAt: Date.now() };
+    const now = Date.now();
+    const merged = { ...existing, ...updates, updatedAt: now, version: now };
     await store.upsertNote(merged as StoreNote);
-    warmDexieNote(storeNoteToNote(merged as StoreNote));
+    const note = { ...storeNoteToNote(merged as StoreNote), hasBody: true };
+    warmDexieNote(note);
 
-    if (updates.content !== undefined) {
-        syncNoteToDocStore(id, updates.content, merged.updatedAt);
+    if (updates.content !== undefined || updates.markdownContent !== undefined || updates.title !== undefined) {
+        syncNoteToDocStore(note);
     }
+
+    return note;
 }
 
-function syncNoteToDocStore(id: string, content: any, version: number): void {
+function syncNoteToDocStore(note: Note): void {
     import('../api/pretty-text-api').then((api) => {
         const phoenixUiApi = (api as any).getPhoenixUiApi?.();
         if (phoenixUiApi) {
-            const text = typeof content === 'string' ? content : JSON.stringify(content);
-            phoenixUiApi.upsertNote(id, text, version).catch((e: any) =>
+            const text = note.markdownContent || (typeof note.content === 'string' ? note.content : JSON.stringify(note.content));
+            phoenixUiApi.upsertNote(note.id, text, note.updatedAt, {
+                title: note.title,
+                narrativeId: note.narrativeId,
+                folderPath: note.folderId,
+            }).catch((e: any) =>
                 console.warn('[Operations] DocStore sync failed:', e)
             );
         }
@@ -190,30 +237,71 @@ export async function getNote(id: string): Promise<Note | undefined> {
     const store = getBridge();
     if (!store) return undefined;
     const note = await store.getNote(id);
-    return note ? storeNoteToNote(note) : undefined;
+    return note ? { ...storeNoteToNote(note), hasBody: true } : undefined;
+}
+
+export async function getNoteHeader(id: string): Promise<Note | undefined> {
+    const store = getBridge();
+    if (!store) return undefined;
+    const note = await store.getNoteHeader(id);
+    return note ? { ...storeNoteHeaderToNote(note), hasBody: false } : undefined;
 }
 
 export async function getAllNotes(): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const notes = await store.listNotes();
-    return notes.map(storeNoteToNote);
+    const notes = await store.listNoteHeaders();
+    return notes.map(storeNoteHeaderToNote);
 }
 
 export async function getNotesByFolder(folderId: string): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const notes = await store.listNotes(folderId);
-    return notes.map(storeNoteToNote);
+    const notes = await store.listNoteHeaders(folderId);
+    return notes.map(storeNoteHeaderToNote);
 }
 
 export async function getNotesByNarrative(narrativeId: string): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const allNotes = await store.listNotes();
+    const allNotes = await store.listNoteHeaders();
     return allNotes
         .filter(n => n.narrativeId === narrativeId)
-        .map(storeNoteToNote);
+        .map(storeNoteHeaderToNote);
+}
+
+export async function getNotesByIds(ids: string[]): Promise<Note[]> {
+    const store = getBridge();
+    if (!store || ids.length === 0) return [];
+    const notes = await store.getNotesByIds(ids);
+    return notes.map((note) => ({ ...storeNoteToNote(note), hasBody: true }));
+}
+
+export async function ensureNoteBodyLoaded(id: string): Promise<Note | undefined> {
+    const cached = await db.notes.get(id);
+    if (cached?.hasBody) {
+        return cached as Note;
+    }
+
+    const note = await getNote(id);
+    if (!note) {
+        return undefined;
+    }
+
+    await db.notes.put({ ...note, hasBody: true } as any);
+    return note;
+}
+
+export async function trimNoteBody(id: string): Promise<void> {
+    const note = await db.notes.get(id);
+    if (!note?.hasBody || note.entityKind === 'EVENT') {
+        return;
+    }
+    await db.notes.update(id, {
+        content: '',
+        markdownContent: '',
+        hasBody: false,
+    } as any);
 }
 
 function storeNoteToNote(sn: StoreNote): Note {
@@ -232,8 +320,33 @@ function storeNoteToNote(sn: StoreNote): Note {
         ownerId: sn.ownerId,
         createdAt: sn.createdAt,
         updatedAt: sn.updatedAt,
+        version: sn.version,
         narrativeId: sn.narrativeId,
         order: sn.order,
+        hasBody: true,
+    };
+}
+
+function storeNoteHeaderToNote(sn: StoreNoteHeader): Note {
+    return {
+        id: sn.id,
+        worldId: sn.worldId,
+        title: sn.title,
+        content: '',
+        markdownContent: '',
+        folderId: sn.folderId,
+        entityKind: sn.entityKind,
+        entitySubtype: sn.entitySubtype,
+        isEntity: sn.isEntity,
+        isPinned: sn.isPinned,
+        favorite: sn.favorite,
+        ownerId: sn.ownerId,
+        createdAt: sn.createdAt,
+        updatedAt: sn.updatedAt,
+        version: sn.version,
+        narrativeId: sn.narrativeId,
+        order: sn.order,
+        hasBody: false,
     };
 }
 
@@ -440,8 +553,18 @@ async function rebalanceNoteOrders(folderId: string): Promise<void> {
     const notes = await getNotesByFolder(folderId);
     notes.sort((a, b) => a.order - b.order);
     for (let i = 0; i < notes.length; i++) {
-        const updated = { ...notes[i], order: (i + 1) * DEFAULT_ORDER_STEP };
-        await store.upsertNote(PhoenixStoreService.fromDexieNote(updated));
+        const existing = await store.getNote(notes[i].id);
+        if (!existing) {
+            continue;
+        }
+        const updated = { ...existing, order: (i + 1) * DEFAULT_ORDER_STEP };
+        await store.upsertNote(updated);
+        warmDexieNote({
+            ...storeNoteToNote(updated),
+            hasBody: notes[i].hasBody || false,
+            content: notes[i].hasBody ? updated.content : '',
+            markdownContent: notes[i].hasBody ? updated.markdownContent : '',
+        });
     }
     console.log(`[Operations] Rebalanced ${notes.length} note orders in folder ${folderId || 'root'}`);
 }

@@ -1,18 +1,6 @@
 /// <reference lib="webworker" />
-/**
- * OPFS Snapshot Worker — From Scratch
- *
- * Dedicated worker for OPFS file I/O.
- * Only three operations: LOAD, SAVE_SNAPSHOT, CLEAR_ALL.
- * All operations are serialized through a mutex to prevent races.
- * No Dexie. No WAL.
- */
 
 import { SqliteOpfsAdapter } from './sqlite-opfs-core';
-
-// ---------------------------------------------------------------------------
-// Mutex — serialize all OPFS operations
-// ---------------------------------------------------------------------------
 
 class OpMutex {
     private queue: Array<() => void> = [];
@@ -23,16 +11,16 @@ class OpMutex {
             this.locked = true;
             return;
         }
-        return new Promise<void>(resolve => this.queue.push(resolve));
+        return new Promise<void>((resolve) => this.queue.push(resolve));
     }
 
     release(): void {
         const next = this.queue.shift();
         if (next) {
             next();
-        } else {
-            this.locked = false;
+            return;
         }
+        this.locked = false;
     }
 
     async withLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -45,63 +33,113 @@ class OpMutex {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Worker message handler
-// ---------------------------------------------------------------------------
-
 const adapter = new SqliteOpfsAdapter();
 const mutex = new OpMutex();
 
-self.onmessage = async (e: MessageEvent) => {
-    const { id, type, payload } = e.data;
+self.onmessage = async (event: MessageEvent) => {
+    const { id, type, payload } = event.data;
 
     try {
         switch (type) {
             case 'LOAD': {
-                await mutex.withLock(async () => {
-                    try {
-                        const snapshot = await adapter.load();
-                        self.postMessage({ id, type, success: true, data: { snapshot } });
-                    } catch (err: any) {
-                        self.postMessage({ id, type, success: false, error: err.message });
-                    }
-                });
+                await respond(id, type, async () => ({ snapshot: await adapter.load() }));
                 break;
             }
-
             case 'SAVE_SNAPSHOT': {
-                await mutex.withLock(async () => {
-                    try {
-                        await adapter.saveSnapshot(payload);
-                        self.postMessage({ id, type, success: true });
-                    } catch (err: any) {
-                        console.error('[SqliteOpfsWorker] Save failed:', err);
-                        self.postMessage({ id, type, success: false, error: err.message });
-                    }
+                await respond(id, type, async () => {
+                    await adapter.saveSnapshot(payload);
+                    return null;
                 });
                 break;
             }
-
+            case 'LOAD_PHOENIX_MANIFEST': {
+                await respond(id, type, async () => adapter.loadPhoenixManifest());
+                break;
+            }
+            case 'READ_PHOENIX_FILE': {
+                await respond(id, type, async () => {
+                    const bytes = await adapter.readPhoenixFile(String(payload?.file || ''));
+                    return {
+                        __transferEnvelope: true,
+                        data: bytes,
+                        transfer: bytes ? [bytes.buffer] : [],
+                    };
+                });
+                break;
+            }
+            case 'INSPECT_PHOENIX_PERSISTENCE': {
+                await respond(id, type, async () => adapter.inspectPhoenixPersistence());
+                break;
+            }
+            case 'INSPECT_PHOENIX_PERSISTENCE_DEBUG': {
+                await respond(id, type, async () => adapter.inspectPhoenixPersistenceDebug());
+                break;
+            }
+            case 'APPEND_PHOENIX_WAL_BATCH': {
+                await respond(id, type, async () => adapter.appendPhoenixWalBatch(payload));
+                break;
+            }
+            case 'COMMIT_PHOENIX_MANIFEST': {
+                await respond(id, type, async () => {
+                    await adapter.commitPhoenixManifest(payload);
+                    return null;
+                });
+                break;
+            }
+            case 'WRITE_PHOENIX_CHECKPOINT': {
+                await respond(id, type, async () =>
+                    adapter.writePhoenixCheckpoint(payload.partition, payload.generation, payload.bytes),
+                );
+                break;
+            }
+            case 'PRUNE_PHOENIX_FILES': {
+                await respond(id, type, async () => {
+                    await adapter.prunePhoenixFiles(Array.isArray(payload?.files) ? payload.files : []);
+                    return null;
+                });
+                break;
+            }
             case 'CLEAR_ALL': {
-                await mutex.withLock(async () => {
-                    try {
-                        await adapter.clearAll();
-                        self.postMessage({ id, type, success: true });
-                    } catch (err: any) {
-                        self.postMessage({ id, type, success: false, error: err.message });
-                    }
-                });
+                await respond(id, type, async () => adapter.clearAll());
                 break;
             }
-
-            default:
-                console.warn('[SqliteOpfsWorker] Unknown message:', type);
-                self.postMessage({ id, type: 'ERROR', success: false, error: `Unknown: ${type}` });
+            default: {
+                self.postMessage({ id, type, success: false, error: `Unknown worker message: ${type}` });
+            }
         }
-    } catch (err: any) {
-        console.error('[SqliteOpfsWorker] Fatal:', err);
-        self.postMessage({ id, type: 'ERROR', success: false, error: err.message });
+    } catch (error: any) {
+        console.error('[SqliteOpfsWorker] Fatal:', error);
+        self.postMessage({ id, type, success: false, error: error?.message || String(error) });
     }
 };
 
-console.log('[SqliteOpfsWorker] Worker initialized (Pure Snapshot)');
+async function respond(
+    id: number,
+    type: string,
+    fn: () => Promise<any | { data: any; transfer?: Transferable[] }>,
+): Promise<void> {
+    await mutex.withLock(async () => {
+        try {
+            const result = await fn();
+            const isTransferEnvelope =
+                !!result &&
+                typeof result === 'object' &&
+                '__transferEnvelope' in result &&
+                'data' in result;
+            const data = isTransferEnvelope ? result.data : result;
+            const transfer =
+                isTransferEnvelope && Array.isArray((result as { transfer?: Transferable[] }).transfer)
+                    ? (result as { transfer?: Transferable[] }).transfer!
+                    : [];
+            self.postMessage({ id, type, success: true, data }, transfer);
+        } catch (error: any) {
+            console.error(`[SqliteOpfsWorker] ${type} failed:`, error);
+            self.postMessage({
+                id,
+                type,
+                success: false,
+                error: error?.message || String(error),
+            });
+        }
+    });
+}

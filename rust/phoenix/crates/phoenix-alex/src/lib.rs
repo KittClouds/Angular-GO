@@ -15,8 +15,9 @@ use thiserror::Error;
 use fuzzy::find_matching_anchors;
 pub use normalize::{
     canonicalize_with_offsets, generate_auto_aliases, is_sentence_guard, is_stop_word,
-    normalize_raw, phrase_key, scope_matches, strip_possessive, tokenize_norm,
-    tokens_from_normalized, MAX_PHRASE_TOKENS, TOK_SEP,
+    is_stop_word_with_profile, normalized_has_meaningful_token, normalize_raw, phrase_key,
+    scope_matches, strip_possessive, tokenize_norm, tokens_from_normalized, MAX_PHRASE_TOKENS,
+    TOK_SEP,
 };
 pub use sentence::split_sentence_ranges;
 

@@ -104,6 +104,8 @@ export interface PhoenixSessionStatsBinaryResult {
     updatedAt: number;
 }
 
+export type PhoenixSnapshotPartition = 'all' | 'content' | 'derived';
+
 type PacketResponse = {
     kind: number;
     requestId: number;
@@ -212,6 +214,76 @@ export interface PhoenixOmTransportConfig {
     maxTokens?: number;
 }
 
+export interface PhoenixChatWorkspaceArtifact {
+    key: string;
+    runId: string;
+    narrativeId: string;
+    folderId: string;
+    kind: string;
+    payload: unknown;
+    pinned: boolean;
+    producedBy: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface PhoenixChatPlannerToolSpec {
+    name: string;
+    description: string;
+    parametersJson: unknown;
+}
+
+export interface PhoenixChatPlannerToolCall {
+    id: string;
+    name: string;
+    argumentsJson: string;
+}
+
+export interface PhoenixChatPlannerMessage {
+    role: string;
+    content: string;
+    name?: string | null;
+    toolCallId?: string | null;
+    toolCalls: PhoenixChatPlannerToolCall[];
+}
+
+export interface PhoenixChatPlannerModelRequest {
+    runId: string;
+    threadId: string;
+    model: string;
+    allowTools: boolean;
+    tools: PhoenixChatPlannerToolSpec[];
+    messages: PhoenixChatPlannerMessage[];
+}
+
+export interface PhoenixChatPlannerModelResponse {
+    content: string;
+    toolCalls: PhoenixChatPlannerToolCall[];
+}
+
+export type PhoenixChatPlannerStep =
+    | {
+          kind: 'modelRequest';
+          request: PhoenixChatPlannerModelRequest;
+      }
+    | {
+          kind: 'toolCalls';
+          runId: string;
+          toolCalls: PhoenixChatPlannerToolCall[];
+      }
+    | {
+          kind: 'complete';
+          runId: string;
+          response: string;
+      };
+
+export interface PhoenixChatPlannerTransportConfig {
+    apiKey: string;
+    defaultModel: string;
+    temperature?: number;
+    maxTokens?: number;
+}
+
 type PhoenixSemanticLeafChunk = {
     spanId: string;
     documentId: string;
@@ -250,6 +322,7 @@ export class PhoenixWasmService {
         }
     >();
     private readonly pendingOmByThread = new Map<string, Promise<boolean>>();
+    private readonly pendingPlannerByRun = new Map<string, Promise<boolean>>();
     private readonly pendingSemanticDocsBySession = new Map<string, Set<string>>();
     private loggedTransferFallback = false;
     private semanticEmbeddingQueue: Promise<void> = Promise.resolve();
@@ -397,9 +470,19 @@ export class PhoenixWasmService {
         return decodeSessionStatsResult(payload);
     }
 
-    async exportSnapshot(capacityHint = 8 * 1024 * 1024): Promise<Uint8Array> {
+    async exportSnapshot(
+        partition: PhoenixSnapshotPartition = 'all',
+        capacityHint = 8 * 1024 * 1024,
+    ): Promise<Uint8Array> {
         await this.loadWasm();
-        return (await this.sendBytes(PACKET_KIND.snapshotExportRequest, new Uint8Array(0), capacityHint)).bytes;
+        if (partition === 'all') {
+            return (await this.sendBytes(PACKET_KIND.snapshotExportRequest, new Uint8Array(0), capacityHint)).bytes;
+        }
+        return (await this.sendJson(
+            PACKET_KIND.snapshotExportRequest,
+            { partition },
+            capacityHint,
+        )).bytes;
     }
 
     async importSnapshot(bytes: Uint8Array): Promise<any> {
@@ -518,6 +601,38 @@ export class PhoenixWasmService {
         });
     }
 
+    async chatGetPlannerStep(runId: string): Promise<PhoenixChatPlannerStep | null> {
+        return this.storeCommand('chat:getPlannerStep', { runId });
+    }
+
+    async chatSubmitPlannerModelResponse(
+        runId: string,
+        response: PhoenixChatPlannerModelResponse,
+    ): Promise<PhoenixChatPlannerStep | null> {
+        return this.storeCommand('chat:submitPlannerModelResponse', { runId, response });
+    }
+
+    async chatAdvancePlannerRun(runId: string): Promise<PhoenixChatPlannerStep | null> {
+        return this.storeCommand('chat:advancePlannerRun', { runId });
+    }
+
+    async chatDegradePlannerRun(runId: string, reason: string): Promise<any> {
+        return this.storeCommand('chat:degradePlannerRun', { runId, reason });
+    }
+
+    async chatListPlannerArtifacts(runId: string): Promise<PhoenixChatWorkspaceArtifact[]> {
+        const payload = await this.storeCommand('chat:listPlannerArtifacts', { runId });
+        return Array.isArray(payload) ? payload : [];
+    }
+
+    async chatPinPlannerArtifact(
+        runId: string,
+        key: string,
+        pinned = true,
+    ): Promise<PhoenixChatWorkspaceArtifact | null> {
+        return this.storeCommand('chat:pinPlannerArtifact', { runId, key, pinned });
+    }
+
     async chatPrepareOm(threadId: string): Promise<PhoenixOmPendingAction | null> {
         return this.storeCommand('chat:prepareOm', { threadId });
     }
@@ -574,6 +689,22 @@ export class PhoenixWasmService {
             this.pendingOmByThread.delete(threadId);
         });
         this.pendingOmByThread.set(threadId, task);
+        return task;
+    }
+
+    async chatProcessPlannerRun(
+        runId: string,
+        config: PhoenixChatPlannerTransportConfig,
+    ): Promise<boolean> {
+        const existing = this.pendingPlannerByRun.get(runId);
+        if (existing) {
+            return existing;
+        }
+
+        const task = this.chatProcessPlannerRunInternal(runId, config).finally(() => {
+            this.pendingPlannerByRun.delete(runId);
+        });
+        this.pendingPlannerByRun.set(runId, task);
         return task;
     }
 
@@ -766,6 +897,46 @@ export class PhoenixWasmService {
         return mutated;
     }
 
+    private async chatProcessPlannerRunInternal(
+        runId: string,
+        config: PhoenixChatPlannerTransportConfig,
+    ): Promise<boolean> {
+        if (!config.apiKey?.trim()) {
+            await this.chatDegradePlannerRun(runId, 'Planner requires an OpenRouter API key.').catch(
+                () => undefined,
+            );
+            return false;
+        }
+
+        try {
+            let step = await this.chatGetPlannerStep(runId);
+            while (step) {
+                if (step.kind === 'complete') {
+                    return true;
+                }
+                if (step.kind === 'toolCalls') {
+                    step = await this.chatAdvancePlannerRun(step.runId);
+                    continue;
+                }
+
+                const payload = await this.fetchOmChatCompletion(
+                    step.request.model || config.defaultModel,
+                    config,
+                    this.buildToolCallingRequestBody(step.request),
+                );
+                step = await this.chatSubmitPlannerModelResponse(
+                    step.request.runId,
+                    this.buildPlannerModelResponse(payload),
+                );
+            }
+            return false;
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            await this.chatDegradePlannerRun(runId, reason).catch(() => undefined);
+            return false;
+        }
+    }
+
     private async runOmAction(action: PhoenixOmPendingAction, config: PhoenixOmTransportConfig): Promise<string> {
         if (action.kind === 'reflect' && action.reflectorToolingEnabled) {
             return this.runReflectorWithRuntime(action, config);
@@ -838,7 +1009,7 @@ export class PhoenixWasmService {
                 const payload = await this.fetchOmChatCompletion(
                     step.request.model || action.model || config.omModel || config.defaultModel,
                     config,
-                    this.buildReflectorRequestBody(step.request),
+                    this.buildToolCallingRequestBody(step.request),
                 );
                 step = await this.omSubmitReflectorModelResponse(
                     step.request.sessionId,
@@ -887,7 +1058,25 @@ export class PhoenixWasmService {
         return response.json();
     }
 
-    private buildReflectorRequestBody(request: PhoenixOmReflectorModelRequest): Record<string, unknown> {
+    private buildToolCallingRequestBody(request: {
+        allowTools: boolean;
+        tools: Array<{
+            name: string;
+            description: string;
+            parametersJson: unknown;
+        }>;
+        messages: Array<{
+            role: string;
+            content: string;
+            name?: string | null;
+            toolCallId?: string | null;
+            toolCalls: Array<{
+                id: string;
+                name: string;
+                argumentsJson: string;
+            }>;
+        }>;
+    }): Record<string, unknown> {
         return {
             messages: request.messages.map((message) => ({
                 role: message.role,
@@ -924,6 +1113,25 @@ export class PhoenixWasmService {
     }
 
     private buildReflectorModelResponse(payload: any): PhoenixOmReflectorModelResponse {
+        const response = this.buildToolCallingModelResponse(payload);
+        return {
+            content: response.content,
+            toolCalls: response.toolCalls,
+        };
+    }
+
+    private buildPlannerModelResponse(payload: any): PhoenixChatPlannerModelResponse {
+        const response = this.buildToolCallingModelResponse(payload);
+        return {
+            content: response.content,
+            toolCalls: response.toolCalls,
+        };
+    }
+
+    private buildToolCallingModelResponse(payload: any): {
+        content: string;
+        toolCalls: Array<{ id: string; name: string; argumentsJson: string }>;
+    } {
         const choice = payload?.choices?.[0];
         const toolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
         return {
@@ -990,6 +1198,7 @@ export class PhoenixWasmService {
         this.worker?.terminate();
         this.worker = new Worker(new URL('../workers/phoenix.worker', import.meta.url), {
             type: 'module',
+            name: 'phoenix-wasm',
         });
         this.workerReady = false;
 
