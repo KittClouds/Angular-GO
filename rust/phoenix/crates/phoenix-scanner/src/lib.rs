@@ -513,11 +513,14 @@ fn guess_pos(token: &str, masked: bool) -> PosTag {
     if lower.ends_with("ly") {
         return PosTag::Adverb;
     }
-    if ["ous", "ful", "ive", "al", "less", "able", "ic", "ish"]
+    if ["ous", "ful", "ive", "al", "less", "able", "ic", "ish", "ant", "ent"]
         .iter()
         .any(|suffix| lower.ends_with(suffix))
     {
         return PosTag::Adjective;
+    }
+    if lower.ends_with("ed") || lower.ends_with("ing") {
+        return PosTag::Verb;
     }
     if token
         .chars()
@@ -526,9 +529,6 @@ fn guess_pos(token: &str, masked: bool) -> PosTag {
         .unwrap_or(false)
     {
         return PosTag::ProperNoun;
-    }
-    if lower.ends_with("ed") || lower.ends_with("ing") {
-        return PosTag::Verb;
     }
     PosTag::Noun
 }
@@ -856,6 +856,32 @@ fn build_discovery_mentions(
         .map(|hit| hit.sentence_index)
         .collect::<HashSet<_>>();
 
+    // Precompute: sentence-start byte offsets (first non-whitespace in each sentence)
+    let sentence_starts: HashSet<u32> = sentences
+        .iter()
+        .map(|s| {
+            let mut offset = s.range.start as usize;
+            let bytes = text.as_bytes();
+            while offset < bytes.len() && bytes[offset].is_ascii_whitespace() {
+                offset += 1;
+            }
+            offset as u32
+        })
+        .collect();
+
+    // Precompute: set of all lowercase word surfaces for the lowercase-alias check.
+    // A single pass over tokens; only words that are NOT capitalized get inserted.
+    let lowercase_surfaces: HashSet<String> = tokens
+        .iter()
+        .filter(|t| {
+            !t.capitalized
+                && t.token_class == Some(TokenClass::Word)
+                && !t.masked
+        })
+        .map(|t| normalize_raw(slice(text, t.range)))
+        .filter(|n| !n.is_empty())
+        .collect();
+
     let mut index = 0usize;
     while index < tokens.len() {
         if tokens[index].masked || overlaps_any(tokens[index].range, &mention_ranges) {
@@ -863,6 +889,15 @@ fn build_discovery_mentions(
             continue;
         }
         if !tokens[index].capitalized || tokens[index].token_class != Some(TokenClass::Word) {
+            index += 1;
+            continue;
+        }
+
+        // Stop-word prefix skip: if the first word is a stop-word, skip it so the next
+        // capitalized word can be properly picked up as a standalone entity.
+        let first_surface = slice(text, tokens[index].range);
+        let first_normalized = normalize_raw(first_surface);
+        if is_stop_word_with_profile(strip_possessive(&first_normalized), stopword_profile) {
             index += 1;
             continue;
         }
@@ -877,6 +912,21 @@ fn build_discovery_mentions(
         {
             end = tokens[cursor].range.end;
             cursor += 1;
+        }
+
+        // POS-tag gate: only for single-word candidates (multiword phrases are almost always entities)
+        let is_single_word = cursor == index + 1;
+        if is_single_word && !is_discovery_eligible_pos(&tokens[index].pos) {
+            index = cursor;
+            continue;
+        }
+        // Dialogue-lead hard skip: single word right after opening quote is never an entity
+        if is_single_word && start > 0 {
+            let prev = text.as_bytes()[start as usize - 1];
+            if prev == b'"' || prev == 0x9C {
+                index = cursor;
+                continue;
+            }
         }
         let range = TextRange { start, end };
         let surface = slice(text, range)
@@ -913,6 +963,17 @@ fn build_discovery_mentions(
         {
             entry.score += thresholds.capitalized_bonus;
         }
+
+        // Sentence-start penalty: single-word at beginning of sentence needs more evidence
+        if is_single_word && sentence_starts.contains(&start) {
+            entry.score -= thresholds.sentence_start_penalty;
+        }
+
+        // Lowercase-alias penalty: if the same word appears lowercase elsewhere, it's common
+        if lowercase_surfaces.contains(&normalized) {
+            entry.score -= thresholds.lowercase_alias_penalty;
+        }
+
         entry.last_surface = surface.clone();
 
         if entry.count >= thresholds.min_occurrences && entry.score >= thresholds.min_score {
@@ -929,6 +990,17 @@ fn build_discovery_mentions(
         index = cursor;
     }
     emitted
+}
+
+/// Only Noun, ProperNoun, Other, or untagged tokens are eligible for discovery.
+/// Adjectives, adverbs, verbs, auxiliaries, modals, conjunctions, prepositions,
+/// determiners, and pronouns are rejected — they are never entity names.
+#[inline]
+fn is_discovery_eligible_pos(pos: &Option<PosTag>) -> bool {
+    matches!(
+        pos,
+        None | Some(PosTag::Noun) | Some(PosTag::ProperNoun) | Some(PosTag::Other)
+    )
 }
 
 fn select_mentions(
@@ -1712,9 +1784,12 @@ mod tests {
             resolver_seed: Vec::new(),
         });
 
-        assert!(artifact.mentions.iter().any(|mention| {
-            mention.source == Some(MentionSource::Discovery) && mention.surface == "The Ember Gate"
-        }));
+        assert!(
+            artifact.mentions.iter().any(|mention| {
+                mention.source == Some(MentionSource::Discovery) && mention.surface == "Ember Gate"
+            }),
+            "The leading 'The' should be stripped, discovering 'Ember Gate'"
+        );
     }
 
     #[test]
@@ -1723,15 +1798,16 @@ mod tests {
             stopword_profile: "off".to_owned(),
             ..ScannerConfig::default()
         });
+        // Use a capitalized noun (not pronoun) that the default stopword list would block
         let artifact = scanner.scan(&ScanRequest {
-            text: "He stayed. He waited.".to_owned(),
+            text: "North called. North answered.".to_owned(),
             scope: ScopeKey::default(),
             session_id: Some(phoenix_types::SessionId("disc-off-profile".to_owned())),
             resolver_seed: Vec::new(),
         });
 
         assert!(artifact.mentions.iter().any(|mention| {
-            mention.source == Some(MentionSource::Discovery) && mention.surface == "He"
+            mention.source == Some(MentionSource::Discovery) && mention.surface == "North"
         }));
     }
 
@@ -1766,6 +1842,152 @@ mod tests {
                 artifact.sentences[2].range
             ),
             "Wow?"
+        );
+    }
+
+    #[test]
+    fn pos_tag_gate_blocks_non_noun_discoveries() {
+        // The POS tagger gives ProperNoun to capitalized words, so POS gate primarily
+        // catches continuations. But let's verify a verb-form at sentence start where
+        // the word also appears lowercase (double penalty) gets suppressed.
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Stayed behind. She stayed close. Stayed firm.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-pos-verb".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        // "Stayed" appears capitalized at sentence start but lowercase too
+        // sentence-start penalty + lowercase-alias penalty should suppress it
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .all(|m| m.source != Some(MentionSource::Discovery)
+                    || m.surface != "Stayed"),
+            "Verb 'Stayed' at sentence start with lowercase alias should be suppressed"
+        );
+    }
+
+    #[test]
+    fn prefix_stop_words_are_skipped() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Then Isolde stayed. Then Isolde left. The Circle opened. The Circle closed.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-stop-prefix".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .any(|m| m.source == Some(MentionSource::Discovery) && m.surface == "Isolde"),
+            "Isolde should be discovered without the 'Then' prefix"
+        );
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .any(|m| m.source == Some(MentionSource::Discovery) && m.surface == "Circle"),
+            "Circle should be discovered without the 'The' prefix"
+        );
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .all(|m| m.source != Some(MentionSource::Discovery) || !m.surface.starts_with("Then ") && !m.surface.starts_with("The ")),
+            "Entities prefixed with stop-words should have been stripped"
+        );
+    }
+
+    #[test]
+    fn lowercase_alias_suppresses_common_words() {
+        let scanner = PhoenixScanner::default();
+        // "Ice" appears capitalized AND "ice" appears lowercase → penalty kills it
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Ice formed quickly. The ice fell from the edge. Ice shattered.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-lowercase".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .all(|m| m.source != Some(MentionSource::Discovery)
+                    || m.surface != "Ice"),
+            "Common word 'Ice' that appears lowercase should be suppressed"
+        );
+    }
+
+    #[test]
+    fn dialogue_lead_penalty_suppresses_interjections() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: r#""Nah. Not really." He paused. "Nah. Never mind.""#.to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-dialogue".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .all(|m| m.source != Some(MentionSource::Discovery)
+                    || m.surface != "Nah"),
+            "Dialogue-lead word 'Nah' after quote should be suppressed"
+        );
+    }
+
+    #[test]
+    fn real_names_survive_all_new_filters() {
+        let scanner = PhoenixScanner::default();
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Fiora laughed. Kamaria waited. Fiora moved. Kamaria smiled.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-survive".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        let discovery_surfaces: Vec<&str> = artifact
+            .mentions
+            .iter()
+            .filter(|m| m.source == Some(MentionSource::Discovery))
+            .map(|m| m.surface.as_str())
+            .collect();
+        assert!(
+            discovery_surfaces.contains(&"Fiora"),
+            "Real name 'Fiora' must survive all filters"
+        );
+        assert!(
+            discovery_surfaces.contains(&"Kamaria"),
+            "Real name 'Kamaria' must survive all filters"
+        );
+    }
+
+    #[test]
+    fn sentence_start_common_word_suppressed() {
+        let scanner = PhoenixScanner::default();
+        // "Hold" only appears at sentence start and also appears lowercase
+        let artifact = scanner.scan(&ScanRequest {
+            text: "Hold steady. She tried to hold on. Hold firm.".to_owned(),
+            scope: ScopeKey::default(),
+            session_id: Some(phoenix_types::SessionId("disc-sentence-start".to_owned())),
+            resolver_seed: Vec::new(),
+        });
+
+        assert!(
+            artifact
+                .mentions
+                .iter()
+                .all(|m| m.source != Some(MentionSource::Discovery)
+                    || m.surface != "Hold"),
+            "Common word 'Hold' at sentence start with lowercase alias should be suppressed"
         );
     }
 }

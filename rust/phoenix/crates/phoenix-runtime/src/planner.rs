@@ -5,9 +5,8 @@ use std::sync::Mutex;
 use phoenix_store_cozo::{CompactRow, CompactRowView, StoreError};
 use phoenix_types::{
     ChatPlannerMessage, ChatPlannerModelRequest, ChatPlannerModelResponse, ChatPlannerStep,
-    ChatPlannerToolCall, ChatPlannerToolSpec, ChatRun, ChatRunEvent, ChatRunStatus,
-    ChatToolCall, ChatWorkspaceArtifact, EvidenceItem, QueryRequest, QueryTarget, ScopeKey,
-    SessionId,
+    ChatPlannerToolCall, ChatPlannerToolSpec, ChatRun, ChatRunEvent, ChatRunStatus, ChatToolCall,
+    ChatWorkspaceArtifact, EvidenceItem, QueryRequest, QueryTarget, ScopeKey, SessionId,
 };
 use serde_json::{json, Value};
 
@@ -207,7 +206,8 @@ impl ChatPlannerRunner {
             false
         };
 
-        let tool_outcome = self.execute_tool_calls(runtime, run, &tool_calls, &mut session.messages)?;
+        let tool_outcome =
+            self.execute_tool_calls(runtime, run, &tool_calls, &mut session.messages)?;
         session.tool_rounds_used = session.tool_rounds_used.saturating_add(1);
 
         if tool_outcome.external_pending {
@@ -225,7 +225,9 @@ impl ChatPlannerRunner {
                     phase: "awaiting_tool_host".to_owned(),
                     kind: "status".to_owned(),
                     label: "Waiting for note workspace tools".to_owned(),
-                    detail: Some("Canvas planner is waiting on the TypeScript editor host.".to_owned()),
+                    detail: Some(
+                        "Canvas planner is waiting on the TypeScript editor host.".to_owned(),
+                    ),
                     status: Some("running".to_owned()),
                     payload: None,
                     latency_ms: None,
@@ -307,9 +309,9 @@ impl ChatPlannerRunner {
             .iter()
             .filter(|message| message.role == "assistant" && !message.tool_calls.is_empty())
             .count();
-        let final_request_sent = messages
-            .iter()
-            .any(|message| message.role == "user" && message.content.trim() == PLANNER_FINAL_PROMPT);
+        let final_request_sent = messages.iter().any(|message| {
+            message.role == "user" && message.content.trim() == PLANNER_FINAL_PROMPT
+        });
         let mut session = ChatPlannerSession {
             run_id: run.id.clone(),
             thread_id: run.thread_id.0.clone(),
@@ -352,8 +354,8 @@ impl ChatPlannerRunner {
         messages: &[ChatPlannerMessage],
     ) -> Result<(), StoreError> {
         let mut updated = run.clone();
-        updated.planner_messages_json =
-            serde_json::to_string(messages).map_err(|error| StoreError::Query(error.to_string()))?;
+        updated.planner_messages_json = serde_json::to_string(messages)
+            .map_err(|error| StoreError::Query(error.to_string()))?;
         updated.updated_at = now_ms();
         runtime.chat.persist_run(&runtime.store, &updated)
     }
@@ -378,8 +380,8 @@ impl ChatPlannerRunner {
         let mut updated = run.clone();
         updated.status = ChatRunStatus::ReadyToAnswer;
         updated.error = None;
-        updated.planner_messages_json =
-            serialize_messages(&session.messages).map_err(|error| StoreError::Query(error.to_string()))?;
+        updated.planner_messages_json = serialize_messages(&session.messages)
+            .map_err(|error| StoreError::Query(error.to_string()))?;
         if !planner_context.is_empty() {
             updated.prepared_context = append_section(&updated.prepared_context, &planner_context);
             updated.prepared_system_prompt = append_section(
@@ -401,7 +403,9 @@ impl ChatPlannerRunner {
                 phase: "planning".to_owned(),
                 kind: "status".to_owned(),
                 label: "Planner complete".to_owned(),
-                detail: Some("Pinned planner artifacts were promoted into the answer context.".to_owned()),
+                detail: Some(
+                    "Pinned planner artifacts were promoted into the answer context.".to_owned(),
+                ),
                 status: Some("done".to_owned()),
                 payload: None,
                 latency_ms: None,
@@ -437,8 +441,8 @@ impl ChatPlannerRunner {
         updated.status = ChatRunStatus::Degraded;
         updated.error = Some(reason.to_owned());
         if let Some(messages) = messages {
-            updated.planner_messages_json =
-                serialize_messages(messages).map_err(|error| StoreError::Query(error.to_string()))?;
+            updated.planner_messages_json = serialize_messages(messages)
+                .map_err(|error| StoreError::Query(error.to_string()))?;
         }
         updated.updated_at = now_ms();
         runtime.chat.persist_run(&runtime.store, &updated)?;
@@ -591,10 +595,7 @@ fn build_planner_user_prompt(run: &ChatRun) -> String {
     }
 }
 
-fn build_model_request_step(
-    session: &ChatPlannerSession,
-    allow_tools: bool,
-) -> ChatPlannerStep {
+fn build_model_request_step(session: &ChatPlannerSession, allow_tools: bool) -> ChatPlannerStep {
     ChatPlannerStep::ModelRequest {
         request: ChatPlannerModelRequest {
             run_id: session.run_id.clone(),
@@ -615,7 +616,8 @@ fn planner_tool_specs(mutations_enabled: bool) -> Vec<ChatPlannerToolSpec> {
     let mut specs = vec![
         ChatPlannerToolSpec {
             name: "scope_describe".to_owned(),
-            description: "Describe the active planner scope, session, and workspace budget.".to_owned(),
+            description: "Describe the active planner scope, session, and workspace budget."
+                .to_owned(),
             parameters_json: json!({ "type": "object", "properties": {} }),
         },
         ChatPlannerToolSpec {
@@ -630,7 +632,8 @@ fn planner_tool_specs(mutations_enabled: bool) -> Vec<ChatPlannerToolSpec> {
         },
         ChatPlannerToolSpec {
             name: "note_get".to_owned(),
-            description: "Fetch a note in scope, including its body when explicitly requested.".to_owned(),
+            description: "Fetch a note in scope, including its body when explicitly requested."
+                .to_owned(),
             parameters_json: json!({
                 "type": "object",
                 "properties": {
@@ -808,7 +811,9 @@ fn external_tool_metadata(name: &str, run: &ChatRun) -> Option<(&'static str, &'
         "get_active_note_snapshot" | "get_selection" | "highlight_range" => {
             Some(("typescript", "read"))
         }
-        "replace_text_proposal" | "rewrite_block_proposal" | "insert_text_proposal"
+        "replace_text_proposal"
+        | "rewrite_block_proposal"
+        | "insert_text_proposal"
         | "save_note_proposal" => Some(("typescript", "proposal")),
         _ => None,
     }
@@ -875,7 +880,11 @@ fn tool_scope_describe(runtime: &PhoenixRuntime, run: &ChatRun) -> Result<Value,
     }))
 }
 
-fn tool_note_list(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Result<Value, StoreError> {
+fn tool_note_list(
+    runtime: &PhoenixRuntime,
+    run: &ChatRun,
+    args: &Value,
+) -> Result<Value, StoreError> {
     let limit = clamp_limit(args.get("limit").and_then(Value::as_u64), 10, 25);
     let notes = runtime.list_note_values(None, false)?;
     let mut filtered = notes
@@ -894,12 +903,22 @@ fn tool_note_list(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Resu
     }))
 }
 
-fn tool_note_get(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Result<Value, StoreError> {
-    let note_id = args.get("noteId").and_then(Value::as_str).unwrap_or_default();
+fn tool_note_get(
+    runtime: &PhoenixRuntime,
+    run: &ChatRun,
+    args: &Value,
+) -> Result<Value, StoreError> {
+    let note_id = args
+        .get("noteId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if note_id.is_empty() {
         return Ok(json!({ "error": "noteId is required." }));
     }
-    let include_body = args.get("includeBody").and_then(Value::as_bool).unwrap_or(true);
+    let include_body = args
+        .get("includeBody")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let Some(note) = runtime.get_note_value(note_id, include_body)? else {
         return Ok(json!({ "error": format!("Note not found: {note_id}") }));
     };
@@ -914,8 +933,15 @@ fn tool_note_read_span(
     run: &ChatRun,
     args: &Value,
 ) -> Result<Value, StoreError> {
-    let note_id = args.get("noteId").and_then(Value::as_str).unwrap_or_default();
-    let start = args.get("start").and_then(Value::as_i64).unwrap_or(0).max(0) as usize;
+    let note_id = args
+        .get("noteId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let start = args
+        .get("start")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0) as usize;
     let end = args.get("end").and_then(Value::as_i64).unwrap_or(0).max(0) as usize;
     if note_id.is_empty() || end <= start {
         return Ok(json!({ "error": "noteId, start, and end are required." }));
@@ -944,7 +970,11 @@ fn tool_search_lexical(
     run: &ChatRun,
     args: &Value,
 ) -> Result<Value, StoreError> {
-    let query = args.get("query").and_then(Value::as_str).unwrap_or_default().trim();
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
     if query.is_empty() {
         return Ok(json!({ "error": "query is required." }));
     }
@@ -999,7 +1029,11 @@ fn tool_search_graph(
     run: &ChatRun,
     args: &Value,
 ) -> Result<Value, StoreError> {
-    let query = args.get("query").and_then(Value::as_str).unwrap_or_default().trim();
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
     if query.is_empty() {
         return Ok(json!({ "error": "query is required." }));
     }
@@ -1069,8 +1103,16 @@ fn tool_session_stats(runtime: &PhoenixRuntime, run: &ChatRun) -> Result<Value, 
     serde_json::to_value(stats).map_err(|error| StoreError::Query(error.to_string()))
 }
 
-fn tool_artifact_put(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Result<Value, StoreError> {
-    let kind = args.get("kind").and_then(Value::as_str).unwrap_or_default().trim();
+fn tool_artifact_put(
+    runtime: &PhoenixRuntime,
+    run: &ChatRun,
+    args: &Value,
+) -> Result<Value, StoreError> {
+    let kind = args
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
     if kind.is_empty() {
         return Ok(json!({ "error": "kind is required." }));
     }
@@ -1084,7 +1126,11 @@ fn tool_artifact_put(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> R
     }))
 }
 
-fn tool_artifact_list(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Result<Value, StoreError> {
+fn tool_artifact_list(
+    runtime: &PhoenixRuntime,
+    run: &ChatRun,
+    args: &Value,
+) -> Result<Value, StoreError> {
     let pinned_only = args
         .get("pinnedOnly")
         .and_then(Value::as_bool)
@@ -1096,7 +1142,11 @@ fn tool_artifact_list(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> 
     Ok(json!({ "artifacts": artifacts }))
 }
 
-fn tool_artifact_pin(runtime: &PhoenixRuntime, run: &ChatRun, args: &Value) -> Result<Value, StoreError> {
+fn tool_artifact_pin(
+    runtime: &PhoenixRuntime,
+    run: &ChatRun,
+    args: &Value,
+) -> Result<Value, StoreError> {
     let key = args.get("key").and_then(Value::as_str).unwrap_or_default();
     if key.is_empty() {
         return Ok(json!({ "error": "key is required." }));
@@ -1216,7 +1266,10 @@ fn artifact_from_row(row: &CompactRow) -> Option<ChatWorkspaceArtifact> {
     Some(ChatWorkspaceArtifact {
         key: view.get_str("key")?.to_owned(),
         run_id: view.get_str("thread_id")?.to_owned(),
-        narrative_id: view.get_str("narrative_id").unwrap_or("__global__").to_owned(),
+        narrative_id: view
+            .get_str("narrative_id")
+            .unwrap_or("__global__")
+            .to_owned(),
         folder_id: view.get_str("folder_id").unwrap_or("__root__").to_owned(),
         kind: view.get_str("kind").unwrap_or_default().to_owned(),
         payload: view.get_json("payload").unwrap_or(Value::Null),
@@ -1241,7 +1294,11 @@ fn resolve_main_session_id(runtime: &PhoenixRuntime, run: &ChatRun) -> Option<Se
     let desired_narrative = run.options.narrative_id.as_deref();
     let preferred = rows.iter().find(|row| {
         row.get("label").and_then(Value::as_str) == Some("phoenix-ui-main")
-            && row.get("status").and_then(Value::as_str).unwrap_or("active") == "active"
+            && row
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("active")
+                == "active"
             && desired_narrative
                 .map(|value| row.get("narrative_id").and_then(Value::as_str) == Some(value))
                 .unwrap_or(true)
@@ -1278,7 +1335,9 @@ fn note_matches_scope(note: &Value, run: &ChatRun) -> bool {
 }
 
 fn note_updated_at(note: &Value) -> i64 {
-    note.get("updated_at").and_then(Value::as_i64).unwrap_or_default()
+    note.get("updated_at")
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
 }
 
 fn note_id(note: &Value) -> Option<&str> {
@@ -1372,7 +1431,10 @@ fn planner_evidence_items(
     }
     for artifact in artifacts.iter().filter(|artifact| artifact.pinned) {
         let mut metadata = BTreeMap::new();
-        metadata.insert("artifactKey".to_owned(), Value::String(artifact.key.clone()));
+        metadata.insert(
+            "artifactKey".to_owned(),
+            Value::String(artifact.key.clone()),
+        );
         metadata.insert("kind".to_owned(), Value::String(artifact.kind.clone()));
         items.push(EvidenceItem {
             id: format!("planner-artifact:{}", artifact.key),

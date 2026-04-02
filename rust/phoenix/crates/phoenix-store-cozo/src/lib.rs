@@ -9,8 +9,8 @@ use phoenix_types::{
 };
 use rustc_hash::FxHashMap;
 use schema::{
-    CONTENT_SNAPSHOT_RELATIONS, DERIVED_SNAPSHOT_RELATIONS, PhoenixColumnSpec, PhoenixColumnType,
-    PhoenixRelationSpec, ALL_RELATIONS,
+    PhoenixColumnSpec, PhoenixColumnType, PhoenixRelationSpec, ALL_RELATIONS,
+    CONTENT_SNAPSHOT_RELATIONS, DERIVED_SNAPSHOT_RELATIONS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -317,6 +317,15 @@ pub struct SemanticVectorRow<'a> {
     pub updated_at: i64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticDocumentVectorRow<'a> {
+    pub document_id: &'a str,
+    pub values: &'a [f32],
+    pub model_id: &'a str,
+    pub leaf_count: usize,
+    pub updated_at: i64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SemanticLeafChunk {
@@ -331,6 +340,13 @@ pub struct SemanticLeafChunk {
 pub struct SemanticNeighbor {
     pub span_id: String,
     pub distance: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SemanticDocumentNeighbor {
+    pub document_id: String,
+    pub distance: f64,
+    pub leaf_count: usize,
 }
 
 impl PhoenixCozoStore {
@@ -388,9 +404,14 @@ impl PhoenixCozoStore {
     }
 
     pub fn ensure_semantic_relations(&self) -> Result<(), StoreError> {
+        self.ensure_semantic_index("semantic_vectors", "vec_idx")?;
+        self.ensure_semantic_index("semantic_documents", "doc_idx")
+    }
+
+    fn ensure_semantic_index(&self, relation: &str, index_name: &str) -> Result<(), StoreError> {
         let script = format!(
             r#"
-::hnsw create semantic_vectors:vec_idx {{
+::hnsw create {relation}:{index_name} {{
     dim: {dim},
     dtype: F32,
     fields: [vec],
@@ -468,6 +489,62 @@ rows[span_id, raw_vec, model_id, updated_at] <- $rows
         Ok(())
     }
 
+    pub fn upsert_semantic_document_vectors(
+        &self,
+        rows: &[SemanticDocumentVectorRow<'_>],
+    ) -> Result<(), StoreError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let data = rows
+            .iter()
+            .map(|row| {
+                if row.values.len() != SEMANTIC_VECTOR_DIM {
+                    return Err(StoreError::Query(format!(
+                        "semantic document vector dimension mismatch for {}: expected {}, got {}",
+                        row.document_id,
+                        SEMANTIC_VECTOR_DIM,
+                        row.values.len()
+                    )));
+                }
+                if row.model_id != SEMANTIC_MODEL_ID {
+                    return Err(StoreError::Query(format!(
+                        "semantic document model mismatch for {}: expected {}, got {}",
+                        row.document_id, SEMANTIC_MODEL_ID, row.model_id
+                    )));
+                }
+                Ok(cozo::DataValue::List(vec![
+                    cozo::DataValue::Str(row.document_id.to_owned().into()),
+                    cozo::DataValue::List(
+                        row.values
+                            .iter()
+                            .map(|value| cozo::DataValue::from(*value as f64))
+                            .collect(),
+                    ),
+                    cozo::DataValue::Str(row.model_id.to_owned().into()),
+                    cozo::DataValue::from(row.leaf_count as i64),
+                    cozo::DataValue::from(row.updated_at),
+                ]))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let params = [("rows".to_owned(), cozo::DataValue::List(data))]
+            .into_iter()
+            .collect();
+        self.db
+            .run_script(
+                r#"
+rows[document_id, raw_vec, model_id, leaf_count, updated_at] <- $rows
+?[document_id, vec, model_id, leaf_count, updated_at] := rows[document_id, raw_vec, model_id, leaf_count, updated_at],
+    vec = vec(raw_vec, "F32")
+:put semantic_documents { document_id => vec, model_id, leaf_count, updated_at }
+"#,
+                params,
+                cozo::ScriptMutability::Mutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        Ok(())
+    }
+
     pub fn list_leaf_chunks_for_documents(
         &self,
         document_ids: &[String],
@@ -536,6 +613,9 @@ selected[doc_id] <- $docs
         limit: usize,
         oversample: usize,
     ) -> Result<Vec<SemanticNeighbor>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         if query_vector.len() != SEMANTIC_VECTOR_DIM {
             return Err(StoreError::Query(format!(
                 "semantic query vector dimension mismatch: expected {}, got {}",
@@ -543,38 +623,199 @@ selected[doc_id] <- $docs
                 query_vector.len()
             )));
         }
-        let params = [
-            (
-                "query".to_owned(),
-                cozo::DataValue::List(
-                    query_vector
-                        .iter()
-                        .map(|value| cozo::DataValue::from(*value as f64))
-                        .collect(),
-                ),
-            ),
-            (
-                "k".to_owned(),
-                cozo::DataValue::from(oversample.max(limit) as i64),
-            ),
-            ("ef".to_owned(), cozo::DataValue::from(50_i64)),
-            (
-                "model_id".to_owned(),
-                cozo::DataValue::Str(SEMANTIC_MODEL_ID.to_owned().into()),
-            ),
-        ]
-        .into_iter()
-        .collect();
+        let params = build_semantic_query_params(query_vector, oversample.max(limit));
         let rows = self
             .db
             .run_script(
                 r#"
 q_vec[v] := v = vec($query, "F32")
 ?[span_id, dist, narrative_id, folder_id] := q_vec[q],
-    ~semantic_vectors:vec_idx{span_id | query: q, k: $k, ef: $ef, bind_distance: dist, filter: model_id == $model_id},
+    ~semantic_vectors:vec_idx{
+        span_id,
+        vec,
+        model_id,
+        updated_at |
+        query: q,
+        k: $k,
+        ef: $ef,
+        bind_distance: dist,
+        filter: model_id == $model_id
+    },
     *chunkid_map{id: chunk_id, chunk_key: span_id},
     *chunks{chunk_id, level, scope_narrative: narrative_id, scope_folder: folder_id},
     level = 0
+:order dist
+"#,
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        let mut filtered = Vec::with_capacity(limit);
+        for row in rows.rows {
+            let Some(span_id) = row.first().and_then(datavalue_as_str) else {
+                continue;
+            };
+            if !matches_scope(
+                scope,
+                row.get(2).and_then(datavalue_as_str),
+                row.get(3).and_then(datavalue_as_str),
+            ) {
+                continue;
+            }
+            let Some(distance) = row.get(1).and_then(datavalue_to_f64) else {
+                continue;
+            };
+            filtered.push(SemanticNeighbor {
+                span_id: span_id.to_owned(),
+                distance,
+            });
+            if filtered.len() >= limit {
+                break;
+            }
+        }
+        Ok(filtered)
+    }
+
+    pub fn query_semantic_documents(
+        &self,
+        query_vector: &[f32],
+        scope: &ScopeKey,
+        limit: usize,
+        oversample: usize,
+    ) -> Result<Vec<SemanticDocumentNeighbor>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        if query_vector.len() != SEMANTIC_VECTOR_DIM {
+            return Err(StoreError::Query(format!(
+                "semantic document query vector dimension mismatch: expected {}, got {}",
+                SEMANTIC_VECTOR_DIM,
+                query_vector.len()
+            )));
+        }
+        let params = build_semantic_query_params(query_vector, oversample.max(limit));
+        let rows = self
+            .db
+            .run_script(
+                r#"
+q_vec[v] := v = vec($query, "F32")
+doc_scope[document_id, narrative_id, folder_id] := *chunks{
+    doc_id: document_id,
+    level,
+    scope_narrative: narrative_id,
+    scope_folder: folder_id
+},
+    level = 0
+?[document_id, dist, leaf_count, narrative_id, folder_id] := q_vec[q],
+    ~semantic_documents:doc_idx{
+        document_id,
+        vec,
+        model_id,
+        leaf_count,
+        updated_at |
+        query: q,
+        k: $k,
+        ef: $ef,
+        bind_distance: dist,
+        filter: model_id == $model_id
+    },
+    doc_scope[document_id, narrative_id, folder_id]
+:order dist
+"#,
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|error| StoreError::Query(error.to_string()))?;
+        let mut filtered = Vec::with_capacity(limit);
+        for row in rows.rows {
+            let Some(document_id) = row.first().and_then(datavalue_as_str) else {
+                continue;
+            };
+            if !matches_scope(
+                scope,
+                row.get(3).and_then(datavalue_as_str),
+                row.get(4).and_then(datavalue_as_str),
+            ) {
+                continue;
+            }
+            let Some(distance) = row.get(1).and_then(datavalue_to_f64) else {
+                continue;
+            };
+            let leaf_count = row
+                .get(2)
+                .and_then(datavalue_to_f64)
+                .and_then(|value| usize::try_from(value as i64).ok())
+                .unwrap_or_default();
+            filtered.push(SemanticDocumentNeighbor {
+                document_id: document_id.to_owned(),
+                distance,
+                leaf_count,
+            });
+            if filtered.len() >= limit {
+                break;
+            }
+        }
+        Ok(filtered)
+    }
+
+    pub fn query_semantic_neighbors_in_documents(
+        &self,
+        query_vector: &[f32],
+        scope: &ScopeKey,
+        document_ids: &[String],
+        limit: usize,
+        oversample: usize,
+    ) -> Result<Vec<SemanticNeighbor>, StoreError> {
+        if limit == 0 || document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if query_vector.len() != SEMANTIC_VECTOR_DIM {
+            return Err(StoreError::Query(format!(
+                "semantic query vector dimension mismatch: expected {}, got {}",
+                SEMANTIC_VECTOR_DIM,
+                query_vector.len()
+            )));
+        }
+        let mut params = build_semantic_query_params(query_vector, oversample.max(limit));
+        params.insert(
+            "docs".to_owned(),
+            cozo::DataValue::List(
+                document_ids
+                    .iter()
+                    .map(|value| {
+                        cozo::DataValue::List(vec![cozo::DataValue::Str(value.clone().into())])
+                    })
+                    .collect(),
+            ),
+        );
+        let rows = self
+            .db
+            .run_script(
+                r#"
+selected_docs[doc_id] <- $docs
+q_vec[v] := v = vec($query, "F32")
+?[span_id, dist, narrative_id, folder_id] := q_vec[q],
+    ~semantic_vectors:vec_idx{
+        span_id,
+        vec,
+        model_id,
+        updated_at |
+        query: q,
+        k: $k,
+        ef: $ef,
+        bind_distance: dist,
+        filter: model_id == $model_id
+    },
+    *chunkid_map{id: chunk_id, chunk_key: span_id},
+    *chunks{
+        chunk_id,
+        doc_id,
+        level,
+        scope_narrative: narrative_id,
+        scope_folder: folder_id
+    },
+    level = 0,
+    selected_docs[doc_id]
 :order dist
 "#,
                 params,
@@ -831,7 +1072,10 @@ q_vec[v] := v = vec($query, "F32")
 
     pub fn clear_relations(&self, relations: &[&str]) -> Result<(), StoreError> {
         for relation in ALL_RELATIONS.iter().rev() {
-            if relations.iter().any(|candidate| *candidate == relation.name) {
+            if relations
+                .iter()
+                .any(|candidate| *candidate == relation.name)
+            {
                 self.clear_relation(relation.name)?;
             }
         }
@@ -848,13 +1092,20 @@ q_vec[v] := v = vec($query, "F32")
     pub fn clear_relations_by_ids(&self, relation_ids: &[u16]) -> Result<(), StoreError> {
         let relation_names = relation_ids
             .iter()
-            .filter_map(|relation_id| ALL_RELATIONS.get(*relation_id as usize).map(|relation| relation.name))
+            .filter_map(|relation_id| {
+                ALL_RELATIONS
+                    .get(*relation_id as usize)
+                    .map(|relation| relation.name)
+            })
             .collect::<Vec<_>>();
         self.clear_relations(&relation_names)
     }
 
     pub fn clear_all_relations(&self) -> Result<(), StoreError> {
-        let relation_names = ALL_RELATIONS.iter().map(|relation| relation.name).collect::<Vec<_>>();
+        let relation_names = ALL_RELATIONS
+            .iter()
+            .map(|relation| relation.name)
+            .collect::<Vec<_>>();
         self.clear_relations(&relation_names)
     }
 
@@ -1335,8 +1586,7 @@ q_vec[v] := v = vec($query, "F32")
     ) -> Result<Vec<u8>, StoreError> {
         let created_at = now_ms();
         let relations = relations_for_partition(partition);
-        let mut bytes =
-            Vec::with_capacity(relations.len() * SnapshotRelationBlockHeader::BYTE_LEN);
+        let mut bytes = Vec::with_capacity(relations.len() * SnapshotRelationBlockHeader::BYTE_LEN);
         SnapshotWireHeader {
             magic: SNAPSHOT_MAGIC,
             version: SNAPSHOT_VERSION,
@@ -1932,6 +2182,34 @@ fn relation_already_exists(message: &str) -> bool {
         || message.contains("conflicts with an existing one")
 }
 
+fn build_semantic_query_params(
+    query_vector: &[f32],
+    candidate_count: usize,
+) -> BTreeMap<String, cozo::DataValue> {
+    [
+        (
+            "query".to_owned(),
+            cozo::DataValue::List(
+                query_vector
+                    .iter()
+                    .map(|value| cozo::DataValue::from(*value as f64))
+                    .collect(),
+            ),
+        ),
+        (
+            "k".to_owned(),
+            cozo::DataValue::from(candidate_count as i64),
+        ),
+        ("ef".to_owned(), cozo::DataValue::from(50_i64)),
+        (
+            "model_id".to_owned(),
+            cozo::DataValue::Str(SEMANTIC_MODEL_ID.to_owned().into()),
+        ),
+    ]
+    .into_iter()
+    .collect()
+}
+
 fn datavalue_as_str(value: &cozo::DataValue) -> Option<&str> {
     match value {
         cozo::DataValue::Str(text) => Some(text.as_str()),
@@ -1972,6 +2250,7 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use crate::schema::CORE_RELATIONS;
+    use phoenix_types::ScopeKey;
 
     fn sample_note() -> Value {
         serde_json::json!({
@@ -1997,6 +2276,53 @@ mod tests {
             "is_current": true,
             "change_reason": "seed"
         })
+    }
+
+    fn semantic_test_vector(primary_index: usize) -> Vec<f32> {
+        let mut values = vec![0.0; SEMANTIC_VECTOR_DIM];
+        if primary_index < values.len() {
+            values[primary_index] = 1.0;
+        }
+        values
+    }
+
+    fn seed_semantic_leaf(
+        store: &PhoenixCozoStore,
+        chunk_id: i64,
+        span_id: &str,
+        document_id: &str,
+        narrative_id: &str,
+        folder_id: &str,
+        text: &str,
+    ) {
+        store
+            .put_row(
+                "chunks",
+                serde_json::json!({
+                    "chunk_id": chunk_id,
+                    "doc_id": document_id,
+                    "level": 0,
+                    "start": 0,
+                    "end": text.len() as i64,
+                    "text": text,
+                    "parent_id": null,
+                    "scope_narrative": narrative_id,
+                    "scope_folder": folder_id,
+                    "created_at": 1,
+                }),
+            )
+            .expect("seed chunk");
+        store
+            .put_row(
+                "chunkid_map",
+                serde_json::json!({
+                    "id": chunk_id,
+                    "chunk_key": span_id,
+                    "doc_id": document_id,
+                    "created_at": 1,
+                }),
+            )
+            .expect("seed chunkid");
     }
 
     #[test]
@@ -2181,5 +2507,144 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].entity_id.0, "luffy");
         assert!(relationships.is_empty());
+    }
+
+    #[test]
+    fn semantic_document_vectors_upsert_and_query_are_scoped_and_replaceable() {
+        let store = PhoenixCozoStore::new().expect("mem store");
+        seed_semantic_leaf(
+            &store,
+            1,
+            "doc-a:leaf-1",
+            "doc-a",
+            "nar-a",
+            "folder-a",
+            "alpha harbor",
+        );
+        seed_semantic_leaf(
+            &store,
+            2,
+            "doc-b:leaf-1",
+            "doc-b",
+            "nar-b",
+            "folder-b",
+            "beta forest",
+        );
+
+        let vector_a = semantic_test_vector(0);
+        let vector_b = semantic_test_vector(1);
+        store
+            .upsert_semantic_document_vectors(&[
+                SemanticDocumentVectorRow {
+                    document_id: "doc-a",
+                    values: &vector_a,
+                    model_id: SEMANTIC_MODEL_ID,
+                    leaf_count: 1,
+                    updated_at: 10,
+                },
+                SemanticDocumentVectorRow {
+                    document_id: "doc-b",
+                    values: &vector_b,
+                    model_id: SEMANTIC_MODEL_ID,
+                    leaf_count: 2,
+                    updated_at: 10,
+                },
+            ])
+            .expect("upsert docs");
+
+        let scoped = store
+            .query_semantic_documents(
+                &vector_a,
+                &ScopeKey {
+                    narrative_id: Some("nar-a".to_owned()),
+                    ..ScopeKey::default()
+                },
+                4,
+                8,
+            )
+            .expect("query docs");
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].document_id, "doc-a");
+        assert_eq!(scoped[0].leaf_count, 1);
+
+        store
+            .upsert_semantic_document_vectors(&[SemanticDocumentVectorRow {
+                document_id: "doc-a",
+                values: &vector_b,
+                model_id: SEMANTIC_MODEL_ID,
+                leaf_count: 3,
+                updated_at: 11,
+            }])
+            .expect("replace doc");
+        let replaced = store
+            .query_semantic_documents(
+                &vector_b,
+                &ScopeKey {
+                    narrative_id: Some("nar-a".to_owned()),
+                    ..ScopeKey::default()
+                },
+                4,
+                8,
+            )
+            .expect("query replaced doc");
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].document_id, "doc-a");
+        assert_eq!(replaced[0].leaf_count, 3);
+    }
+
+    #[test]
+    fn semantic_neighbors_can_be_filtered_to_document_shortlist() {
+        let store = PhoenixCozoStore::new().expect("mem store");
+        seed_semantic_leaf(
+            &store,
+            1,
+            "doc-a:leaf-1",
+            "doc-a",
+            "nar-a",
+            "folder-a",
+            "alpha harbor",
+        );
+        seed_semantic_leaf(
+            &store,
+            2,
+            "doc-b:leaf-1",
+            "doc-b",
+            "nar-a",
+            "folder-a",
+            "alpha harbor annex",
+        );
+
+        let vector = semantic_test_vector(0);
+        store
+            .upsert_semantic_vectors(&[
+                SemanticVectorRow {
+                    span_id: "doc-a:leaf-1",
+                    values: &vector,
+                    model_id: SEMANTIC_MODEL_ID,
+                    updated_at: 10,
+                },
+                SemanticVectorRow {
+                    span_id: "doc-b:leaf-1",
+                    values: &vector,
+                    model_id: SEMANTIC_MODEL_ID,
+                    updated_at: 10,
+                },
+            ])
+            .expect("upsert leaf vectors");
+
+        let filtered = store
+            .query_semantic_neighbors_in_documents(
+                &vector,
+                &ScopeKey {
+                    narrative_id: Some("nar-a".to_owned()),
+                    ..ScopeKey::default()
+                },
+                &["doc-b".to_owned()],
+                5,
+                10,
+            )
+            .expect("filtered query");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].span_id, "doc-b:leaf-1");
     }
 }

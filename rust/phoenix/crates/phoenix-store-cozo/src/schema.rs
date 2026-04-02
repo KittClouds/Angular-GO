@@ -268,6 +268,14 @@ const SEMANTIC_VECTORS: &[PhoenixColumnSpec] = &[
     col("updated_at", PhoenixColumnType::Int, false, false),
 ];
 
+const SEMANTIC_DOCUMENTS: &[PhoenixColumnSpec] = &[
+    col("document_id", PhoenixColumnType::String, false, true),
+    col("vec", PhoenixColumnType::VectorF32(384), false, false),
+    col("model_id", PhoenixColumnType::String, false, false),
+    col("leaf_count", PhoenixColumnType::Int, false, false),
+    col("updated_at", PhoenixColumnType::Int, false, false),
+];
+
 const WORKSPACE_ARTIFACTS: &[PhoenixColumnSpec] = &[
     col("key", PhoenixColumnType::String, false, true),
     col("thread_id", PhoenixColumnType::String, false, true),
@@ -711,6 +719,7 @@ pub const ALL_RELATIONS: &[PhoenixRelationSpec] = &[
     PhoenixRelationSpec::new("om_generations", OM_GENERATIONS),
     PhoenixRelationSpec::new("om_graph_index", OM_GRAPH_INDEX),
     PhoenixRelationSpec::new("semantic_vectors", SEMANTIC_VECTORS),
+    PhoenixRelationSpec::new("semantic_documents", SEMANTIC_DOCUMENTS),
     PhoenixRelationSpec::new("workspace_artifacts", WORKSPACE_ARTIFACTS),
     PhoenixRelationSpec::new("chat_runs", CHAT_RUNS),
     PhoenixRelationSpec::new("chat_run_events", CHAT_RUN_EVENTS),
@@ -748,6 +757,7 @@ pub const ALL_RELATIONS: &[PhoenixRelationSpec] = &[
 
 pub const DERIVED_SNAPSHOT_RELATIONS: &[&str] = &[
     "semantic_vectors",
+    "semantic_documents",
     "hnsw_index",
     "docid_map",
     "chunkid_map",
@@ -807,6 +817,7 @@ pub const CORE_RELATIONS: &[&str] = &[
     "thread_messages",
     "om_graph_index",
     "semantic_vectors",
+    "semantic_documents",
     "spans",
     "chunks",
     "raptor_nodes",

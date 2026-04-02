@@ -658,6 +658,9 @@ pub struct DiscoveryThresholds {
     pub narrative_bonus: f32,
     pub np_head_bonus: f32,
     pub capitalized_bonus: f32,
+    pub sentence_start_penalty: f32,
+    pub lowercase_alias_penalty: f32,
+    pub dialogue_lead_penalty: f32,
 }
 
 impl Default for DiscoveryThresholds {
@@ -668,6 +671,9 @@ impl Default for DiscoveryThresholds {
             narrative_bonus: 0.5,
             np_head_bonus: 0.75,
             capitalized_bonus: 0.5,
+            sentence_start_penalty: 0.75,
+            lowercase_alias_penalty: 1.5,
+            dialogue_lead_penalty: 1.0,
         }
     }
 }

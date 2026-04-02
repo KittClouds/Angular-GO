@@ -15,6 +15,7 @@ use phoenix_lex::LexIndex;
 use phoenix_om::OmEngine;
 use phoenix_om_graptor::OmGraptorBridge;
 use phoenix_scanner::PhoenixScanner;
+pub use phoenix_store_cozo::SnapshotPartition;
 use phoenix_store_cozo::{
     schema::{CONTENT_SNAPSHOT_RELATIONS, DERIVED_SNAPSHOT_RELATIONS},
     CompactRow, CompactRowView, PhoenixCozoStore, SnapshotEnvelope, StoreConfig, StoreError,
@@ -30,10 +31,9 @@ use phoenix_types::{
     StoreCommandRequest, StoreCommandResult, StructureArtifact, StructureRequest,
     ToolResultSubmission,
 };
+use planner::{list_run_artifacts, set_artifact_pinned, ChatPlannerRunner};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub use phoenix_store_cozo::SnapshotPartition;
-use planner::{list_run_artifacts, set_artifact_pinned, ChatPlannerRunner};
 pub use view::{
     AnalyzeTextRequestView, IngestDocumentView, IngestRequestView, QueryRequestView,
     ScanRequestView, ScopeKeyView, StructureRequestView,
@@ -82,6 +82,14 @@ struct PersistenceWalRecord {
     partition: String,
     #[serde(rename = "writtenAt")]
     written_at: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SemanticDocumentVectorUpsertRow {
+    document_id: String,
+    values: Vec<f32>,
+    leaf_count: usize,
 }
 
 impl PhoenixRuntime {
@@ -610,9 +618,12 @@ impl PhoenixRuntime {
         key_columns: &[&str],
         session_id: &str,
     ) -> Result<usize, StoreError> {
-        let rows = self
-            .store
-            .fetch_compact_rows_where_str(relation, key_columns, "session_id", session_id)?;
+        let rows = self.store.fetch_compact_rows_where_str(
+            relation,
+            key_columns,
+            "session_id",
+            session_id,
+        )?;
         let count = rows.len();
         self.store.delete_key_rows(relation, &rows)?;
         Ok(count)
@@ -667,7 +678,9 @@ impl PhoenixRuntime {
                     let matched = rows
                         .iter()
                         .zip(compact_rows.into_iter())
-                        .filter_map(|(row, compact)| row_matches_filter(row, filter).then_some(compact))
+                        .filter_map(|(row, compact)| {
+                            row_matches_filter(row, filter).then_some(compact)
+                        })
                         .collect::<Vec<_>>();
                     self.store.delete_key_rows(relation, &matched)?;
                 }
@@ -1071,13 +1084,16 @@ impl PhoenixRuntime {
             }
             "chat:pollRun" => {
                 let run_id = require_payload_str(&request.payload, "runId")?;
-                let snapshot = self.chat.poll_run(&self.store, run_id)?.map(|mut snapshot| {
-                    snapshot.planner_step = self.planner.peek_step(run_id);
-                    if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
-                        snapshot.artifacts = artifacts;
-                    }
-                    snapshot
-                });
+                let snapshot = self
+                    .chat
+                    .poll_run(&self.store, run_id)?
+                    .map(|mut snapshot| {
+                        snapshot.planner_step = self.planner.peek_step(run_id);
+                        if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
+                            snapshot.artifacts = artifacts;
+                        }
+                        snapshot
+                    });
                 Ok(StoreCommandResult {
                     success: true,
                     payload: snapshot
@@ -1259,13 +1275,16 @@ impl PhoenixRuntime {
                     .ok_or_else(|| StoreError::Query(format!("run not found: {run_id}")))?;
                 self.planner.degrade_run(self, &run, reason, None)?;
                 self.planner.drop_session(run_id);
-                let snapshot = self.chat.poll_run(&self.store, run_id)?.map(|mut snapshot| {
-                    snapshot.planner_step = self.planner.peek_step(run_id);
-                    if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
-                        snapshot.artifacts = artifacts;
-                    }
-                    snapshot
-                });
+                let snapshot = self
+                    .chat
+                    .poll_run(&self.store, run_id)?
+                    .map(|mut snapshot| {
+                        snapshot.planner_step = self.planner.peek_step(run_id);
+                        if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
+                            snapshot.artifacts = artifacts;
+                        }
+                        snapshot
+                    });
                 Ok(StoreCommandResult {
                     success: true,
                     payload: snapshot
@@ -1522,6 +1541,37 @@ impl PhoenixRuntime {
                     error: None,
                 })
             }
+            "semantic:upsertDocumentVectors" => {
+                let rows: Vec<SemanticDocumentVectorUpsertRow> = serde_json::from_value(
+                    request
+                        .payload
+                        .get("rows")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
+                )
+                .map_err(|error| StoreError::Query(error.to_string()))?;
+                let updated_at = now_ms();
+                let vectors = rows
+                    .iter()
+                    .map(|row| phoenix_store_cozo::SemanticDocumentVectorRow {
+                        document_id: row.document_id.as_str(),
+                        values: row.values.as_slice(),
+                        model_id: phoenix_store_cozo::SEMANTIC_MODEL_ID,
+                        leaf_count: row.leaf_count,
+                        updated_at,
+                    })
+                    .collect::<Vec<_>>();
+                self.store.upsert_semantic_document_vectors(&vectors)?;
+                Ok(StoreCommandResult {
+                    success: true,
+                    payload: Some(serde_json::json!({
+                        "inserted": vectors.len(),
+                        "modelId": phoenix_store_cozo::SEMANTIC_MODEL_ID,
+                        "dimension": phoenix_store_cozo::SEMANTIC_VECTOR_DIM,
+                    })),
+                    error: None,
+                })
+            }
             "chat:submitToolResults" => {
                 let run_id = require_payload_str(&request.payload, "runId")?;
                 let results: Vec<ToolResultSubmission> = serde_json::from_value(
@@ -1562,20 +1612,16 @@ impl PhoenixRuntime {
                     .unwrap_or(false);
                 let decision_json = request.payload.get("decisionJson").and_then(Value::as_str);
                 self.planner.drop_session(run_id);
-                let snapshot = self.chat.submit_approval(
-                    &self.store,
-                    run_id,
-                    approval_id,
-                    approved,
-                    decision_json,
-                )
-                .map(|mut snapshot| {
-                    snapshot.planner_step = self.planner.peek_step(run_id);
-                    if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
-                        snapshot.artifacts = artifacts;
-                    }
-                    snapshot
-                })?;
+                let snapshot = self
+                    .chat
+                    .submit_approval(&self.store, run_id, approval_id, approved, decision_json)
+                    .map(|mut snapshot| {
+                        snapshot.planner_step = self.planner.peek_step(run_id);
+                        if let Ok(artifacts) = list_run_artifacts(self, &snapshot.run) {
+                            snapshot.artifacts = artifacts;
+                        }
+                        snapshot
+                    })?;
                 Ok(StoreCommandResult {
                     success: true,
                     payload: Some(
@@ -1703,9 +1749,9 @@ impl PhoenixRuntime {
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| StoreError::Query("missing store command field: row.id".to_owned()))?;
-        let existing = self
-            .store
-            .fetch_compact_rows_where_str("notes", NOTE_KEY_COLUMNS, "id", id)?;
+        let existing =
+            self.store
+                .fetch_compact_rows_where_str("notes", NOTE_KEY_COLUMNS, "id", id)?;
         if !existing.is_empty() {
             self.store.delete_key_rows("notes", &existing)?;
         }
@@ -1731,12 +1777,20 @@ impl PhoenixRuntime {
     ) -> Result<Vec<Value>, StoreError> {
         let columns = note_columns(include_body);
         let rows = match folder_id {
-            Some(value) if !value.is_empty() => self
+            Some(value) if !value.is_empty() => {
+                self.store
+                    .fetch_compact_rows_where_str("notes", columns, "folder_id", value)?
+            }
+            _ => self
                 .store
-                .fetch_compact_rows_where_str("notes", columns, "folder_id", value)?,
-            _ => self.store.fetch_compact_rows_with_columns("notes", columns)?,
+                .fetch_compact_rows_with_columns("notes", columns)?,
         };
-        Ok(note_values_from_rows(rows, columns, folder_id, include_body))
+        Ok(note_values_from_rows(
+            rows,
+            columns,
+            folder_id,
+            include_body,
+        ))
     }
 
     pub(crate) fn list_note_values_by_ids(
@@ -2083,7 +2137,12 @@ fn note_values_from_rows(
             left.get("title")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
-                .cmp(right.get("title").and_then(Value::as_str).unwrap_or_default())
+                .cmp(
+                    right
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
         })
     });
     values
@@ -2255,9 +2314,8 @@ mod tests {
     use super::*;
     use phoenix_types::{
         ChatPlannerModelResponse, ChatPlannerStep, ChatRunSnapshot, ChatRunStatus,
-        ChatWorkspaceArtifact,
-        CreateSessionRequest, DocumentId, EntityId, EntityKind, GenderHint, GraphDeltaRequest,
-        MentionEntityRef, QueryResultHeader, QueryTarget, RunOptions, ScopeKey,
+        ChatWorkspaceArtifact, CreateSessionRequest, DocumentId, EntityId, EntityKind, GenderHint,
+        GraphDeltaRequest, MentionEntityRef, QueryResultHeader, QueryTarget, RunOptions, ScopeKey,
         SessionStateResultHeader, SessionStatsResultHeader,
     };
     use serde_json::{json, Value};
@@ -2796,7 +2854,10 @@ mod tests {
             .find(|row| row.get("id").and_then(Value::as_str) == Some("entity-1"));
 
         assert_eq!(
-            note.and_then(|value| value.get("title").and_then(Value::as_str).map(str::to_owned)),
+            note.and_then(|value| value
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_owned)),
             Some("Alpha".to_owned())
         );
         assert!(entity.is_some());
@@ -2867,7 +2928,13 @@ mod tests {
             .fetch_rows("phoenix_sessions")
             .expect("derived rows")
             .is_empty());
-        assert_eq!(runtime.get_note_value("note-keep", true).expect("note").is_some(), true);
+        assert_eq!(
+            runtime
+                .get_note_value("note-keep", true)
+                .expect("note")
+                .is_some(),
+            true
+        );
     }
 
     #[test]
@@ -2941,7 +3008,12 @@ mod tests {
         let runtime = chat_runtime();
         let thread = runtime
             .chat
-            .create_thread(&runtime.store, Some("world-1"), Some("nar-1"), Some("Thread"))
+            .create_thread(
+                &runtime.store,
+                Some("world-1"),
+                Some("nar-1"),
+                Some("Thread"),
+            )
             .expect("thread");
         runtime
             .chat
@@ -2981,7 +3053,12 @@ mod tests {
         let runtime = chat_runtime();
         let thread = runtime
             .chat
-            .create_thread(&runtime.store, Some("world-1"), Some("nar-1"), Some("Thread"))
+            .create_thread(
+                &runtime.store,
+                Some("world-1"),
+                Some("nar-1"),
+                Some("Thread"),
+            )
             .expect("thread");
         runtime
             .chat
@@ -2994,7 +3071,13 @@ mod tests {
             )
             .expect("message");
 
-        insert_note(&runtime, "note-in", "nar-1", "Inside scope", "Ryan waited at the harbor.");
+        insert_note(
+            &runtime,
+            "note-in",
+            "nar-1",
+            "Inside scope",
+            "Ryan waited at the harbor.",
+        );
         insert_note(
             &runtime,
             "note-out",
@@ -3015,7 +3098,8 @@ mod tests {
         assert_eq!(run.status, ChatRunStatus::Planning);
         let run_id = run.id.clone();
 
-        let step = planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
+        let step =
+            planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
         let request = match step {
             ChatPlannerStep::ModelRequest { request } => request,
             other => panic!("expected initial model request, got {other:?}"),
@@ -3098,7 +3182,10 @@ mod tests {
         );
         match complete_step {
             ChatPlannerStep::Complete { response, .. } => {
-                assert_eq!(response, "Ground the answer in note-in and the saved claims.")
+                assert_eq!(
+                    response,
+                    "Ground the answer in note-in and the saved claims."
+                )
             }
             other => panic!("expected planner completion, got {other:?}"),
         }
@@ -3143,7 +3230,9 @@ mod tests {
                 .expect("artifacts payload"),
         )
         .expect("artifacts");
-        assert!(artifacts.iter().any(|artifact| artifact.key == claim_artifact.key));
+        assert!(artifacts
+            .iter()
+            .any(|artifact| artifact.key == claim_artifact.key));
 
         let pinned: ChatWorkspaceArtifact = serde_json::from_value(
             runtime
@@ -3168,7 +3257,12 @@ mod tests {
         let runtime = chat_runtime();
         let thread = runtime
             .chat
-            .create_thread(&runtime.store, Some("world-1"), Some("nar-1"), Some("Thread"))
+            .create_thread(
+                &runtime.store,
+                Some("world-1"),
+                Some("nar-1"),
+                Some("Thread"),
+            )
             .expect("thread");
         runtime
             .chat
@@ -3192,7 +3286,8 @@ mod tests {
             .expect("run");
         let run_id = run.id.clone();
 
-        let initial_step = planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
+        let initial_step =
+            planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
         let initial_request = match initial_step {
             ChatPlannerStep::ModelRequest { request } => request,
             other => panic!("expected initial model request, got {other:?}"),
@@ -3331,7 +3426,8 @@ mod tests {
         .expect("after approval snapshot");
         assert_eq!(after_approval.run.status, ChatRunStatus::Planning);
 
-        let resumed_step = planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
+        let resumed_step =
+            planner_step_command(&runtime, "chat:getPlannerStep", json!({ "runId": run_id }));
         let resumed_request = match resumed_step {
             ChatPlannerStep::ModelRequest { request } => request,
             other => panic!("expected resumed model request, got {other:?}"),
@@ -3363,7 +3459,10 @@ mod tests {
         );
         match complete_step {
             ChatPlannerStep::Complete { response, .. } => {
-                assert_eq!(response, "The active note edit has been planned and approved.")
+                assert_eq!(
+                    response,
+                    "The active note edit has been planned and approved."
+                )
             }
             other => panic!("expected completion after approval, got {other:?}"),
         }
