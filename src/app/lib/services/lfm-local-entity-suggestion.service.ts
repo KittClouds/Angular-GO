@@ -1,10 +1,11 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, NgZone, signal } from '@angular/core';
 import type {
     EntitySuggestionProviderApi,
     EntitySuggestionProviderStatus,
     EntitySuggestionScanRequest,
     LocalEntitySuggestion,
 } from '../entity-suggestions/entity-suggestion.types';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../core/worker-zone';
 
 type WorkerResponse =
     | { type: 'INIT_COMPLETE'; payload: { device: 'webgpu' | 'wasm' }; _id: number }
@@ -33,6 +34,8 @@ export class LfmLocalEntitySuggestionProvider implements EntitySuggestionProvide
         loading: false,
         device: null,
     });
+
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {}
 
     async scan(request: EntitySuggestionScanRequest): Promise<LocalEntitySuggestion[]> {
         this.cancelIdleDispose();
@@ -163,22 +166,29 @@ export class LfmLocalEntitySuggestionProvider implements EntitySuggestionProvide
             return;
         }
 
-        this.worker = new Worker(new URL('../../workers/lfm-entity-suggestion.worker', import.meta.url), {
-            type: 'module',
-        });
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('../../workers/lfm-entity-suggestion.worker', import.meta.url), {
+                    type: 'module',
+                }),
+            (worker) => {
+                worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+                    this.handleWorkerMessage(event.data);
+                };
 
-        this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-            this.handleWorkerMessage(event.data);
-        };
-
-        this.worker.onerror = (event) => {
-            const message = event.message || 'Local entity worker crashed';
-            this.status.update((current) => ({
-                ...current,
-                loading: false,
-                error: message,
-            }));
-        };
+                worker.onerror = (event) => {
+                    const message = event.message || 'Local entity worker crashed';
+                    this.ngZone.run(() => {
+                        this.status.update((current) => ({
+                            ...current,
+                            loading: false,
+                            error: message,
+                        }));
+                    });
+                };
+            },
+        );
     }
 
     private nextId(): number {
@@ -209,26 +219,36 @@ export class LfmLocalEntitySuggestionProvider implements EntitySuggestionProvide
         this.pendingCallbacks.delete(message._id);
 
         if (message.type === 'ERROR') {
-            pending.reject(new Error(message.payload.message));
+            this.ngZone.run(() => {
+                pending.reject(new Error(message.payload.message));
+            });
             return;
         }
 
         if (message.type === 'INIT_COMPLETE') {
-            pending.resolve(message.payload);
+            this.ngZone.run(() => {
+                pending.resolve(message.payload);
+            });
             return;
         }
 
         if (message.type === 'SCAN_COMPLETE') {
-            pending.resolve(message.payload);
+            this.ngZone.run(() => {
+                pending.resolve(message.payload);
+            });
             return;
         }
 
         if (message.type === 'STATUS') {
-            pending.resolve(message.payload);
+            this.ngZone.run(() => {
+                pending.resolve(message.payload);
+            });
             return;
         }
 
-        pending.resolve(undefined);
+        this.ngZone.run(() => {
+            pending.resolve(undefined);
+        });
     }
 
     private cancelIdleDispose(): void {

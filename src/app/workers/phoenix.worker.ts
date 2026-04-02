@@ -46,8 +46,19 @@ async function loadWasmInternal(): Promise<void> {
         );
     }
 
-    const moduleBytes = await response.arrayBuffer();
-    const { instance } = await WebAssembly.instantiate(moduleBytes, createImportObject());
+    let instance: WebAssembly.Instance;
+    try {
+        const result = await WebAssembly.instantiateStreaming(response, createImportObject());
+        instance = result.instance;
+    } catch {
+        // Fallback for dev servers (like Angular's) that may serve .wasm files without the mandatory `application/wasm` MIME type.
+        // We must re-fetch since `instantiateStreaming` consumed the previous response body.
+        const fallbackResponse = await fetch(response.url);
+        const moduleBytes = await fallbackResponse.arrayBuffer();
+        const result = await WebAssembly.instantiate(moduleBytes, createImportObject());
+        instance = result.instance;
+    }
+
     wasmExports = instance.exports as unknown as WasmExports;
     const protocolVersion = wasmExports.phoenix_wasm_protocol_version();
     if (protocolVersion !== PROTOCOL_VERSION) {

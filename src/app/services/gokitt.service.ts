@@ -1,9 +1,14 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, NgZone, signal } from '@angular/core';
 import { smartGraphRegistry } from '../lib/registry';
 import type { DecorationSpan } from '../lib/Scanner';
 import { db } from '../lib/dexie/db';
 import type { EntityKind } from '../lib/types';
 import type { TextAnalytics } from '../lib/analytics';
+import {
+    addWorkerListenerOutsideAngular,
+    createNoopNgZone,
+    createWorkerOutsideAngular,
+} from '../lib/core/worker-zone';
 
 // =============================================================================
 // Types for Worker Communication
@@ -385,7 +390,7 @@ export class GoKittService {
         return this._worker;
     }
 
-    constructor() {
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {
         console.log('[GoKittService] Service ready (worker-based)');
     }
 
@@ -404,6 +409,7 @@ export class GoKittService {
      * Fire all ready callbacks and dispatch global event
      */
     private notifyReady(): void {
+        this.ngZone.run(() => {
         console.log('[GoKittService] 🚀 WASM ready - notifying listeners');
 
         for (const cb of this.readyCallbacks) {
@@ -422,6 +428,7 @@ export class GoKittService {
             };
             console.log('[GoKittService] 💡 Debug: Call window.testGraphScan() in console');
         }
+        });
     }
 
     /**
@@ -437,16 +444,21 @@ export class GoKittService {
 
     private async _loadWasmInternal(): Promise<void> {
         // Create worker
-        this._worker = new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' });
+        this._worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () => new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' }),
+            (worker) => {
+                worker.onmessage = (e: MessageEvent<GoKittWorkerResponse>) => {
+                    this.handleWorkerMessage(e.data);
+                };
 
-        // Setup message handler
-        this._worker.onmessage = (e: MessageEvent<GoKittWorkerResponse>) => {
-            this.handleWorkerMessage(e.data);
-        };
-
-        this._worker.onerror = (e) => {
-            console.error('[GoKittService] Worker error:', e);
-        };
+                worker.onerror = (e) => {
+                    this.ngZone.run(() => {
+                        console.error('[GoKittService] Worker error:', e);
+                    });
+                };
+            },
+        );
 
         // Send INIT and wait for response
         await this.sendAndWait<void>({ type: 'INIT' });
@@ -1039,7 +1051,9 @@ export class GoKittService {
             if (pending) {
                 if (msg.type === 'ERROR') {
                     this.pendingRequests.delete(msg.id);
-                    pending.reject(new Error(msg.payload.message));
+                    this.ngZone.run(() => {
+                        pending.reject(new Error(msg.payload.message));
+                    });
                 } else {
                     // Extract payload based on message type
                     switch (msg.type) {
@@ -1185,7 +1199,9 @@ export class GoKittService {
                         case 'SYSTEM_CLOSE_RESULT':
                         case 'SYSTEM_RUN_RESULT':
                             this.pendingRequests.delete(msg.id);
-                            pending.resolve(msg.payload);
+                            this.ngZone.run(() => {
+                                pending.resolve(msg.payload);
+                            });
                             break;
                         default:
                             console.warn('[GoKittService] Ignoring unhandled worker response:', msg.type);
@@ -1218,29 +1234,45 @@ export class GoKittService {
 
     private sendAndWait<T>(msg: GoKittWorkerMessage): Promise<T> {
         return new Promise((resolve, reject) => {
+            const worker = this._worker;
+            if (!worker) {
+                this.ngZone.run(() => {
+                    reject(new Error('[GoKittService] Worker not initialized'));
+                });
+                return;
+            }
+
             const handler = (e: MessageEvent<GoKittWorkerResponse>) => {
                 const response = e.data;
 
                 // Match response type to request type
                 if (msg.type === 'INIT' && response.type === 'INIT_COMPLETE') {
-                    this._worker?.removeEventListener('message', handler);
-                    resolve(undefined as T);
+                    cleanup();
+                    this.ngZone.run(() => {
+                        resolve(undefined as T);
+                    });
                 } else if (msg.type === 'HYDRATE' && response.type === 'HYDRATE_COMPLETE') {
-                    this._worker?.removeEventListener('message', handler);
-                    resolve(response.payload as T);
+                    cleanup();
+                    this.ngZone.run(() => {
+                        resolve(response.payload as T);
+                    });
                 } else if (response.type === 'ERROR' && !('id' in response)) {
-                    this._worker?.removeEventListener('message', handler);
-                    reject(new Error(response.payload.message));
+                    cleanup();
+                    this.ngZone.run(() => {
+                        reject(new Error(response.payload.message));
+                    });
                 }
             };
 
-            this._worker?.addEventListener('message', handler);
-            this._worker?.postMessage(msg);
+            const cleanup = addWorkerListenerOutsideAngular(this.ngZone, worker, 'message', handler);
+            worker.postMessage(msg);
 
             // Timeout
             setTimeout(() => {
-                this._worker?.removeEventListener('message', handler);
-                reject(new Error(`${msg.type} timed out`));
+                cleanup();
+                this.ngZone.run(() => {
+                    reject(new Error(`${msg.type} timed out`));
+                });
             }, 30000);
         });
     }
@@ -1426,6 +1458,14 @@ export class GoKittService {
         if (!this.wasmLoaded) return { response: '', error: 'WASM not loaded' };
 
         return new Promise((resolve, reject) => {
+            const worker = this._worker;
+            if (!worker) {
+                this.ngZone.run(() => {
+                    reject(new Error('[GoKittService] Worker not initialized'));
+                });
+                return;
+            }
+
             const id = this.nextRequestId++;
 
             // Set up a custom long-lived pending request handler in pendingRequests map.
@@ -1440,18 +1480,22 @@ export class GoKittService {
                         onReasoning?.(msg.payload.chunk);
                         return; // do not remove listener
                     } else if (msg.type === 'GO_STREAM_CHAT_RESULT') {
-                        this._worker?.removeEventListener('message', chunkHandler);
-                        resolve(msg.payload);
+                        cleanup();
+                        this.ngZone.run(() => {
+                            resolve(msg.payload);
+                        });
                     } else if (msg.type === 'ERROR') {
-                        this._worker?.removeEventListener('message', chunkHandler);
-                        reject(new Error(msg.payload.message));
+                        cleanup();
+                        this.ngZone.run(() => {
+                            reject(new Error(msg.payload.message));
+                        });
                     }
                 }
             };
 
-            this._worker?.addEventListener('message', chunkHandler);
+            const cleanup = addWorkerListenerOutsideAngular(this.ngZone, worker, 'message', chunkHandler);
 
-            this._worker?.postMessage({
+            worker.postMessage({
                 type: 'GO_STREAM_CHAT',
                 payload: {
                     messagesJSON,

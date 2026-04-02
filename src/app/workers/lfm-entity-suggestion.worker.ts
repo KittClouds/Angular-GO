@@ -39,8 +39,9 @@ const IDLE_STATUS: EntitySuggestionProviderStatus = {
 
 const CHUNKER_WASM_URL = '/assets/wasm/phoenix_chunker.wasm';
 const CHUNKER_JS_URL = '/assets/wasm/phoenix_chunker.js';
-const CHUNK_SIZE = 500;
-const CHUNK_OVERLAP = 100;
+const CHUNK_SIZE = 1500;
+const CHUNK_OVERLAP = 200;
+const MAX_CHUNKS = 8;
 
 let chunkerReady = false;
 let chunkTextFn: ((text: string, chunkSize: number, overlap: number) => string) | null = null;
@@ -67,7 +68,7 @@ async function ensureChunker(): Promise<void> {
 
         // Initialize the WASM module with the fetched binary
         const wasmBytes = await wasmResponse.arrayBuffer();
-        await glue.default(wasmBytes);
+        await glue.default({ module_or_path: wasmBytes });
         chunkTextFn = glue.chunk_text;
         chunkerReady = true;
         console.log('[LfmEntitySuggestionWorker] Phoenix WASM chunker loaded (18KB)');
@@ -88,7 +89,9 @@ function wasmChunkText(plainText: string): { id: string; text: string }[] | null
     }
     const json = chunkTextFn(plainText, CHUNK_SIZE, CHUNK_OVERLAP);
     const ranges: WasmChunkRange[] = JSON.parse(json);
-    return ranges.map((range, index) => ({
+    // Cap at MAX_CHUNKS to prevent OOM on very long texts
+    const capped = ranges.slice(0, MAX_CHUNKS);
+    return capped.map((range, index) => ({
         id: `chunk-${index + 1}`,
         text: plainText.slice(range.start, range.end),
     }));
@@ -195,6 +198,7 @@ class LfmEntitySuggestionWorker {
         }
 
         const suggestions: LocalEntitySuggestion[] = [];
+        let consecutiveEmpty = 0;
 
         for (const chunk of chunks) {
             const output = await this.generator(
@@ -215,12 +219,21 @@ class LfmEntitySuggestionWorker {
                 }),
             );
 
-            suggestions.push(...parsed);
+            if (parsed.length > 0) {
+                suggestions.push(...parsed);
+                consecutiveEmpty = 0;
+            } else {
+                consecutiveEmpty++;
+                if (consecutiveEmpty >= 3) {
+                    console.log(`[LfmEntitySuggestionWorker] Early termination: ${consecutiveEmpty} consecutive empty chunks`);
+                    break;
+                }
+            }
         }
 
         const merged = mergeLocalEntitySuggestions(suggestions);
         if (!merged.length) {
-            throw new Error('The local model returned no valid entity suggestions.');
+            console.log('[LfmEntitySuggestionWorker] No entities found in text');
         }
 
         return merged;

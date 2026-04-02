@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, NgZone, inject } from '@angular/core';
 import {
     BINARY_REQUEST_LAYOUT_VERSION,
     decodePacketHeader,
@@ -19,6 +19,7 @@ import {
     writePacketHeader,
 } from '../lib/phoenix/wasm-protocol';
 import { EmbeddingWorkerService } from '../lib/services/embedding-worker.service';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../lib/core/worker-zone';
 
 export interface PhoenixScope {
     worldId?: string;
@@ -292,6 +293,12 @@ type PhoenixSemanticLeafChunk = {
     folderId?: string;
 };
 
+type PhoenixSemanticDocumentVector = {
+    documentId: string;
+    values: Float32Array;
+    leafCount: number;
+};
+
 const SEMANTIC_EMBEDDING_MODEL_ID = 'mongodb-leaf';
 const SEMANTIC_VECTOR_DIM = 384;
 const SEMANTIC_EMBED_BATCH_SIZE = 16;
@@ -330,6 +337,8 @@ export class PhoenixWasmService {
     get isReady(): boolean {
         return this.workerReady;
     }
+
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {}
 
     onReady(callback: () => void): void {
         if (this.isReady) {
@@ -797,6 +806,7 @@ export class PhoenixWasmService {
 
         await this.ensureSemanticEmbeddingWorker();
         let writeChain = Promise.resolve();
+        const documentAccumulator = new Map<string, { sum: Float32Array; leafCount: number }>();
         await this.embeddingWorker.embedStream(
             chunks.map((chunk) => chunk.text),
             (batch) => {
@@ -807,9 +817,15 @@ export class PhoenixWasmService {
                         if (!chunk) {
                             return null;
                         }
+                        const values = this.toSemanticVector(embedding);
+                        accumulateSemanticDocumentVector(
+                            documentAccumulator,
+                            chunk.documentId,
+                            values,
+                        );
                         return {
                             spanId: chunk.spanId,
-                            values: this.toSemanticVector(embedding),
+                            values,
                         };
                     })
                     .filter((record): record is { spanId: string; values: Float32Array } => record !== null);
@@ -821,6 +837,16 @@ export class PhoenixWasmService {
             SEMANTIC_EMBED_BATCH_SIZE,
         );
         await writeChain;
+        const documentVectors = finalizeSemanticDocumentVectors(documentAccumulator);
+        if (documentVectors.length) {
+            await this.storeCommand('semantic:upsertDocumentVectors', {
+                rows: documentVectors.map((record) => ({
+                    documentId: record.documentId,
+                    leafCount: record.leafCount,
+                    values: Array.from(record.values),
+                })),
+            });
+        }
     }
 
     private async upsertSemanticBatch(
@@ -1196,28 +1222,35 @@ export class PhoenixWasmService {
 
     private async loadWasmInternal(): Promise<void> {
         this.worker?.terminate();
-        this.worker = new Worker(new URL('../workers/phoenix.worker', import.meta.url), {
-            type: 'module',
-            name: 'phoenix-wasm',
-        });
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('../workers/phoenix.worker', import.meta.url), {
+                    type: 'module',
+                    name: 'phoenix-wasm',
+                }),
+            (worker) => {
+                worker.onmessage = (event: MessageEvent<PhoenixWorkerResponse>) => {
+                    this.handleWorkerMessage(event.data);
+                };
+
+                worker.onerror = (event) => {
+                    const error = new Error(
+                        `[PhoenixWasmService] Worker error: ${event.message || 'Unknown worker error'}`,
+                    );
+                    this.ngZone.run(() => {
+                        console.error('[PhoenixWasmService] Worker error:', event);
+                        this.worker?.terminate();
+                        this.worker = null;
+                        this.workerReady = false;
+                        this.loadPromise = null;
+                        this.rejectPendingWorkerMessages(error);
+                        this.rejectActiveChatStreams(error);
+                    });
+                };
+            },
+        );
         this.workerReady = false;
-
-        this.worker.onmessage = (event: MessageEvent<PhoenixWorkerResponse>) => {
-            this.handleWorkerMessage(event.data);
-        };
-
-        this.worker.onerror = (event) => {
-            const error = new Error(
-                `[PhoenixWasmService] Worker error: ${event.message || 'Unknown worker error'}`,
-            );
-            console.error('[PhoenixWasmService] Worker error:', event);
-            this.worker?.terminate();
-            this.worker = null;
-            this.workerReady = false;
-            this.loadPromise = null;
-            this.rejectPendingWorkerMessages(error);
-            this.rejectActiveChatStreams(error);
-        };
 
         const response = await this.sendWorkerMessage({ type: 'INIT' });
         if (response.type !== 'INIT_RESULT') {
@@ -1233,14 +1266,16 @@ export class PhoenixWasmService {
     }
 
     private notifyReady(): void {
-        for (const callback of this.readyCallbacks) {
-            try {
-                callback();
-            } catch (error) {
-                console.error('[PhoenixWasmService] Ready callback failed:', error);
+        this.ngZone.run(() => {
+            for (const callback of this.readyCallbacks) {
+                try {
+                    callback();
+                } catch (error) {
+                    console.error('[PhoenixWasmService] Ready callback failed:', error);
+                }
             }
-        }
-        this.readyCallbacks = [];
+            this.readyCallbacks = [];
+        });
     }
 
     private async sendJson(kind: number, payload: unknown, capacityHint?: number): Promise<PacketResponse> {
@@ -1349,16 +1384,20 @@ export class PhoenixWasmService {
             return;
         }
         this.pendingWorkerMessages.delete(message.id);
-        if (message.type === 'ERROR') {
-            pending.reject(new Error(message.error));
-            return;
-        }
-        pending.resolve(message);
+        this.ngZone.run(() => {
+            if (message.type === 'ERROR') {
+                pending.reject(new Error(message.error));
+                return;
+            }
+            pending.resolve(message);
+        });
     }
 
     private rejectPendingWorkerMessages(error: Error): void {
         for (const pending of this.pendingWorkerMessages.values()) {
-            pending.reject(error);
+            this.ngZone.run(() => {
+                pending.reject(error);
+            });
         }
         this.pendingWorkerMessages.clear();
     }
@@ -1379,22 +1418,28 @@ export class PhoenixWasmService {
                 active.callbacks.onReasoningChunk?.(event.chunk);
                 return;
             case 'done':
-                active.callbacks.onEvent?.({ stage: 'stream', status: 'done' });
                 this.activeChatStreams.delete(streamId);
-                active.callbacks.onComplete(event.response);
-                active.resolve();
+                this.ngZone.run(() => {
+                    active.callbacks.onEvent?.({ stage: 'stream', status: 'done' });
+                    active.callbacks.onComplete(event.response);
+                    active.resolve();
+                });
                 return;
             case 'cancelled':
-                active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: 'Cancelled' });
                 this.activeChatStreams.delete(streamId);
-                active.callbacks.onError(new Error('Chat stream cancelled'));
-                active.resolve();
+                this.ngZone.run(() => {
+                    active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: 'Cancelled' });
+                    active.callbacks.onError(new Error('Chat stream cancelled'));
+                    active.resolve();
+                });
                 return;
             case 'error':
-                active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: event.error });
                 this.activeChatStreams.delete(streamId);
-                active.callbacks.onError(new Error(event.error));
-                active.resolve();
+                this.ngZone.run(() => {
+                    active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: event.error });
+                    active.callbacks.onError(new Error(event.error));
+                    active.resolve();
+                });
                 return;
         }
     }
@@ -1405,9 +1450,11 @@ export class PhoenixWasmService {
             return;
         }
         this.activeChatStreams.delete(streamId);
-        active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: error.message });
-        active.callbacks.onError(error);
-        active.resolve();
+        this.ngZone.run(() => {
+            active.callbacks.onEvent?.({ stage: 'stream', status: 'error', detail: error.message });
+            active.callbacks.onError(error);
+            active.resolve();
+        });
     }
 
     private rejectActiveChatStreams(error: Error): void {
@@ -1649,6 +1696,74 @@ function normalizeSemanticLeafChunks(value: unknown): PhoenixSemanticLeafChunk[]
             };
         });
     return rows.filter((row): row is PhoenixSemanticLeafChunk => row !== null && !!row.text);
+}
+
+function accumulateSemanticDocumentVector(
+    accumulator: Map<string, { sum: Float32Array; leafCount: number }>,
+    documentId: string,
+    values: Float32Array,
+): void {
+    if (!documentId) {
+        return;
+    }
+    const normalized = l2NormalizeSemanticVector(values);
+    if (!normalized) {
+        return;
+    }
+    let entry = accumulator.get(documentId);
+    if (!entry) {
+        entry = { sum: new Float32Array(normalized.length), leafCount: 0 };
+        accumulator.set(documentId, entry);
+    }
+    for (let index = 0; index < normalized.length; index += 1) {
+        entry.sum[index] += normalized[index];
+    }
+    entry.leafCount += 1;
+}
+
+function finalizeSemanticDocumentVectors(
+    accumulator: Map<string, { sum: Float32Array; leafCount: number }>,
+): PhoenixSemanticDocumentVector[] {
+    const rows: PhoenixSemanticDocumentVector[] = [];
+    for (const [documentId, entry] of accumulator) {
+        if (!documentId || entry.leafCount <= 0) {
+            continue;
+        }
+        const mean = new Float32Array(entry.sum.length);
+        for (let index = 0; index < entry.sum.length; index += 1) {
+            mean[index] = entry.sum[index] / entry.leafCount;
+        }
+        const values = l2NormalizeSemanticVector(mean);
+        if (!values) {
+            continue;
+        }
+        rows.push({
+            documentId,
+            values,
+            leafCount: entry.leafCount,
+        });
+    }
+    return rows;
+}
+
+function l2NormalizeSemanticVector(values: Float32Array): Float32Array | null {
+    let magnitudeSquared = 0;
+    for (let index = 0; index < values.length; index += 1) {
+        const value = values[index];
+        magnitudeSquared += value * value;
+    }
+    if (!Number.isFinite(magnitudeSquared) || magnitudeSquared <= 0) {
+        return null;
+    }
+    const magnitude = Math.sqrt(magnitudeSquared);
+    if (!Number.isFinite(magnitude) || magnitude <= 0) {
+        return null;
+    }
+    const normalized = new Float32Array(values.length);
+    for (let index = 0; index < values.length; index += 1) {
+        normalized[index] = values[index] / magnitude;
+    }
+    return normalized;
 }
 
 function buildSemanticQueryBinaryPayload(

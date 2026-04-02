@@ -1,6 +1,7 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, NgZone, computed, signal } from '@angular/core';
 import type { TTSWorkerMessage, TTSResponseMessage } from '../workers/tts.worker';
 import { modelCache } from '../lib/model-cache';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../lib/core/worker-zone';
 
 export type TTSModelState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -101,6 +102,8 @@ export class TtsService {
         resolve: () => void;
         timeout: ReturnType<typeof setTimeout>;
     } | null = null;
+
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {}
 
     // ========================================================================
     // Voice Selection
@@ -497,21 +500,28 @@ export class TtsService {
     private initWorker(): void {
         if (this.worker) return;
 
-        this.worker = new Worker(new URL('../workers/tts.worker', import.meta.url), {
-            type: 'module'
-        });
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('../workers/tts.worker', import.meta.url), {
+                    type: 'module',
+                }),
+            (worker) => {
+                worker.onmessage = (e: MessageEvent<TTSResponseMessage>) => {
+                    this.handleWorkerMessage(e.data);
+                };
 
-        this.worker.onmessage = (e: MessageEvent<TTSResponseMessage>) => {
-            this.handleWorkerMessage(e.data);
-        };
-
-        this.worker.onerror = (error) => {
-            console.error('[TtsService] Worker error:', error);
-            this.resolveUnloadWaiter();
-            this.rejectAllVoicePreloads(new Error('Worker failed to initialize.'));
-            this._modelState.set('error');
-            this._errorMessage.set('Worker failed to initialize.');
-        };
+                worker.onerror = (error) => {
+                    this.ngZone.run(() => {
+                        console.error('[TtsService] Worker error:', error);
+                        this.resolveUnloadWaiter();
+                        this.rejectAllVoicePreloads(new Error('Worker failed to initialize.'));
+                        this._modelState.set('error');
+                        this._errorMessage.set('Worker failed to initialize.');
+                    });
+                };
+            },
+        );
     }
 
     private sendMessage(msg: TTSWorkerMessage, transfer: Transferable[] = []): void {
@@ -535,42 +545,52 @@ export class TtsService {
                 break;
 
             case 'MODEL_READY':
-                this._modelState.set('ready');
-                this._loadProgress.set(100);
-                this._loadStatus.set('Ready');
-                console.log('[TtsService] Model ready!');
-                void this.preloadVoice(this._selectedVoice());
+                this.ngZone.run(() => {
+                    this._modelState.set('ready');
+                    this._loadProgress.set(100);
+                    this._loadStatus.set('Ready');
+                    console.log('[TtsService] Model ready!');
+                    void this.preloadVoice(this._selectedVoice());
+                });
                 break;
 
             case 'MODEL_UNLOADED':
-                this.resolveUnloadWaiter();
+                this.ngZone.run(() => {
+                    this.resolveUnloadWaiter();
+                });
                 break;
 
             case 'MODEL_ERROR':
-                this.resolveUnloadWaiter();
-                this._modelState.set('error');
-                this._errorMessage.set(msg.payload.message);
-                this.isGenerating = false;
-                console.error('[TtsService] Model load error:', msg.payload.message);
+                this.ngZone.run(() => {
+                    this.resolveUnloadWaiter();
+                    this._modelState.set('error');
+                    this._errorMessage.set(msg.payload.message);
+                    this.isGenerating = false;
+                    console.error('[TtsService] Model load error:', msg.payload.message);
+                });
                 break;
 
             case 'VOICE_READY': {
-                this.cachedWorkerVoiceIds.add(msg.payload.voiceId);
-                const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
-                if (resolver) {
-                    this.voicePreloadResolvers.delete(msg.payload.voiceId);
-                    resolver.resolve();
-                }
+                this.ngZone.run(() => {
+                    this.cachedWorkerVoiceIds.add(msg.payload.voiceId);
+                    const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
+                    if (resolver) {
+                        this.voicePreloadResolvers.delete(msg.payload.voiceId);
+                        resolver.resolve();
+                    }
+                });
                 break;
             }
 
             case 'VOICE_ERROR': {
-                this.cachedWorkerVoiceIds.delete(msg.payload.voiceId);
-                const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
-                if (resolver) {
-                    this.voicePreloadResolvers.delete(msg.payload.voiceId);
-                    resolver.reject(new Error(msg.payload.message));
-                }
+                this.ngZone.run(() => {
+                    this.cachedWorkerVoiceIds.delete(msg.payload.voiceId);
+                    const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
+                    if (resolver) {
+                        this.voicePreloadResolvers.delete(msg.payload.voiceId);
+                        resolver.reject(new Error(msg.payload.message));
+                    }
+                });
                 break;
             }
 
@@ -589,9 +609,11 @@ export class TtsService {
                 break;
 
             case 'STATUS':
-                if (msg.payload.modelLoaded && this._modelState() !== 'ready') {
-                    this._modelState.set('ready');
-                }
+                this.ngZone.run(() => {
+                    if (msg.payload.modelLoaded && this._modelState() !== 'ready') {
+                        this._modelState.set('ready');
+                    }
+                });
                 break;
         }
     }

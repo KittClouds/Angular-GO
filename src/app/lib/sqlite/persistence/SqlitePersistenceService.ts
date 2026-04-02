@@ -1,4 +1,5 @@
-import { Injectable, isDevMode } from '@angular/core';
+import { Injectable, NgZone, isDevMode } from '@angular/core';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../../core/worker-zone';
 
 import type {
     PhoenixPersistenceClearResult,
@@ -23,7 +24,7 @@ export class SqlitePersistenceService {
     private nextId = 1;
     private pending = new Map<number, PendingRequest>();
 
-    constructor() {
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {
         if (typeof window !== 'undefined') {
             (window as any).kittClearOPFS = async () => {
                 const result = await this.clear();
@@ -80,12 +81,22 @@ export class SqlitePersistenceService {
             return;
         }
 
-        this.worker = new Worker(new URL('./sqlite-opfs.worker.ts', import.meta.url), {
-            type: 'module',
-            name: 'phoenix-opfs',
-        });
-        this.worker.onmessage = (event) => this.handleMessage(event.data);
-        this.worker.onerror = (event) => console.error('[SqlitePersistence] Worker error:', event);
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('./sqlite-opfs.worker.ts', import.meta.url), {
+                    type: 'module',
+                    name: 'phoenix-opfs',
+                }),
+            (worker) => {
+                worker.onmessage = (event) => this.handleMessage(event.data);
+                worker.onerror = (event) => {
+                    this.ngZone.run(() => {
+                        console.error('[SqlitePersistence] Worker error:', event);
+                    });
+                };
+            },
+        );
     }
 
     async load(): Promise<{ snapshot: Uint8Array | null }> {
@@ -174,10 +185,14 @@ export class SqlitePersistenceService {
 
         this.pending.delete(id);
         if (success) {
-            request.resolve(payload);
+            this.ngZone.run(() => {
+                request.resolve(payload);
+            });
             return;
         }
-        request.reject(new Error(error || 'Unknown worker error'));
+        this.ngZone.run(() => {
+            request.reject(new Error(error || 'Unknown worker error'));
+        });
     }
 
     private send<T>(type: string, payload?: any, transfer: Transferable[] = []): Promise<T> {
