@@ -1,0 +1,49 @@
+<section class="semantic-workshop">
+    <div class="workshop-head">
+        <div class="title-row">
+            <ng-icon name="lucideNetwork" class="title-icon"></ng-icon>
+            <div>
+                <h3>Semantic Tools</h3>
+                <p>{{ scopeLabel() }} scope - {{ activeToolDef().hint }}</p>
+            </div>
+        </div>
+        <button type="button" class="run-btn" (click)="runTool()" [disabled]="isRunning()">
+            <ng-icon [name]="isRunning() ? 'lucideLoader2' : activeToolDef().icon"
+                [class.spin]="isRunning()"></ng-icon>
+            Run
+        </button>
+    </div>
+
+    <div class="tool-strip">
+        <button *ngFor="let tool of tools" type="button" class="tool-btn"
+            [class.active]="activeTool() === tool.id" (click)="selectTool(tool.id)">
+            <ng-icon [name]="tool.icon"></ng-icon>
+            <span>{{ tool.label }}</span>
+        </button>
+    </div>
+
+    <div *ngIf="sourceText()" class="source-preview">
+        <span>{{ sourceLabel() }}</span>
+        <p>{{ sourceText() }}</p>
+    </div>
+
+    <div *ngIf="notice()" class="workshop-notice">{{ notice() }}</div>
+
+    <div *ngIf="results().length" class="workshop-results">
+        <button *ngFor="let result of results()" type="button" class="workshop-result"
+            (click)="openResult(result)">
+            <div class="result-top">
+                <span class="kind-pill">{{ result.kind }}</span>
+                <span class="score-pill">{{ formatScore(result.score) }}</span>
+            </div>
+            <strong>{{ result.title }}</strong>
+            <p>{{ result.excerpt }}</p>
+            <div class="result-foot">
+                <span>{{ result.meta }}</span>
+                <button *ngIf="result.noteId" type="button" (click)="showInGraph($event, result)">
+                    Graph
+                </button>
+            </div>
+        </button>
+    </div>
+</section>

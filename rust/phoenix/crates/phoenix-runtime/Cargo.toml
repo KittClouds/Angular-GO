@@ -1,0 +1,50 @@
+[package]
+name = "phoenix-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+legacy-cozo-graph = [
+    "dep:phoenix-gldr",
+    "dep:phoenix-graptor",
+    "dep:phoenix-om-graptor",
+    "dep:phoenix-store-cozo",
+    "phoenix-chat/legacy-cozo-store",
+    "phoenix-lex/legacy-cozo-store",
+    "phoenix-om/legacy-graptor",
+]
+
+[dependencies]
+phoenix-analytics = { path = "../phoenix-analytics" }
+phoenix-chat = { path = "../phoenix-chat" }
+phoenix-graph = { path = "../phoenix-graph" }
+phoenix-gldr = { path = "../phoenix-gldr", optional = true }
+phoenix-graptor = { path = "../phoenix-graptor", optional = true }
+phoenix-hyperbolic = { path = "../phoenix-hyperbolic" }
+phoenix-invarant-v2 = { path = "../phoenix-invarant-v2" }
+phoenix-kernel = { path = "../phoenix-kernel" }
+phoenix-lex = { path = "../phoenix-lex" }
+phoenix-om = { path = "../phoenix-om" }
+phoenix-om-graptor = { path = "../phoenix-om-graptor", optional = true }
+phoenix-runtime-native = { path = "../phoenix-runtime-native" }
+phoenix-scanner = { path = "../phoenix-scanner" }
+phoenix-semantic-v2 = { path = "../phoenix-semantic-v2" }
+phoenix-store-cozo = { path = "../phoenix-store-cozo", optional = true }
+phoenix-store-native = { path = "../phoenix-store-native" }
+phoenix-store-native-core = { path = "../phoenix-store-native-core" }
+phoenix-store-overgraph = { path = "../phoenix-store-overgraph" }
+phoenix-structure = { path = "../phoenix-structure" }
+phoenix-triverse-v2 = { path = "../phoenix-triverse-v2" }
+phoenix-types = { path = "../phoenix-types" }
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+overgraph.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"

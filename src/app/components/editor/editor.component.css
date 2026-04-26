@@ -25,36 +25,62 @@
     color: hsl(var(--editor-fg));
 }
 
-/* Ensure the internal milkdown editor takes full height */
-:deep(.milkdown) {
+/* Ensure the internal Milkdown editor takes full height. */
+:host ::ng-deep .milkdown {
     height: 100%;
+    min-height: 100%;
     overflow-y: auto;
-    /* Internal scroll */
+    background-color: hsl(var(--editor-bg));
+    color: hsl(var(--editor-fg));
 }
 
 /* ProseMirror editor content area */
-/* ProseMirror editor content area */
-:deep(.ProseMirror) {
+:host ::ng-deep .ProseMirror {
     min-height: 100%;
-    height: 100%;
-    padding: 2rem 3rem;
-    outline: none;
+    padding: clamp(4.5rem, 7vh, 6rem) clamp(4rem, 7vw, 8rem) 8rem clamp(8rem, 9vw, 11rem);
+    outline: none !important;
+    box-shadow: none !important;
     max-width: none !important;
-    /* Force full width */
     margin: 0 !important;
     background-color: hsl(var(--editor-bg));
     color: hsl(var(--editor-fg));
     box-sizing: border-box;
-
-    /* Performance: Hint browser to optimize for content changes */
-    will-change: contents;
+    overflow-wrap: break-word;
+    white-space: normal;
     contain: layout style;
 }
 
-:deep(.milkdown) {
-    height: 100%;
-    background-color: hsl(var(--editor-bg));
-    color: hsl(var(--editor-fg));
+:host ::ng-deep .ProseMirror:focus,
+:host ::ng-deep .ProseMirror:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+:host ::ng-deep .ProseMirror p {
+    margin: 0 0 1.05em;
+    line-height: 1.58;
+}
+
+:host ::ng-deep .ProseMirror h1,
+:host ::ng-deep .ProseMirror h2,
+:host ::ng-deep .ProseMirror h3 {
+    margin: 1.35em 0 0.7em;
+    line-height: 1.2;
+}
+
+:host ::ng-deep .ProseMirror > *:first-child {
+    margin-top: 0;
+}
+
+:host ::ng-deep .milkdown-link-preview[data-show='false'],
+:host ::ng-deep .milkdown-link-edit[data-show='false'] {
+    display: none !important;
+}
+
+:host ::ng-deep .milkdown-link-edit,
+:host ::ng-deep .milkdown-link-preview,
+:host ::ng-deep .angular-block-handle {
+    z-index: 20;
 }
 
 .crepe-host {
@@ -65,7 +91,7 @@
 /* --- TOOLBAR VISIBILITY LOGIC (Default Hidden) --- */
 
 /* 1. Base state: Hidden */
-:deep(.angular-toolbar-wrapper) {
+:host ::ng-deep .angular-toolbar-wrapper {
     display: none;
     visibility: hidden;
     opacity: 0;
@@ -74,7 +100,7 @@
 }
 
 /* 2. Active state: Show ONLY when explicit true */
-:deep(.angular-toolbar-wrapper[data-show="true"]) {
+:host ::ng-deep .angular-toolbar-wrapper[data-show="true"] {
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;

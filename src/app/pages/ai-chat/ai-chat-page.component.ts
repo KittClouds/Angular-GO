@@ -2,7 +2,7 @@
  * AI Chat Page Component
  *
  * Full-feature chat page that sits between sidebars (like Graph/Calendar pages).
- * Uses @neurodevworks/angular-chatbot types + our existing GoChatService/GoogleGenAIService.
+ * Uses @neurodevworks/angular-chatbot types + the Phoenix chat/GoogleGenAI services.
  */
 
 import { Component, OnInit, OnDestroy, ViewChild, ElementRef, signal, computed, inject, effect, untracked, AfterViewInit } from '@angular/core';
@@ -29,12 +29,11 @@ import {
 } from 'lucide-angular';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 import {
-    GoChatService,
     type Thread,
     type ChatConfig,
     type ChatProgressEvent,
     type OpenRouterMessage,
-} from '../../lib/services/go-chat.service';
+} from '../../lib/services/phoenix-chat.service';
 import {
     GoogleGenAIService,
     GoogleGenAIMessage,
@@ -335,7 +334,15 @@ Keep responses concise but helpful. If you don't know something specific about t
                                     [class.text-white]="activeProvider() === 'go-openrouter'"
                                     [class.text-slate-400]="activeProvider() !== 'go-openrouter'"
                                     (click)="activeProvider.set('go-openrouter')">
-                                    OpenRouter (Go)
+                                    OpenRouter (Phoenix)
+                                </button>
+                                <button
+                                    class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                                    [class.bg-teal-600]="activeProvider() === 'nvidia-nim'"
+                                    [class.text-white]="activeProvider() === 'nvidia-nim'"
+                                    [class.text-slate-400]="activeProvider() !== 'nvidia-nim'"
+                                    (click)="activeProvider.set('nvidia-nim')">
+                                    NVIDIA NIM
                                 </button>
                             </div>
 
@@ -432,6 +439,47 @@ Keep responses concise but helpful. If you don't know something specific about t
                                                     [class.translate-x-5]="reasoningEnabledInput()"></span>
                                             </button>
                                         </div>
+                                    </div>
+                                </div>
+                            }
+
+                            <!-- NVIDIA NIM Settings -->
+                            @if (activeProvider() === 'nvidia-nim') {
+                                <div class="space-y-3">
+                                    <div class="space-y-1">
+                                        <label class="text-xs font-medium text-slate-400">NVIDIA API Key</label>
+                                        <input type="password"
+                                            class="settings-input"
+                                            placeholder="nvapi-..."
+                                            [value]="nvidiaApiKeyInput()"
+                                            (input)="nvidiaApiKeyInput.set($any($event.target).value)" />
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-xs font-medium text-slate-400">Model</label>
+                                        <select class="settings-input"
+                                            [value]="nvidiaModelInput()"
+                                            (change)="nvidiaModelInput.set($any($event.target).value)">
+                                            @for (model of nvidiaNim.availableModels; track model.id) {
+                                                <option [value]="model.id">{{ model.name }}</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div class="space-y-1">
+                                            <label class="text-[10px] text-slate-400 flex justify-between"><span>Temperature</span><span>{{ nvidiaTemperatureInput() }}</span></label>
+                                            <input type="range" min="0" max="2" step="0.1" class="w-full accent-teal-500"
+                                                [value]="nvidiaTemperatureInput()" (input)="nvidiaTemperatureInput.set(+$any($event.target).value)" />
+                                        </div>
+                                        <div class="space-y-1">
+                                            <label class="text-[10px] text-slate-400 flex justify-between"><span>Top P</span><span>{{ nvidiaTopPInput() }}</span></label>
+                                            <input type="range" min="0.1" max="1" step="0.05" class="w-full accent-teal-500"
+                                                [value]="nvidiaTopPInput()" (input)="nvidiaTopPInput.set(+$any($event.target).value)" />
+                                        </div>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] text-slate-400 flex justify-between"><span>Max Tokens</span><span>{{ nvidiaMaxTokensInput() }}</span></label>
+                                        <input type="range" min="512" max="32768" step="512" class="w-full accent-teal-500"
+                                            [value]="nvidiaMaxTokensInput()" (input)="nvidiaMaxTokensInput.set(+$any($event.target).value)" />
                                     </div>
                                 </div>
                             }
@@ -673,6 +721,7 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     private readonly chatUi = inject(KammiChatUiService);
     goChatService = this.chatUi.goChatService;
     googleGenAI = this.chatUi.googleGenAI;
+    nvidiaNim = this.chatUi.nvidiaNim;
 
     // Icons
     readonly ArrowLeft = ArrowLeft;
@@ -718,6 +767,13 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     // Google settings
     googleApiKeyInput = this.chatUi.googleApiKeyInput;
     googleModelInput = this.chatUi.googleModelInput;
+
+    // NVIDIA NIM settings
+    nvidiaApiKeyInput = this.chatUi.nvidiaApiKeyInput;
+    nvidiaModelInput = this.chatUi.nvidiaModelInput;
+    nvidiaTemperatureInput = this.chatUi.nvidiaTemperatureInput;
+    nvidiaTopPInput = this.chatUi.nvidiaTopPInput;
+    nvidiaMaxTokensInput = this.chatUi.nvidiaMaxTokensInput;
 
     // System prompt
     systemPromptInput = this.chatUi.systemPromptInput;
@@ -783,11 +839,7 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     resetSystemPrompt(): void { this.chatUi.resetSystemPrompt(); }
 
     getActiveProviderName(): string {
-        if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
-            return `Google Gemini (${this.googleGenAI.getModel()})`;
-        }
-        const model = this.selectedModel();
-        return model ? `OpenRouter · ${model.split('/').pop()}` : 'OpenRouter';
+        return this.chatUi.getActiveProviderName();
     }
 
     toggleIndexMode(): void {

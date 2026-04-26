@@ -12,15 +12,15 @@ import { FormsModule } from '@angular/forms';
 import { PlaygroundLogService, LogLevel, LogSource } from '../../services/playground-log.service';
 import { PlaygroundDataService } from '../../services/playground-data.service';
 import { RaptorModuleComponent } from '../../components/raptor-module/raptor-module.component';
-import { GraptorModuleComponent } from '../../components/graptor-module/graptor-module.component';
 import { MemoryModuleComponent } from '../../components/memory-module/memory-module.component';
+import { NumerologyModuleComponent } from '../../components/numerology-module/numerology-module.component';
 
 const DOC_URL = '/docs/shortrun.md';
 
 const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
   { label: 'All Sources', value: null },
+  { label: 'Numerology', value: 'numerology' },
   { label: '🔵 RAPTOR', value: 'raptor' },
-  { label: '🟢 Graptor', value: 'graptor' },
   { label: '🟣 Memory/OM', value: 'memory' },
   { label: '⚙️  System', value: 'system' },
 ];
@@ -35,8 +35,8 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     Tabs, TabList, Tab, TabPanels, TabPanel,
     SelectModule,
     RaptorModuleComponent,
-    GraptorModuleComponent,
     MemoryModuleComponent,
+    NumerologyModuleComponent,
   ],
   template: `
     <div class="playground-root">
@@ -93,13 +93,13 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
               <span class="tab-dot raptor-dot"></span>
               RAPTOR
             </p-tab>
-            <p-tab value="graptor">
-              <span class="tab-dot graptor-dot"></span>
-              Graptor
-            </p-tab>
             <p-tab value="memory">
               <span class="tab-dot memory-dot"></span>
               Memory / OM
+            </p-tab>
+            <p-tab value="numerology">
+              <span class="tab-dot numerology-dot"></span>
+              Numerology
             </p-tab>
           </p-tablist>
 
@@ -107,11 +107,11 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
             <p-tabpanel value="raptor">
               <app-raptor-module></app-raptor-module>
             </p-tabpanel>
-            <p-tabpanel value="graptor">
-              <app-graptor-module></app-graptor-module>
-            </p-tabpanel>
             <p-tabpanel value="memory">
               <app-memory-module></app-memory-module>
+            </p-tabpanel>
+            <p-tabpanel value="numerology">
+              <app-numerology-module></app-numerology-module>
             </p-tabpanel>
           </p-tabpanels>
         </p-tabs>
@@ -218,8 +218,8 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
       display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
     }
     .raptor-dot  { background: #60a5fa; }
-    .graptor-dot { background: #34d399; }
     .memory-dot  { background: #c084fc; }
+    .numerology-dot { background: #22d3ee; }
 
     /* Shared stat pill (used in all modules via global) */
     :host ::ng-deep .module-stats .stat-pill {
@@ -260,8 +260,8 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
       text-transform: uppercase; white-space: nowrap; flex-shrink: 0; min-width: 52px;
     }
     .src-raptor  { color: #60a5fa; }
-    .src-graptor { color: #34d399; }
     .src-memory  { color: #c084fc; }
+    .src-numerology { color: #22d3ee; }
     .src-rlm     { color: #fb923c; }
     .src-system  { color: #94a3b8; }
     .log-msg { flex: 1; }

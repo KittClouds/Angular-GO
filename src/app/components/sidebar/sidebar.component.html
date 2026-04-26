@@ -44,22 +44,11 @@
                 [class.bg-primary/10]="viewMode() === 'search'" [class.text-primary]="viewMode() === 'search'"
                 [class.text-muted-foreground]="viewMode() !== 'search'"
                 [class.hover:text-foreground]="viewMode() !== 'search'"
-                [class.hover:bg-muted/10]="viewMode() !== 'search'" title="Semantic Search"
+                [class.hover:bg-muted/10]="viewMode() !== 'search'" title="Retrieval Workbench"
                 (click)="setViewMode('search')">
                 <div *ngIf="viewMode() === 'search'"
                     class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>
                 <lucide-icon [img]="Search" size="18"></lucide-icon>
-            </button>
-
-            <button
-                class="w-9 h-9 flex items-center justify-center rounded-md transition-all duration-200 relative group"
-                [class.bg-primary/10]="viewMode() === 'ner'" [class.text-primary]="viewMode() === 'ner'"
-                [class.text-muted-foreground]="viewMode() !== 'ner'"
-                [class.hover:text-foreground]="viewMode() !== 'ner'" [class.hover:bg-muted/10]="viewMode() !== 'ner'"
-                title="Entity Detection" (click)="toggleNer()">
-                <div *ngIf="viewMode() === 'ner'"
-                    class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>
-                <lucide-icon [img]="Brain" size="18"></lucide-icon>
             </button>
 
             <button
@@ -90,16 +79,15 @@
              (mousedown)="startResize($event)"></div>
 
         <div
-            class="h-10 flex items-center justify-between px-3 border-b border-white/10 shrink-0 bg-gradient-to-b from-zinc-800 to-zinc-950 text-slate-200">
-            <span class="text-sm font-semibold text-slate-200">
+            class="h-10 flex items-center px-2 border-b border-white/10 shrink-0 bg-gradient-to-b from-zinc-800 to-zinc-950 text-slate-200">
+            <span class="sr-only">
                 <ng-container [ngSwitch]="viewMode()">
                     <span *ngSwitchCase="'files'">Folders</span>
                     <span *ngSwitchCase="'search'">Search</span>
-                    <span *ngSwitchCase="'ner'">Entities</span>
                 </ng-container>
             </span>
 
-            <div class="flex items-center gap-1">
+            <div class="flex min-w-0 flex-1 items-center justify-end gap-0.5">
                 <button class="p-1.5 text-white/80 hover:text-white rounded-md hover:bg-white/10 transition-colors"
                     (click)="editorService.undo()" title="Undo">
                     <lucide-icon [img]="Undo" size="14"></lucide-icon>
@@ -114,7 +102,7 @@
                     <lucide-icon [img]="themeService.isDark() ? Sun : Moon" size="14"></lucide-icon>
                 </button>
 
-                <div class="w-px h-3 bg-white/20 mx-1"></div>
+                <div class="w-px h-3 bg-white/20 mx-0.5"></div>
 
                 <button *ngIf="viewMode() === 'files'" class="p-1.5 rounded-md transition-colors"
                     [class.bg-amber-500/20]="reorderService.isReorderMode()"
@@ -131,6 +119,14 @@
                     class="p-1.5 rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"
                     title="Import text files" (click)="openImportDialog()">
                     <lucide-icon [img]="Upload" size="14"></lucide-icon>
+                </button>
+
+                <button *ngIf="viewMode() === 'files'"
+                    class="p-1.5 rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    [disabled]="!activeExportNote() || isExporting()"
+                    [title]="activeExportNote() ? 'Export current note as .txt' : 'Open a note before exporting'"
+                    (click)="exportActiveNote()">
+                    <lucide-icon [img]="Download" size="14"></lucide-icon>
                 </button>
 
                 <div *ngIf="viewMode() === 'files'" class="relative">
@@ -169,11 +165,10 @@
         <div *ngIf="folderDropdownOpen()" class="fixed inset-0 z-40" (click)="closeFolderDropdown()"></div>
 
         <div class="flex-1 overflow-hidden flex flex-col">
-            <!-- Main Content Area (Tree / Search / NER) -->
+            <!-- Main Content Area (Tree / Search) -->
             <div class="flex-1 overflow-hidden relative" [class.border-b]="isChatRoute() && viewMode() === 'files'" [class.border-border]="isChatRoute() && viewMode() === 'files'">
                 <app-file-tree *ngIf="viewMode() === 'files'" [tree]="treeData()" class="absolute inset-0"></app-file-tree>
                 <app-search-panel *ngIf="viewMode() === 'search'" class="absolute inset-0"></app-search-panel>
-                <app-ner-panel *ngIf="viewMode() === 'ner'" class="absolute inset-0"></app-ner-panel>
             </div>
 
             <!-- Virtual Chat History Bottom Panel -->
@@ -225,9 +220,9 @@
                 [class.bg-teal-500/10]="!isScanning()" [class.text-teal-700]="!isScanning()"
                 [class.hover:bg-teal-500/20]="!isScanning()" [class.bg-amber-500/10]="isScanning()"
                 [class.text-amber-700]="isScanning()" [class.cursor-wait]="isScanning()"
-                [title]="isScanning() ? 'Scanning...' : 'Run Graph Scan on Current Note'">
+                [title]="isScanning() ? 'Indexing...' : 'Index Current Note'">
                 <lucide-icon [img]="RefreshCw" size="12" [class.animate-spin]="isScanning()"></lucide-icon>
-                <span class="text-[10px] font-medium">{{ isScanning() ? 'Scanning...' : 'Graph Scan' }}</span>
+                <span class="text-[10px] font-medium">{{ isScanning() ? 'Indexing...' : 'Index Note' }}</span>
             </button>
         </div>
     </aside>

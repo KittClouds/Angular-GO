@@ -38,8 +38,8 @@ vi.mock('./dexie/decorations', () => ({
     clearAllDecorations: clearAllDecorationsMock,
 }));
 
-vi.mock('../services/gokitt-store.service', () => ({
-    GoKittStoreService: class {
+vi.mock('../services/phoenix-store.service', () => ({
+    PhoenixStoreService: class {
         static fromDexieEntity(entity: any) {
             return entity;
         }
@@ -94,6 +94,7 @@ function seedRegistry(registry: CentralRegistry) {
 
 describe('CentralRegistry persistence deletes', () => {
     beforeEach(() => {
+        vi.unstubAllGlobals();
         vi.clearAllMocks();
 
         bridgeState.current = null;
@@ -131,6 +132,107 @@ describe('CentralRegistry persistence deletes', () => {
         expect(store.deleteEdge).toHaveBeenCalledWith(edge.id);
         expect(store.deleteEntity).toHaveBeenCalledWith(entityA.id);
         expect(clearAllDecorationsMock).toHaveBeenCalledOnce();
+    });
+
+    it('does not let extraction demote a user-curated entity kind', () => {
+        const registry = new CentralRegistry();
+        const state = registry as any;
+        state.isRebuildingDictionary = true;
+        bridgeState.current = {
+            upsertEntity: vi.fn().mockResolvedValue(undefined),
+        };
+
+        const original = registry.registerEntity('Aella', 'CHARACTER' as any, 'note-1', { source: 'user' });
+        const refreshed = registry.registerEntity('Aella', 'OTHER' as any, 'note-1', { source: 'extraction' });
+
+        expect(original.entity.kind).toBe('CHARACTER');
+        expect(refreshed.entity.kind).toBe('CHARACTER');
+        expect(registry.findEntityByLabel('Aella')?.kind).toBe('CHARACTER');
+        expect(mockDb.entities.put).toHaveBeenLastCalledWith(expect.objectContaining({
+            label: 'Aella',
+            kind: 'CHARACTER',
+        }));
+    });
+
+    it('promotes weak auto-created kinds when extraction provides a stronger kind', () => {
+        const registry = new CentralRegistry();
+        const state = registry as any;
+        state.isRebuildingDictionary = true;
+        bridgeState.current = {
+            upsertEntity: vi.fn().mockResolvedValue(undefined),
+        };
+
+        const original = registry.registerEntity('Kai', 'OTHER' as any, 'note-1', { source: 'auto' });
+        const refreshed = registry.registerEntity('Kai', 'CHARACTER' as any, 'note-1', { source: 'extraction' });
+
+        expect(original.entity.kind).toBe('OTHER');
+        expect(refreshed.entity.kind).toBe('CHARACTER');
+        expect(registry.findEntityByLabel('Kai')?.kind).toBe('CHARACTER');
+    });
+
+    it('emits live projection payloads when entities change', () => {
+        const registry = new CentralRegistry();
+        const state = registry as any;
+        state.isRebuildingDictionary = true;
+        bridgeState.current = {
+            upsertEntity: vi.fn().mockResolvedValue(undefined),
+        };
+        const listener = vi.fn();
+        const windowTarget = new EventTarget();
+        vi.stubGlobal('window', windowTarget);
+        windowTarget.addEventListener('entities-changed', listener);
+
+        try {
+            registry.registerEntity('Siofra', 'CHARACTER' as any, 'note-10', {
+                source: 'user',
+                attributes: { narrativeId: 'narrative-1' },
+            });
+        } finally {
+            windowTarget.removeEventListener('entities-changed', listener);
+        }
+
+        const lastCall = listener.mock.calls[listener.mock.calls.length - 1];
+        const event = lastCall?.[0] as CustomEvent;
+        expect(event.detail.entities).toEqual([
+            expect.objectContaining({ label: 'Siofra', firstNote: 'note-10' }),
+        ]);
+        expect(event.detail.edges).toEqual([]);
+        expect(mockDb.entities.put).toHaveBeenCalledWith(expect.objectContaining({
+            label: 'Siofra',
+            firstNote: 'note-10',
+            narrativeId: 'narrative-1',
+        }));
+    });
+
+    it('durably persists manual entity kind changes to Dexie and Phoenix', async () => {
+        const registry = new CentralRegistry();
+        const { entityA } = seedRegistry(registry);
+        const store = {
+            upsertEntity: vi.fn().mockResolvedValue(undefined),
+        };
+
+        bridgeState.current = store;
+
+        await expect(registry.updateEntityDurable(entityA.id, {
+            kind: 'LOCATION' as any,
+        })).resolves.toEqual(expect.objectContaining({
+            id: entityA.id,
+            kind: 'LOCATION',
+            createdBy: 'user',
+        }));
+
+        expect(mockDb.entities.put).toHaveBeenCalledWith(expect.objectContaining({
+            id: entityA.id,
+            label: entityA.label,
+            kind: 'LOCATION',
+            createdBy: 'user',
+        }));
+        expect(store.upsertEntity).toHaveBeenCalledWith(expect.objectContaining({
+            id: entityA.id,
+            kind: 'LOCATION',
+            createdBy: 'user',
+        }));
+        expect(registry.getEntityById(entityA.id)?.kind).toBe('LOCATION');
     });
 
     it('clearAll removes all entities and edges from cache, Dexie, and SQLite', async () => {

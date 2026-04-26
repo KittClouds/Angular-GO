@@ -10,9 +10,9 @@ import { Subject, firstValueFrom, filter, race, timer } from 'rxjs';
  */
 export type BootPhase =
     | 'shell'         // Phase 0: UI shell visible, spinner shown
-    | 'wasm_load'     // Phase 1: GoKitt WASM module loaded (not yet hydrated)
+    | 'runtime_load'  // Phase 1: Phoenix runtime loaded (not yet hydrated)
     | 'registry'      // Phase 2: SmartGraphRegistry hydrated from Dexie cache
-    | 'wasm_hydrate'  // Phase 3: GoKitt initialized with entities from registry
+    | 'runtime_hydrate' // Phase 3: Phoenix initialized with entities from registry
     | 'ready'         // Phase 4: App interactive, note can open, editor usable
     | 'background';   // Phase 5: Background hydration and sync finished
 
@@ -40,7 +40,7 @@ export class AppOrchestrator {
     private readonly phaseComplete$ = new Subject<BootPhase>();
 
     private readonly phaseOrder: BootPhase[] = [
-        'shell', 'wasm_load', 'registry', 'wasm_hydrate', 'ready', 'background'
+        'shell', 'runtime_load', 'registry', 'runtime_hydrate', 'ready', 'background'
     ];
 
     private phases: Map<BootPhase, PhaseInfo> = new Map();
@@ -48,7 +48,7 @@ export class AppOrchestrator {
     private readyLogged = false;
 
     readonly isReady = computed(() => this.isPhaseAtLeast('ready'));
-    readonly isWasmReady = computed(() => this.isPhaseAtLeast('wasm_hydrate'));
+    readonly isRuntimeReady = computed(() => this.isPhaseAtLeast('runtime_hydrate'));
     readonly isRegistryReady = computed(() => this.isPhaseAtLeast('registry'));
 
     constructor() {

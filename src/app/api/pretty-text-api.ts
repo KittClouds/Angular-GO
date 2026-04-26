@@ -14,7 +14,13 @@
  *   - ScanPipeline      (sequential orchestrator)
  */
 
-import type { DecorationSpan, HighlighterConfig, HighlightMode, AnalyticsHighlightKind } from '../lib/Scanner';
+import type {
+    DecorationSpan,
+    HighlighterConfig,
+    HighlightMode,
+    AnalyticsHighlightKind,
+    AnalyticsHighlightPaletteKey,
+} from '../lib/Scanner';
 import { getDecorationStyle, getDecorationClass } from '../lib/Scanner';
 import type { EntityKind } from '../lib/Scanner/types';
 import { getScanCoordinator } from '../lib/Scanner/scanCoordinatorInstance';
@@ -24,6 +30,7 @@ import { realignSpans } from '../lib/Scanner/anchor-utils';
 import {
     type ProseMirrorDoc,
     extractText,
+    extractProjectedText,
     docContent,
     remapSpans,
     remapSpansPermissive,
@@ -38,7 +45,7 @@ import { highlightingStore } from '../lib/store/highlightingStore';
 import { analyticsHighlightStore } from '../lib/store/analyticsHighlightStore';
 import { keywordHighlightStore } from '../lib/store/keywordHighlightStore';
 import { searchHighlightStore } from '../lib/store/searchHighlightStore';
-import { GoKittService } from '../services/gokitt.service';
+import { PhoenixUiApiService } from '../services/phoenix-ui-api.service';
 import {
     getNoteDecorations,
     saveNoteDecorations,
@@ -49,21 +56,23 @@ import { smartGraphRegistry } from '../lib/registry';
 import { DiscoveryStore } from '../lib/store/discoveryStore';
 import type { AnalyticsHighlightRange } from '../lib/analytics';
 import { filterCachedEntitySpans } from './pretty-text-cache';
+import type { SentenceVariationBucket } from '../lib/Scanner/types';
+import type { AnalyticsHighlightSelection } from '../lib/store/analyticsHighlightStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level wiring (legacy bridge — to be replaced with DI over time)
 // ─────────────────────────────────────────────────────────────────────────────
 
 let discoveryStore: DiscoveryStore | null = null;
-let goKittService: GoKittService | null = null;
+let phoenixUiApi: PhoenixUiApiService | null = null;
 let scanPipeline: ScanPipeline | null = null;
 
 export function setDiscoveryStore(store: DiscoveryStore) {
     discoveryStore = store;
 }
 
-export function setGoKittService(service: GoKittService) {
-    goKittService = service;
+export function setPhoenixUiApi(service: PhoenixUiApiService) {
+    phoenixUiApi = service;
 
     // Build the pipeline when GoKitt becomes available
     scanPipeline = new ScanPipeline(
@@ -78,9 +87,12 @@ export function setGoKittService(service: GoKittService) {
     console.log('[PrettyTextAPI] ScanPipeline initialized');
 }
 
-export function getGoKittService(): GoKittService | null {
-    return goKittService;
+export function getPhoenixUiApi(): PhoenixUiApiService | null {
+    return phoenixUiApi;
 }
+
+export const setGoKittService = setPhoenixUiApi;
+export const getGoKittService = getPhoenixUiApi;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interface (unchanged — backward compatible)
@@ -91,6 +103,7 @@ export { ProseMirrorDoc };
 export interface PrettyTextApi {
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[];
     scanForSpansAsync(doc: ProseMirrorDoc): Promise<DecorationSpan[]>;
+    getImplicitDecorations(doc: ProseMirrorDoc): DecorationSpan[];
     getStyle(span: DecorationSpan): string;
     getClass(span: DecorationSpan): string;
     getMode(): HighlightMode;
@@ -99,16 +112,30 @@ export interface PrettyTextApi {
     setConfig(config: Partial<HighlighterConfig>): void;
     subscribe(callback: () => void): () => void;
     setNoteId(noteId: string, narrativeId?: string): void;
+    primeImplicitDecorations(doc: ProseMirrorDoc): void;
+    scheduleImplicitRefresh(doc: ProseMirrorDoc, options?: ImplicitRefreshOptions): void;
     setKeywordHighlights(noteId: string, keywords: string[]): void;
     toggleKeywordHighlight(noteId: string, keyword: string): void;
     clearKeywordHighlights(noteId: string): void;
     setSearchHighlightTerms(terms: string[]): void;
     clearSearchHighlights(): void;
-    setAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void;
-    toggleAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void;
+    setAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[], paletteKey?: AnalyticsHighlightPaletteKey): void;
+    toggleAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[], paletteKey?: AnalyticsHighlightPaletteKey): void;
     clearAnalyticsHighlights(): void;
+    clearAnalyticsDetailHighlights(): void;
+    setSentenceVariationHighlights(noteId: string, buckets: ReadonlySet<SentenceVariationBucket>, selections: AnalyticsHighlightSelection[]): void;
+    clearSentenceVariationHighlights(noteId?: string): void;
     onKeystroke(char: string, cursorPos: number, contextText: string): void;
     forceRescan(): void;
+}
+
+export interface ImplicitRefreshOptions {
+    delayMs?: number;
+    immediate?: boolean;
+    force?: boolean;
+    useCache?: boolean;
+    allowRealign?: boolean;
+    rescanAfterRealign?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,17 +145,19 @@ export interface PrettyTextApi {
 class PrettyTextAPI implements PrettyTextApi {
     private enableEntityRefs = true;
     private implicitDecorations: DecorationSpan[] = [];
-    private implicitDecorationsDocSize = 0;
+    private implicitDecorationsHash: string | null = null;
     private lastContext: string = '';
     private lastScannedContext: string = '';
     private listeners: Set<() => void> = new Set();
     private scanVersion = 0;
+    private refreshRequestVersion = 0;
     private currentNoteId: string = '';
     private currentNarrativeId?: string;
     private hasScannedOnOpen = false;
     private lastKnownEntityCount = 0;
     private lastSentenceEndPos = 0;
     private pendingRescan = false;
+    private pendingImplicitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private lastDoc: ProseMirrorDoc | null = null;
     private selectedKeywords: string[] = [];
     private searchHighlightTerms: string[] = [];
@@ -139,7 +168,11 @@ class PrettyTextAPI implements PrettyTextApi {
 
         if (typeof window !== 'undefined') {
             window.addEventListener('gokitt-ready', () => {
-                console.log('[PrettyTextAPI] GoKitt ready — triggering rescan');
+                console.log('[PrettyTextAPI] GoKitt ready — triggering implicit refresh');
+                if (this.lastDoc && this.currentNoteId) {
+                    this.scheduleImplicitRefresh(this.lastDoc, { immediate: true, force: true });
+                    return;
+                }
                 this.pendingRescan = true;
                 this.notifyListeners();
             });
@@ -152,6 +185,10 @@ class PrettyTextAPI implements PrettyTextApi {
                     );
                     this.notifyListeners();
                 } else {
+                    if (this.lastDoc && this.currentNoteId) {
+                        this.scheduleImplicitRefresh(this.lastDoc, { immediate: true, force: true });
+                        return;
+                    }
                     this.pendingRescan = true;
                     this.notifyListeners();
                 }
@@ -185,7 +222,11 @@ class PrettyTextAPI implements PrettyTextApi {
         this.currentNoteId = noteId;
         this.currentNarrativeId = narrativeId;
 
-        if (noteId && noteId !== prevNoteId) {
+        if (noteId !== prevNoteId) {
+            this.refreshRequestVersion++;
+            this.clearPendingImplicitRefresh();
+            this.implicitDecorations = [];
+            this.implicitDecorationsHash = null;
             this.hasScannedOnOpen = false;
             this.lastKnownEntityCount = 0;
             this.lastSentenceEndPos = 0;
@@ -196,6 +237,55 @@ class PrettyTextAPI implements PrettyTextApi {
 
         this.selectedKeywords = keywordHighlightStore.getKeywordsForNote(noteId);
         this.notifyListeners();
+    }
+
+    primeImplicitDecorations(doc: ProseMirrorDoc): void {
+        if (!doc) return;
+        this.pendingRescan = false;
+        this.lastDoc = doc;
+        const text = docContent(doc);
+        this.lastContext = text;
+        const requestId = ++this.refreshRequestVersion;
+        void this.tryLoadCachedOrScan(doc, text, {
+            requestId,
+            useCache: true,
+            allowRealign: true,
+            rescanAfterRealign: true,
+        });
+    }
+
+    scheduleImplicitRefresh(doc: ProseMirrorDoc, options: ImplicitRefreshOptions = {}): void {
+        if (!doc) return;
+        this.pendingRescan = false;
+        this.lastDoc = doc;
+        const text = docContent(doc);
+        this.lastContext = text;
+
+        const requestId = ++this.refreshRequestVersion;
+        const runRefresh = () => {
+            this.pendingImplicitRefreshTimer = null;
+
+            if (options.useCache) {
+                void this.tryLoadCachedOrScan(doc, text, {
+                    requestId,
+                    useCache: true,
+                    allowRealign: !!options.allowRealign,
+                    rescanAfterRealign: !!options.rescanAfterRealign,
+                });
+                return;
+            }
+
+            this.triggerPipelineScan(doc, text, requestId);
+        };
+
+        this.clearPendingImplicitRefresh();
+
+        if (options.immediate || (options.delayMs ?? 0) <= 0) {
+            runRefresh();
+            return;
+        }
+
+        this.pendingImplicitRefreshTimer = setTimeout(runRefresh, options.delayMs ?? 250);
     }
 
     setKeywordHighlights(noteId: string, keywords: string[]): void {
@@ -218,16 +308,48 @@ class PrettyTextAPI implements PrettyTextApi {
         searchHighlightStore.clear();
     }
 
-    setAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void {
-        analyticsHighlightStore.setSelection({ noteId, key, kind, label, ranges });
+    setAnalyticsHighlights(
+        noteId: string,
+        key: string,
+        kind: AnalyticsHighlightKind,
+        label: string,
+        ranges: AnalyticsHighlightRange[],
+        paletteKey?: AnalyticsHighlightPaletteKey,
+    ): void {
+        const selection = { noteId, key, kind, label, ranges, paletteKey };
+        analyticsHighlightStore.setSelection(selection);
     }
 
-    toggleAnalyticsHighlights(noteId: string, key: string, kind: AnalyticsHighlightKind, label: string, ranges: AnalyticsHighlightRange[]): void {
-        analyticsHighlightStore.toggleSelection({ noteId, key, kind, label, ranges });
+    toggleAnalyticsHighlights(
+        noteId: string,
+        key: string,
+        kind: AnalyticsHighlightKind,
+        label: string,
+        ranges: AnalyticsHighlightRange[],
+        paletteKey?: AnalyticsHighlightPaletteKey,
+    ): void {
+        const selection = { noteId, key, kind, label, ranges, paletteKey };
+        analyticsHighlightStore.toggleSelection(selection);
     }
 
     clearAnalyticsHighlights(): void {
         analyticsHighlightStore.clear();
+    }
+
+    clearAnalyticsDetailHighlights(): void {
+        analyticsHighlightStore.clearDetailSelection();
+    }
+
+    setSentenceVariationHighlights(
+        noteId: string,
+        buckets: ReadonlySet<SentenceVariationBucket>,
+        selections: AnalyticsHighlightSelection[],
+    ): void {
+        analyticsHighlightStore.setSentenceVariationHighlights(noteId, buckets, selections);
+    }
+
+    clearSentenceVariationHighlights(noteId?: string): void {
+        analyticsHighlightStore.clearSentenceVariationHighlights(noteId);
     }
 
     onKeystroke(char: string, cursorPos: number, contextText: string): void {
@@ -237,13 +359,7 @@ class PrettyTextAPI implements PrettyTextApi {
 
     forceRescan(): void {
         if (!this.lastDoc || !this.currentNoteId) return;
-        this.hasScannedOnOpen = false;
-        this.lastScannedContext = '';
-        const text = docContent(this.lastDoc);
-        this.lastContext = text;
-        this.hasScannedOnOpen = true;
-        this.lastScannedContext = text;
-        this.triggerPipelineScan(this.lastDoc, text);
+        this.scheduleImplicitRefresh(this.lastDoc, { immediate: true, force: true });
     }
 
     // ── Decorations ───────────────────────────────────────────────────────
@@ -251,47 +367,25 @@ class PrettyTextAPI implements PrettyTextApi {
     getDecorations(doc: ProseMirrorDoc): DecorationSpan[] {
         this.lastDoc = doc;
         const settings = highlightingStore.getSettings();
-        const { segments } = extractText(doc);
+        const { text: editorText, segments } = extractText(doc);
+        const analyticsProjection = extractProjectedText(doc);
         const focusTerms = [...new Set([...this.selectedKeywords, ...this.searchHighlightTerms])];
         const keywordSpans = createKeywordFocusSpans(segments, focusTerms);
-        const analyticsSpans = this.getAnalyticsHighlightSpans(segments);
+        const analyticsSpans = this.getAnalyticsHighlightSpans(analyticsProjection.segments);
 
         if (settings.mode === 'off') return [...keywordSpans, ...analyticsSpans];
 
         const text = docContent(doc);
+        const currentTextHash = hashContent(text);
 
-        // Handle pending rescan (triggered when WASM becomes ready)
         if (this.pendingRescan) {
             this.pendingRescan = false;
-            this.lastScannedContext = '';
-            this.tryLoadCachedOrScan(doc, text);
-        }
-
-        if (text !== this.lastContext) {
-            const prevText = this.lastContext;
-            this.lastContext = text;
-
-            if (!this.hasScannedOnOpen) {
-                this.hasScannedOnOpen = true;
-                this.lastScannedContext = text;
-                this.tryLoadCachedOrScan(doc, text);
-            } else {
-                const lastChar = text.slice(-1);
-                const isWordBoundary = /[\s.,!?;:\-\n\r]/.test(lastChar);
-                const isDelete = text.length < prevText.length;
-                const isPaste = Math.abs(text.length - prevText.length) > 3;
-
-                if (isWordBoundary || isDelete || isPaste) {
-                    this.lastScannedContext = text;
-                    this.tryLoadCachedOrScan(doc, text);
-                }
-            }
+            this.scheduleImplicitRefresh(doc, { immediate: true, force: true });
         }
 
         // Build output spans
         const allSpans: DecorationSpan[] = [];
-        const currentTextLength = text.length;
-        const implicitsAreValid = this.implicitDecorationsDocSize === currentTextLength;
+        const implicitsAreValid = this.implicitDecorationsHash === currentTextHash;
 
         if (implicitsAreValid) {
             for (const implicit of this.implicitDecorations) {
@@ -336,6 +430,15 @@ class PrettyTextAPI implements PrettyTextApi {
         }
 
         return combinedSpans;
+    }
+
+    getImplicitDecorations(doc: ProseMirrorDoc): DecorationSpan[] {
+        const text = docContent(doc);
+        const currentHash = hashContent(text);
+        if (this.implicitDecorationsHash !== currentHash) {
+            return [];
+        }
+        return this.implicitDecorations.filter(span => span.type === 'entity_implicit');
     }
 
     /** Async scan that waits for GoKitt to return spans (used on note open) */
@@ -402,40 +505,56 @@ class PrettyTextAPI implements PrettyTextApi {
 
     // ── Internal Pipeline Integration ─────────────────────────────────────
 
-    private async tryLoadCachedOrScan(doc: ProseMirrorDoc, text: string): Promise<void> {
-        if (!this.currentNoteId) {
-            this.triggerPipelineScan(doc, text);
+    private async tryLoadCachedOrScan(
+        doc: ProseMirrorDoc,
+        text: string,
+        options: Required<Pick<ImplicitRefreshOptions, 'useCache' | 'allowRealign' | 'rescanAfterRealign'>> & { requestId: number }
+    ): Promise<void> {
+        if (!this.currentNoteId || !options.useCache) {
+            this.triggerPipelineScan(doc, text, options.requestId);
             return;
         }
 
+        const noteId = this.currentNoteId;
+        const currentHash = hashContent(text);
+
         try {
-            const cached = await getNoteDecorations(this.currentNoteId);
-            if (cached && cached.length > 0) {
-                const storedHash = await getDecorationContentHash(this.currentNoteId);
-                const currentHash = hashContent(text);
+            const cached = await getNoteDecorations(noteId);
+            if (!this.isCurrentRefreshRequest(options.requestId, noteId)) {
+                return;
+            }
+
+            if (cached) {
+                const storedHash = await getDecorationContentHash(noteId);
+                if (!this.isCurrentRefreshRequest(options.requestId, noteId)) {
+                    return;
+                }
+
                 const filteredCached = filterCachedEntitySpans(cached, smartGraphRegistry);
 
                 if (filteredCached.length !== cached.length) {
-                    await saveNoteDecorations(this.currentNoteId, filteredCached, storedHash ?? currentHash);
+                    await saveNoteDecorations(noteId, filteredCached, storedHash ?? currentHash);
                 }
 
                 if (storedHash === currentHash) {
-                    if (filteredCached.length > 0) {
-                        this.implicitDecorations = filteredCached;
-                        this.implicitDecorationsDocSize = text.length;
-                        this.notifyListeners();
-                        return;
-                    }
-                } else {
+                    this.applyImplicitDecorations(filteredCached, currentHash);
+                    return;
+                }
+
+                if (options.allowRealign) {
                     const realigned = realignSpans(filteredCached, text);
                     const filteredRealigned = filterCachedEntitySpans(realigned, smartGraphRegistry);
                     if (filteredRealigned.length > 0) {
                         if (filteredRealigned.length !== realigned.length) {
-                            await saveNoteDecorations(this.currentNoteId, filteredRealigned, currentHash);
+                            await saveNoteDecorations(noteId, filteredRealigned, currentHash);
                         }
-                        this.implicitDecorations = filteredRealigned;
-                        this.implicitDecorationsDocSize = text.length;
-                        this.notifyListeners();
+                        if (!this.isCurrentRefreshRequest(options.requestId, noteId)) {
+                            return;
+                        }
+                        this.applyImplicitDecorations(filteredRealigned, currentHash);
+                        if (options.rescanAfterRealign) {
+                            this.triggerPipelineScan(doc, text, options.requestId);
+                        }
                         return;
                     }
                 }
@@ -444,33 +563,43 @@ class PrettyTextAPI implements PrettyTextApi {
             console.warn('[PrettyTextAPI] Dexie read failed:', err);
         }
 
-        this.triggerPipelineScan(doc, text);
+        if (!this.isCurrentRefreshRequest(options.requestId, noteId)) {
+            return;
+        }
+
+        this.triggerPipelineScan(doc, text, options.requestId);
     }
 
-    private getAnalyticsHighlightSpans(segments: ReturnType<typeof extractText>['segments']): DecorationSpan[] {
-        const selection = analyticsHighlightStore.getSelection();
-        if (!selection || selection.noteId !== this.currentNoteId || selection.ranges.length === 0) {
+    private getAnalyticsHighlightSpans(
+        segments: ReturnType<typeof extractProjectedText>['segments'],
+    ): DecorationSpan[] {
+        const selections = analyticsHighlightStore.getSelections(this.currentNoteId)
+            .filter(selection => selection.ranges.length > 0);
+        if (selections.length === 0) {
             this.analyticsHighlightSpans = [];
             return [];
         }
 
-        const rawSpans = selection.ranges
-            .filter(range => range.to > range.from)
-            .map((range, index) => ({
-                type: 'analytics_highlight' as const,
-                from: range.from,
-                to: range.to,
-                label: selection.label,
-                matchedText: range.text,
-                highlightKind: selection.kind,
-                annotationId: `${selection.key}:${index}`,
-            }));
+        const rawSpans = selections.flatMap(selection =>
+            selection.ranges
+                .filter((range: AnalyticsHighlightRange) => range.to > range.from)
+                .map((range: AnalyticsHighlightRange, index: number) => ({
+                    type: 'analytics_highlight' as const,
+                    from: range.from,
+                    to: range.to,
+                    label: selection.label,
+                    matchedText: range.text,
+                    highlightKind: selection.kind,
+                    analyticsPaletteKey: selection.paletteKey,
+                    annotationId: `${selection.key}:${index}`,
+                })),
+        );
 
-        this.analyticsHighlightSpans = remapSpans(rawSpans, segments);
+        this.analyticsHighlightSpans = remapSpansPermissive(rawSpans, segments).spans;
         return this.analyticsHighlightSpans;
     }
 
-    private triggerPipelineScan(doc: ProseMirrorDoc, text?: string) {
+    private triggerPipelineScan(doc: ProseMirrorDoc, text?: string, requestId?: number) {
         if (!scanPipeline) return;
 
         const myVersion = ++this.scanVersion;
@@ -478,64 +607,28 @@ class PrettyTextAPI implements PrettyTextApi {
         const scanText = text || fullText;
 
         if (segments.length === 0) {
-            this.implicitDecorations = [];
-            this.implicitDecorationsDocSize = 0;
-            this.notifyListeners();
+            this.applyImplicitDecorations([], null);
             return;
         }
 
         const noteIdForSave = this.currentNoteId;
         const contentHashForSave = hashContent(scanText);
-
-        // Determine if we should run the full pipeline or highlight-only
-        const entityCount = this.implicitDecorations.filter(d => d.type === 'entity_implicit').length;
-        const sentenceEnded = this.detectSentenceEnd(scanText);
-        const hadNewEntities = entityCount > this.lastKnownEntityCount;
-
-        const shouldRunFull = entityCount > 0 && sentenceEnded && hadNewEntities;
-
-        // Run pipeline
-        // Discovery is manual-only via NerService/NER panel. Implicit rescans should
-        // refresh highlights (and graph when eligible) without running unsupervised NER.
         const pipelinePromise = scanPipeline.run(scanText, {
             skipDiscovery: true,
-            skipGraph: !shouldRunFull,
-            noteId: this.currentNoteId || undefined,
-            provenance: this.currentNoteId ? {
-                worldId: this.currentNoteId,
-                vaultId: this.currentNarrativeId,
-                parentPath: '',
-            } : undefined,
+            skipGraph: true,
         });
 
         pipelinePromise.then(async (result) => {
             if (this.scanVersion !== myVersion) return;
-
-            // Remap highlight spans to ProseMirror coordinates
-            const mergedSpans = remapSpans(result.highlights, segments);
-
-            const changed = !this.spansEqual(this.implicitDecorations, mergedSpans);
-            this.implicitDecorations = mergedSpans;
-            this.implicitDecorationsDocSize = scanText.length;
-            if (changed) this.notifyListeners();
-
-            const newEntityCount = mergedSpans.filter(d => d.type === 'entity_implicit').length;
-            this.lastKnownEntityCount = newEntityCount;
-
-            // Push discovery candidates to store
-            if (result.discovery && result.discovery.candidates.length > 0) {
-                discoveryStore?.addCandidates(result.discovery.candidates);
-
-                // Create candidate spans for discovered tokens
-                const candidateSpans = this.createCandidateSpans(scanText, result.discovery.candidates, segments);
-                if (candidateSpans.length > 0) {
-                    this.implicitDecorations = [
-                        ...this.implicitDecorations.filter(d => d.type !== 'entity_candidate'),
-                        ...candidateSpans,
-                    ];
-                    this.notifyListeners();
-                }
+            if (requestId !== undefined && !this.isCurrentRefreshRequest(requestId, noteIdForSave)) {
+                return;
             }
+
+            // Scanner spans are produced over flat note text. Historic marks can split
+            // one entity surface across adjacent text nodes, so the highlight remapper
+            // must preserve cross-segment entity spans instead of dropping them.
+            const mergedSpans = remapSpansPermissive(result.highlights, segments).spans;
+            this.applyImplicitDecorations(mergedSpans, contentHashForSave);
 
             // Save to Dexie cache
             if (noteIdForSave) {
@@ -546,6 +639,27 @@ class PrettyTextAPI implements PrettyTextApi {
                 }
             }
         }).catch(console.error);
+    }
+
+    private applyImplicitDecorations(spans: DecorationSpan[], textHash: string | null): void {
+        const changed = !this.spansEqual(this.implicitDecorations, spans) || this.implicitDecorationsHash !== textHash;
+        this.implicitDecorations = spans;
+        this.implicitDecorationsHash = textHash;
+        if (changed) {
+            this.notifyListeners();
+        }
+    }
+
+    private isCurrentRefreshRequest(requestId: number, noteId: string): boolean {
+        return requestId === this.refreshRequestVersion && noteId === this.currentNoteId;
+    }
+
+    private clearPendingImplicitRefresh(): void {
+        if (!this.pendingImplicitRefreshTimer) {
+            return;
+        }
+        clearTimeout(this.pendingImplicitRefreshTimer);
+        this.pendingImplicitRefreshTimer = null;
     }
 
     // ── Utilities ──────────────────────────────────────────────────────────

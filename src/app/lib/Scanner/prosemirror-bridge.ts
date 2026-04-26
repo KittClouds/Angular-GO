@@ -11,6 +11,8 @@ import { createSelector } from './anchor-utils';
 
 export interface ProseMirrorDoc {
     descendants: (callback: (node: { isText?: boolean; text?: string }, pos: number) => void) => void;
+    textBetween?: (from: number, to: number, blockSeparator?: string, leafText?: string) => string;
+    content?: { size: number };
 }
 
 /** A contiguous text segment with its ProseMirror position offset */
@@ -33,6 +35,13 @@ export interface ExtractedText {
     segments: TextSegment[];
     /** Node batch for discovery (text + pos pairs) */
     nodeBatch: Array<{ text: string; pos: number }>;
+}
+
+export interface ProjectedText {
+    /** Canonical text projection used by analytics */
+    text: string;
+    /** Text segments aligned to the canonical projection */
+    segments: TextSegment[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +71,36 @@ export function extractText(doc: ProseMirrorDoc): ExtractedText {
     });
 
     return { text: fullText, segments, nodeBatch };
+}
+
+/**
+ * Extract the canonical analytics text projection from a ProseMirror document.
+ * This mirrors the live editor's `textBetween(..., '\\n\\n', '\\n')` behavior and
+ * aligns raw text-node segments back into that projected string.
+ */
+export function extractProjectedText(doc: ProseMirrorDoc): ProjectedText {
+    const extracted = extractText(doc);
+    const text = typeof doc.textBetween === 'function' && doc.content
+        ? doc.textBetween(0, doc.content.size, '\n\n', '\n')
+        : extracted.text;
+
+    if (extracted.segments.length === 0) {
+        return { text, segments: [] };
+    }
+
+    let searchCursor = 0;
+    const segments = extracted.segments.map((segment) => {
+        const matchIndex = text.indexOf(segment.text, searchCursor);
+        const concatStart = matchIndex >= 0 ? matchIndex : searchCursor;
+        searchCursor = concatStart + segment.text.length;
+
+        return {
+            ...segment,
+            concatStart,
+        };
+    });
+
+    return { text, segments };
 }
 
 /**

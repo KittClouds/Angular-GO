@@ -1,0 +1,61 @@
+use std::env;
+use std::path::PathBuf;
+
+use phoenix_embed::{
+    default_embedding_model_root, OrtTextEmbedConfig, OrtTextEmbedError, OrtTextEmbedder,
+    TextEmbeddingProfile,
+};
+use thiserror::Error;
+
+pub type SnowflakeOrtEmbedder = OrtTextEmbedder;
+pub use phoenix_embed::{default_ort_dylib_path, workspace_root};
+
+#[derive(Debug, Error)]
+pub enum SemanticNeighborError {
+    #[error(transparent)]
+    Embed(#[from] OrtTextEmbedError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticEmbedConfig {
+    pub model_root: PathBuf,
+    pub batch_size: usize,
+    pub max_length: usize,
+    pub profile: TextEmbeddingProfile,
+}
+
+impl Default for SemanticEmbedConfig {
+    fn default() -> Self {
+        Self {
+            model_root: default_embedding_model_root(),
+            batch_size: 12,
+            max_length: 512,
+            profile: TextEmbeddingProfile::Native384,
+        }
+    }
+}
+
+pub fn semantic_embedder(
+    config: &SemanticEmbedConfig,
+) -> Result<SnowflakeOrtEmbedder, SemanticNeighborError> {
+    let _ = ensure_ort_dylib_path();
+    Ok(SnowflakeOrtEmbedder::load(&OrtTextEmbedConfig {
+        model_root: config.model_root.clone(),
+        batch_size: config.batch_size,
+        max_length: config.max_length,
+        profile: config.profile,
+        prefix_passage: true,
+        pooling: Default::default(),
+        input_prefix: Default::default(),
+    })?)
+}
+
+pub fn ensure_ort_dylib_path() -> Option<PathBuf> {
+    if let Some(existing) = env::var_os("ORT_DYLIB_PATH") {
+        return Some(PathBuf::from(existing));
+    }
+    let root = workspace_root();
+    let path = default_ort_dylib_path(&root)?;
+    env::set_var("ORT_DYLIB_PATH", &path);
+    Some(path)
+}

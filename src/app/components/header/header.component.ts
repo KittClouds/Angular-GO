@@ -8,7 +8,8 @@ import {
     PanelRight,
     Sun,
     Moon,
-    Save
+    Save,
+    History
 } from 'lucide-angular';
 import { EditorService } from '../../services/editor.service';
 import { SidebarService } from '../../lib/services/sidebar.service';
@@ -32,6 +33,7 @@ export class HeaderComponent {
     readonly Sun = Sun;
     readonly Moon = Moon;
     readonly Save = Save;
+    readonly History = History;
 
     sidebarService = inject(SidebarService);
     rightSidebarService = inject(RightSidebarService);
@@ -53,5 +55,10 @@ export class HeaderComponent {
 
     save() {
         this.editorService.save();
+    }
+
+    openNoteHistory() {
+        this.rightSidebarService.open();
+        this.rightSidebarService.setActivePanel('history');
     }
 }

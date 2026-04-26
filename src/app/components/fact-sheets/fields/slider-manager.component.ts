@@ -41,10 +41,15 @@ import { ScopeService } from '../../../lib/services/scope.service';
             <!-- Status Conditions (for CHARACTER) -->
             @if (entityKind === 'CHARACTER') {
                 <div class="pt-2 border-t border-border/30">
-                    <label class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    <label
+                        class="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                        [attr.for]="getInputId('status-conditions')"
+                    >
                         Status Conditions
                     </label>
                     <input 
+                        [id]="getInputId('status-conditions')"
+                        [attr.name]="getInputName('status-conditions')"
                         type="text"
                         class="w-full mt-1 px-2 py-1.5 text-sm bg-transparent border-b border-border/50 focus:border-primary outline-none"
                         placeholder="Add status conditions... (Press Enter)"
@@ -67,8 +72,15 @@ import { ScopeService } from '../../../lib/services/scope.service';
                     <div class="add-slider-form p-3 bg-muted/20 rounded-md border border-border/50 space-y-3">
                         <!-- Name Input -->
                         <div>
-                            <label class="text-xs text-muted-foreground">Stat Name</label>
+                            <label
+                                class="text-xs text-muted-foreground"
+                                [attr.for]="getInputId('new-stat-name')"
+                            >
+                                Stat Name
+                            </label>
                             <input 
+                                [id]="getInputId('new-stat-name')"
+                                [attr.name]="getInputName('new-stat-name')"
                                 type="text"
                                 class="w-full mt-1 px-2 py-1.5 text-sm bg-background border border-border rounded focus:border-primary outline-none"
                                 placeholder="e.g., Sanity, Corruption, Renown"
@@ -243,6 +255,31 @@ export class SliderManagerComponent implements OnInit {
         this.showAddForm = false;
         this.newSliderName = '';
         this.selectedUmbra = 'vitals';
+    }
+
+    getInputId(key: string): string {
+        return `${this.getBaseId()}-${this.sanitizeSegment(key)}`;
+    }
+
+    getInputName(key: string): string {
+        return `${this.getBaseId()}-${this.sanitizeSegment(key)}`;
+    }
+
+    private getBaseId(): string {
+        return [
+            'slider-manager',
+            this.sanitizeSegment(this.entityKind),
+            this.sanitizeSegment(this.entityId),
+        ].join('-');
+    }
+
+    private sanitizeSegment(value: string | null | undefined): string {
+        const sanitized = (value ?? 'field')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+
+        return sanitized || 'field';
     }
 
 }

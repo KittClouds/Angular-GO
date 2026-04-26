@@ -1,0 +1,251 @@
+<div class="analytics-content">
+    <div class="mode-tabs">
+        <button
+            class="mode-tab"
+            [class.active]="activePanelMode() === 'prose'"
+            (click)="setActivePanelMode('prose')"
+        >
+            Prose
+        </button>
+        <button
+            class="mode-tab"
+            [class.active]="activePanelMode() === 'meter'"
+            (click)="setActivePanelMode('meter')"
+        >
+            Meter Analysis
+        </button>
+    </div>
+
+    @if (activePanelMode() === 'meter') {
+        <app-meter-analysis
+            [text]="currentPlainText()"
+            [noteId]="activeNoteId()"
+        />
+    } @else {
+        <section class="panel-card retrieval-card">
+            <div class="section-header retrieval-header">
+                <div class="header-title">
+                    <lucide-icon [img]="Sparkles" class="header-icon"></lucide-icon>
+                    <span>Retrieval</span>
+                    <span class="route-pill">{{ retrievalModeLabel() }}</span>
+                </div>
+                <button class="icon-btn" (click)="toggleRetrievalSettings()" title="Retrieval settings">
+                    <lucide-icon [img]="Settings" size="14"></lucide-icon>
+                </button>
+            </div>
+
+            <div class="retrieval-mode-toggle" aria-label="Retrieval mode">
+                <button
+                    class="retrieval-mode-btn"
+                    [class.active]="retrievalMode() === 'bm25'"
+                    (click)="setRetrievalMode('bm25')"
+                >
+                    BM25
+                </button>
+                <button
+                    class="retrieval-mode-btn"
+                    [class.active]="retrievalMode() === 'semantic'"
+                    (click)="setRetrievalMode('semantic')"
+                >
+                    Embeddings
+                </button>
+            </div>
+
+            @if (isRetrievalSettingsOpen()) {
+                <div class="retrieval-settings">
+                    <div class="settings-row">
+                        <span>Route</span>
+                        <strong>{{ retrievalRouteLabel() }}</strong>
+                    </div>
+                    <button
+                        class="model-choice"
+                        [class.active]="semanticModel() === 'bge-small-rust'"
+                        (click)="setSemanticModel('bge-small-rust')"
+                    >
+                        <span>BGE Small Rust</span>
+                        <small>384d fast lane for lighter semantic passes</small>
+                    </button>
+                    <button
+                        class="model-choice"
+                        [class.active]="semanticModel() === 'jina-v5-nano-retrieval'"
+                        (click)="setSemanticModel('jina-v5-nano-retrieval')"
+                    >
+                        <span>Jina v5 Nano Retrieval</span>
+                        <small>768d retrieval-tuned native runner target</small>
+                    </button>
+                </div>
+            }
+
+            <div class="search-box">
+                <lucide-icon [img]="Search" class="search-icon"></lucide-icon>
+                <input
+                    type="text"
+                    class="search-input"
+                    [placeholder]="retrievalPlaceholder()"
+                    [value]="searchInput()"
+                    (input)="updateSearchInput($event)"
+                    (keyup.enter)="performSearch(searchInput())"
+                />
+                <button class="search-btn" (click)="performSearch(searchInput())" title="Search">
+                    <lucide-icon [img]="Sparkles" size="14"></lucide-icon>
+                </button>
+                <button
+                    class="search-btn"
+                    [disabled]="!hasActiveSearchHighlight()"
+                    (click)="clearSearchHighlight()"
+                    title="Clear search highlight"
+                >
+                    <lucide-icon [img]="X" size="14"></lucide-icon>
+                </button>
+            </div>
+
+            @if (isSearching()) {
+                <div class="muted-line">Searching...</div>
+            }
+
+            @if (searchResults().length > 0) {
+                <div class="search-results">
+                    @for (res of searchResults(); track res.id) {
+                        <button class="search-result-item" (click)="openNoteResult(res.id)">
+                            <span class="result-title">{{ res.title }}</span>
+                            @if (res.localMatchCount) {
+                                <span class="result-score">{{ res.localMatchCount }} match{{ res.localMatchCount === 1 ? '' : 'es' }}</span>
+                            } @else {
+                                <span class="result-score">{{ res.score | number:'1.2-2' }}</span>
+                            }
+                            @if (res.sourceLabel) {
+                                <span class="result-meta">{{ res.sourceLabel }} · {{ res.routeLabel }}</span>
+                            }
+                        </button>
+                    }
+                </div>
+            } @else if (searchQuery() && !isSearching()) {
+                <div class="muted-line">No results found.</div>
+            }
+        </section>
+
+        @if (!hasContent()) {
+            <div class="empty-state">
+                <lucide-icon [img]="FileText" size="40"></lucide-icon>
+                <p>Start writing to see analytics</p>
+            </div>
+        } @else {
+            <section class="panel-card overview-card">
+                <div class="section-header">
+                    <div class="header-title">
+                        <lucide-icon [img]="BarChart3" class="header-icon"></lucide-icon>
+                        <span>Prose Health</span>
+                    </div>
+                    <span class="mini-badge">{{ analytics().readingLevel }}</span>
+                </div>
+
+                <div class="overview-grid">
+                    @for (chip of overviewChips(); track chip.label) {
+                        <div class="overview-chip" [ngClass]="'tone-' + chip.tone">
+                            <span>{{ chip.label }}</span>
+                            <strong>{{ chip.value }}</strong>
+                        </div>
+                    }
+                </div>
+
+                <div class="vitals-strip">
+                    <span>{{ formatTime(analytics().readingTimeMinutes, analytics().readingTimeSeconds) }} read</span>
+                    <span>{{ formatTime(analytics().speakingTimeMinutes, analytics().speakingTimeSeconds) }} spoken</span>
+                    <span>{{ analytics().averageSentenceLength }} words avg</span>
+                </div>
+            </section>
+
+            <section class="panel-card rhythm-card">
+                <div class="section-header">
+                    <div class="header-title">
+                        <span class="tiny-spark"></span>
+                        <span>Rhythm Map</span>
+                    </div>
+                    <span class="mini-badge">{{ analytics().flowInsights.hasMonotony ? 'watch' : 'varied' }}</span>
+                </div>
+                <app-flow-score
+                    [score]="analytics().flowScore"
+                    [distribution]="analytics().sentenceLengthDistribution"
+                    [insights]="analytics().flowInsights"
+                    [sentences]="analytics().cadence.sentences"
+                    [activeVariationBuckets]="activeVariationBuckets()"
+                    (variationToggle)="toggleSentenceVariationHighlight($event.bucket, $event.label)"
+                />
+            </section>
+
+            <section class="panel-card workbench-card">
+                <div class="section-header">
+                    <div class="header-title">
+                        <lucide-icon [img]="Sparkles" class="header-icon"></lucide-icon>
+                        <span>Editing Lenses</span>
+                    </div>
+                    @if (hasActiveAnalyticsHighlights()) {
+                        <button class="clear-btn" (click)="clearActiveHighlight()" title="Clear highlights">
+                            <lucide-icon [img]="X" size="13"></lucide-icon>
+                            Clear
+                        </button>
+                    }
+                </div>
+
+                <div class="lens-grid">
+                    @for (lens of lensSummaries(); track lens.id) {
+                        <button
+                            class="lens-card"
+                            [class.active]="activeAnalyticsView() === lens.id"
+                            [ngClass]="'severity-' + lens.severity"
+                            (click)="setActiveView(lens.id)"
+                        >
+                            <span class="lens-label">{{ lens.label }}</span>
+                            <strong>{{ lens.count }}</strong>
+                            <small>{{ lens.description }}</small>
+                        </button>
+                    }
+                </div>
+
+                <div class="active-lens">
+                    <div class="active-lens-header">
+                        <div>
+                            <h3>{{ activeLensSummary().label }}</h3>
+                            <p>{{ activeLensSummary().description }}</p>
+                        </div>
+                        <span class="mini-badge">{{ activeLensItems().length }} rows</span>
+                    </div>
+
+                    @if (displayedLensItems().length === 0) {
+                        <div class="empty-lens">No flags in this lens.</div>
+                    } @else {
+                        <div class="lens-list">
+                            @for (item of displayedLensItems(); track item.id) {
+                                <button
+                                    class="lens-row"
+                                    [class.active]="isWritingLensItemActive(item)"
+                                    [class.has-highlight]="item.ranges.length > 0 || item.lensId === 'keyword'"
+                                    (click)="toggleWritingLensItem(item)"
+                                >
+                                    <span class="row-main">
+                                        @if (item.lensId === 'keyword') {
+                                            <span class="fake-check" [class.checked]="isKeywordChecked(item.label)"></span>
+                                        }
+                                        <span class="row-label">{{ item.label }}</span>
+                                        <span class="row-detail">{{ item.detail }}</span>
+                                    </span>
+                                    <span class="row-count">{{ item.count }}</span>
+                                </button>
+                            }
+                        </div>
+
+                        @if (hiddenLensItemCount() > 0) {
+                            <button class="expand-btn" (click)="isKeywordsExpanded.set(!isKeywordsExpanded())">
+                                @if (isKeywordsExpanded()) {
+                                    Show fewer rows
+                                } @else {
+                                    Show {{ hiddenLensItemCount() }} more
+                                }
+                            </button>
+                        }
+                    }
+                </div>
+            </section>
+        }
+    }
+</div>

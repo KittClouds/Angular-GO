@@ -16,6 +16,7 @@ function normalizeRightSidebarPanel(panel: string | undefined): RightSidebarPane
         case 'analytics':
         case 'timeline':
         case 'ai':
+        case 'history':
         case 'entities':
             return panel;
         case 'chat':

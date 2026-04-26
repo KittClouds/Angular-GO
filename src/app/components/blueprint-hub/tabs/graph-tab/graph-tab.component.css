@@ -1,10 +1,8 @@
-/* Graph Tab Styles */
 :host {
     display: block;
     height: 100%;
 }
 
-/* Smooth animations */
 .animate-in {
     animation: fadeIn 0.2s ease-out;
 }
@@ -21,30 +19,30 @@
     }
 }
 
-/* Entity tree scrollbar */
-.overflow-y-auto::-webkit-scrollbar {
-    width: 6px;
+.graph-scroll {
+    scrollbar-color: rgba(161, 161, 170, 0.35) transparent;
+    scrollbar-width: thin;
 }
 
-.overflow-y-auto::-webkit-scrollbar-track {
+.graph-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.graph-scroll::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.overflow-y-auto::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.2);
-    border-radius: 3px;
+.graph-scroll::-webkit-scrollbar-thumb {
+    background: rgba(161, 161, 170, 0.32);
+    border-radius: 999px;
 }
 
-.overflow-y-auto::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.4);
+.graph-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(212, 212, 216, 0.5);
 }
 
-/* Entity item hover glow effect */
-.group:hover {
-    box-shadow: 0 0 0 1px hsl(var(--border) / 0.3);
-}
-
-/* Selected entity highlight */
-.bg-primary\/10 {
-    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.3);
+.graph-scroll,
+:host ::ng-deep app-graph-style-drawer aside {
+    overscroll-behavior: contain;
 }

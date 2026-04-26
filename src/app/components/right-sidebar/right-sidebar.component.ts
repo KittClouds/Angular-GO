@@ -1,16 +1,18 @@
 import { Component, inject, signal, OnInit, OnDestroy, computed, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, Bot, Clock } from 'lucide-angular';
+import { LucideAngularModule, Sparkles, BarChart3, ChevronDown, Bot, Clock, History } from 'lucide-angular';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { ScopeService } from '../../lib/services/scope.service';
+import { EntitySelectionService } from '../../lib/services/entity-selection.service';
 import { FactSheetContainerComponent, ParsedEntity } from '../fact-sheets/fact-sheet-container/fact-sheet-container.component';
 import { AnalyticsPanelComponent } from '../analytics-panel';
 import { TimelineViewComponent } from './timeline-view/timeline-view.component';
 import { AiChatPanelComponent } from './ai-chat-panel/ai-chat-panel.component';
+import { NoteHistoryPanelComponent } from './note-history-panel/note-history-panel.component';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 
-type SidebarView = 'entities' | 'analytics' | 'timeline' | 'ai';
+type SidebarView = 'entities' | 'analytics' | 'timeline' | 'ai' | 'history';
 
 interface ViewOption {
     value: SidebarView;
@@ -22,15 +24,14 @@ const VIEW_OPTIONS: ViewOption[] = [
     { value: 'entities', label: 'Entities', icon: Sparkles },
     { value: 'analytics', label: 'Analytics', icon: BarChart3 },
     { value: 'timeline', label: 'Timeline', icon: Clock },
+    { value: 'history', label: 'History', icon: History },
     { value: 'ai', label: 'AI', icon: Bot },
 ];
-
-const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 
 @Component({
     selector: 'app-right-sidebar',
     standalone: true,
-    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent, AiChatPanelComponent],
+    imports: [CommonModule, FormsModule, LucideAngularModule, FactSheetContainerComponent, AnalyticsPanelComponent, TimelineViewComponent, AiChatPanelComponent, NoteHistoryPanelComponent],
     template: `
         <aside
             class="h-full border-l border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col overflow-hidden relative"
@@ -145,6 +146,13 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
                                 <app-ai-chat-panel />
                             </div>
                         }
+
+                        @case ('history') {
+                            <!-- Note History Panel -->
+                            <div class="flex-1 overflow-hidden">
+                                <app-note-history-panel />
+                            </div>
+                        }
                     }
                 </div>
 
@@ -154,6 +162,8 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
                         <span>{{ entities().length }} entities</span>
                     } @else if (activeView() === 'ai') {
                         <span>Kammi AI</span>
+                    } @else if (activeView() === 'history') {
+                        <span>Note history</span>
                     } @else {
                         <span>Real-time analysis</span>
                     }
@@ -215,6 +225,7 @@ const ENTITY_STORAGE_KEY = 'right-sidebar:selected-entity';
 export class RightSidebarComponent implements OnInit, OnDestroy {
     service = inject(RightSidebarService);
     scopeService = inject(ScopeService);
+    private entitySelection = inject(EntitySelectionService);
 
     readonly viewOptions = VIEW_OPTIONS;
 
@@ -249,7 +260,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
     });
 
     /** Currently selected entity ID */
-    selectedEntityId = signal<string>(getSetting<string>(ENTITY_STORAGE_KEY, ''));
+    selectedEntityId = this.entitySelection.selectedEntityId;
 
     /** Computed selected entity */
     selectedEntity = computed(() => {
@@ -274,13 +285,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
         // Auto-select first entity when scope changes and current selection is no longer in scope
         effect(() => {
             const ents = this.entities();
-            const currentId = this.selectedEntityId();
-
-            if (ents.length > 0 && !ents.find(e => e.id === currentId)) {
-                const newId = ents[0].id;
-                this.selectedEntityId.set(newId);
-                setSetting(ENTITY_STORAGE_KEY, newId);
-            }
+            this.entitySelection.ensureValid(ents.map((entity) => entity.id));
         });
     }
 
@@ -306,8 +311,7 @@ export class RightSidebarComponent implements OnInit, OnDestroy {
     }
 
     onEntitySelect(entityId: string) {
-        this.selectedEntityId.set(entityId);
-        setSetting(ENTITY_STORAGE_KEY, entityId);
+        this.entitySelection.select(entityId);
     }
 
     startResize(event: MouseEvent): void {

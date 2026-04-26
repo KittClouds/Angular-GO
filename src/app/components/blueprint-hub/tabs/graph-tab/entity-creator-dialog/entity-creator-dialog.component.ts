@@ -331,9 +331,13 @@ export class EntityCreatorDialogComponent implements OnChanges {
     });
 
     ngOnChanges(changes: SimpleChanges) {
-        // Reset form when dialog opens or editEntity changes
+        if (changes['editEntity']?.currentValue?.kind) {
+            this.syncAvailableKinds(changes['editEntity'].currentValue.kind);
+        }
+
         if (changes['visible'] && this.visible) {
             if (this.editEntity) {
+                this.syncAvailableKinds(this.editEntity.kind);
                 this.label = this.editEntity.label;
                 this.selectedKind.set(this.editEntity.kind);
                 this.aliases = [...this.editEntity.aliases];
@@ -350,6 +354,7 @@ export class EntityCreatorDialogComponent implements OnChanges {
         this.newAlias = '';
         this.showCustomInput.set(false);
         this.customKindInput = '';
+        this.syncAvailableKinds();
     }
 
     selectKind(kind: string) {
@@ -360,7 +365,7 @@ export class EntityCreatorDialogComponent implements OnChanges {
         const trimmed = this.customKindInput.trim().toUpperCase();
         if (trimmed && !this.allKinds.includes(trimmed as any)) {
             this.customKinds.update(k => [...k, trimmed]);
-            this.allKinds = [...ENTITY_KINDS, ...this.customKinds()];
+            this.syncAvailableKinds(trimmed);
             this.selectedKind.set(trimmed);
         }
         this.showCustomInput.set(false);
@@ -389,6 +394,15 @@ export class EntityCreatorDialogComponent implements OnChanges {
 
     getIcon(kind: string): any {
         return ENTITY_ICONS[kind] || Sparkles;
+    }
+
+    private syncAvailableKinds(activeKind?: string) {
+        const kinds = [...ENTITY_KINDS, ...this.customKinds()];
+        const normalizedActiveKind = activeKind?.trim().toUpperCase();
+        if (normalizedActiveKind && !kinds.includes(normalizedActiveKind as any)) {
+            kinds.push(normalizedActiveKind);
+        }
+        this.allKinds = Array.from(new Set(kinds));
     }
 
     onCancel() {

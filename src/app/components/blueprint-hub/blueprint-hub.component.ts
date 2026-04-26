@@ -1,25 +1,21 @@
 import { Component, HostListener, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BlueprintHubService } from './blueprint-hub.service';
-import { ButtonModule } from 'primeng/button';
 import { GraphTabComponent } from './tabs/graph-tab/graph-tab.component';
-import { ThemeTabComponent } from './tabs/theme-tab/theme-tab.component';
 import { PatternsTabComponent } from './tabs/patterns-tab/patterns-tab.component';
 import { PlotThreadsTabComponent } from './tabs/plot-threads-tab/plot-threads-tab.component';
 import { WorldbuildingTabComponent } from './tabs/worldbuilding-tab/worldbuilding-tab.component';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
 
 const STORAGE_KEY = 'kittclouds-hub-tab';
-const VALID_TAB_IDS = ['graph', 'theme', 'patterns', 'plot-threads', 'worldbuilding', 'attributes'];
+const VALID_TAB_IDS = ['graph', 'patterns', 'plot-threads', 'worldbuilding', 'attributes'];
 
 @Component({
     selector: 'app-blueprint-hub',
     standalone: true,
     imports: [
         CommonModule,
-        ButtonModule,
         GraphTabComponent,
-        ThemeTabComponent,
         PatternsTabComponent,
         PlotThreadsTabComponent,
         WorldbuildingTabComponent
@@ -42,7 +38,6 @@ export class BlueprintHubComponent {
 
     tabs = [
         { id: 'graph', label: 'Graph', icon: 'pi pi-share-alt' },
-        { id: 'theme', label: 'Theme', icon: 'pi pi-palette' },
         { id: 'patterns', label: 'Patterns', icon: 'pi pi-code' },
         { id: 'plot-threads', label: 'Plot Threads', icon: 'pi pi-sitemap' },
         { id: 'worldbuilding', label: 'Worldbuilding', icon: 'pi pi-globe' },

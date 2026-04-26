@@ -1,10 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { EditorAgentWorkspaceService } from './editor-agent-workspace.service';
-import type { ChatApprovalRequest, ChatToolCall, ToolProposal, ToolResultSubmission } from './go-chat.service';
+import type { ChatApprovalRequest, ChatToolCall, ToolProposal, ToolResultSubmission } from './phoenix-chat.service';
+import { AiSidebarModeService } from './ai-sidebar-mode.service';
 
 @Injectable({ providedIn: 'root' })
 export class ChatToolHostService {
     private readonly workspace = inject(EditorAgentWorkspaceService);
+    private readonly aiSidebarMode = inject(AiSidebarModeService);
 
     async executeCall(call: ChatToolCall): Promise<ToolResultSubmission> {
         try {
@@ -19,6 +21,15 @@ export class ChatToolHostService {
                     const selection = this.workspace.getSelection();
                     if (!selection) return { callId: call.id, error: 'No active editor selection available.' };
                     return { callId: call.id, toolCallId: call.toolCallId, resultJson: JSON.stringify(selection) };
+                }
+                case 'highlight_range': {
+                    const result = this.workspace.highlightRange(
+                        Number(args['from'] ?? 0),
+                        Number(args['to'] ?? args['from'] ?? 0)
+                    );
+                    return result.ok
+                        ? { callId: call.id, toolCallId: call.toolCallId, resultJson: JSON.stringify(result) }
+                        : { callId: call.id, toolCallId: call.toolCallId, error: result.error || 'Failed to highlight range.' };
                 }
                 case 'replace_text_proposal':
                     return this.buildReplaceTextProposal(call, args);
@@ -94,7 +105,7 @@ export class ChatToolHostService {
         }
     }
 
-    private buildReplaceTextProposal(call: ChatToolCall, args: Record<string, any>): ToolResultSubmission {
+    private async buildReplaceTextProposal(call: ChatToolCall, args: Record<string, any>): Promise<ToolResultSubmission> {
         const snapshot = this.workspace.getSnapshot();
         if (!snapshot) return { callId: call.id, error: 'No active note/editor snapshot available.' };
 
@@ -102,6 +113,18 @@ export class ChatToolHostService {
         const to = Number(args['to'] ?? from);
         const replacement = String(args['replacement'] ?? '');
         const expectedRevision = args['expectedRevision'] ?? snapshot.revision;
+
+        const autoApplied = await this.tryAutoApplySelectionEdit(call, {
+            kind: 'replace_text',
+            noteId: snapshot.noteId,
+            from,
+            to,
+            replacement,
+            expectedRevision,
+        });
+        if (autoApplied) {
+            return autoApplied;
+        }
 
         const diffPreview = `Replace text from ${from} to ${to} with:\n${replacement}`;
         const proposal: ToolProposal = {
@@ -139,13 +162,25 @@ export class ChatToolHostService {
         return { callId: call.id, toolCallId: call.toolCallId, proposal };
     }
 
-    private buildInsertTextProposal(call: ChatToolCall, args: Record<string, any>): ToolResultSubmission {
+    private async buildInsertTextProposal(call: ChatToolCall, args: Record<string, any>): Promise<ToolResultSubmission> {
         const snapshot = this.workspace.getSnapshot();
         if (!snapshot) return { callId: call.id, error: 'No active note/editor snapshot available.' };
 
         const pos = Number(args['pos'] ?? 0);
         const text = String(args['text'] ?? '');
         const expectedRevision = args['expectedRevision'] ?? snapshot.revision;
+
+        const autoApplied = await this.tryAutoApplySelectionEdit(call, {
+            kind: 'insert_text',
+            noteId: snapshot.noteId,
+            pos,
+            text,
+            expectedRevision,
+        });
+        if (autoApplied) {
+            return autoApplied;
+        }
+
         const diffPreview = `Insert at ${pos}:\n${text}`;
         const proposal: ToolProposal = {
             proposalId: this.generateId('proposal'),
@@ -193,6 +228,74 @@ export class ChatToolHostService {
         } catch {
             return null;
         }
+    }
+
+    private async tryAutoApplySelectionEdit(
+        call: ChatToolCall,
+        candidate:
+            | {
+                  kind: 'replace_text';
+                  noteId: string;
+                  from: number;
+                  to: number;
+                  replacement: string;
+                  expectedRevision: number;
+              }
+            | {
+                  kind: 'insert_text';
+                  noteId: string;
+                  pos: number;
+                  text: string;
+                  expectedRevision: number;
+              }
+    ): Promise<ToolResultSubmission | null> {
+        const selection = this.aiSidebarMode.selectionContext();
+        if (!this.aiSidebarMode.isCanvasMode() || !selection?.autoApplyEligible) {
+            return null;
+        }
+        if (selection.noteId !== null && selection.noteId !== candidate.noteId) {
+            return null;
+        }
+
+        const matchesSelection =
+            candidate.kind === 'replace_text'
+                ? selection.from === candidate.from && selection.to === candidate.to
+                : selection.from === candidate.pos || selection.to === candidate.pos;
+        if (!matchesSelection) {
+            return null;
+        }
+
+        const result = candidate.kind === 'replace_text'
+            ? await this.workspace.replaceText(
+                candidate.from,
+                candidate.to,
+                candidate.replacement,
+                candidate.expectedRevision
+            )
+            : await this.workspace.insertText(
+                candidate.pos,
+                candidate.text,
+                candidate.expectedRevision
+            );
+        if (result.ok) {
+            this.aiSidebarMode.markSelectionAutoApplyUsed();
+        }
+
+        return {
+            callId: call.id,
+            toolCallId: call.toolCallId,
+            ...(result.ok
+                ? {
+                    resultJson: JSON.stringify({
+                        autoApplied: true,
+                        applied: true,
+                        ...result,
+                    }),
+                }
+                : {
+                    error: result.error || 'Failed to auto-apply the selection edit.',
+                }),
+        };
     }
 
     private generateId(prefix: string): string {

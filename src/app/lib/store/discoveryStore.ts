@@ -1,63 +1,54 @@
-// Placeholder to avoid error while I check consumers.
-// I will not execute this replace yet if I need to check consumers first.
-// But the tool requires `ReplacementContent`.
-// I will cancel this tool call by returning the original content, effectively doing nothing, then proceed to check consumers.
-// Wait, that's wasteful.
-// Let's assume standard Angular practice: changing to Service is better.
-// But if I break imports, the build fails.
+import { computed, Injectable, inject, signal } from '@angular/core';
+import {
+    coalesceDiscoveryCandidates,
+    normalizeDiscoveryCandidateKey,
+    type PhoenixDiscoveryCandidate,
+} from '../phoenix/phoenix-discovery';
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 
-// Let's check usage quickly.
-import { signal, computed, Injectable, inject } from '@angular/core';
-import { GoKittService } from '../../services/gokitt.service'; // Check path
-
-export interface DiscoveryCandidate {
-    token: string;
-    count: number;
-    status: number; // 0=Watching, 1=Promoted
-    kind: string;
-    score: number;
-}
+export interface DiscoveryCandidate extends PhoenixDiscoveryCandidate {}
 
 @Injectable({ providedIn: 'root' })
 export class DiscoveryStore {
     private candidates = signal<DiscoveryCandidate[]>([]);
-    private goKitt = inject(GoKittService); // Now we can inject!
+    private store = inject(PhoenixStoreService);
 
     readonly allCandidates = computed(() => this.candidates());
-    readonly promoted = computed(() => this.candidates().filter(c => c.status === 1));
+    readonly promoted = computed(() => this.candidates().filter((candidate) => candidate.status === 1));
 
     constructor() {
-        // Load initial state from backend
         this.loadFromBackend();
     }
 
     private async loadFromBackend() {
         try {
-            // Wait for GoKitt to be ready
             const maxWait = 5000;
             const startTime = Date.now();
-            while (!this.goKitt.isReady && (Date.now() - startTime) < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 100));
+            while (!this.store.isReady && Date.now() - startTime < maxWait) {
+                const ready = await this.store.tryInitialize();
+                if (ready) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100));
             }
 
-            const list = await this.goKitt.storeListDiscoveryCandidates();
-
-            // Defensive: Ensure list is an array
+            const list = await this.store.storeListDiscoveryCandidates();
             if (!Array.isArray(list)) {
                 console.warn('[DiscoveryStore] storeListDiscoveryCandidates returned non-array:', typeof list, list);
                 this.candidates.set([]);
                 return;
             }
 
-            const mapped = list.map((c: any) => ({
-                token: c.token,
-                count: c.count,
-                status: c.status,
-                kind: String(c.kind), // temporary cast
-                score: c.score
+            const mapped: DiscoveryCandidate[] = list.map((candidate: any) => ({
+                key: normalizeDiscoveryCandidateKey(candidate.token),
+                token: String(candidate.token || ''),
+                count: Number(candidate.count || 0),
+                status: Number(candidate.status || 0),
+                kind: String(candidate.kind || '0'),
+                score: Number(candidate.score || 0),
             }));
 
-            this.candidates.set(mapped);
+            this.candidates.set(coalesceDiscoveryCandidates(mapped));
         } catch (e: any) {
             if (e?.message?.includes('timed out')) {
                 console.warn('[DiscoveryStore] Skipping candidates load: No candidates available (timeout)');
@@ -68,26 +59,35 @@ export class DiscoveryStore {
     }
 
     addCandidates(newCandidates: DiscoveryCandidate[]) {
-        this.candidates.update(current => {
-            const map = new Map(current.map(c => [c.token, c]));
+        const normalizedIncoming = newCandidates.map((candidate) => ({
+            ...candidate,
+            key: normalizeDiscoveryCandidateKey(candidate.key || candidate.token),
+        }));
+        const incomingKeys = new Set(normalizedIncoming.map((candidate) => candidate.key));
 
-            newCandidates.forEach(nc => {
-                map.set(nc.token, nc);
-                // Dual write: Persist to backend
-                // Map back to Go struct shape
+        this.candidates.update((current) => {
+            const merged = coalesceDiscoveryCandidates([...current, ...normalizedIncoming]);
+            const mergedByKey = new Map(merged.map((candidate) => [candidate.key, candidate]));
+
+            for (const key of incomingKeys) {
+                const candidate = mergedByKey.get(key);
+                if (!candidate) {
+                    continue;
+                }
+
                 const goCandidate = {
-                    token: nc.token,
-                    kind: parseInt(nc.kind) || 0, // Potential data loss if kind is "PERSON"
-                    score: nc.score,
-                    status: nc.status,
-                    count: nc.count,
+                    token: candidate.token,
+                    kind: parseInt(candidate.kind, 10) || 0,
+                    score: candidate.score,
+                    status: candidate.status,
+                    count: candidate.count,
                     lastSeen: Date.now(),
-                    firstSeen: Date.now() // Logic for firstSeen needed if exists?
+                    firstSeen: Date.now(),
                 };
-                this.goKitt.storeUpsertDiscoveryCandidate(goCandidate).catch(e => console.error(e));
-            });
+                this.store.storeUpsertDiscoveryCandidate(goCandidate).catch((error) => console.error(error));
+            }
 
-            return Array.from(map.values());
+            return merged;
         });
     }
 
@@ -95,8 +95,3 @@ export class DiscoveryStore {
         this.candidates.set([]);
     }
 }
-// Export instance for backward compatibility?
-// No, if we make it Injectable, we can't easily export `new DiscoveryStore()`.
-// Unless we do: export const discoveryStore = new DiscoveryStore();
-// But `inject()` fails outside injection context.
-// So we MUST refactor consumers to use Dependency Injection.

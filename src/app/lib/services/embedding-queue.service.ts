@@ -2,31 +2,6 @@ import { Injectable, signal, inject, OnDestroy } from '@angular/core';
 import { Subject, Subscription, debounceTime } from 'rxjs';
 import { RagWorkerService } from './rag-worker.service';
 
-// ============================================================================
-// CozoDB Stubs - To be reimplemented
-// ============================================================================
-
-interface RaptorPayload {
-    text: string;
-    sourceId: string;
-    startIndex: number;
-    endIndex: number;
-    metadata: { title: string };
-}
-
-const RAPTOR_QUERIES = {
-    upsertNodes: 'STUB: upsertNodes - CozoDB removed'
-};
-
-// Stub CozoService for future reimplementation
-@Injectable({ providedIn: 'root' })
-class CozoService {
-    async run(_query: string, _params: Record<string, unknown>): Promise<{ ok: boolean }> {
-        console.warn('[CozoService] Stub called - CozoDB removed');
-        return { ok: false };
-    }
-}
-
 export interface EmbeddingJob {
     noteId: string;
     narrativeId: string;
@@ -40,7 +15,6 @@ export type EmbeddingStatus = 'idle' | 'queued' | 'embedding' | 'complete' | 'er
 @Injectable({ providedIn: 'root' })
 export class EmbeddingQueueService implements OnDestroy {
     private ragWorker = inject(RagWorkerService);
-    private cozo = inject(CozoService);
 
     // Configuration
     private readonly IDLE_DEBOUNCE_MS = 10000; // 10 seconds
@@ -157,49 +131,11 @@ export class EmbeddingQueueService implements OnDestroy {
         const chunks = this.chunkText(job.content, this.CHUNK_SIZE);
         console.log(`[EmbeddingQueue] Embedding ${chunks.length} chunks for "${job.title}"`);
 
-        // 2. Embed each chunk
-        const raptorNodes: any[] = [];
-        const timestamp = Date.now();
-
-        // Note: We could parallelize `Promise.all` but sequential is safer for worker memory for now
-        for (let i = 0; i < chunks.length; i++) {
-            const chunkText = chunks[i];
-            const embedding = await this.ragWorker.embed(chunkText);
-            const embeddingArray = Array.from(embedding);
-
-            // Create RaptorNode (Leaf)
-            const nodeId = `leaf_${job.noteId}_${i}`;
-            const payload: RaptorPayload = {
-                text: chunkText,
-                sourceId: job.noteId,
-                startIndex: i, // Simple index for now, ideally char offset
-                endIndex: i + chunkText.length,
-                metadata: { title: job.title }
-            };
-
-            // Matches Cozo schema columns:
-            // node_id, narrative_id, level, embedding, payload, children, created_at
-            raptorNodes.push([
-                nodeId,
-                job.narrativeId,
-                0, // Level 0 = Leaf
-                embeddingArray,
-                payload, // Cozo client handles object->JSON
-                [], // No children for leaves
-                timestamp
-            ]);
+        // Embed sequentially and discard vectors; persistent retrieval belongs to native Phoenix.
+        for (const chunkText of chunks) {
+            await this.ragWorker.embed(chunkText);
         }
-
-        // 3. Persist to CozoDB
-        if (raptorNodes.length > 0) {
-            try {
-                await this.cozo.run(RAPTOR_QUERIES.upsertNodes, { nodes: raptorNodes });
-                console.log(`[EmbeddingQueue] Persisted ${raptorNodes.length} nodes to CozoDB`);
-            } catch (e) {
-                console.error('[EmbeddingQueue] Cozo upsert failed:', e);
-                throw e;
-            }
-        }
+        console.log(`[EmbeddingQueue] Warmed ${chunks.length} chunks for "${job.title}"`);
     }
 
     private chunkText(text: string, maxChars: number): string[] {

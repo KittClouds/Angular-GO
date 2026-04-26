@@ -1,5 +1,5 @@
 /**
- * Span types - extracted from CozoDB for use across the application.
+ * Span types for use across the application.
  * These represent immutable text facts with Web Annotation selectors.
  */
 

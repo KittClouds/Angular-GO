@@ -42,6 +42,10 @@ const MODEL_FILES: Record<string, RustModelFiles> = {
         onnxUrl: 'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx',
         tokenizerUrl: 'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json',
     },
+    'jina-v5-nano-retrieval': {
+        onnxUrl: 'https://huggingface.co/jinaai/jina-embeddings-v5-text-nano-retrieval/resolve/main/onnx/model.onnx',
+        tokenizerUrl: 'https://huggingface.co/jinaai/jina-embeddings-v5-text-nano-retrieval/resolve/main/tokenizer.json',
+    },
 };
 
 /**
@@ -77,6 +81,18 @@ export class RustEmbeddingProvider implements IEmbeddingProvider {
                     quality: 'high',
                     costPer1kTokens: 0,
                     description: 'BGE Small via Rust/WASM ONNX inference',
+                };
+            case 'jina-v5-nano-retrieval':
+                return {
+                    id: 'jina-v5-nano-retrieval',
+                    name: 'Jina Embeddings v5 Nano Retrieval (768d)',
+                    provider: 'rust',
+                    dimensions: 768,
+                    maxTokens: 1024,
+                    speed: 'fast',
+                    quality: 'high',
+                    costPer1kTokens: 0,
+                    description: 'Jina v5 retrieval embeddings through the native Rust runner.',
                 };
             default:
                 return {

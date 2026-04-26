@@ -1,8 +1,9 @@
 // src/app/services/raptor-eval.service.ts
 // RAPTOR Evaluation Service - Uses EmbeddingEngine for embeddings
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, NgZone, signal } from '@angular/core';
 import { EmbeddingEngine } from '../lib/embeddings/EmbeddingEngine';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../lib/core/worker-zone';
 
 
 export interface RaptorConfig {
@@ -87,6 +88,8 @@ export class RaptorEvalService {
     readonly ingestionProgress = signal<IngestionProgress | null>(null);
     readonly isProcessing = signal(false);
 
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {}
+
     /**
      * Initialize the RAPTOR evaluation service.
      * Uses the existing EmbeddingEngine (mongodb-leaf model).
@@ -100,34 +103,43 @@ export class RaptorEvalService {
         console.log('[RaptorEvalService] EmbeddingEngine ready');
 
         // Create worker
-        this.worker = new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' });
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () => new Worker(new URL('../workers/gokitt.worker', import.meta.url), { type: 'module' }),
+            (worker) => {
+                worker.onmessage = (e: MessageEvent<RaptorWorkerResponse>) => {
+                    // Handle INIT_COMPLETE separately (no id)
+                    if (e.data.type === 'INIT_COMPLETE') {
+                        const handler = this.messageHandlers.get(0); // Use 0 as INIT id
+                        if (handler) {
+                            this.messageHandlers.delete(0);
+                            this.ngZone.run(() => {
+                                handler.resolve(undefined);
+                            });
+                        }
+                        return;
+                    }
 
-        // Setup message handler
-        this.worker.onmessage = (e: MessageEvent<RaptorWorkerResponse>) => {
-            // Handle INIT_COMPLETE separately (no id)
-            if (e.data.type === 'INIT_COMPLETE') {
-                const handler = this.messageHandlers.get(0); // Use 0 as INIT id
-                if (handler) {
-                    this.messageHandlers.delete(0);
-                    handler.resolve(undefined);
-                }
-                return;
-            }
+                    const handler = this.messageHandlers.get(e.data.id!);
+                    if (handler) {
+                        this.messageHandlers.delete(e.data.id!);
+                        this.ngZone.run(() => {
+                            if (e.data.type === 'ERROR') {
+                                handler.reject(new Error(e.data.payload.message));
+                            } else {
+                                handler.resolve((e.data as any).payload);
+                            }
+                        });
+                    }
+                };
 
-            const handler = this.messageHandlers.get(e.data.id!);
-            if (handler) {
-                this.messageHandlers.delete(e.data.id!);
-                if (e.data.type === 'ERROR') {
-                    handler.reject(new Error(e.data.payload.message));
-                } else {
-                    handler.resolve((e.data as any).payload);
-                }
-            }
-        };
-
-        this.worker.onerror = (e) => {
-            console.error('[RaptorEvalService] Worker error:', e);
-        };
+                worker.onerror = (e) => {
+                    this.ngZone.run(() => {
+                        console.error('[RaptorEvalService] Worker error:', e);
+                    });
+                };
+            },
+        );
 
         // Step 1: Initialize the worker and load WASM
         console.log('[RaptorEvalService] Sending INIT to load WASM...');

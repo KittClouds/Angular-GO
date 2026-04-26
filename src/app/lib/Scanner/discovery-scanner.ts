@@ -3,7 +3,7 @@
  * and returns new discovery candidates.
  * Replaces NerService.analyzeNote() for the Go pipeline path.
  */
-import type { GoKittService } from '../../services/gokitt.service';
+import type { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import type { DiscoveryCandidate } from '../store/discoveryStore';
 
 export interface DiscoveryFilter {
@@ -20,7 +20,7 @@ export interface DiscoveryResult {
 
 export class DiscoveryScanner {
     constructor(
-        private readonly goKitt: GoKittService,
+        private readonly phoenixUiApi: PhoenixUiApiService,
         private readonly filter: DiscoveryFilter
     ) { }
 
@@ -36,7 +36,7 @@ export class DiscoveryScanner {
         }
 
         try {
-            const rawCandidates = await this.goKitt.scanDiscovery(text);
+            const rawCandidates = await this.phoenixUiApi.scanDiscovery(text);
 
             if (!rawCandidates || !Array.isArray(rawCandidates) || rawCandidates.length === 0) {
                 return { candidates: [], rawCount: 0 };

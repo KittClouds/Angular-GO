@@ -1,5 +1,5 @@
 /**
- * Shared entity types - extracted from CozoDB for use across the application.
+ * Shared entity types for use across the application.
  * These types are used by GoKitt services, extractors, and UI components.
  */
 

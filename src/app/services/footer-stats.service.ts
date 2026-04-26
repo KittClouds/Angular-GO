@@ -1,16 +1,23 @@
 // src/app/services/footer-stats.service.ts
 // Live stats service for the hub footer - computes real data from Dexie and editor
 
-import { Injectable, signal, computed, inject } from '@angular/core';
-import { toSignal, toObservable } from '@angular/core/rxjs-interop';
+import { DestroyRef, Injectable, signal, computed, inject } from '@angular/core';
+import { toSignal, toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { of, switchMap, startWith, distinctUntilChanged, debounceTime } from 'rxjs';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from } from 'rxjs';
-import { db, Mention } from '../lib/dexie/db';
+import { db } from '../lib/dexie/db';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
-import { parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
-import { GoKittService } from './gokitt.service';
+import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
+import {
+    scheduleLoadedNoteEntityOccurrenceRebuild,
+} from '../lib/notes/entity-occurrence-index';
+import {
+    getEntitySignalRows,
+    type EntitySignalBreakdown,
+    type EntitySignalRow,
+} from '../lib/notes/entity-occurrence-rows';
 
 export interface FooterStats {
     backlinks: number;
@@ -20,6 +27,19 @@ export interface FooterStats {
     totalEntities: number;
     isSaved: boolean;
 }
+
+const EMPTY_BACKLINK_BREAKDOWN: EntitySignalBreakdown = {
+    tagged: 0,
+    matched: 0,
+    evidence: 0,
+    suggested: 0,
+    total: 0,
+};
+
+const EMPTY_BACKLINK_DATA: { rows: EntitySignalRow[]; breakdown: EntitySignalBreakdown } = {
+    rows: [],
+    breakdown: EMPTY_BACKLINK_BREAKDOWN,
+};
 
 function isSeverity(value: unknown): value is 'low' | 'medium' | 'high' {
     return value === 'low' || value === 'medium' || value === 'high';
@@ -227,16 +247,16 @@ function normalizeTextAnalytics(value: unknown): TextAnalytics | null {
     providedIn: 'root'
 })
 export class FooterStatsService {
+    private destroyRef = inject(DestroyRef);
     private noteEditorStore = inject(NoteEditorStore);
     private editorService = inject(EditorService);
-    private goKittService = inject(GoKittService);
 
     // ─────────────────────────────────────────────────────────────
     // Internal state
     // ─────────────────────────────────────────────────────────────
 
-    /** Current JSON content from editor (for analytics) */
-    private currentContent = signal<string>('');
+    /** Current plain text from editor (for analytics and local search) */
+    private currentPlainText = signal('');
 
     /** Latest live analytics calculated from current editor text */
     private _liveAnalytics = signal<TextAnalytics>(getEmptyAnalytics());
@@ -246,54 +266,71 @@ export class FooterStatsService {
 
     /** Save state tracking (derived from store) */
     readonly isSaved = computed(() => !this.noteEditorStore.isSaving());
+    readonly plainText = computed(() => this.currentPlainText());
 
     constructor() {
+        void scheduleLoadedNoteEntityOccurrenceRebuild();
+
         // Listen to editor content changes for analytics
-        this.editorService.content$.subscribe(({ json }) => {
-            this.updateCurrentContent(JSON.stringify(json));
-        });
+        this.editorService.liveUpdate$
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(({ plainText }) => {
+                this.updateCurrentPlainText(plainText);
+            });
 
         // Also load initial content when note changes
         this.noteEditorStore.activeNote$.pipe(
-            distinctUntilChanged((a, b) => a?.id === b?.id)
+            distinctUntilChanged((a, b) => a?.id === b?.id),
+            takeUntilDestroyed(this.destroyRef),
         ).subscribe(note => {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
+            void scheduleLoadedNoteEntityOccurrenceRebuild();
 
             if (note) {
-                this.updateCurrentContent(note.content || '');
+                this.updateCurrentPlainText(
+                    parseContentToPlainText(note.content || note.markdownContent || '')
+                );
             } else {
-                this.updateCurrentContent('');
+                this.updateCurrentPlainText('');
             }
         });
 
         // Analyze the live editor text directly instead of piggybacking on scans.
-        toObservable(this.currentContent).pipe(
+        toObservable(this.currentPlainText).pipe(
             debounceTime(300),
-        ).subscribe(async (content) => {
+            takeUntilDestroyed(this.destroyRef),
+        ).subscribe((content) => {
             if (!content) {
                 return;
             }
 
-            const plainText = parseContentToPlainText(content);
-            if (!plainText.trim()) {
+            if (!content.trim()) {
                 return;
             }
 
             const requestVersion = ++this.analyticsRequestVersion;
-            const res = await this.goKittService.analyzeText(plainText);
-            if (requestVersion !== this.analyticsRequestVersion) {
-                return;
-            }
+            try {
+                const analytics = normalizeTextAnalytics(analyzeText(content)) ?? getEmptyAnalytics();
+                if (requestVersion !== this.analyticsRequestVersion) {
+                    return;
+                }
 
-            this._liveAnalytics.set(normalizeTextAnalytics(res) ?? getEmptyAnalytics());
+                this._liveAnalytics.set(analytics);
+            } catch (error) {
+                console.error('[FooterStatsService] Local text analytics failed:', error);
+                if (requestVersion !== this.analyticsRequestVersion) {
+                    return;
+                }
+
+                this._liveAnalytics.set(getEmptyAnalytics());
+            }
         });
     }
 
-    private updateCurrentContent(content: string): void {
-        this.currentContent.set(content);
+    private updateCurrentPlainText(plainText: string): void {
+        this.currentPlainText.set(plainText);
 
-        const plainText = parseContentToPlainText(content);
         if (!plainText.trim()) {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
@@ -313,43 +350,27 @@ export class FooterStatsService {
     readonly totalEntities = toSignal(this.totalEntities$, { initialValue: 0 });
 
     /** Backlinks for current note - live query based on active note ID */
-    readonly backlinks$ = toObservable(this.noteEditorStore.activeNoteId).pipe(
+    readonly backlinkData$ = toObservable(this.noteEditorStore.activeNoteId).pipe(
         distinctUntilChanged(),
         switchMap(noteId => {
-            if (!noteId) return of(0);
-
-            // Count mentions where the current note's entities appear in OTHER notes
-            // This is a simplified backlink count - mentions pointing TO this note
-            return from(liveQuery(async () => {
-                // Get all mentions in this note to find its entities
-                const mentionsInNote = await db.mentions.where('noteId').equals(noteId).toArray();
-                const entityIds = [...new Set(mentionsInNote.map(m => m.entityId))];
-
-                if (entityIds.length === 0) return 0;
-
-                // Count mentions of these entities in OTHER notes
-                let backlinkCount = 0;
-                for (const entityId of entityIds) {
-                    const mentions = await db.mentions
-                        .where('entityId')
-                        .equals(entityId)
-                        .filter((m: Mention) => m.noteId !== noteId)
-                        .count();
-                    backlinkCount += mentions;
-                }
-
-                return backlinkCount;
-            }) as DexieObservable<number>);
+            if (!noteId) return of(EMPTY_BACKLINK_DATA);
+            return from(liveQuery(async () => getEntitySignalRows(noteId)) as DexieObservable<{
+                rows: EntitySignalRow[];
+                breakdown: EntitySignalBreakdown;
+            }>);
         }),
-        startWith(0)
+        startWith(EMPTY_BACKLINK_DATA)
     );
-    readonly backlinks = toSignal(this.backlinks$, { initialValue: 0 });
+    readonly backlinkData = toSignal(this.backlinkData$, { initialValue: EMPTY_BACKLINK_DATA });
+    readonly backlinks = computed(() => this.backlinkData().breakdown.total);
+    readonly backlinkRows = computed(() => this.backlinkData().rows);
+    readonly backlinkBreakdown = computed(() => this.backlinkData().breakdown);
 
     // ─────────────────────────────────────────────────────────────
     // Computed Stats from Editor Content (using text-analytics)
     // ─────────────────────────────────────────────────────────────
 
-    /** Full text analytics from direct Go analysis of the live editor text */
+    /** Full text analytics from direct TypeScript analysis of the live editor text */
     readonly analytics = computed<TextAnalytics>(() => this._liveAnalytics());
 
     /** Word count - from analytics */

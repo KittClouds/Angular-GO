@@ -1,13 +1,14 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { getSetting, setSetting } from '../dexie/settings.service';
 import {
-    GoChatService,
+    PhoenixChatService,
     type ChatConfig,
     type ChatProgressEvent,
     type OpenRouterMessage,
     type Thread,
-} from './go-chat.service';
+} from './phoenix-chat.service';
 import { GoogleGenAIService, type GoogleGenAIMessage } from './google-genai.service';
+import { NvidiaNimService } from './nvidia-nim.service';
 import { ChatContextClipStore } from '../store/chat-context-clip.store';
 
 export interface SessionInfo {
@@ -35,6 +36,8 @@ export interface DisplayMessage {
     activitySteps?: ActivityTraceStep[];
     statusText?: string;
 }
+
+export type KammiAiProvider = 'google' | 'go-openrouter' | 'nvidia-nim';
 
 interface TraceEntry {
     insertIndex: number;
@@ -65,12 +68,13 @@ Keep responses concise but helpful. If you don't know something specific about t
 
 @Injectable({ providedIn: 'root' })
 export class KammiChatUiService {
-    readonly goChatService = inject(GoChatService);
+    readonly goChatService = inject(PhoenixChatService);
     readonly googleGenAI = inject(GoogleGenAIService);
+    readonly nvidiaNim = inject(NvidiaNimService);
 
     private readonly chatContextClipStore = inject(ChatContextClipStore);
 
-    readonly activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter');
+    readonly activeProvider = signal<KammiAiProvider>('go-openrouter');
     readonly apiKeyInput = signal('');
     readonly selectedModel = signal('nvidia/nemotron-3-nano-30b-a3b:free');
     readonly temperatureInput = signal(0.7);
@@ -84,6 +88,11 @@ export class KammiChatUiService {
     readonly reflectThresholdInput = signal(4000);
     readonly googleApiKeyInput = signal('');
     readonly googleModelInput = signal('gemini-3-flash-preview');
+    readonly nvidiaApiKeyInput = signal('');
+    readonly nvidiaModelInput = signal('moonshotai/kimi-k2-thinking');
+    readonly nvidiaTemperatureInput = signal(1);
+    readonly nvidiaTopPInput = signal(0.9);
+    readonly nvidiaMaxTokensInput = signal(16384);
     readonly systemPromptInput = signal(KAMMI_SYSTEM_PROMPT);
     readonly indexEnabled = signal(false);
     readonly savedModels = signal<string[]>([]);
@@ -98,6 +107,10 @@ export class KammiChatUiService {
     ];
 
     readonly isGoConfigured = computed(() => !!this.apiKeyInput().trim());
+    readonly isNvidiaConfigured = computed(() => !!this.nvidiaApiKeyInput().trim());
+    readonly isAnyProviderConfigured = computed(() =>
+        this.googleGenAI.isConfigured() || this.isGoConfigured() || this.isNvidiaConfigured()
+    );
     readonly messageCount = computed(() => this.goChatService.messageCount());
     readonly sessions = computed<SessionInfo[]>(() =>
         this.goChatService.threads().map((thread: Thread) => ({
@@ -225,6 +238,19 @@ export class KammiChatUiService {
             this.googleGenAI.clearConfig();
         }
 
+        const nvidiaApiKey = this.nvidiaApiKeyInput().trim();
+        if (nvidiaApiKey) {
+            this.nvidiaNim.saveConfig({
+                apiKey: nvidiaApiKey,
+                model: this.nvidiaModelInput(),
+                temperature: this.nvidiaTemperatureInput(),
+                topP: this.nvidiaTopPInput(),
+                maxTokens: this.nvidiaMaxTokensInput(),
+            });
+        } else if (this.nvidiaNim.isConfigured()) {
+            this.nvidiaNim.clearConfig();
+        }
+
         setSetting('chat:systemPrompt', this.systemPromptInput());
     }
 
@@ -303,8 +329,9 @@ export class KammiChatUiService {
         const traceId = this.startActivityTrace(this.goChatService.messages().length);
         const googleConfigured = this.googleGenAI.isConfigured();
         const openRouterConfigured = this.isGoConfigured();
+        const nvidiaConfigured = this.isNvidiaConfigured();
 
-        if (!googleConfigured && !openRouterConfigured) {
+        if (!googleConfigured && !openRouterConfigured && !nvidiaConfigured) {
             this.finishActivityStep(traceId, 'error', 'AI provider is not configured.');
             this.streamingDraft.set({
                 insertIndex: this.goChatService.messages().length + 1,
@@ -330,7 +357,7 @@ export class KammiChatUiService {
         const effectiveSystemPrompt = this.systemPromptInput()
             + (highlightedContext ? '\n\n' + highlightedContext : '');
 
-        const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
+        const reasoningStepId = this.activeProvider() !== 'google' && this.reasoningEnabledInput()
             ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
             : null;
 
@@ -368,8 +395,12 @@ export class KammiChatUiService {
             return `Google Gemini (${this.googleGenAI.getModel()})`;
         }
 
+        if (this.activeProvider() === 'nvidia-nim' && this.nvidiaNim.isConfigured()) {
+            return `NVIDIA NIM (${this.nvidiaNim.getModel().split('/').pop()})`;
+        }
+
         const model = this.selectedModel();
-        return model ? `Go OpenRouter (${model.split('/').pop()})` : 'Go OpenRouter';
+        return model ? `Phoenix OpenRouter (${model.split('/').pop()})` : 'Phoenix OpenRouter';
     }
 
     stripSuggestionPrefix(text: string): string {
@@ -422,8 +453,19 @@ export class KammiChatUiService {
             this.googleModelInput.set(googleConfig.model || 'gemini-2.0-flash');
         }
 
+        const nvidiaConfig = this.nvidiaNim.config();
+        if (nvidiaConfig) {
+            this.nvidiaApiKeyInput.set(nvidiaConfig.apiKey || '');
+            this.nvidiaModelInput.set(nvidiaConfig.model || 'moonshotai/kimi-k2-thinking');
+            this.nvidiaTemperatureInput.set(nvidiaConfig.temperature ?? 1);
+            this.nvidiaTopPInput.set(nvidiaConfig.topP ?? 0.9);
+            this.nvidiaMaxTokensInput.set(nvidiaConfig.maxTokens ?? 16384);
+        }
+
         if (this.googleGenAI.isConfigured() && !savedConfig?.apiKey) {
             this.activeProvider.set('google');
+        } else if (this.nvidiaNim.isConfigured() && !savedConfig?.apiKey) {
+            this.activeProvider.set('nvidia-nim');
         }
 
         const savedPrompt = getSetting<string | null>('chat:systemPrompt', null);
@@ -487,7 +529,7 @@ export class KammiChatUiService {
         return this.addActivityStep(
             'reasoning',
             'Thinking',
-            this.reasoningEnabledInput() && this.activeProvider() === 'go-openrouter'
+            this.reasoningEnabledInput() && this.activeProvider() !== 'google'
                 ? 'Reasoning through your request...'
                 : 'Reading your request...'
         );
@@ -681,6 +723,31 @@ export class KammiChatUiService {
                             onProgress({ stage: 'stream', status: 'error', detail: error.message });
                             void this.setStreamingError(messageId, `Error: ${error.message}`);
                         },
+                    },
+                    systemPrompt
+                );
+                return;
+            }
+
+            if (this.activeProvider() === 'nvidia-nim' && this.nvidiaNim.isConfigured()) {
+                await this.nvidiaNim.streamChat(
+                    history,
+                    {
+                        onChunk: (chunk) => {
+                            onProgress({ stage: 'stream', status: 'running' });
+                            void this.goChatService.appendMessage(messageId, chunk);
+                        },
+                        onComplete: async (response) => {
+                            onProgress({ stage: 'stream', status: 'done', detail: 'Completed successfully.' });
+                            await this.goChatService.updateMessage(messageId, response);
+                            this.isStreaming.set(false);
+                        },
+                        onError: (error) => {
+                            onProgress({ stage: 'stream', status: 'error', detail: error.message });
+                            void this.setStreamingError(messageId, `Error: ${error.message}`);
+                        },
+                        onEvent: onProgress,
+                        onReasoningChunk: onReasoning,
                     },
                     systemPrompt
                 );

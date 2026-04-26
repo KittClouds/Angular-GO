@@ -582,7 +582,7 @@ export class GoKittStoreService {
 
     /**
      * List ALL edges in the store (no filter).
-     * Used by CozoHydrator for full graph hydration.
+     * Used by full graph hydration.
      */
     async listAllEdges(): Promise<StoreEdge[]> {
         await this.ensureInitialized();

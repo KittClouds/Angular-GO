@@ -1,0 +1,16 @@
+[package]
+name = "phoenix-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+phoenix-analytics = { path = "../phoenix-analytics" }
+phoenix-graph = { path = "../phoenix-graph" }
+phoenix-runtime = { path = "../phoenix-runtime" }
+phoenix-store-native-core = { path = "../phoenix-store-native-core" }
+phoenix-types = { path = "../phoenix-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -1,36 +1,26 @@
-import { Component, OnInit, OnDestroy, signal, computed, inject, effect } from '@angular/core';
+import { Component, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ScrollingModule } from '@angular/cdk/scrolling';
-import { ButtonModule } from 'primeng/button';
-import { TooltipModule } from 'primeng/tooltip';
-import { LucideAngularModule, Plus, Trash2, ChevronRight, ChevronDown, User, MapPin, Users, Package, Shield, Calendar, Lightbulb, Sparkles, Globe, Folder, BookOpen, FileText, Wand2, Settings } from 'lucide-angular';
 import { smartGraphRegistry } from '../../../../lib/registry';
 import type { RegisteredEntity } from '../../../../lib/registry';
+import { entityColorStore } from '../../../../lib/store/entityColorStore';
 import { GraphDetailComponent } from './graph-detail/graph-detail.component';
+import { GraphStyleDrawerComponent } from './graph-style-drawer/graph-style-drawer.component';
+import type { AtlasPreviewEdge } from './graph-atlas-preview/graph-atlas-preview.component';
+import { GraphEntitySidebarComponent } from './graph-entity-sidebar.component';
+import { GraphLensWorkspaceComponent } from './graph-lens-workspace.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
-import { ScopeService, GLOBAL_SCOPE, ActiveScope } from '../../../../lib/services/scope.service';
+import { ScopeService } from '../../../../lib/services/scope.service';
 import { LlmEntityExtractorService } from '../../../../lib/services/llm-entity-extractor.service';
 import { LlmBatchService, BATCH_GOOGLE_MODELS, BATCH_OPENROUTER_MODELS } from '../../../../lib/services/llm-batch.service';
-import { db } from '../../../../lib/dexie/db';
-import { entityColorStore } from '../../../../lib/store/entityColorStore';
-
-// Entity icons (colors come from entityColorStore)
-const ENTITY_ICONS: Record<string, any> = {
-    'CHARACTER': User,
-    'LOCATION': MapPin,
-    'NPC': Users,
-    'ITEM': Package,
-    'FACTION': Shield,
-    'EVENT': Calendar,
-    'CONCEPT': Lightbulb,
-};
-
-interface EntityGroup {
-    kind: string;
-    entities: RegisteredEntity[];
-    expanded: boolean;
-}
+import { NoteEditorStore } from '../../../../lib/store/note-editor.store';
+import { parseContentToPlainText } from '../../../../lib/analytics';
+import { NerService } from '../../../../services/ner.service';
+import { FooterStatsService } from '../../../../services/footer-stats.service';
+import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
+import { PhoenixMachineControlService } from '../../../../services/phoenix-machine-control.service';
+import { EntitySelectionService } from '../../../../lib/services/entity-selection.service';
+import type { EntitySuggestionProviderId, EntitySuggestionScanRequest } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 
 @Component({
     selector: 'app-graph-tab',
@@ -38,32 +28,25 @@ interface EntityGroup {
     imports: [
         CommonModule,
         FormsModule,
-        ScrollingModule,
-        ButtonModule,
-        TooltipModule,
-        LucideAngularModule,
         GraphDetailComponent,
+        GraphStyleDrawerComponent,
+        GraphEntitySidebarComponent,
+        GraphLensWorkspaceComponent,
         EntityCreatorDialogComponent,
     ],
     templateUrl: './graph-tab.component.html',
     styleUrl: './graph-tab.component.css'
 })
-export class GraphTabComponent implements OnInit, OnDestroy {
+export class GraphTabComponent {
     private scopeService = inject(ScopeService);
     private llmExtractor = inject(LlmEntityExtractorService);
+    private nerService = inject(NerService);
+    private noteStore = inject(NoteEditorStore);
+    private footerStatsService = inject(FooterStatsService);
+    private projection = inject(PhoenixProjectionService);
+    private machine = inject(PhoenixMachineControlService);
+    private entitySelection = inject(EntitySelectionService);
     llmBatch = inject(LlmBatchService); // Public for template
-
-    // Icons
-    PlusIcon = Plus;
-    Trash2Icon = Trash2;
-    ChevronRightIcon = ChevronRight;
-    ChevronDownIcon = ChevronDown;
-    GlobeIcon = Globe;
-    FolderIcon = Folder;
-    BookIcon = BookOpen;
-    FileIcon = FileText;
-    WandIcon = Wand2;
-    SettingsIcon = Settings;
 
     // Model lists for settings
     googleModels = BATCH_GOOGLE_MODELS;
@@ -72,21 +55,25 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     // State — entities now derived from ScopeService signal
     entities = computed(() => this.scopeService.scopedEntities());
     selectedEntity = signal<RegisteredEntity | null>(null);
-    expandedKinds = signal<Set<string>>(new Set());
+    graphLensMode = this.machine.graphLensMode;
     isCreatorOpen = signal(false);
     editingEntity = signal<EntityCreatorData | undefined>(undefined);
+    isStyleDrawerOpen = signal(false);
+    atlasSearch = signal('');
 
     // Scope state — driven by ScopeService
-    activeScope = this.scopeService.activeScope;
     scopeLabel = this.scopeService.scopeLabel;
-
-    // Dropdown state
-    isScopeMenuOpen = signal(false);
-    hierarchyOptions = signal<{ label: string, type: string, scope: ActiveScope }[]>([]);
+    activeScope = this.scopeService.activeScope;
 
     // LLM Extraction state
     isExtracting = this.llmExtractor.isExtracting;
     extractionProgress = this.llmExtractor.extractionProgress;
+    suggestions = this.nerService.suggestions;
+    isScanningSuggestions = this.nerService.isAnalyzing;
+    activeSuggestionProvider = this.nerService.activeProvider;
+    suggestionError = this.nerService.errorMessage;
+    lfmStatus = () => this.nerService.getProviderStatus('lfm_local_experiment');
+    glinerStatus = () => this.nerService.getProviderStatus('gliner_local');
 
     // LLM Settings dialog state
     showLlmSettings = signal(false);
@@ -96,149 +83,79 @@ export class GraphTabComponent implements OnInit, OnDestroy {
     llmSettingsOrKey = signal('');
     llmSettingsOrModel = signal('google/gemini-2.0-flash-001');
 
-    scopeIcon = computed(() => {
-        const scope = this.activeScope();
-        if (scope.type === 'global') return this.GlobeIcon;
-        if (scope.type === 'narrative') return this.BookIcon;
-        if (scope.type === 'act') return this.BookIcon;
-        if (scope.type === 'folder') return this.FolderIcon;
-        return this.FileIcon;
-    });
-
-    constructor() {
-        // React to scope changes — calculate hierarchy for dropdown
-        effect(() => {
-            const scope = this.activeScope();
-            this.calculateScopeHierarchy(scope);
-        });
-
-        // Auto-expand new entity kinds
-        effect(() => {
-            const ents = this.entities();
-            const newKinds = new Set(ents.map(e => e.kind));
-            this.expandedKinds.update(current => new Set([...current, ...newKinds]));
-        });
-    }
-
-    // Scope label is now a reactive signal from ScopeService — no updateScopeLabel needed
-
-    /**
-     * Build the hierarchy options for the dropdown
-     * e.g. "My Note" -> "My Folder" -> "My Narrative" -> "Global"
-     */
-    private async calculateScopeHierarchy(scope: ActiveScope) {
-        const options: { label: string, type: string, scope: ActiveScope }[] = [];
-
-        // 1. Current Scope
-        // (Skipping current scope in the list as it's already selected, 
-        //  but maybe useful to show as "active")
-
-        // 2. Parents
-        if (scope.type === 'note') {
-            const note = await db.notes.get(scope.id);
-            if (note && note.folderId) {
-                const folder = await db.folders.get(note.folderId);
-                if (folder) {
-                    options.push({
-                        label: folder.name,
-                        type: 'Folder',
-                        scope: { type: 'folder', id: folder.id, narrativeId: folder.narrativeId }
-                    });
-                }
-            }
-        }
-
-        // Narrative level validation (if current isn't already narrative)
-        if (scope.type !== 'narrative' && scope.narrativeId) {
-            // Usually narrativeId maps to a root folder
-            const narrativeFolder = await db.folders.get(scope.narrativeId);
-            if (narrativeFolder) {
-                // Check if we haven't added it yet (e.g. if parent folder IS the narrative root)
-                if (!options.find(o => o.scope.id === narrativeFolder.id)) {
-                    options.push({
-                        label: narrativeFolder.name,
-                        type: 'Narrative',
-                        scope: { type: 'narrative', id: narrativeFolder.id, narrativeId: narrativeFolder.id }
-                    });
-                }
-            }
-        }
-
-        // 3. Global (Always available at bottom)
-        options.push({
-            label: 'Global Scope',
-            type: 'Vault',
-            scope: GLOBAL_SCOPE
-        });
-
-        this.hierarchyOptions.set(options);
-    }
-
-    toggleScopeMenu() {
-        this.isScopeMenuOpen.update(v => !v);
-    }
-
-    closeScopeMenu() {
-        this.isScopeMenuOpen.set(false);
-    }
-
-    switchToScope(option: { scope: ActiveScope }) {
-        this.scopeService.setScope(option.scope);
-        this.closeScopeMenu();
-    }
-
-    // Computed: Group entities by kind
-    groupedEntities = computed<EntityGroup[]>(() => {
-        const groups: Record<string, RegisteredEntity[]> = {};
-        for (const entity of this.entities()) {
-            if (!groups[entity.kind]) {
-                groups[entity.kind] = [];
-            }
-            groups[entity.kind].push(entity);
-        }
-
-        const expanded = this.expandedKinds();
-        return Object.entries(groups)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([kind, entities]) => ({
-                kind,
-                entities: entities.sort((a, b) => a.label.localeCompare(b.label)),
-                expanded: expanded.has(kind),
-            }));
-    });
-
     totalEntities = this.scopeService.scopedEntityCount;
+    activeEntity = computed(() => {
+        const local = this.selectedEntity();
+        if (local) return local;
+        const selectedId = this.entitySelection.selectedEntityId();
+        return this.entities().find((entity) => entity.id === selectedId) ?? null;
+    });
+    selectedEntityConnectionCount = computed(() => {
+        const entity = this.activeEntity();
+        return entity ? this.projection.getEdgesForEntity(entity.id).length : 0;
+    });
+    atlasEdges = computed<AtlasPreviewEdge[]>(() => {
+        const entityIds = new Set(this.entities().map((entity) => entity.id));
+        const seen = new Set<string>();
+        const edges: AtlasPreviewEdge[] = [];
+
+        for (const entity of this.entities()) {
+            for (const edge of this.projection.getEdgesForEntity(entity.id)) {
+                if (!entityIds.has(edge.sourceId) || !entityIds.has(edge.targetId)) {
+                    continue;
+                }
+                const id = edge.id || `${edge.sourceId}:${edge.type}:${edge.targetId}`;
+                if (seen.has(id)) {
+                    continue;
+                }
+                seen.add(id);
+                edges.push({
+                    id,
+                    sourceId: edge.sourceId,
+                    targetId: edge.targetId,
+                    type: edge.type,
+                    confidence: edge.confidence,
+                });
+            }
+        }
+
+        return edges;
+    });
+    styleTargetKind = computed(() => this.activeEntity()?.kind ?? 'CHARACTER');
+    stewardContextId = computed(() => this.machineScope());
 
     // No manual registry subscription needed — entities are a computed signal
 
-    ngOnInit() {
-        // Expand all groups by default on init
-        const allKinds = new Set(this.entities().map(e => e.kind));
-        this.expandedKinds.set(allKinds);
-    }
-
-    ngOnDestroy() {
-        // No cleanup needed — signals are garbage collected
-    }
-
-    resetToGlobal() {
-        this.scopeService.resetToGlobal();
-    }
-
-    toggleKind(kind: string) {
-        this.expandedKinds.update(current => {
-            const next = new Set(current);
-            if (next.has(kind)) {
-                next.delete(kind);
-            } else {
-                next.add(kind);
-            }
-            return next;
+    selectEntity(entity: RegisteredEntity) {
+        this.selectedEntity.set(entity);
+        this.entitySelection.select(entity.id);
+        this.machine.requestGraphFocus({
+            query: entity.label,
+            scope: this.machineScope(),
+            title: entity.label,
         });
     }
 
-    selectEntity(entity: RegisteredEntity) {
+    showAtlas() {
+        this.selectedEntity.set(null);
+    }
+
+    toggleStyleDrawer() {
+        this.isStyleDrawerOpen.update((open) => !open);
+    }
+
+    closeStyleDrawer() {
+        this.isStyleDrawerOpen.set(false);
+    }
+
+    navigateToEntity(entity: RegisteredEntity) {
         this.selectedEntity.set(entity);
+        this.entitySelection.select(entity.id);
+        this.machine.requestGraphFocus({
+            query: entity.label,
+            scope: this.machineScope(),
+            title: entity.label,
+        });
     }
 
     openCreator() {
@@ -246,8 +163,8 @@ export class GraphTabComponent implements OnInit, OnDestroy {
         this.isCreatorOpen.set(true);
     }
 
-    editEntity(entity: RegisteredEntity, event: MouseEvent) {
-        event.stopPropagation();
+    editEntity(entity: RegisteredEntity, event?: Event) {
+        event?.stopPropagation();
         this.editingEntity.set({
             id: entity.id,
             label: entity.label,
@@ -259,32 +176,49 @@ export class GraphTabComponent implements OnInit, OnDestroy {
 
     async deleteEntity(entity: RegisteredEntity, event: MouseEvent) {
         event.stopPropagation();
+        await this.deleteEntityFromSidebar(entity);
+    }
+
+    async deleteEntityFromSidebar(entity: RegisteredEntity) {
         const deleted = await smartGraphRegistry.deleteEntity(entity.id);
         if (!deleted) return;
         // Entities auto-refresh via computed signal
         if (this.selectedEntity()?.id === entity.id) {
             this.selectedEntity.set(null);
         }
+        if (this.entitySelection.selectedEntityId() === entity.id) {
+            this.entitySelection.clear();
+        }
     }
 
     async onSaveEntity(data: EntityCreatorData) {
         if (data.id) {
-            // Editing
-            await smartGraphRegistry.updateEntity(data.id, {
+            const updated = await smartGraphRegistry.updateEntityDurable(data.id, {
                 label: data.label,
                 kind: data.kind as any,
                 aliases: data.aliases,
             });
+            if (updated && this.selectedEntity()?.id === updated.id) {
+                this.selectedEntity.set(updated);
+            }
+            if (updated) {
+                this.entitySelection.select(updated.id);
+            }
         } else {
-            // Creating
-            await smartGraphRegistry.registerEntity(
+            const context = this.manualEntityContext();
+            const result = await smartGraphRegistry.registerEntity(
                 data.label,
                 data.kind as any,
-                'manual',
-                { source: 'user', aliases: data.aliases }
+                context.noteId,
+                {
+                    source: 'user',
+                    aliases: data.aliases,
+                    attributes: context.narrativeId ? { narrativeId: context.narrativeId } : undefined,
+                }
             );
+            this.selectedEntity.set(result.entity);
+            this.entitySelection.select(result.entity.id);
         }
-        // Entities auto-refresh via computed signal
     }
 
     async flushRegistry() {
@@ -292,16 +226,30 @@ export class GraphTabComponent implements OnInit, OnDestroy {
             const cleared = await smartGraphRegistry.clearAll();
             if (cleared === 0) return;
             this.selectedEntity.set(null);
+            this.entitySelection.clear();
         }
+    }
+
+    async runSuggestionScan(providerId: EntitySuggestionProviderId) {
+        const request = this.buildScanRequest();
+        if (!request) {
+            alert('Open a note with rendered text before scanning.');
+            return;
+        }
+        await this.nerService.runManualScan(providerId, request);
+    }
+
+    async acceptSuggestion(id: string) {
+        await this.nerService.acceptSuggestion(id);
+    }
+
+    async rejectSuggestion(id: string) {
+        await this.nerService.rejectSuggestion(id);
     }
 
     getColor(kind: string): string {
         // Use entityColorStore for color parity across the app
         return entityColorStore.getEntityColor(kind);
-    }
-
-    getIcon(kind: string): any {
-        return ENTITY_ICONS[kind] || Sparkles;
     }
 
     // =========================================================================
@@ -328,6 +276,38 @@ export class GraphTabComponent implements OnInit, OnDestroy {
             openRouterModel: this.llmSettingsOrModel()
         });
         this.showLlmSettings.set(false);
+    }
+
+    private buildScanRequest(): EntitySuggestionScanRequest | null {
+        const currentNote = this.noteStore.currentNote();
+        if (!currentNote) return null;
+
+        const plainText =
+            this.footerStatsService.plainText() ||
+            parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
+
+        if (!plainText.trim()) return null;
+
+        return {
+            noteId: currentNote.id,
+            noteTitle: currentNote.title || 'Untitled Note',
+            plainText,
+        };
+    }
+
+    private machineScope(): 'global' | string {
+        const scope = this.activeScope();
+        if (scope.type === 'global' || scope.scopeFolderId === 'vault:global') return 'global';
+        return scope.scopeFolderId || scope.id || 'global';
+    }
+
+    private manualEntityContext(): { noteId: string; narrativeId?: string } {
+        const currentNote = this.noteStore.currentNote();
+        const scope = this.activeScope();
+        return {
+            noteId: currentNote?.id || scope.selectedNoteId || (scope.type === 'note' ? scope.id : 'manual'),
+            narrativeId: currentNote?.narrativeId || scope.narrativeId || (scope.type === 'narrative' ? scope.id : undefined),
+        };
     }
 
     // =========================================================================

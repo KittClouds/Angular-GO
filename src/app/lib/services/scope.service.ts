@@ -3,11 +3,11 @@
 
 import { Injectable, inject, signal, computed, effect } from '@angular/core';
 import { NoteEditorStore } from '../store/note-editor.store';
-import { smartGraphRegistry } from '../registry';
 import type { RegisteredEntity } from '../registry';
 import type { Note, Entity, Folder } from '../dexie/db';
 import { db } from '../dexie/db';
 import { setSetting } from '../dexie/settings.service';
+import { PhoenixProjectionService } from '../../services/phoenix-projection.service';
 
 export type ScopeType = 'global' | 'narrative' | 'act' | 'folder' | 'note';
 
@@ -59,11 +59,10 @@ const SCOPE_STORAGE_KEY = 'kittclouds_active_scope';
 })
 export class ScopeService {
     private noteEditorStore = inject(NoteEditorStore);
+    private projection = inject(PhoenixProjectionService);
 
     private _activeScope = signal<ResolvedScope>(GLOBAL_SCOPE);
-    private _registryVersion = signal(0);
     private _scopeNoteIds = signal<string[]>([]);
-    private unsubRegistry: (() => void) | null = null;
 
     get activeScope() {
         return this._activeScope;
@@ -85,10 +84,8 @@ export class ScopeService {
     });
 
     readonly scopedEntities = computed<RegisteredEntity[]>(() => {
-        this._registryVersion();
-
         const scope = this._activeScope();
-        const allEntities = smartGraphRegistry.getAllEntities();
+        const allEntities = this.projection.entities();
 
         if (scope.type === 'global') {
             return allEntities;
@@ -103,7 +100,7 @@ export class ScopeService {
         }
 
         const noteIdSet = new Set(noteIds);
-        return allEntities.filter(e => {
+        const scoped = allEntities.filter(e => {
             if (e.firstNote && noteIdSet.has(e.firstNote)) return true;
             if (e.mentionsByNote) {
                 for (const [noteId] of e.mentionsByNote) {
@@ -112,6 +109,10 @@ export class ScopeService {
             }
             return false;
         });
+        if (scoped.length > 0 || scope.type === 'note') {
+            return scoped;
+        }
+        return allEntities;
     });
 
     readonly scopedEntityCount = computed(() => this.scopedEntities().length);
@@ -134,14 +135,6 @@ export class ScopeService {
     });
 
     constructor() {
-        this.unsubRegistry = smartGraphRegistry.subscribe(() => {
-            this._registryVersion.update(v => v + 1);
-        });
-
-        if (smartGraphRegistry.isInitialized()) {
-            this._registryVersion.update(v => v + 1);
-        }
-
         effect(() => {
             const noteId = this.noteEditorStore.activeNoteId();
             this.recomputeScopeForNote(noteId);

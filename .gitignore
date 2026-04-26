@@ -54,3 +54,22 @@ GoKitt/.codex-go-tmp
 /.gomodcache
 GoKitt/.gocache/
 *.txt
+
+# Rust target directories
+/target/
+**/target/
+
+# Large artifacts/binaries
+*.onnx
+*.zip
+*.exe
+*.bin
+
+# Custom build targets & Cache
+.codex-target-*/
+target-codex-*/
+manifest.current
+manifest.prev
+**/.pip-cache-*/
+**/.pydeps-*/
+*.wal

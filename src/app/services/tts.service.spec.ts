@@ -102,6 +102,12 @@ describe('TtsService', () => {
     });
 
     afterEach(() => {
+        const testGlobal = globalThis as typeof globalThis & {
+            window?: { __TAURI_INTERNALS__?: unknown };
+        };
+        if (testGlobal.window) {
+            delete testGlobal.window.__TAURI_INTERNALS__;
+        }
         vi.useRealTimers();
     });
 
@@ -194,6 +200,40 @@ describe('TtsService', () => {
         expect(worker.terminate).not.toHaveBeenCalled();
     });
 
+    it('unloads immediately after one-shot selected-text playback finishes', async () => {
+        (service as any).cachedWorkerVoiceIds.add(TTS_VOICES[0].id);
+
+        service.speakOnce('Selected text only.');
+        await flushMicrotasks();
+
+        expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'SPEAK',
+            payload: expect.objectContaining({
+                text: 'Selected text only.',
+            }),
+        }));
+
+        await (service as any).handleAudioReady(
+            new Float32Array([0.1, 0.2, 0.3]).buffer,
+            3,
+            24000,
+            1,
+            1,
+        );
+
+        const source = audioContext.createBufferSource.mock.results[0].value as AudioBufferSourceNode;
+        source.onended?.(new Event('ended'));
+        await flushMicrotasks();
+
+        const unloadCalls = worker.postMessage.mock.calls
+            .filter(([message]) => message.type === 'UNLOAD_MODEL');
+
+        expect(unloadCalls).toHaveLength(1);
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
+        expect(audioContext.close).toHaveBeenCalledTimes(1);
+        expect(service.modelState()).toBe('idle');
+    });
+
     it('reuses cached voice embeddings instead of refetching them per chunk', async () => {
         service.setVoice(TTS_VOICES[1]);
         await flushMicrotasks();
@@ -207,5 +247,122 @@ describe('TtsService', () => {
         expect(modelCache.fetchWithCache).toHaveBeenCalledTimes(1);
         expect(preloadCalls).toHaveLength(1);
         expect(preloadCalls[0][0].payload.voiceId).toBe(TTS_VOICES[1].id);
+    });
+
+    it('keeps trailing unpunctuated text when chunking speech', () => {
+        const chunks = (service as any).chunkText('First sentence. Second sentence without terminal mark');
+
+        expect(chunks).toEqual([
+            'First sentence. Second sentence without terminal mark'
+        ]);
+    });
+
+    it('splits a single long sentence by word budget for slow native engines', () => {
+        const chunks = (service as any).chunkText(
+            'This sentence is deliberately long enough that it cannot be sent as one native synthesis request without making playback feel frozen.',
+            40,
+        );
+
+        expect(chunks.length).toBeGreaterThan(1);
+        expect(chunks.every((chunk: string) => chunk.length <= 40)).toBe(true);
+    });
+
+    it('routes native Supertonic Rust synthesis through TauRPC without the browser worker', async () => {
+        (globalThis as typeof globalThis & {
+            window?: { __TAURI_INTERNALS__?: unknown };
+        }).window = { __TAURI_INTERNALS__: {} };
+
+        const ttsSupertonicSpeak = vi.fn(async () => ({
+            sampleRate: 24000,
+            sampleCount: 3,
+            pcmS16le: new Uint8Array([0, 0, 0, 64, 0, 128]),
+            generatedTokens: 0,
+            stopped: true,
+            timings: {
+                conditionMs: 0,
+                tokenMs: 1,
+                decodeMs: 0,
+                totalMs: 1,
+            },
+        }));
+
+        (service as any).nativeRpc = {
+            phoenix: {
+                tts_supertonic_speak: ttsSupertonicSpeak,
+                tts_unload: vi.fn(async () => true),
+            },
+        };
+
+        service.setEngine('nativeSupertonicRust');
+        expect(service.selectedEngine()).toBe('nativeSupertonicRust');
+
+        service.loadModel();
+        await (service as any).pendingEngineSwitch;
+        await flushMicrotasks();
+        (service as any).audioContext = audioContext;
+
+        expect(service.modelState()).toBe('ready');
+        expect(service.errorMessage()).toBeNull();
+
+        service.speak('Phoenix native Supertonic smoke.');
+        await flushMicrotasks();
+
+        expect(ttsSupertonicSpeak).toHaveBeenCalledTimes(1);
+        expect(ttsSupertonicSpeak.mock.calls[0][0]).toMatchObject({
+            text: 'Phoenix native Supertonic smoke.',
+            voiceStyle: 'F1',
+            lang: 'en',
+        });
+        expect(worker.postMessage.mock.calls.some(([message]) => message.type === 'SPEAK')).toBe(false);
+    });
+
+    it('routes native Qwen voice clone through the 0.6B TauRPC path', async () => {
+        (globalThis as typeof globalThis & {
+            window?: { __TAURI_INTERNALS__?: unknown };
+        }).window = { __TAURI_INTERNALS__: {} };
+
+        const ttsQwenSpeak = vi.fn(async () => ({
+            sampleRate: 24000,
+            sampleCount: 3,
+            pcmS16le: new Uint8Array([0, 0, 0, 64, 0, 128]),
+            generatedTokens: 0,
+            stopped: true,
+            timings: {
+                conditionMs: 0,
+                tokenMs: 1,
+                decodeMs: 0,
+                totalMs: 1,
+            },
+        }));
+
+        (service as any).nativeRpc = {
+            phoenix: {
+                tts_qwen_speak: ttsQwenSpeak,
+                tts_unload: vi.fn(async () => true),
+            },
+        };
+
+        service.setEngine('nativeQwenClone');
+        expect(service.selectedEngine()).toBe('nativeQwenClone');
+
+        service.loadModel();
+        await (service as any).pendingEngineSwitch;
+        await flushMicrotasks();
+        (service as any).audioContext = audioContext;
+
+        service.speak('Phoenix Qwen clone smoke.');
+        await flushMicrotasks();
+
+        expect(ttsQwenSpeak).toHaveBeenCalledTimes(1);
+        expect(ttsQwenSpeak.mock.calls[0][0]).toMatchObject({
+            text: 'Phoenix Qwen clone smoke.',
+            model: 'Qwen/Qwen3-TTS-12Hz-0.6B-Base',
+            refAudio: 'G:\\phoenix-tts\\reference-sapi.wav',
+            loadPrompt: 'G:\\phoenix-tts\\qwen-reference-prompt.json',
+            savePrompt: 'G:\\phoenix-tts\\qwen-reference-prompt.json',
+            usePromptCache: true,
+            xVectorOnly: true,
+        });
+        expect(worker.postMessage.mock.calls.some(([message]) => message.type === 'SPEAK')).toBe(false);
     });
 });

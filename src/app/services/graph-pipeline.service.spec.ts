@@ -8,20 +8,18 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type ForceGraphData, GraphVizService } from './graph-viz.service';
-import { GoKittService } from './gokitt.service';
 import { GraphPipelineService } from './graph-pipeline.service';
 import { KnowledgeService } from './knowledge.service';
+import { PhoenixGraphOrchestratorService } from './phoenix-graph-orchestrator.service';
+import { PhoenixUiApiService } from './phoenix-ui-api.service';
 
 describe('GraphPipelineService', () => {
     let injector: EnvironmentInjector;
     let service: GraphPipelineService;
-    let goKittMock: { systemRun: ReturnType<typeof vi.fn> };
-    let knowledgeMock: {
-        ensureReady: ReturnType<typeof vi.fn>;
-        sync: ReturnType<typeof vi.fn>;
-        getGraph: ReturnType<typeof vi.fn>;
+    let orchestratorMock: {
+        indexNote: ReturnType<typeof vi.fn>;
+        loadGraphView: ReturnType<typeof vi.fn>;
     };
-    let graphVizMock: { fromKnowledgeGraph: ReturnType<typeof vi.fn> };
 
     const rawGraph = {
         nodes: {
@@ -36,25 +34,22 @@ describe('GraphPipelineService', () => {
     };
 
     beforeEach(() => {
-        goKittMock = {
-            systemRun: vi.fn().mockResolvedValue({
-                ingest: { chunkStats: { strategy: 'chunker_x2' } },
-                commit: { entities: 1, edges: 0 },
+        orchestratorMock = {
+            indexNote: vi.fn().mockResolvedValue({
+                runResult: {
+                    ingest: { chunkStats: { strategy: 'chunker_x2' } },
+                    commit: { entities: 1, edges: 0 },
+                },
+                graph: { rawGraph, graphData },
             }),
-        };
-        knowledgeMock = {
-            ensureReady: vi.fn().mockResolvedValue(undefined),
-            sync: vi.fn().mockResolvedValue({ success: true }),
-            getGraph: vi.fn().mockResolvedValue(rawGraph),
-        };
-        graphVizMock = {
-            fromKnowledgeGraph: vi.fn().mockReturnValue(graphData),
+            loadGraphView: vi.fn().mockResolvedValue({ rawGraph, graphData }),
         };
 
         injector = createEnvironmentInjector([
-            { provide: GoKittService, useValue: goKittMock },
-            { provide: KnowledgeService, useValue: knowledgeMock },
-            { provide: GraphVizService, useValue: graphVizMock },
+            { provide: PhoenixGraphOrchestratorService, useValue: orchestratorMock },
+            { provide: PhoenixUiApiService, useValue: {} },
+            { provide: KnowledgeService, useValue: {} },
+            { provide: GraphVizService, useValue: {} },
         ], Injector.create({ providers: [] }));
 
         service = runInInjectionContext(injector, () => new GraphPipelineService());
@@ -64,7 +59,7 @@ describe('GraphPipelineService', () => {
         injector.destroy();
     });
 
-    it('runs the full-system pipeline, syncs the graphstore, and returns transformed graph data', async () => {
+    it('delegates active-note indexing to the graph orchestrator and returns transformed graph data', async () => {
         const note = {
             id: 'note-1',
             title: 'Untitled',
@@ -77,40 +72,12 @@ describe('GraphPipelineService', () => {
 
         const result = await service.runNoteGraphPipeline(note);
 
-        expect(goKittMock.systemRun).toHaveBeenCalledTimes(1);
-        expect(goKittMock.systemRun).toHaveBeenCalledWith({
-            ingest: {
-                scope: {
-                    worldId: 'world-1',
-                    narrativeId: 'narr-1',
-                    folderId: 'narr-1',
-                    folderPath: 'narr-1',
-                },
-                documents: [{
-                    documentId: 'note-1',
-                    noteId: 'note-1',
-                    title: 'Untitled',
-                    text: 'Ryan entered New Rome.',
-                    scope: {
-                        worldId: 'world-1',
-                        narrativeId: 'narr-1',
-                        folderId: 'narr-1',
-                        folderPath: 'narr-1',
-                    },
-                }],
-            },
-            commit: {
-                scope: {
-                    worldId: 'world-1',
-                    narrativeId: 'narr-1',
-                    folderId: 'narr-1',
-                    folderPath: 'narr-1',
-                },
-            },
+        expect(orchestratorMock.indexNote).toHaveBeenCalledTimes(1);
+        expect(orchestratorMock.indexNote).toHaveBeenCalledWith(note, {
+            policy: 'force',
+            syncGraph: true,
+            reason: 'active-note-index',
         });
-        expect(knowledgeMock.sync).toHaveBeenCalledTimes(1);
-        expect(knowledgeMock.getGraph).toHaveBeenCalledTimes(1);
-        expect(graphVizMock.fromKnowledgeGraph).toHaveBeenCalledWith(rawGraph);
         expect(result.graphData).toEqual(graphData);
         expect(result.rawGraph).toEqual(rawGraph);
     });
@@ -118,9 +85,8 @@ describe('GraphPipelineService', () => {
     it('can load the persisted graph without rerunning the pipeline', async () => {
         const result = await service.loadPersistedGraph({ sync: true });
 
-        expect(goKittMock.systemRun).not.toHaveBeenCalled();
-        expect(knowledgeMock.sync).toHaveBeenCalledTimes(1);
-        expect(knowledgeMock.getGraph).toHaveBeenCalledTimes(1);
+        expect(orchestratorMock.indexNote).not.toHaveBeenCalled();
+        expect(orchestratorMock.loadGraphView).toHaveBeenCalledWith({ sync: true });
         expect(result.graphData).toEqual(graphData);
     });
 });

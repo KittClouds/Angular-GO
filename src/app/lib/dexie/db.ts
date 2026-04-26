@@ -14,6 +14,8 @@ export interface Note {
     title: string;
     content: string;
     markdownContent: string;
+    hasBody?: boolean;
+    version?: number;
     folderId: string;
     entityKind: string;
     entitySubtype: string;
@@ -27,6 +29,219 @@ export interface Note {
     narrativeId: string;          // Vault this note belongs to ('' if global)
     // Ordering
     order: number;                // Float-based order within folder (1000, 2000, etc.)
+}
+
+export type NoteSnapshotReason = 'manual' | 'safety' | 'restore-copy';
+
+export interface NoteSnapshot {
+    id: string;
+    noteId: string;
+    title: string;
+    content: string;
+    markdownContent: string;
+    markdownHash: string;
+    reason: NoteSnapshotReason;
+    worldId: string;
+    folderId: string;
+    narrativeId: string;
+    entityKind: string;
+    entitySubtype: string;
+    isEntity: boolean;
+    ownerId: string;
+    createdAt: number;
+}
+
+export interface NoteBlockProjection {
+    id: string;
+    noteId: string;
+    worldId: string;
+    narrativeId: string;
+    folderId: string;
+    sourceVersion?: number;
+    ordinal: number;
+    path: string;
+    nodeType: string;
+    text: string;
+    textHash: string;
+    startOffset: number;
+    endOffset: number;
+    lineCount: number;
+    headingLevel?: number;
+    updatedAt: number;
+}
+
+export interface NoteLineProjection {
+    id: string;
+    blockId: string;
+    noteId: string;
+    worldId: string;
+    narrativeId: string;
+    folderId: string;
+    sourceVersion?: number;
+    blockOrdinal: number;
+    lineOrdinal: number;
+    text: string;
+    textHash: string;
+    startOffset: number;
+    endOffset: number;
+    updatedAt: number;
+}
+
+export type EntityOccurrenceSource =
+    | 'manual_tag'
+    | 'dictionary_match'
+    | 'machine_evidence'
+    | 'machine_suggestion';
+
+export type EntityFeedbackAction =
+    | 'manual_tag'
+    | 'accepted_suggestion'
+    | 'rejected_suggestion';
+
+export interface EntityFeedbackEntry {
+    id: string;
+    action: EntityFeedbackAction;
+    normalizedSurface: string;
+    surface: string;
+    label: string;
+    kind: string;
+    provider?: string;
+    noteId?: string;
+    entityId?: string;
+    confidence?: number;
+    context?: string;
+    count: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface EntityOccurrence {
+    id: string;
+    noteId: string;
+    entityId: string;
+    entityLabel: string;
+    entityKind: string;
+    targetNoteId?: string;
+    sourceStart: number;
+    sourceEnd: number;
+    surface: string;
+    source: EntityOccurrenceSource;
+    confidence: number;
+    excerpt: string;
+    worldId?: string;
+    narrativeId?: string;
+    folderId?: string;
+    generation: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface EntityNoteIndex {
+    id: string;
+    noteId: string;
+    entityId: string;
+    entityLabel: string;
+    entityKind: string;
+    targetNoteId?: string;
+    occurrenceCount: number;
+    bestSource: EntityOccurrenceSource;
+    maxConfidence: number;
+    firstStart: number;
+    lastEnd: number;
+    worldId?: string;
+    narrativeId?: string;
+    folderId?: string;
+    generation: number;
+    updatedAt: number;
+}
+
+export interface ContextIsland {
+    id: string;
+    worldId: string;
+    narrativeId: string;
+    kind: 'global_derived';
+    label: string;
+    anchorFolderId: string;
+    anchorFolderPath: string;
+    noteCount: number;
+    blockCount: number;
+    topTerms: string[];
+    signatureHash: string;
+    generation: number;
+    createdAt: number;
+    updatedAt: number;
+    evidence: {
+        folderScore: number;
+        lexicalScore: number;
+        bridgeScore: number;
+    };
+}
+
+export interface ContextIslandMembership {
+    id: string;
+    islandId: string;
+    noteId: string;
+    worldId: string;
+    narrativeId: string;
+    folderId: string;
+    confidence: number;
+    primary: boolean;
+    evidenceScore: number;
+    generation: number;
+    updatedAt: number;
+    evidence: {
+        maxPairScore: number;
+        tokenCount: number;
+        folderPrior: number;
+    };
+}
+
+export interface ContextIslandBridge {
+    id: string;
+    worldId: string;
+    narrativeId: string;
+    sourceIslandId: string;
+    targetIslandId: string;
+    confidence: number;
+    evidenceScore: number;
+    sharedTerms: string[];
+    generation: number;
+    updatedAt: number;
+    evidence: {
+        edgeCount: number;
+        lexicalScore: number;
+        folderScore: number;
+    };
+}
+
+export type SignalQualityFamily =
+    | 'lexical'
+    | 'semantic'
+    | 'graph'
+    | 'temporal'
+    | 'causal'
+    | 'structural'
+    | 'llm';
+
+export type SignalQualityStatus = 'accepted' | 'deferred' | 'rejected' | 'review';
+
+export interface SignalQualityLedgerEntry {
+    id: string;
+    candidateId: string;
+    sourceUnitId: string;
+    targetUnitId: string;
+    signalFamily: SignalQualityFamily;
+    supportScore: number;
+    contradictionScore: number;
+    freshness: number;
+    scopeConfidence: number;
+    islandConfidence: number;
+    pathConfidence: number;
+    rerankScore: number;
+    status: SignalQualityStatus;
+    provenance: string[];
+    generation: number;
+    updatedAt: number;
 }
 
 export interface Folder {
@@ -124,7 +339,7 @@ export interface TextQuoteSelector {
  * Span - The atomic immutable fact. All derived data traces back here.
  * Uses Web Annotation's TextPositionSelector + TextQuoteSelector for resilient anchoring.
  *
- * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
+ * @deprecated Migrated out of Dexie into the native fact model.
  */
 export interface Span {
     id: string;                        // UUID
@@ -152,7 +367,7 @@ export interface Span {
  * Wormhole - A contract binding two spans together.
  * Spans can be in same or different documents. Wormholes are NOT entity-to-entity.
  *
- * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
+ * @deprecated Migrated out of Dexie into the native fact model.
  */
 export interface Wormhole {
     id: string;
@@ -175,7 +390,7 @@ export interface Wormhole {
  * SpanMention - Links a Span to a candidate Entity.
  * The span is the ground truth; entity linkage is derived/optional.
  *
- * @deprecated Migrated to CozoDB. See: src/app/lib/cozo/schema/layer2-span-model.ts
+ * @deprecated Migrated out of Dexie into the native fact model.
  */
 export interface SpanMention {
     id: string;
@@ -542,7 +757,7 @@ export interface Setting {
 
 export type LeftSidebarMode = 'open' | 'collapsed' | 'closed';
 export type RightSidebarMode = 'open' | 'closed';
-export type RightSidebarPanel = 'entities' | 'analytics' | 'timeline' | 'ai';
+export type RightSidebarPanel = 'entities' | 'analytics' | 'timeline' | 'ai' | 'history';
 export type SearchMode = 'vector' | 'keyword' | 'raptor';
 export type CalendarView = 'month' | 'week' | 'timeline';
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -618,6 +833,7 @@ export function getDefaultUIState(): UIState {
 export class CrepeDatabase extends Dexie {
     // Core content
     notes!: Table<Note>;
+    noteSnapshots!: Table<NoteSnapshot>;
     folders!: Table<Folder>;
     tags!: Table<Tag>;
     noteTags!: Table<NoteTag>;
@@ -650,8 +866,7 @@ export class CrepeDatabase extends Dexie {
     networkInstances!: Table<NetworkInstance>;
     networkRelationships!: Table<NetworkRelationship>;
 
-    // Span-first data model (v4) - REMOVED: spans, wormholes, spanMentions migrated to CozoDB
-    // See: src/app/lib/cozo/schema/layer2-span-model.ts
+    // Span-first data model (v4) - REMOVED: spans, wormholes, spanMentions migrated out of Dexie.
     // Only claims remains in Dexie for now (will migrate later)
     claims!: Table<Claim>;
 
@@ -666,6 +881,17 @@ export class CrepeDatabase extends Dexie {
 
     // UI State (v16) - persistent UI state for full state management
     uiState!: Table<UIState>;
+
+    // Note structure projections (v17)
+    noteBlocks!: Table<NoteBlockProjection>;
+    noteLines!: Table<NoteLineProjection>;
+    entityOccurrences!: Table<EntityOccurrence>;
+    entityNoteIndex!: Table<EntityNoteIndex>;
+    entityFeedback!: Table<EntityFeedbackEntry>;
+    contextIslands!: Table<ContextIsland>;
+    contextIslandMemberships!: Table<ContextIslandMembership>;
+    contextIslandBridges!: Table<ContextIslandBridge>;
+    signalQualityLedger!: Table<SignalQualityLedgerEntry>;
 
     constructor() {
         super('CrepeNotesDB');
@@ -723,11 +949,10 @@ export class CrepeDatabase extends Dexie {
         });
 
         // Version 4: Span-first data model (Immutable Facts Layer)
-        // DEPRECATED: spans, wormholes, spanMentions migrated to CozoDB
-        // See: src/app/lib/cozo/schema/layer2-span-model.ts
+        // DEPRECATED: spans, wormholes, spanMentions migrated out of Dexie.
         // Only claims remains here (will migrate later)
         this.version(4).stores({
-            // REMOVED: spans, wormholes, spanMentions - now in CozoDB
+            // REMOVED: spans, wormholes, spanMentions - owned by the native fact model.
             // Claim - SVO quads referencing spans
             claims: 'id, worldId, narrativeId, subjectSpanId, objectSpanId, verb, sourceNoteId, [subjectEntityId+verb+objectEntityId]'
         });
@@ -951,6 +1176,37 @@ export class CrepeDatabase extends Dexie {
             const defaultState = getDefaultUIState();
             await tx.table('uiState').put(defaultState);
             console.log('[Dexie] Upgrade to v16: Seeded default UI state');
+        });
+
+        this.version(17).stores({
+            noteBlocks: 'id, noteId, worldId, narrativeId, folderId, ordinal, nodeType, [noteId+ordinal], [worldId+narrativeId], [narrativeId+ordinal]',
+            noteLines: 'id, blockId, noteId, worldId, narrativeId, folderId, blockOrdinal, lineOrdinal, [blockId+lineOrdinal], [noteId+blockOrdinal], [worldId+narrativeId]'
+        });
+
+        this.version(18).stores({
+            contextIslands: 'id, kind, worldId, narrativeId, anchorFolderId, generation, updatedAt, [worldId+kind], [worldId+narrativeId]',
+            contextIslandMemberships: 'id, islandId, noteId, worldId, narrativeId, folderId, primary, generation, [noteId+primary], [islandId+confidence], [worldId+narrativeId]',
+            contextIslandBridges: 'id, worldId, narrativeId, sourceIslandId, targetIslandId, confidence, generation, [sourceIslandId+confidence], [targetIslandId+confidence], [worldId+confidence]'
+        });
+
+        this.version(19).stores({
+            signalQualityLedger: 'id, candidateId, sourceUnitId, targetUnitId, signalFamily, status, generation, [candidateId+signalFamily], [sourceUnitId+targetUnitId], [signalFamily+status]'
+        });
+
+        this.version(20).stores({
+            noteSnapshots: 'id, noteId, createdAt, reason, markdownHash, [noteId+createdAt]'
+        });
+
+        this.version(21).stores({});
+
+        this.version(22).stores({
+            outboundRefs: null,
+            entityOccurrences: 'id, noteId, entityId, source, [noteId+entityId], [entityId+noteId], [noteId+source], [entityId+source], generation, updatedAt',
+            entityNoteIndex: 'id, noteId, entityId, bestSource, [noteId+entityId], [entityId+noteId], [noteId+bestSource], [entityId+updatedAt], [narrativeId+entityId], updatedAt'
+        });
+
+        this.version(23).stores({
+            entityFeedback: 'id, action, normalizedSurface, entityId, provider, noteId, [action+normalizedSurface], [provider+normalizedSurface], [entityId+action], createdAt'
         });
     }
 

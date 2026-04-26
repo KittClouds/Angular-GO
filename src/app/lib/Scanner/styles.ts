@@ -3,7 +3,7 @@
 // Uses CSS variables from entityColorStore for live theming
 
 import type { EntityKind, HighlightMode, DecorationSpan } from './types';
-import { getEntityColor, getEntityBgColor, getEntityColorVar, getEntityTextColorVar } from '../store/entityColorStore';
+import { getEntityColorVar, getEntityTextColorVar } from '../store/entityColorStore';
 
 /**
  * LEGACY: Color palette for entity kinds - DEPRECATED
@@ -29,6 +29,7 @@ export const ENTITY_COLORS: Record<EntityKind, { bg: string; text: string }> = {
   NARRATIVE: { bg: '#047857', text: '#ffffff' },  // Emerald-700
   NETWORK: { bg: '#059669', text: '#ffffff' },  // Emerald-600
   CUSTOM: { bg: '#6b7280', text: '#ffffff' },  // Gray
+  OTHER: { bg: '#6b7280', text: '#ffffff' },  // Gray
   UNKNOWN: { bg: '#6b7280', text: '#ffffff' },  // Gray
 };
 
@@ -67,7 +68,7 @@ export function getDecorationStyle(span: DecorationSpan, mode: HighlightMode): s
     case 'keyword_focus':
       return getKeywordFocusStyle();
     case 'analytics_highlight':
-      return getAnalyticsHighlightStyle(span.highlightKind);
+      return getAnalyticsHighlightStyle(span.highlightKind, span.analyticsPaletteKey);
     default:
       return '';
   }
@@ -81,11 +82,39 @@ function getKeywordFocusStyle(): string {
   `;
 }
 
-function getAnalyticsHighlightStyle(kind: DecorationSpan['highlightKind']): string {
-  const palette = kind === 'repetition'
+function getAnalyticsHighlightStyle(
+  kind: DecorationSpan['highlightKind'],
+  paletteKey?: DecorationSpan['analyticsPaletteKey'],
+): string {
+  const resolved = paletteKey || kind;
+  const palette = resolved === 'repetition'
     ? { fill: 'rgba(245, 158, 11, 0.22)', stroke: 'rgba(245, 158, 11, 0.65)' }
-    : kind === 'proximity'
+    : resolved === 'proximity'
       ? { fill: 'rgba(244, 63, 94, 0.18)', stroke: 'rgba(244, 63, 94, 0.6)' }
+      : resolved === 'negation'
+        ? { fill: 'rgba(248, 113, 113, 0.18)', stroke: 'rgba(248, 113, 113, 0.68)' }
+      : resolved === 'ornament'
+        ? { fill: 'rgba(217, 70, 239, 0.16)', stroke: 'rgba(217, 70, 239, 0.58)' }
+      : resolved === 'distance'
+        ? { fill: 'rgba(96, 165, 250, 0.16)', stroke: 'rgba(96, 165, 250, 0.58)' }
+      : resolved === 'diction'
+        ? { fill: 'rgba(52, 211, 153, 0.16)', stroke: 'rgba(52, 211, 153, 0.58)' }
+      : resolved === 'keyword'
+        ? { fill: 'rgba(45, 212, 191, 0.18)', stroke: 'rgba(45, 212, 191, 0.6)' }
+      : resolved === 'meter'
+        ? { fill: 'rgba(20, 184, 166, 0.2)', stroke: 'rgba(45, 212, 191, 0.68)' }
+      : resolved === '1'
+        ? { fill: 'rgba(167, 139, 250, 0.22)', stroke: 'rgba(139, 92, 246, 0.68)' }
+        : resolved === '2-6'
+          ? { fill: 'rgba(96, 165, 250, 0.2)', stroke: 'rgba(59, 130, 246, 0.64)' }
+          : resolved === '7-15'
+            ? { fill: 'rgba(52, 211, 153, 0.2)', stroke: 'rgba(16, 185, 129, 0.64)' }
+            : resolved === '16-25'
+              ? { fill: 'rgba(251, 146, 60, 0.2)', stroke: 'rgba(234, 88, 12, 0.64)' }
+              : resolved === '26-39'
+                ? { fill: 'rgba(248, 113, 113, 0.18)', stroke: 'rgba(220, 38, 38, 0.62)' }
+                : resolved === '40+'
+                  ? { fill: 'rgba(251, 113, 133, 0.18)', stroke: 'rgba(244, 63, 94, 0.62)' }
       : { fill: 'rgba(34, 211, 238, 0.18)', stroke: 'rgba(34, 211, 238, 0.58)' };
 
   return `
@@ -97,6 +126,10 @@ function getAnalyticsHighlightStyle(kind: DecorationSpan['highlightKind']): stri
 
 function getAmbiguousStyle(mode: HighlightMode): string {
   // Gray dashed underline for ambiguous
+  if (mode === 'clean') {
+    return getPlainInlineStyle();
+  }
+
   if (mode === 'vivid') {
     return `
       border-bottom: 2px dashed #9ca3af; 
@@ -111,6 +144,10 @@ function getCandidateStyle(mode: HighlightMode): string {
   // Tealish-gray (CadetBlue) dotted underline for candidates
   // Replaces the previous yellow (#eab308)
   const color = '#5f9ea0'; // CadetBlue
+
+  if (mode === 'clean') {
+    return getPlainInlineStyle();
+  }
 
   if (mode === 'vivid') {
     return `
@@ -144,15 +181,19 @@ function getEntityStyle(kind: EntityKind, mode: HighlightMode): string {
     `;
   }
 
-  // SUBTLE MODE: Text color only (no pill, no background)
   if (mode === 'subtle') {
-    return `
-      color: hsl(var(${textColorVar}));
-      font-weight: 500;
-    `;
+    return getSubtleInlineStyle(textColorVar);
   }
 
-  // Clean/Off mode - unstyled/invisible
+  if (mode === 'gradient') {
+    return getGradientInlineStyle(colorVar, textColorVar);
+  }
+
+  if (mode === 'clean') {
+    return getPlainInlineStyle();
+  }
+
+  // Focus mode is filtered upstream; Off bails out before styling.
   return '';
 }
 
@@ -162,6 +203,10 @@ function getEntityStyle(kind: EntityKind, mode: HighlightMode): string {
 function getWikilinkStyle(resolved: boolean, mode: HighlightMode): string {
   const color = resolved ? WIKILINK_COLOR : WIKILINK_BROKEN;
   const underline = resolved ? 'solid' : 'dashed';
+
+  if (mode === 'clean') {
+    return getPlainInlineStyle();
+  }
 
   if (mode === 'vivid') {
     return `
@@ -199,6 +244,10 @@ function getEntityRefStyle(kind: EntityKind | undefined, resolved: boolean, mode
   const bg = resolved ? 'rgba(139, 92, 246, 0.2)' : 'rgba(107, 114, 128, 0.2)';
   const border = resolved ? 'rgba(139, 92, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)';
 
+  if (mode === 'clean') {
+    return getPlainInlineStyle();
+  }
+
   if (mode === 'vivid') {
     return `
       background-color: ${bg};
@@ -216,6 +265,56 @@ function getEntityRefStyle(kind: EntityKind | undefined, resolved: boolean, mode
 
   // Subtle mode
   return `border-bottom: 2px solid ${bg}; padding-bottom: 1px; cursor: pointer;`;
+}
+
+function getGradientInlineStyle(colorVar: string, textColorVar: string): string {
+  return `
+    background-image: linear-gradient(
+      to right,
+      hsl(var(${colorVar})),
+      color-mix(in srgb, hsl(var(${colorVar})) 78%, hsl(var(--background)) 22%) 52%,
+      color-mix(in srgb, hsl(var(${colorVar})) 64%, hsl(var(--foreground)) 36%),
+      hsl(var(${colorVar}))
+    );
+    background-repeat: no-repeat;
+    background-position: 0% 0;
+    background-size: 300% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    font-weight: 600;
+    animation: entity-gradient-oscillate 8s linear infinite;
+  `;
+}
+
+function getSubtleInlineStyle(textColorVar: string): string {
+  return `
+    background: transparent;
+    border: none;
+    color: hsl(var(${textColorVar}));
+    font-weight: 500;
+    padding: 0;
+  `;
+}
+
+function getPlainInlineStyle(): string {
+  return `
+    background: transparent;
+    background-image: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
+    cursor: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    padding: 0;
+    text-decoration: none;
+    text-shadow: none;
+    white-space: normal;
+  `;
 }
 
 /**

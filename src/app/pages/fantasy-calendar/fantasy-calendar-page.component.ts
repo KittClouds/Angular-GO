@@ -1,7 +1,6 @@
-import { Component, signal, computed, inject } from '@angular/core';
+import { Component, effect, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
-import { CalendarService } from '../../services/calendar.service';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FantasyCalendarGridComponent } from '../../components/fantasy-calendar/calendar-grid/calendar-grid.component';
 import { CalendarSidebarComponent } from '../../components/fantasy-calendar/calendar-sidebar/calendar-sidebar.component';
 import { CalendarWizardComponent } from '../../components/fantasy-calendar/calendar-wizard/calendar-wizard.component';
@@ -9,6 +8,8 @@ import { TimelineBarComponent } from '../../components/fantasy-calendar/timeline
 import { NarrativeEditorComponent } from '../../components/fantasy-calendar/narrative-editor/narrative-editor.component';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCalendarDays, lucideWand2, lucideLayers, lucideTable } from '@ng-icons/lucide';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs';
 
 type ViewMode = 'wizard' | 'calendar' | 'timeline' | 'kanban';
 
@@ -34,7 +35,7 @@ type ViewMode = 'wizard' | 'calendar' | 'timeline' | 'kanban';
         <div class="flex gap-1">
           <button 
             *ngFor="let mode of modes"
-            (click)="viewMode.set(mode.id)"
+            (click)="setViewMode(mode.id)"
             class="px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5 transition-colors"
             [class.bg-primary]="viewMode() === mode.id"
             [class.text-primary-foreground]="viewMode() === mode.id"
@@ -81,7 +82,18 @@ type ViewMode = 'wizard' | 'calendar' | 'timeline' | 'kanban';
 })
 export class FantasyCalendarPageComponent {
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   readonly viewMode = signal<ViewMode>('calendar');
+  readonly pendingRouteMode = signal<ViewMode | null>(null);
+  readonly routeViewMode = toSignal(
+    this.route.queryParamMap.pipe(
+      map((params) => {
+        const view = params.get('view');
+        return isViewMode(view) ? view : null;
+      })
+    ),
+    { initialValue: null as ViewMode | null }
+  );
 
   readonly modes: { id: ViewMode; label: string; icon: string }[] = [
     { id: 'wizard', label: 'Setup', icon: 'lucideWand2' },
@@ -91,14 +103,46 @@ export class FantasyCalendarPageComponent {
   ];
 
   constructor() {
-    // Could auto-switch to wizard if no calendar is configured
+    effect(() => {
+      const routeMode = this.routeViewMode();
+      const pending = this.pendingRouteMode();
+      if (pending) {
+        if (routeMode === pending) {
+          this.pendingRouteMode.set(null);
+        } else {
+          return;
+        }
+      }
+      if (routeMode && routeMode !== this.viewMode()) {
+        this.viewMode.set(routeMode);
+      }
+    });
   }
 
   onWizardComplete() {
-    this.viewMode.set('calendar');
+    void this.setViewMode('calendar');
   }
 
   navigateToEditor() {
     this.router.navigate(['/']);
   }
+
+  async setViewMode(mode: ViewMode): Promise<boolean> {
+    this.pendingRouteMode.set(mode);
+    this.viewMode.set(mode);
+    const ok = await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { view: mode },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    if (!ok) {
+      this.pendingRouteMode.set(null);
+    }
+    return ok;
+  }
+}
+
+function isViewMode(value: string | null): value is ViewMode {
+  return value === 'wizard' || value === 'calendar' || value === 'timeline' || value === 'kanban';
 }

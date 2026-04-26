@@ -5,6 +5,8 @@
 import { db } from './db';
 import type { DecorationSpan } from '../Scanner/types';
 
+const DECORATION_CACHE_VERSION = 3;
+
 /**
  * djb2 hash - fast, good distribution for strings
  */
@@ -13,11 +15,16 @@ export function hashContent(content: string): string {
     for (let i = 0; i < content.length; i++) {
         hash = ((hash << 5) + hash) ^ content.charCodeAt(i);
     }
-    return (hash >>> 0).toString(36);
+    return `d${DECORATION_CACHE_VERSION}:${(hash >>> 0).toString(36)}`;
 }
 
 // In-memory decoration cache for speed
-const decorationCache = new Map<string, { spans: DecorationSpan[], contentHash: string, updatedAt: number }>();
+const decorationCache = new Map<string, {
+    spans: DecorationSpan[];
+    contentHash: string;
+    updatedAt: number;
+    version: number;
+}>();
 
 /**
  * Save decoration spans for a note (replaces old spans)
@@ -35,6 +42,7 @@ export async function saveNoteDecorations(
         spans,
         contentHash: contentHash ?? '',
         updatedAt: now,
+        version: DECORATION_CACHE_VERSION,
     });
 
     // Validations
@@ -52,7 +60,7 @@ export async function saveNoteDecorations(
 
             await db.decorationMeta.put({
                 noteId,
-                version: 1,
+                version: DECORATION_CACHE_VERSION,
                 lastScan: now,
             });
         });
@@ -68,10 +76,22 @@ export async function saveNoteDecorations(
 export async function getDecorationContentHash(noteId: string): Promise<string | null> {
     // Check memory first
     const cached = decorationCache.get(noteId);
-    if (cached) return cached.contentHash;
+    if (cached) {
+        if (cached.version === DECORATION_CACHE_VERSION) {
+            return cached.contentHash;
+        }
+        decorationCache.delete(noteId);
+        return null;
+    }
 
     // Check DB
-    const record = await db.decorationSpans.get(noteId);
+    const [record, meta] = await Promise.all([
+        db.decorationSpans.get(noteId),
+        db.decorationMeta.get(noteId),
+    ]);
+    if (meta?.version !== DECORATION_CACHE_VERSION) {
+        return null;
+    }
     return record?.contentHash ?? null;
 }
 
@@ -81,17 +101,30 @@ export async function getDecorationContentHash(noteId: string): Promise<string |
 export async function getNoteDecorations(noteId: string): Promise<DecorationSpan[]> {
     // Check memory first
     const cached = decorationCache.get(noteId);
-    if (cached) return cached.spans;
+    if (cached) {
+        if (cached.version === DECORATION_CACHE_VERSION) {
+            return cached.spans;
+        }
+        decorationCache.delete(noteId);
+        return [];
+    }
 
     // Check DB
     try {
-        const record = await db.decorationSpans.get(noteId);
+        const [record, meta] = await Promise.all([
+            db.decorationSpans.get(noteId),
+            db.decorationMeta.get(noteId),
+        ]);
+        if (meta?.version !== DECORATION_CACHE_VERSION) {
+            return [];
+        }
         if (record) {
             // Hydrate memory cache
             decorationCache.set(noteId, {
                 spans: record.spans,
                 contentHash: record.contentHash,
-                updatedAt: record.updatedAt
+                updatedAt: record.updatedAt,
+                version: DECORATION_CACHE_VERSION,
             });
             return record.spans;
         }

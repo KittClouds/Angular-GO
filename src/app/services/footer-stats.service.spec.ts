@@ -18,10 +18,6 @@ vi.mock('./editor.service', () => ({
     EditorService: class EditorService {},
 }));
 
-vi.mock('./gokitt.service', () => ({
-    GoKittService: class GoKittService {},
-}));
-
 vi.mock('dexie', () => ({
     liveQuery: vi.fn((query: () => unknown) => Promise.resolve().then(query)),
 }));
@@ -49,32 +45,22 @@ vi.mock('../lib/dexie/db', () => ({
     },
 }));
 
+const { analyzeTextMock } = vi.hoisted(() => ({
+    analyzeTextMock: vi.fn(),
+}));
+
+vi.mock('../lib/analytics', async () => {
+    const actual = await vi.importActual<typeof import('../lib/analytics')>('../lib/analytics');
+    return {
+        ...actual,
+        analyzeText: analyzeTextMock,
+    };
+});
+
 import { getEmptyAnalytics, type TextAnalytics } from '../lib/analytics';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
 import { FooterStatsService } from './footer-stats.service';
-import { GoKittService } from './gokitt.service';
-
-function makeDoc(text: string) {
-    return {
-        type: 'doc',
-        content: text
-            ? [{
-                type: 'paragraph',
-                content: [{ type: 'text', text }],
-            }]
-            : [{ type: 'paragraph' }],
-    };
-}
-
-function createDeferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>((res) => {
-        resolve = res;
-    });
-
-    return { promise, resolve };
-}
 
 function makeAnalytics(overrides: Partial<TextAnalytics> = {}): TextAnalytics {
     return {
@@ -99,15 +85,14 @@ function runEffectHandle(handle: { dirty?: boolean; run: () => void }) {
 
 describe('FooterStatsService live analytics', () => {
     let injector: EnvironmentInjector;
-    let contentSubject: Subject<{ json: object; markdown: string }>;
+    let liveUpdateSubject: Subject<any>;
     let activeNoteSubject: BehaviorSubject<any>;
     let noteStoreMock: {
         activeNote$: BehaviorSubject<any>;
         activeNoteId: ReturnType<typeof signal>;
         isSaving: ReturnType<typeof signal>;
     };
-    let editorServiceMock: { content$: Subject<{ json: object; markdown: string }> };
-    let goKittServiceMock: { analyzeText: ReturnType<typeof vi.fn> };
+    let editorServiceMock: { liveUpdate$: Subject<any>; recordAnalyticsRequest: ReturnType<typeof vi.fn> };
     let changeDetectionSchedulerMock: { notify: ReturnType<typeof vi.fn>; runningTick: boolean };
     let effectSchedulerMock: {
         add: ReturnType<typeof vi.fn>;
@@ -120,18 +105,17 @@ describe('FooterStatsService live analytics', () => {
     beforeEach(() => {
         vi.useFakeTimers();
 
-        contentSubject = new Subject<{ json: object; markdown: string }>();
+        liveUpdateSubject = new Subject<any>();
         activeNoteSubject = new BehaviorSubject<any>(undefined);
         noteStoreMock = {
             activeNote$: activeNoteSubject,
             activeNoteId: signal<string | null>(null),
             isSaving: signal(false),
         };
+        analyzeTextMock.mockReset();
         editorServiceMock = {
-            content$: contentSubject,
-        };
-        goKittServiceMock = {
-            analyzeText: vi.fn(),
+            liveUpdate$: liveUpdateSubject,
+            recordAnalyticsRequest: vi.fn(),
         };
         changeDetectionSchedulerMock = {
             notify: vi.fn(),
@@ -172,7 +156,6 @@ describe('FooterStatsService live analytics', () => {
         injector = createEnvironmentInjector([
             { provide: NoteEditorStore, useValue: noteStoreMock },
             { provide: EditorService, useValue: editorServiceMock },
-            { provide: GoKittService, useValue: goKittServiceMock },
             { provide: ChangeDetectionScheduler, useValue: changeDetectionSchedulerMock },
             { provide: EffectScheduler, useValue: effectSchedulerMock },
         ], Injector.create({ providers: [] }));
@@ -188,28 +171,30 @@ describe('FooterStatsService live analytics', () => {
 
     it('updates analytics from live editor content after the debounce', async () => {
         const payload = makeAnalytics();
-        goKittServiceMock.analyzeText.mockResolvedValue(payload);
+        analyzeTextMock.mockReturnValue(payload);
 
-        contentSubject.next({ json: makeDoc('hello world'), markdown: 'hello world' });
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'hello world', textLength: 11, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
 
-        expect(goKittServiceMock.analyzeText).toHaveBeenCalledWith('hello world');
+        expect(analyzeTextMock).toHaveBeenCalledWith('hello world');
         expect(service.analytics()).toEqual(payload);
+        expect(service.plainText()).toBe('hello world');
+        expect(editorServiceMock.recordAnalyticsRequest).not.toHaveBeenCalled();
     });
 
-    it('resets analytics to empty for blank content and malformed Go payloads', async () => {
-        goKittServiceMock.analyzeText.mockResolvedValue(makeAnalytics());
-        contentSubject.next({ json: makeDoc('hello world'), markdown: 'hello world' });
+    it('resets analytics to empty for blank content and malformed local payloads', async () => {
+        analyzeTextMock.mockReturnValue(makeAnalytics());
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'hello world', textLength: 11, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
         expect(service.analytics().wordCount).toBe(2);
 
-        contentSubject.next({ json: makeDoc(''), markdown: '' });
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 2, plainText: '', textLength: 0, timings: { plainTextMs: 1 } });
         expect(service.analytics()).toEqual(getEmptyAnalytics());
         await vi.advanceTimersByTimeAsync(300);
-        expect(goKittServiceMock.analyzeText).toHaveBeenCalledTimes(1);
+        expect(analyzeTextMock).toHaveBeenCalledTimes(1);
 
-        goKittServiceMock.analyzeText.mockResolvedValueOnce({ invalid: true });
-        contentSubject.next({ json: makeDoc('bad payload'), markdown: 'bad payload' });
+        analyzeTextMock.mockReturnValueOnce({ invalid: true });
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 3, plainText: 'bad payload', textLength: 11, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
         expect(service.analytics()).toEqual(getEmptyAnalytics());
     });
@@ -266,8 +251,8 @@ describe('FooterStatsService live analytics', () => {
             },
         });
 
-        goKittServiceMock.analyzeText.mockResolvedValue(enriched);
-        contentSubject.next({ json: makeDoc('Short beat. Tiny pause.'), markdown: 'Short beat. Tiny pause.' });
+        analyzeTextMock.mockReturnValue(enriched);
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'Short beat. Tiny pause.', textLength: 23, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
 
         expect(service.analytics()).toEqual(enriched);
@@ -282,8 +267,8 @@ describe('FooterStatsService live analytics', () => {
             keywordDensity: [{ word: 'kai', count: 2, percentage: 50 }],
         };
 
-        goKittServiceMock.analyzeText.mockResolvedValueOnce(partial);
-        contentSubject.next({ json: makeDoc('Kai moved. Kai spoke.'), markdown: 'Kai moved. Kai spoke.' });
+        analyzeTextMock.mockReturnValueOnce(partial);
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 2, plainText: 'Kai moved. Kai spoke.', textLength: 21, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
 
         expect(service.analytics()).toEqual({
@@ -291,11 +276,11 @@ describe('FooterStatsService live analytics', () => {
             ...partial,
         });
 
-        goKittServiceMock.analyzeText.mockResolvedValueOnce({
+        analyzeTextMock.mockReturnValueOnce({
             ...enriched,
             repetition: { totalFlags: 1 },
         });
-        contentSubject.next({ json: makeDoc('Broken repetition payload'), markdown: 'Broken repetition payload' });
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 3, plainText: 'Broken repetition payload', textLength: 25, timings: { plainTextMs: 1 } });
         await vi.advanceTimersByTimeAsync(300);
 
         expect(service.analytics()).toEqual({
@@ -304,27 +289,17 @@ describe('FooterStatsService live analytics', () => {
         });
     });
 
-    it('ignores stale async analytics responses when newer typing arrives', async () => {
-        const first = createDeferred<TextAnalytics>();
-        const second = createDeferred<TextAnalytics>();
-
-        goKittServiceMock.analyzeText
-            .mockImplementationOnce(() => first.promise)
-            .mockImplementationOnce(() => second.promise);
-
-        contentSubject.next({ json: makeDoc('first draft'), markdown: 'first draft' });
+    it('recomputes analytics from the latest live editor text on successive edits', async () => {
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'first draft', textLength: 11, timings: { plainTextMs: 1 } });
+        analyzeTextMock.mockReturnValueOnce(makeAnalytics({ wordCount: 99, characterCount: 999 }));
         await vi.advanceTimersByTimeAsync(300);
 
-        contentSubject.next({ json: makeDoc('second draft'), markdown: 'second draft' });
-        await vi.advanceTimersByTimeAsync(300);
+        expect(service.analytics()).toEqual(makeAnalytics({ wordCount: 99, characterCount: 999 }));
 
-        first.resolve(makeAnalytics({ wordCount: 99, characterCount: 999 }));
-        await Promise.resolve();
-        expect(service.analytics()).toEqual(getEmptyAnalytics());
-
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 2, plainText: 'second draft', textLength: 12, timings: { plainTextMs: 1 } });
         const latest = makeAnalytics({ wordCount: 3, characterCount: 12, characterCountNoSpaces: 11 });
-        second.resolve(latest);
-        await Promise.resolve();
+        analyzeTextMock.mockReturnValueOnce(latest);
+        await vi.advanceTimersByTimeAsync(300);
 
         expect(service.analytics()).toEqual(latest);
     });

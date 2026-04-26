@@ -1,11 +1,11 @@
 import { Injectable, inject } from '@angular/core';
-import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class ScopedEntityFieldService {
-    private store = inject(GoKittStoreService);
+    private store = inject(PhoenixStoreService);
 
     async getMergedFields(entityId: string, scopeFolderIds: string[]): Promise<Record<string, any>> {
         const result: Record<string, any> = {};

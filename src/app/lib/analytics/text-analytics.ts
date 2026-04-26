@@ -1,3 +1,5 @@
+import type { TextQuoteSelector } from '../Scanner/types';
+
 // src/app/lib/analytics/text-analytics.ts
 // Text Analytics Service - shared TS model + local fallback analysis engine
 
@@ -21,6 +23,7 @@ export interface AnalyticsHighlightRange {
     from: number;
     to: number;
     text: string;
+    selector?: TextQuoteSelector;
 }
 
 export interface PhraseEchoItem {
@@ -133,6 +136,16 @@ const STOP_WORDS = new Set([
     'down', 'out', 'off', 'over', 'under', 'again', 'further', 'any', 'about',
 ]);
 
+const LINE_BREAK_PATTERN = /[\r\n]/g;
+const DIACRITIC_PATTERN = /\p{M}/gu;
+const CURLY_APOSTROPHE_PATTERN = /’/g;
+const NON_LEXEME_CHARS_PATTERN = /[^\p{L}\p{N}'-]/gu;
+const LEXEME_EDGE_PATTERN = /^['-]+|['-]+$/g;
+
+function createWordPattern(): RegExp {
+    return /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
+}
+
 /**
  * Parse Milkdown/ProseMirror JSON content to plain text
  */
@@ -141,37 +154,59 @@ export function parseContentToPlainText(content: string): string {
 
     try {
         const json = JSON.parse(content);
-        return extractTextFromNode(json).trim();
+        return extractProjectedTextFromJsonNode(json);
     } catch {
         return content;
     }
 }
 
-function extractTextFromNode(node: any): string {
+function extractProjectedTextFromJsonNode(node: any): string {
     if (!node) return '';
 
-    if (node.text) {
+    if (typeof node.text === 'string') {
         return node.text;
     }
 
-    if (node.content && Array.isArray(node.content)) {
-        const texts = node.content.map(extractTextFromNode);
-
-        if (node.type === 'paragraph' || node.type === 'heading') {
-            return texts.join('') + '\n\n';
-        }
-        if (node.type === 'listItem') {
-            return texts.join('') + '\n';
-        }
-
-        return texts.join('');
+    if (node.type === 'hard_break') {
+        return '\n';
     }
 
-    return '';
+    const children = Array.isArray(node.content)
+        ? node.content.map(extractProjectedTextFromJsonNode)
+        : [];
+
+    if (children.length === 0) {
+        return '';
+    }
+
+    return joinProjectedChildren(node.type, children);
+}
+
+function joinProjectedChildren(type: string | undefined, children: string[]): string {
+    if (!children.length) {
+        return '';
+    }
+
+    switch (type) {
+        case 'doc':
+        case 'blockquote':
+        case 'bullet_list':
+        case 'ordered_list':
+            return joinWithSeparator(children, '\n\n');
+        case 'listItem':
+            return joinWithSeparator(children, '\n');
+        default:
+            return children.join('');
+    }
+}
+
+function joinWithSeparator(children: string[], separator: string): string {
+    const filtered = children.filter(child => child.length > 0);
+    return filtered.join(separator);
 }
 
 function countSyllables(word: string): number {
-    let normalized = word.toLowerCase().trim();
+    let normalized = normalizeLexeme(word).replace(/['-]/g, '');
     if (normalized.length <= 3) return 1;
 
     normalized = normalized.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
@@ -182,10 +217,7 @@ function countSyllables(word: string): number {
 }
 
 function getWords(text: string): string[] {
-    return text
-        .replace(/[^\w\s'-]/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 0);
+    return text.match(createWordPattern()) ?? [];
 }
 
 function getSentences(text: string): string[] {
@@ -340,11 +372,17 @@ function calculateKeywordDensity(words: string[], totalWords: number): Array<{ w
 }
 
 function normalizeLexeme(word: string): string {
-    return word.toLowerCase().replace(/[^a-z'-]/g, '');
+    return word
+        .normalize('NFKD')
+        .replace(DIACRITIC_PATTERN, '')
+        .replace(CURLY_APOSTROPHE_PATTERN, '\'')
+        .toLowerCase()
+        .replace(NON_LEXEME_CHARS_PATTERN, '')
+        .replace(LEXEME_EDGE_PATTERN, '');
 }
 
 function stemWord(word: string): string {
-    let stem = normalizeLexeme(word);
+    let stem = normalizeLexeme(word).replace(/['-]/g, '');
     if (stem.length <= 4) {
         return stem;
     }
@@ -369,7 +407,7 @@ function stemWord(word: string): string {
 }
 
 function extractTokenMatches(text: string): TokenMatch[] {
-    const matches = text.matchAll(/[A-Za-z][A-Za-z'-]*/g);
+    const matches = text.matchAll(createWordPattern());
     const tokens: TokenMatch[] = [];
 
     for (const match of matches) {
@@ -663,9 +701,10 @@ export function analyzeText(text: string): TextAnalytics {
     const tokens = extractTokenMatches(text);
 
     const wordCount = words.length;
-    const characterCount = text.length;
+    const characterCount = text.replace(LINE_BREAK_PATTERN, '').length;
     const characterCountNoSpaces = text.replace(/\s/g, '').length;
     const sentenceCount = sentences.length;
+    // Paragraphs are counted from rendered prose blocks, not raw source lines.
     const paragraphCount = paragraphs.length;
 
     const syllableCount = words.reduce((sum, word) => sum + countSyllables(word), 0);

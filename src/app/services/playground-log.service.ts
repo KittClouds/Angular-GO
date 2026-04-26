@@ -3,7 +3,7 @@
 
 import { Injectable, signal, computed } from '@angular/core';
 
-export type LogSource = 'raptor' | 'graptor' | 'memory' | 'rlm' | 'system';
+export type LogSource = 'raptor' | 'memory' | 'numerology' | 'rlm' | 'system';
 export type LogLevel = 'info' | 'warn' | 'error' | 'success';
 
 export interface LogEntry {

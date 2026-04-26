@@ -28,6 +28,7 @@ export const DEFAULT_ENTITY_COLORS: Record<EntityKind, string> = {
     NARRATIVE: '250 60% 55%',      // Indigo
     NETWORK: '190 70% 50%',        // Cyan
     CUSTOM: '0 0% 50%',            // Gray
+    OTHER: '0 0% 50%',             // Gray
     UNKNOWN: '0 0% 50%',
     ORGANIZATION: '300 70% 60%',   // Magenta-ish/Pink
     CREATURE: '140 70% 50%',       // Green
@@ -52,6 +53,7 @@ export const DEFAULT_ENTITY_TEXT_COLORS: Record<EntityKind, string> = {
     NARRATIVE: '250 60% 55%',      // Indigo
     NETWORK: '190 70% 50%',        // Cyan
     CUSTOM: '0 0% 50%',            // Gray
+    OTHER: '0 0% 50%',             // Gray
     UNKNOWN: '0 0% 50%',
     ORGANIZATION: '300 70% 60%',   // Magenta-ish/Pink
     CREATURE: '140 70% 50%',       // Green

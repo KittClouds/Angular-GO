@@ -7,7 +7,7 @@ import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
 import { clearAllDecorations } from './dexie/decorations';
 import { getBridge } from './operations';
-import { GoKittStoreService } from '../services/gokitt-store.service';
+import { PhoenixStoreService } from '../services/phoenix-store.service';
 
 // =============================================================================
 // Types
@@ -49,6 +49,19 @@ export interface Edge {
     /** Additional attributes like verb, manner, location, time */
     attributes?: Record<string, any>;
 }
+
+export interface CentralRegistrySnapshot {
+    entities: RegisteredEntity[];
+    edges: Edge[];
+}
+
+type EntityUpdates = {
+    label?: string;
+    kind?: EntityKind;
+    aliases?: string[];
+    subtype?: string;
+    attributes?: Record<string, any>;
+};
 
 // =============================================================================
 // CentralRegistry - Write-Through Cache over Dexie
@@ -145,7 +158,7 @@ export class CentralRegistry {
             lastSeenDate: new Date(e.updatedAt),
             createdAt: new Date(e.createdAt),
             createdBy: e.createdBy || 'user',
-            attributes: {},
+            attributes: e.narrativeId ? { narrativeId: e.narrativeId } : {},
             registeredAt: e.createdAt,
         };
     }
@@ -165,6 +178,7 @@ export class CentralRegistry {
             createdAt: e.createdAt.getTime(),
             updatedAt: e.lastSeenDate.getTime(),
             createdBy: e.createdBy,
+            narrativeId: typeof e.attributes?.['narrativeId'] === 'string' ? e.attributes['narrativeId'] : undefined,
         };
     }
 
@@ -244,7 +258,9 @@ export class CentralRegistry {
             // console.log(`[CentralRegistry] Registering: ${label} (${kind}) from ${options?.source || 'user'}. IsNew? ${isNew}`);
         }
 
-        const id = existing?.id || this.generateEntityId(label, kind);
+        const source = options?.source || 'user';
+        const resolvedKind = this.resolveEntityKind(existing, kind, source);
+        const id = existing?.id || this.generateEntityId(label, resolvedKind);
         const now = Date.now();
 
         const props = {
@@ -255,14 +271,14 @@ export class CentralRegistry {
             totalMentions: (existing?.totalMentions || 0) + (isNew ? (options?.source === 'auto' ? 0 : 1) : 0), // Don't double count auto-seeds
             lastSeenDate: now,
             createdAt: existing?.createdAt?.getTime() || now,
-            createdBy: existing?.createdBy || options?.source || 'user',
+            createdBy: existing?.createdBy || source,
             attributes: { ...existing?.attributes, ...options?.attributes },
         };
 
         const entity: RegisteredEntity = {
             id,
             label,
-            kind,
+            kind: resolvedKind,
             aliases: props.aliases,
             subtype: props.subtype,
             firstNote: props.firstNote,
@@ -286,27 +302,55 @@ export class CentralRegistry {
         return { entity, isNew, wasMerged: false };
     }
 
+    private resolveEntityKind(
+        existing: RegisteredEntity | null,
+        incoming: EntityKind | undefined,
+        source: 'user' | 'extraction' | 'auto',
+    ): EntityKind {
+        const incomingKind = this.normalizeEntityKind(incoming);
+        if (!existing || source === 'user') {
+            return incomingKind;
+        }
+
+        const existingKind = this.normalizeEntityKind(existing.kind);
+        if (this.isWeakEntityKind(existingKind) && !this.isWeakEntityKind(incomingKind)) {
+            return incomingKind;
+        }
+
+        return existingKind;
+    }
+
+    private normalizeEntityKind(kind: EntityKind | undefined): EntityKind {
+        const normalized = String(kind || 'UNKNOWN').trim().toUpperCase();
+        return (normalized || 'UNKNOWN') as EntityKind;
+    }
+
+    private isWeakEntityKind(kind: EntityKind | string): boolean {
+        return kind === 'UNKNOWN' || kind === 'OTHER';
+    }
+
     /**
      * Persist entity to SQLite (Truth) + Dexie (Shadow)
      * Fire-and-forget, non-blocking
      */
     private persistEntity(entity: RegisteredEntity): void {
+        this.persistEntityDurable(entity).catch(err => {
+            console.error('[CentralRegistry] Failed to persist entity:', entity.id, err);
+        });
+    }
+
+    private async persistEntityDurable(entity: RegisteredEntity): Promise<void> {
         const dexieEntity = this.registeredToDexieEntity(entity);
 
-        // 1. Write to Dexie immediately (for synchronous reads)
-        db.entities.put(dexieEntity).catch(err => {
-            console.warn('[CentralRegistry] Failed to persist entity to Dexie:', entity.id, err);
-        });
+        await db.entities.put(dexieEntity);
 
-        // 2. Write to SQLite (Source of Truth) via GoKittStoreService
         const store = getBridge();
-        if (store) {
-            store.upsertEntity(GoKittStoreService.fromDexieEntity(dexieEntity)).catch(err => {
-                console.error('[CentralRegistry] Failed to sync entity to SQLite:', err);
-            });
-        } else {
-            console.warn('[CentralRegistry] Cannot sync entity to SQLite: Store not initialized yet.');
+        if (!store) {
+            console.warn('[CentralRegistry] Cannot sync entity to Phoenix: Store not initialized yet.');
+            return;
         }
+
+        await store.upsertEntity(PhoenixStoreService.fromDexieEntity(dexieEntity));
     }
 
     registerEntityBatch(
@@ -415,13 +459,32 @@ export class CentralRegistry {
         return count;
     }
 
-    updateEntity(id: string, updates: {
-        label?: string;
-        kind?: EntityKind;
-        aliases?: string[];
-        subtype?: string;
-        attributes?: Record<string, any>;
-    }): RegisteredEntity | null {
+    updateEntity(id: string, updates: EntityUpdates): RegisteredEntity | null {
+        const updated = this.applyEntityUpdate(id, updates);
+        if (!updated) return null;
+
+        // Write-through to SQLite + Dexie (fire-and-forget)
+        this.persistEntity(updated);
+
+        this.notify(true); // Entity updated
+        return updated;
+    }
+
+    async updateEntityDurable(id: string, updates: EntityUpdates): Promise<RegisteredEntity | null> {
+        const updated = this.applyEntityUpdate(id, updates, 'user');
+        if (!updated) return null;
+
+        await this.persistEntityDurable(updated);
+
+        this.notify(true); // Entity updated
+        return updated;
+    }
+
+    private applyEntityUpdate(
+        id: string,
+        updates: EntityUpdates,
+        source?: 'user' | 'extraction' | 'auto',
+    ): RegisteredEntity | null {
         const existing = this.entityCache.get(id);
         if (!existing) return null;
 
@@ -436,6 +499,7 @@ export class CentralRegistry {
             subtype: updates.subtype ?? existing.subtype,
             attributes: { ...existing.attributes, ...updates.attributes },
             lastSeenDate: new Date(),
+            createdBy: source ?? existing.createdBy,
         };
 
         if (updates.label && updates.label !== existing.label) {
@@ -444,11 +508,6 @@ export class CentralRegistry {
         }
 
         this.entityCache.set(id, updated);
-
-        // Write-through to SQLite + Dexie (fire-and-forget)
-        this.persistEntity(updated);
-
-        this.notify(true); // Entity updated
         return updated;
     }
 
@@ -493,8 +552,8 @@ export class CentralRegistry {
         // Write-through to SQLite
         const store = getBridge();
         if (store) {
-            store.upsertEdge(GoKittStoreService.fromDexieEdge(dexieEdge)).catch(err => {
-                console.error('[CentralRegistry] Failed to sync edge to SQLite:', err);
+            store.upsertEdge(PhoenixStoreService.fromDexieEdge(dexieEdge)).catch(err => {
+                console.error('[CentralRegistry] Failed to sync edge to Phoenix:', err);
             });
         }
 
@@ -525,14 +584,17 @@ export class CentralRegistry {
         if (this.suppressEvents) return;
 
         // Update snapshot
-        this.snapshot = Array.from(this.entityCache.values());
+        const liveSnapshot = this.createLiveSnapshot();
+        this.snapshot = liveSnapshot.entities;
 
         // Notify internal listeners
         this.listeners.forEach(fn => fn());
 
         // Dispatch DOM event for legacy listeners
         if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('entities-changed'));
+            window.dispatchEvent(new CustomEvent<CentralRegistrySnapshot>('entities-changed', {
+                detail: liveSnapshot,
+            }));
         }
 
         // Schedule dictionary rebuild ONLY for entity changes (not edges)
@@ -565,7 +627,7 @@ export class CentralRegistry {
 
     /**
      * Perform the actual dictionary rebuild.
-     * Collects all entities and sends them to GoKitt for AC recompilation.
+     * Collects all entities and sends them to Phoenix for scanner dictionary refresh.
      */
     private async performDictionaryRebuild(): Promise<void> {
         // Guard: Prevent concurrent rebuilds
@@ -575,37 +637,32 @@ export class CentralRegistry {
         }
         this.isRebuildingDictionary = true;
 
-        // Import GoKittService dynamically to avoid circular deps
+        // Import PhoenixUiApiService dynamically to avoid circular deps
         try {
-            const { GoKittService } = await import('../services/gokitt.service');
+            const { PhoenixUiApiService } = await import('../services/phoenix-ui-api.service');
             const injector = (window as any).__angularInjector;
             if (!injector) {
                 console.warn('[CentralRegistry] Angular injector not available for dictionary rebuild');
                 return;
             }
 
-            const goKittService = injector.get(GoKittService) as InstanceType<typeof GoKittService>;
-            if (!goKittService) {
-                console.warn('[CentralRegistry] GoKittService not available');
+            const phoenixUiApi = injector.get(PhoenixUiApiService) as InstanceType<typeof PhoenixUiApiService>;
+            if (!phoenixUiApi) {
+                console.warn('[CentralRegistry] PhoenixUiApiService not available');
                 return;
             }
 
-            // Build entity list for AC dictionary
-            const entities = this.snapshot.map(e => ({
-                id: e.id,
-                label: e.label,
-                kind: e.kind,
-                aliases: e.aliases || [],
-            }));
-
-            console.log(`[CentralRegistry] Triggering dictionary rebuild with ${entities.length} entities`);
-            await goKittService.rebuildDictionary(entities);
+            console.log('[CentralRegistry] Triggering dictionary rebuild from native projection');
+            await phoenixUiApi.hydrateWithEntities();
             console.log(`[CentralRegistry] ✅ Dictionary rebuild complete`);
 
             // Dispatch event to trigger immediate rescan with updated dictionary
             // SAFE: ScanCoordinator has guard to skip already-registered entities (line 98-100)
             // preventing: dictionary-rebuilt → rescan → onEntityDecoration → registerEntity → notify → LOOP
             window.dispatchEvent(new CustomEvent('dictionary-rebuilt'));
+            void import('./notes/entity-occurrence-index')
+                .then(module => module.scheduleLoadedNoteEntityOccurrenceRebuild())
+                .catch(error => console.warn('[CentralRegistry] Entity occurrence rebuild skipped:', error));
             console.log(`[CentralRegistry] 📢 Dispatched dictionary-rebuilt event`);
         } catch (err) {
             console.error('[CentralRegistry] Dictionary rebuild failed:', err);
@@ -633,6 +690,13 @@ export class CentralRegistry {
         for (const edgeId of edgeIds) {
             this.edgeCache.delete(edgeId);
         }
+    }
+
+    private createLiveSnapshot(): CentralRegistrySnapshot {
+        return {
+            entities: Array.from(this.entityCache.values()),
+            edges: Array.from(this.edgeCache.values()),
+        };
     }
 
     private async clearDerivedHighlightState(): Promise<void> {

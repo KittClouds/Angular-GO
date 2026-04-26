@@ -74,11 +74,12 @@ export function createWidget(span: DecorationSpan): HTMLElement {
     const mode = api.getMode();
     const widget = document.createElement('span');
 
-    if (mode === 'subtle') {
-        // Subtle mode: Text color only, no pill background
+    if (mode === 'subtle' || mode === 'gradient') {
+        // Inline modes: no pill background, keep text editable and lightweight.
         widget.className = 'entity-widget entity-widget-subtle';
-        const colorStyle = getEditingStyle(span);
-        widget.style.cssText = `${colorStyle} background: transparent; padding: 0; border: none; border-radius: 0; display: inline; box-shadow: none; cursor: pointer;`;
+        const colorStyle = api.getStyle(span) || getEditingStyle(span);
+        const backgroundReset = mode === 'gradient' ? '' : 'background: transparent;';
+        widget.style.cssText = `${colorStyle} ${backgroundReset} padding: 0; border: none; border-radius: 0; display: inline; box-shadow: none; cursor: pointer;`;
     } else {
         // Normal pill mode (Vivid/Clean/Focus)
         widget.className = api.getClass(span) + ' entity-widget';

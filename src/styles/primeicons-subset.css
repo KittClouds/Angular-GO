@@ -1,0 +1,113 @@
+@font-face {
+  font-family: "primeicons";
+  font-display: block;
+  font-style: normal;
+  font-weight: normal;
+  src:
+    url("../../node_modules/primeicons/fonts/primeicons.woff2") format("woff2"),
+    url("../../node_modules/primeicons/fonts/primeicons.woff") format("woff");
+}
+
+.pi {
+  display: inline-block;
+  font-family: "primeicons";
+  font-feature-settings: normal;
+  font-size: 1em;
+  font-style: normal;
+  font-variant: normal;
+  font-weight: normal;
+  line-height: 1;
+  speak: never;
+  text-transform: none;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pi:before {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.pi-spin {
+  animation: pi-spin 2s infinite linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pi-spin {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}
+
+@keyframes pi-spin {
+  to {
+    transform: rotate(359deg);
+  }
+}
+
+.pi-arrow-left:before { content: "\e91a"; }
+.pi-bars:before { content: "\e91d"; }
+.pi-bell:before { content: "\e97c"; }
+.pi-bolt:before { content: "\e9db"; }
+.pi-book:before { content: "\e9ba"; }
+.pi-bookmark:before { content: "\e94e"; }
+.pi-bookmark-fill:before { content: "\e9df"; }
+.pi-briefcase:before { content: "\e97d"; }
+.pi-calendar:before { content: "\e927"; }
+.pi-check:before { content: "\e909"; }
+.pi-check-circle:before { content: "\e90a"; }
+.pi-chevron-down:before { content: "\e902"; }
+.pi-chevron-up:before { content: "\e903"; }
+.pi-circle:before { content: "\e9dc"; }
+.pi-clock:before { content: "\e940"; }
+.pi-code:before { content: "\e9e7"; }
+.pi-cog:before { content: "\e94a"; }
+.pi-compass:before { content: "\e9ab"; }
+.pi-copy:before { content: "\e957"; }
+.pi-database:before { content: "\e9e3"; }
+.pi-download:before { content: "\e956"; }
+.pi-eject:before { content: "\e975"; }
+.pi-ellipsis-v:before { content: "\e950"; }
+.pi-exclamation-circle:before { content: "\e989"; }
+.pi-exclamation-triangle:before { content: "\e922"; }
+.pi-eye:before { content: "\e966"; }
+.pi-file:before { content: "\e958"; }
+.pi-folder:before { content: "\e963"; }
+.pi-folder-open:before { content: "\e964"; }
+.pi-globe:before { content: "\e94f"; }
+.pi-heart:before { content: "\e984"; }
+.pi-history:before { content: "\e9da"; }
+.pi-image:before { content: "\e972"; }
+.pi-inbox:before { content: "\e961"; }
+.pi-info-circle:before { content: "\e924"; }
+.pi-link:before { content: "\e9c1"; }
+.pi-list:before { content: "\e967"; }
+.pi-microchip-ai:before { content: "\ea1c"; }
+.pi-minus:before { content: "\e90f"; }
+.pi-palette:before { content: "\e995"; }
+.pi-pause:before { content: "\e9b2"; }
+.pi-pencil:before { content: "\e942"; }
+.pi-play:before { content: "\e9b3"; }
+.pi-plus:before { content: "\e90d"; }
+.pi-plus-circle:before { content: "\e90e"; }
+.pi-power-off:before { content: "\e95c"; }
+.pi-question-circle:before { content: "\e959"; }
+.pi-refresh:before { content: "\e938"; }
+.pi-share-alt:before { content: "\e97a"; }
+.pi-shield:before { content: "\e9b9"; }
+.pi-sitemap:before { content: "\e96e"; }
+.pi-sparkles:before { content: "\ea31"; }
+.pi-spinner:before { content: "\e926"; }
+.pi-star:before { content: "\e937"; }
+.pi-stop:before { content: "\e9d1"; }
+.pi-sync:before { content: "\e9e6"; }
+.pi-tag:before { content: "\e95e"; }
+.pi-terminal:before { content: "\e9e7"; }
+.pi-th-large:before { content: "\e918"; }
+.pi-times:before { content: "\e90b"; }
+.pi-times-circle:before { content: "\e90c"; }
+.pi-trash:before { content: "\e93d"; }
+.pi-upload:before { content: "\e934"; }
+.pi-user:before { content: "\e939"; }
+.pi-users:before { content: "\e941"; }
+.pi-volume-up:before { content: "\e977"; }

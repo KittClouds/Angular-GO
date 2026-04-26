@@ -1,39 +1,26 @@
-/**
- * GraphVizService - Transforms graph data for 3d-force-graph visualization
- * 
- * Converts GoKitt graph structures into the { nodes, links } format
- * expected by 3d-force-graph library.
- * 
- * Uses EntityColorStore for consistent entity coloring across the app.
- */
-
 import { Injectable } from '@angular/core';
-import type { GoKittGraphData, KnowledgeGraphData } from './gokitt.service';
-import { smartGraphRegistry } from '../lib/registry';
-import { entityColorStore } from '../lib/store/entityColorStore';
-import type { EntityKind } from '../lib/Scanner/types';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types for 3d-force-graph consumption
-// ─────────────────────────────────────────────────────────────────────────────
+import type { EntityKind } from '../lib/Scanner/types';
+import { entityColorStore } from '../lib/store/entityColorStore';
+import type { KnowledgeGraphData } from './phoenix-ui-api.service';
 
 export interface GraphNode {
     id: string;
-    name: string;          // Display label
-    val?: number;          // Node size (based on mentions)
-    color?: string;        // Hex color from EntityColorStore
-    kind?: string;         // Entity kind for grouping
-    group?: number;        // Numeric group for clustering
-    narrativeId?: string;  // Scope
+    name: string;
+    val?: number;
+    color?: string;
+    kind?: string;
+    group?: number;
+    narrativeId?: string;
 }
 
 export interface GraphLink {
-    source: string;        // Source node ID
-    target: string;        // Target node ID
-    type?: string;         // Edge type (KNOWS, VISITS, etc.)
-    color?: string;        // Hex color for edge
-    curvature?: number;    // For parallel edges
-    value?: number;        // Edge weight/confidence
+    source: string;
+    target: string;
+    type?: string;
+    color?: string;
+    curvature?: number;
+    value?: number;
 }
 
 export interface ForceGraphData {
@@ -48,17 +35,6 @@ export interface GraphStats {
     kindCounts: Record<string, number>;
     typeCounts: Record<string, number>;
 }
-
-export interface GraphQueryOptions {
-    narrativeId?: string;
-    maxNodes?: number;
-    includeOrphans?: boolean;
-    kindFilter?: string[];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Entity Kind → Numeric Group mapping (for clustering)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const KIND_TO_GROUP: Record<string, number> = {
     CHARACTER: 1,
@@ -82,370 +58,122 @@ const KIND_TO_GROUP: Record<string, number> = {
     UNKNOWN: 0,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HSL → Hex conversion (for WebGL compatibility)
-// ─────────────────────────────────────────────────────────────────────────────
-
 function hslToHex(hslString: string): string {
-    // Parse "280 70% 60%" format
     const parts = hslString.split(' ');
-    if (parts.length < 3) return '#64748b'; // Slate fallback
-
-    const h = parseFloat(parts[0]) / 360;
-    const s = parseFloat(parts[1].replace('%', '')) / 100;
-    const l = parseFloat(parts[2].replace('%', '')) / 100;
-
-    let r: number, g: number, b: number;
-
-    if (s === 0) {
-        r = g = b = l;
-    } else {
-        const hue2rgb = (p: number, q: number, t: number) => {
-            if (t < 0) t += 1;
-            if (t > 1) t -= 1;
-            if (t < 1 / 6) return p + (q - p) * 6 * t;
-            if (t < 1 / 2) return q;
-            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-            return p;
-        };
-
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        r = hue2rgb(p, q, h + 1 / 3);
-        g = hue2rgb(p, q, h);
-        b = hue2rgb(p, q, h - 1 / 3);
+    if (parts.length < 3) {
+        return '#64748b';
     }
 
-    const toHex = (x: number) => {
-        const hex = Math.round(x * 255).toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-    };
+    const h = Number.parseFloat(parts[0]) / 360;
+    const s = Number.parseFloat(parts[1].replace('%', '')) / 100;
+    const l = Number.parseFloat(parts[2].replace('%', '')) / 100;
 
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    if (s === 0) {
+        const gray = toHex(l * 255);
+        return `#${gray}${gray}${gray}`;
+    }
+
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const r = hueToRgb(p, q, h + 1 / 3);
+    const g = hueToRgb(p, q, h);
+    const b = hueToRgb(p, q, h - 1 / 3);
+    return `#${toHex(r * 255)}${toHex(g * 255)}${toHex(b * 255)}`;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GraphVizService
-// ─────────────────────────────────────────────────────────────────────────────
+function hueToRgb(p: number, q: number, t: number): number {
+    let hue = t;
+    if (hue < 0) hue += 1;
+    if (hue > 1) hue -= 1;
+    if (hue < 1 / 6) return p + (q - p) * 6 * hue;
+    if (hue < 1 / 2) return q;
+    if (hue < 2 / 3) return p + (q - p) * (2 / 3 - hue) * 6;
+    return p;
+}
+
+function toHex(value: number): string {
+    const hex = Math.round(value).toString(16);
+    return hex.length === 1 ? `0${hex}` : hex;
+}
 
 @Injectable({ providedIn: 'root' })
 export class GraphVizService {
-    // Cache hex colors converted from EntityColorStore
-    private colorCache: Map<string, string> = new Map();
+    private readonly colorCache = new Map<string, string>();
 
-    constructor() {
-        console.log('[GraphVizService] Initialized');
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Color Management (uses EntityColorStore)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Get hex color for an entity kind
-     * Uses EntityColorStore for consistency, converts HSL → Hex for WebGL
-     */
     getNodeColor(kind: string): string {
         const normalizedKind = kind?.toUpperCase() || 'UNKNOWN';
-
-        // Check cache first
-        if (this.colorCache.has(normalizedKind)) {
-            return this.colorCache.get(normalizedKind)!;
+        const cached = this.colorCache.get(normalizedKind);
+        if (cached) {
+            return cached;
         }
 
-        // Get HSL from EntityColorStore and convert to hex
         const hsl = entityColorStore.getRawHsl(normalizedKind as EntityKind);
         const hex = hslToHex(hsl);
-
         this.colorCache.set(normalizedKind, hex);
         return hex;
     }
 
-    /**
-     * Get hex color for an edge type
-     * Default: slate gray, can be customized per type
-     */
-    getEdgeColor(type?: string): string {
-        // Default edge color - semi-transparent slate
+    getEdgeColor(_type?: string): string {
         return '#94a3b8';
     }
 
-    /**
-     * Clear color cache (call if EntityColorStore changes)
-     */
     refreshColors(): void {
         this.colorCache.clear();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Transform GoKitt Scan Result → ForceGraphData
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Transform a GoKitt scan result into 3d-force-graph format
-     * @param scanResult - Result from GoKittService.scan()
-     */
-    fromScanResult(scanResult: any): ForceGraphData {
-        const nodes: GraphNode[] = [];
-        const links: GraphLink[] = [];
-        const kindCounts: Record<string, number> = {};
-        const typeCounts: Record<string, number> = {};
-
-        if (!scanResult?.graph) {
-            console.warn('[GraphVizService.fromScanResult] No graph in scan result');
-            return { nodes, links, stats: { totalNodes: 0, totalLinks: 0, kindCounts, typeCounts } };
-        }
-
-        const graphNodes = scanResult.graph.nodes || scanResult.graph.Nodes || {};
-        const graphEdges = scanResult.graph.edges || scanResult.graph.Edges || [];
-
-        // Build ID mapping for edge resolution
-        const idMapping = new Map<string, string>();
-
-        // Process nodes
-        for (const [id, node] of Object.entries(graphNodes) as [string, any][]) {
-            const label = node.Label || node.label || id;
-            const kind = (node.Kind || node.kind || 'UNKNOWN').toUpperCase();
-            const mentions = node.Mentions || node.mentions || node.MentionCount || 1;
-
-            // Track kind counts
-            kindCounts[kind] = (kindCounts[kind] || 0) + 1;
-
-            idMapping.set(id, id);
-
-            nodes.push({
-                id,
-                name: label,
-                kind,
-                val: Math.max(1, Math.log(mentions + 1) * 3), // Log scale for size
-                color: this.getNodeColor(kind),
-                group: KIND_TO_GROUP[kind] ?? 0,
-            });
-        }
-
-        // Process edges
-        for (const edge of graphEdges) {
-            const sourceId = edge.Source || edge.source;
-            const targetId = edge.Target || edge.target;
-            const edgeType = (edge.Type || edge.type || 'RELATED_TO').toUpperCase();
-            const confidence = edge.Confidence ?? edge.confidence ?? 1;
-
-            // Track type counts
-            typeCounts[edgeType] = (typeCounts[edgeType] || 0) + 1;
-
-            // Only add edge if both nodes exist
-            if (idMapping.has(sourceId) && idMapping.has(targetId)) {
-                links.push({
-                    source: sourceId,
-                    target: targetId,
-                    type: edgeType,
-                    color: this.getEdgeColor(edgeType),
-                    value: confidence,
-                });
-            }
-        }
-
-        const stats: GraphStats = {
-            totalNodes: nodes.length,
-            totalLinks: links.length,
-            kindCounts,
-            typeCounts,
-        };
-
-        console.log('[GraphVizService.fromScanResult] Transformed:', stats);
-
-        return { nodes, links, stats };
-    }
-
-    /**
-     * Transform a graphstore dump into 3d-force-graph format.
-     * This is the canonical visualization path for the knowledge graph page.
-     */
     fromKnowledgeGraph(graphData: KnowledgeGraphData): ForceGraphData {
-        return this.fromRawGraphData(graphData);
-    }
-
-    /**
-     * Transform legacy GoKitt graph data into 3d-force-graph format.
-     * Kept for compatibility with older scanner-based callers.
-     */
-    fromGoKittData(graphData: GoKittGraphData): ForceGraphData {
-        return this.fromRawGraphData(graphData);
-    }
-
-    private fromRawGraphData(graphData: { nodes: Record<string, any>; edges: any[] }): ForceGraphData {
         const nodes: GraphNode[] = [];
         const links: GraphLink[] = [];
         const kindCounts: Record<string, number> = {};
         const typeCounts: Record<string, number> = {};
+        const nodeIds = new Set<string>();
 
-        // Build ID mapping for edge resolution
-        const idMapping = new Set<string>();
-
-        // Process nodes
-        for (const [id, node] of Object.entries(graphData.nodes)) {
-            const label = node.Label || node.label || id;
-            const kind = (node.Kind || node.kind || 'UNKNOWN').toUpperCase();
-
-            // Track kind counts
+        for (const [id, node] of Object.entries(graphData.nodes || {})) {
+            const label = String((node as any).Label || node.label || id);
+            const kind = String((node as any).Kind || node.kind || 'UNKNOWN').toUpperCase();
             kindCounts[kind] = (kindCounts[kind] || 0) + 1;
-            idMapping.add(id);
+            nodeIds.add(id);
 
             nodes.push({
                 id,
                 name: label,
                 kind,
-                val: 3, // Default size
+                val: 3,
                 color: this.getNodeColor(kind),
                 group: KIND_TO_GROUP[kind] ?? 0,
             });
         }
 
-        // Process edges
-        for (const edge of graphData.edges) {
-            const sourceId = edge.Source || edge.source || '';
-            const targetId = edge.Target || edge.target || '';
-            const edgeType = (edge.Type || edge.type || edge.relation || 'RELATED_TO').toUpperCase();
-            const confidence = edge.Confidence ?? edge.confidence ?? edge.weight ?? 1;
-
-            // Track type counts
+        for (const edge of graphData.edges || []) {
+            const sourceId = String((edge as any).Source || edge.source || '');
+            const targetId = String((edge as any).Target || edge.target || '');
+            const edgeType = String((edge as any).Type || (edge as any).type || edge.relation || 'RELATED_TO').toUpperCase();
+            const confidence = Number((edge as any).Confidence ?? (edge as any).confidence ?? edge.weight ?? 1);
             typeCounts[edgeType] = (typeCounts[edgeType] || 0) + 1;
 
-            // Only add edge if both nodes exist
-            if (idMapping.has(sourceId) && idMapping.has(targetId)) {
-                links.push({
-                    source: sourceId,
-                    target: targetId,
-                    type: edgeType,
-                    color: this.getEdgeColor(edgeType),
-                    value: confidence,
-                });
-            } else {
-                console.warn(`[GraphVizService.fromGoKittData] Skipping edge: ${sourceId} → ${targetId} (node not found)`);
-            }
-        }
-
-        const stats: GraphStats = {
-            totalNodes: nodes.length,
-            totalLinks: links.length,
-            kindCounts,
-            typeCounts,
-        };
-
-        console.log('[GraphVizService.fromRawGraphData] Transformed:', stats);
-
-        return { nodes, links, stats };
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Transform GraphRegistry → ForceGraphData (LEGACY FALLBACK)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Get full graph from GraphRegistry
-     * @param options - Query options for filtering
-     * @deprecated Use fromGoKitt() instead. This method will be removed when CozoDB is fully deprecated.
-     */
-    fromCozoDB(options?: GraphQueryOptions): ForceGraphData {
-        const nodes: GraphNode[] = [];
-        const links: GraphLink[] = [];
-        const kindCounts: Record<string, number> = {};
-        const typeCounts: Record<string, number> = {};
-
-        // Get all entities from smartGraphRegistry
-        const allEntities = smartGraphRegistry.getAllEntities();
-        const entityIds = new Set<string>();
-
-        console.log(`[GraphVizService.fromCozoDB] Total entities from smartGraphRegistry: ${allEntities.length}`);
-
-        for (const entity of allEntities) {
-            // Apply filters (narrativeId not available in RegisteredEntity, skip for now)
-            if (options?.kindFilter && !options.kindFilter.includes(entity.kind)) {
+            if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
+                console.warn(`[GraphVizService] Skipping edge: ${sourceId} -> ${targetId} (node not found)`);
                 continue;
             }
-            if (options?.maxNodes && nodes.length >= options.maxNodes) {
-                break;
-            }
-
-            const kind = entity.kind.toUpperCase();
-            kindCounts[kind] = (kindCounts[kind] || 0) + 1;
-            entityIds.add(entity.id);
-
-            nodes.push({
-                id: entity.id,
-                name: entity.label,
-                kind,
-                val: Math.max(1, Math.log((entity.totalMentions || 1) + 1) * 3),
-                color: this.getNodeColor(kind),
-                group: KIND_TO_GROUP[kind] ?? 0,
-            });
-        }
-
-        // Get all edges from smartGraphRegistry
-        // Collect edges from all entities
-        const allEdges: { sourceId: string; targetId: string; type: string; confidence: number }[] = [];
-        for (const entity of allEntities) {
-            const edges = smartGraphRegistry.getEdgesForEntity(entity.id);
-            for (const edge of edges) {
-                // Avoid duplicates (each edge is stored once)
-                if (edge.sourceId === entity.id) {
-                    allEdges.push({
-                        sourceId: edge.sourceId,
-                        targetId: edge.targetId,
-                        type: edge.type,
-                        confidence: edge.confidence
-                    });
-                }
-            }
-        }
-        console.log(`[GraphVizService.fromCozoDB] Total edges from smartGraphRegistry: ${allEdges.length}`);
-
-        for (const rel of allEdges) {
-            // Only include edges where both nodes are in the graph
-            const hasSource = entityIds.has(rel.sourceId);
-            const hasTarget = entityIds.has(rel.targetId);
-            if (!hasSource || !hasTarget) {
-                console.warn(`[GraphVizService] Edge filtered: ${rel.type} | source(${rel.sourceId}): ${hasSource}, target(${rel.targetId}): ${hasTarget}`);
-                if (!options?.includeOrphans) continue;
-            }
-
-            const edgeType = rel.type.toUpperCase();
-            typeCounts[edgeType] = (typeCounts[edgeType] || 0) + 1;
 
             links.push({
-                source: rel.sourceId,
-                target: rel.targetId,
+                source: sourceId,
+                target: targetId,
                 type: edgeType,
                 color: this.getEdgeColor(edgeType),
-                value: rel.confidence,
+                value: confidence,
             });
         }
 
-        const stats: GraphStats = {
-            totalNodes: nodes.length,
-            totalLinks: links.length,
-            kindCounts,
-            typeCounts,
+        return {
+            nodes,
+            links,
+            stats: {
+                totalNodes: nodes.length,
+                totalLinks: links.length,
+                kindCounts,
+                typeCounts,
+            },
         };
-
-        console.log('[GraphVizService.fromCozoDB] Loaded:', stats);
-
-        return { nodes, links, stats };
-    }
-
-    /**
-     * Convenience method: Get full graph
-     * @deprecated Use fromGoKitt() instead. This method will be removed when CozoDB is fully deprecated.
-     */
-    getFullGraph(): ForceGraphData {
-        return this.fromCozoDB();
-    }
-
-    /**
-     * Convenience method: Get graph scoped to a narrative
-     * @deprecated Use fromGoKitt() with narrativeId option instead. This method will be removed when CozoDB is fully deprecated.
-     */
-    getScopedGraph(narrativeId: string): ForceGraphData {
-        return this.fromCozoDB({ narrativeId });
     }
 }

@@ -1,0 +1,191 @@
+<div class="absolute inset-0 z-40 flex justify-end bg-black/45 backdrop-blur-[2px]" (click)="close.emit()">
+    <aside class="h-full w-full max-w-[380px] overflow-y-auto border-l border-white/10 bg-zinc-950/96 p-5 text-zinc-100 shadow-2xl"
+        (click)="$event.stopPropagation()">
+        <div class="mb-5 flex items-start justify-between gap-4">
+            <div>
+                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200/80">Graph Style Lab</p>
+                <h3 class="mt-2 text-xl font-semibold text-white">Highlighting and entity style</h3>
+                <p class="mt-2 text-sm leading-6 text-zinc-400">
+                    Keep the controls close to the graph where they actually matter.
+                </p>
+            </div>
+            <button type="button"
+                class="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 transition hover:border-zinc-700 hover:text-white"
+                (click)="close.emit()">
+                <i class="pi pi-times"></i>
+            </button>
+        </div>
+
+        <section class="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <h4 class="text-sm font-semibold text-white">Highlight mode</h4>
+                    <p class="mt-1 text-xs text-zinc-400">{{ modeDescriptions[mode()] }}</p>
+                </div>
+                <span class="rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em]"
+                    [ngClass]="modeTone(mode())">
+                    {{ modeLabels[mode()] }}
+                </span>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+                @for (option of modeOrder; track option) {
+                <button type="button"
+                    class="rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition"
+                    [ngClass]="mode() === option ? modeTone(option) : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'"
+                    (click)="selectMode(option)">
+                    {{ modeLabels[option] }}
+                </button>
+                }
+            </div>
+
+            @if (mode() === 'focus') {
+            <div class="mt-4 border-t border-zinc-800 pt-4">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Focus kinds</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                    @for (category of categories; track category.name) {
+                    @for (kind of category.kinds; track kind) {
+                    <button type="button"
+                        class="rounded-full border px-3 py-1.5 text-xs transition"
+                        [ngClass]="isFocusKindSelected(kind) ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100' : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'"
+                        (click)="toggleFocusKind(kind)">
+                        {{ formatKindName(kind) }}
+                    </button>
+                    }
+                    }
+                </div>
+            </div>
+            }
+        </section>
+
+        <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <h4 class="text-sm font-semibold text-white">Entity family</h4>
+                    <p class="mt-1 text-xs text-zinc-400">Pick a kind, tune it once, then echo it across the family.</p>
+                </div>
+                <button type="button"
+                    class="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:border-zinc-700 hover:text-white"
+                    (click)="applyToCategory()">
+                    Apply to {{ currentCategoryName() }}
+                </button>
+            </div>
+
+            <div class="mt-4 space-y-3">
+                @for (category of categories; track category.name) {
+                <div>
+                    <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{{ category.name }}</p>
+                    <div class="flex flex-wrap gap-2">
+                        @for (kind of category.kinds; track kind) {
+                        <button type="button"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition"
+                            [ngClass]="selectedKind() === kind ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-100' : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'"
+                            (click)="selectKind(kind)">
+                            <span class="h-2.5 w-2.5 rounded-full ring-1 ring-black/20"
+                                [style.backgroundColor]="getHexColor(kind)"></span>
+                            {{ formatKindName(kind) }}
+                        </button>
+                        }
+                    </div>
+                </div>
+                }
+            </div>
+        </section>
+
+        <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Preview</p>
+            <div class="mt-4 grid gap-4 sm:grid-cols-3">
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-center">
+                    <p class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Pill</p>
+                    <span class="mt-4 inline-flex rounded-full border px-3 py-1 text-sm font-semibold"
+                        [style.backgroundColor]="'hsl(var(' + entityColorStore.getCssVarName(selectedKind()) + ') / 0.15)'"
+                        [style.borderColor]="'hsl(var(' + entityColorStore.getCssVarName(selectedKind()) + ') / 0.4)'"
+                        [style.color]="'hsl(var(' + entityColorStore.getTextCssVarName(selectedKind()) + '))'">
+                        {{ formatKindName(selectedKind()) }}
+                    </span>
+                </div>
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-center">
+                    <p class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Node</p>
+                    <div class="mt-3 flex flex-col items-center">
+                        <div class="flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold text-white"
+                            [style.backgroundColor]="getHexColor(selectedKind())">
+                            {{ selectedKind().charAt(0) }}
+                        </div>
+                        <span class="mt-2 text-xs text-zinc-400">Atlas Node</span>
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-center">
+                    <p class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Inline</p>
+                    <p class="mt-4 text-lg font-semibold tracking-tight text-transparent [background-clip:text]"
+                        [style.backgroundImage]="gradientPreview(selectedKind())">
+                        Example Entity
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <div class="grid gap-4 sm:grid-cols-2">
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-semibold text-white">Primary</h4>
+                            <p class="mt-1 text-xs text-zinc-400">Pills, nodes, and accents</p>
+                        </div>
+                        <span class="text-xs font-mono text-zinc-500">{{ getHexColor(selectedKind()) }}</span>
+                    </div>
+                    <div class="mt-4 flex items-center gap-3">
+                        <label class="relative block h-12 w-12 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/10"
+                            [style.backgroundColor]="getHexColor(selectedKind())">
+                            <input type="color" class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                [value]="getHexColor(selectedKind())"
+                                (input)="updateColor(selectedKind(), $any($event.target).value)" />
+                        </label>
+                        <input type="text"
+                            class="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm font-mono text-zinc-100 outline-none transition focus:border-cyan-400/40"
+                            [value]="getHexColor(selectedKind())"
+                            (change)="updateColor(selectedKind(), $any($event.target).value)" />
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-semibold text-white">Text</h4>
+                            <p class="mt-1 text-xs text-zinc-400">Inline and label foreground</p>
+                        </div>
+                        <span class="text-xs font-mono text-zinc-500">{{ getHexTextColor(selectedKind()) }}</span>
+                    </div>
+                    <div class="mt-4 flex items-center gap-3">
+                        <label
+                            class="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-zinc-900 text-lg font-semibold"
+                            [style.color]="getHexTextColor(selectedKind())"
+                            [style.borderColor]="getHexTextColor(selectedKind())">
+                            Aa
+                            <input type="color" class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                [value]="getHexTextColor(selectedKind())"
+                                (input)="updateTextColor(selectedKind(), $any($event.target).value)" />
+                        </label>
+                        <input type="text"
+                            class="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm font-mono text-zinc-100 outline-none transition focus:border-cyan-400/40"
+                            [value]="getHexTextColor(selectedKind())"
+                            (change)="updateTextColor(selectedKind(), $any($event.target).value)" />
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="mt-5 flex items-center justify-between gap-3 border-t border-zinc-800 pt-5">
+            <button type="button"
+                class="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:border-zinc-700 hover:text-white"
+                (click)="resetSelected()">
+                Reset {{ formatKindName(selectedKind()) }}
+            </button>
+            <button type="button"
+                class="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-white"
+                (click)="resetAll()">
+                Reset everything
+            </button>
+        </div>
+    </aside>
+</div>

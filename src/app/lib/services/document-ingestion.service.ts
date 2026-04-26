@@ -4,8 +4,7 @@ import { NotesService } from '../dexie/notes.service';
 import { FolderService } from './folder.service';
 import { NoteEditorStore } from '../store/note-editor.store';
 import { ScopeService } from './scope.service';
-import { GoKittService, SearchScope } from '../../services/gokitt.service';
-import { EmbeddingQueueService } from './embedding-queue.service';
+import { PhoenixUiApiService, SearchScope } from '../../services/phoenix-ui-api.service';
 
 export type DocumentIngestionMode = 'files' | 'folder';
 export type DocumentIngestionConflictPolicy = 'suffix';
@@ -47,8 +46,7 @@ export class DocumentIngestionService {
     private folderService = inject(FolderService);
     private noteEditorStore = inject(NoteEditorStore);
     private scopeService = inject(ScopeService);
-    private goKittService = inject(GoKittService);
-    private embeddingQueue = inject(EmbeddingQueueService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
 
     async openFilesPicker(): Promise<PickedDocumentBatch | null> {
         const files = await this.openPicker('files');
@@ -173,26 +171,20 @@ export class DocumentIngestionService {
             }
             : undefined;
 
-        if (this.goKittService.isReady) {
+        if (this.phoenixUiApi.isReady) {
             try {
-                await this.goKittService.upsertNote(noteId, text, version);
+                await this.phoenixUiApi.upsertNote(noteId, text, version);
             } catch (error) {
                 console.warn('[DocumentIngestion] DocStore sync failed:', error);
             }
 
             try {
-                await this.goKittService.indexNote(noteId, text, scope);
+                await this.phoenixUiApi.indexNote(noteId, text, scope);
             } catch (error) {
                 console.warn('[DocumentIngestion] Search indexing failed:', error);
             }
         }
 
-        this.embeddingQueue.markDirty(
-            noteId,
-            destination.narrativeId || 'default',
-            title,
-            text
-        );
     }
 
     private getFolderIdFromScope(type: string, id: string, actId?: string): string | null {

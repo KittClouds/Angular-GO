@@ -16,7 +16,10 @@ import { getUmbraColor, UMBRA_PRESETS } from '../types/umbra-presets';
         <div class="slider-row group">
             <!-- Header: Label + Value -->
             <div class="flex items-center justify-between mb-1.5">
-                <span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <span
+                    class="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                    [id]="sliderLabelId()"
+                >
                     {{ slider.label }}
                 </span>
                 <span class="text-sm font-semibold" [style.color]="currentColor()">
@@ -35,11 +38,15 @@ import { getUmbraColor, UMBRA_PRESETS } from '../types/umbra-presets';
                 
                 <!-- Thumb handle (hidden input range) -->
                 <input 
+                    [id]="sliderInputId()"
+                    [attr.name]="sliderInputName()"
                     type="range"
                     class="slider-input absolute inset-0 w-full opacity-0 cursor-pointer"
                     [min]="slider.min"
                     [max]="slider.max"
                     [value]="currentValue"
+                    [attr.aria-label]="slider.label"
+                    [attr.aria-labelledby]="sliderLabelId()"
                     (input)="onSliderInput($event)"
                 />
             </div>
@@ -159,5 +166,34 @@ export class DynamicSliderComponent {
     selectUmbra(presetId: string) {
         this.showUmbraMenu = false;
         this.umbraChange.emit(presetId);
+    }
+
+    sliderLabelId(): string {
+        return `${this.sliderBaseId()}-label`;
+    }
+
+    sliderInputId(): string {
+        return `${this.sliderBaseId()}-input`;
+    }
+
+    sliderInputName(): string {
+        return `${this.sliderBaseId()}-input`;
+    }
+
+    private sliderBaseId(): string {
+        return [
+            'dynamic-slider',
+            this.sanitizeSegment(this.slider?.id),
+            this.sanitizeSegment(this.slider?.name),
+        ].join('-');
+    }
+
+    private sanitizeSegment(value: string | null | undefined): string {
+        const sanitized = (value ?? 'slider')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+
+        return sanitized || 'slider';
     }
 }

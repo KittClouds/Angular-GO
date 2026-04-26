@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, NgZone, signal } from '@angular/core';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../core/worker-zone';
 
 /**
  * RAG Worker Service
@@ -19,7 +20,7 @@ export class RagWorkerService {
     readonly isModelLoaded = signal(false);
     readonly modelDimension = signal(256); // Gemini Embedding reduced to 256d
 
-    constructor() {
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {
         console.log('[RagWorkerService] Initialized');
     }
 
@@ -31,14 +32,21 @@ export class RagWorkerService {
 
         try {
             // Create worker from ported rag.worker.ts
-            this.worker = new Worker(new URL('../../workers/rag.worker', import.meta.url), {
-                type: 'module'
-            });
-
-            this.worker.onmessage = (e) => this.handleWorkerMessage(e);
-            this.worker.onerror = (e) => {
-                console.error('[RagWorker] Worker error:', e);
-            };
+            this.worker = createWorkerOutsideAngular(
+                this.ngZone,
+                () =>
+                    new Worker(new URL('../../workers/rag.worker', import.meta.url), {
+                        type: 'module',
+                    }),
+                (worker) => {
+                    worker.onmessage = (e) => this.handleWorkerMessage(e);
+                    worker.onerror = (e) => {
+                        this.ngZone.run(() => {
+                            console.error('[RagWorker] Worker error:', e);
+                        });
+                    };
+                },
+            );
 
             // Initialize worker
             await this.sendWorkerMessage({ type: 'INIT' });
@@ -128,9 +136,13 @@ export class RagWorkerService {
             this.pendingCallbacks.delete(_id);
 
             if (type === 'ERROR') {
-                reject(new Error(payload?.message || 'Worker error'));
+                this.ngZone.run(() => {
+                    reject(new Error(payload?.message || 'Worker error'));
+                });
             } else {
-                resolve(payload);
+                this.ngZone.run(() => {
+                    resolve(payload);
+                });
             }
         }
 
@@ -141,10 +153,14 @@ export class RagWorkerService {
                 break;
             case 'MODEL_LOADED':
                 console.log('[RagWorker] Worker: MODEL_LOADED');
-                this.isModelLoaded.set(true);
+                this.ngZone.run(() => {
+                    this.isModelLoaded.set(true);
+                });
                 break;
             case 'DIMENSIONS_SET':
-                this.modelDimension.set(payload?.dims || 256);
+                this.ngZone.run(() => {
+                    this.modelDimension.set(payload?.dims || 256);
+                });
                 break;
         }
     }

@@ -1,6 +1,6 @@
 /**
- * Shared types index - exports all types extracted from CozoDB.
- * Use these types instead of importing from the deprecated cozo directory.
+ * Shared types index.
+ * Use these app-facing types instead of importing persistence-specific internals.
  */
 
 export type {

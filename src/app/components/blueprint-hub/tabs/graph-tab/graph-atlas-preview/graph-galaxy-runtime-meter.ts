@@ -1,0 +1,180 @@
+export type GraphGalaxyCompilerSource = 'native' | 'local' | 'fallback';
+
+export interface GraphGalaxyCanvasMeter {
+    id: number;
+    rafActive: boolean;
+    nodes: number;
+    links: number;
+    lastDrawAgeMs: number | null;
+    backingPixels: number;
+    canvasBytes: number;
+    backdropBytes: number;
+    estimatedResidentBytes: number;
+    backingWidth: number;
+    backingHeight: number;
+    dpr: number;
+}
+
+export interface GraphGalaxyRuntimeSnapshot {
+    compilerSource: GraphGalaxyCompilerSource;
+    activeCanvases: number;
+    rafActive: number;
+    rafSleeping: number;
+    nodes: number;
+    links: number;
+    backingPixels: number;
+    canvasBytes: number;
+    backdropBytes: number;
+    estimatedResidentBytes: number;
+    canvases: GraphGalaxyCanvasMeter[];
+}
+
+declare const ngDevMode: boolean | undefined;
+
+declare global {
+    interface Window {
+        __PHOENIX_GALAXY_METER__?: { snapshot: () => GraphGalaxyRuntimeSnapshot };
+    }
+}
+
+interface CanvasRecord {
+    rafActive: boolean;
+    nodes: number;
+    links: number;
+    lastDrawAt: number;
+    backingPixels: number;
+    canvasBytes: number;
+    backdropBytes: number;
+    estimatedResidentBytes: number;
+    backingWidth: number;
+    backingHeight: number;
+    dpr: number;
+}
+
+class GraphGalaxyRuntimeMeter {
+    private nextIdValue = 0;
+    private compilerSource: GraphGalaxyCompilerSource = 'local';
+    private readonly canvases = new Map<number, CanvasRecord>();
+    private readonly enabled = typeof window !== 'undefined'
+        && (typeof ngDevMode === 'undefined' || Boolean(ngDevMode));
+
+    constructor() {
+        this.publish();
+    }
+
+    nextCanvasId(): number {
+        return ++this.nextIdValue;
+    }
+
+    registerCanvas(id: number): void {
+        if (!this.enabled) return;
+        this.canvases.set(id, {
+            rafActive: false,
+            nodes: 0,
+            links: 0,
+            lastDrawAt: 0,
+            backingPixels: 0,
+            canvasBytes: 0,
+            backdropBytes: 0,
+            estimatedResidentBytes: 0,
+            backingWidth: 0,
+            backingHeight: 0,
+            dpr: 1,
+        });
+    }
+
+    unregisterCanvas(id: number): void {
+        if (!this.enabled) return;
+        this.canvases.delete(id);
+    }
+
+    recordCompilerSource(source: GraphGalaxyCompilerSource): void {
+        if (!this.enabled) return;
+        this.compilerSource = source;
+    }
+
+    recordScene(id: number, nodes: number, links: number): void {
+        const record = this.canvases.get(id);
+        if (!this.enabled || !record) return;
+        record.nodes = nodes;
+        record.links = links;
+    }
+
+    recordRaf(id: number, rafActive: boolean): void {
+        const record = this.canvases.get(id);
+        if (!this.enabled || !record) return;
+        record.rafActive = rafActive;
+    }
+
+    recordDraw(id: number, width: number, height: number, dpr: number, time: number, backdropBytes = 0): void {
+        const record = this.canvases.get(id);
+        if (!this.enabled || !record) return;
+        record.lastDrawAt = time;
+        record.backingWidth = Math.max(0, Math.floor(width * dpr));
+        record.backingHeight = Math.max(0, Math.floor(height * dpr));
+        record.backingPixels = record.backingWidth * record.backingHeight;
+        record.canvasBytes = record.backingPixels * 4;
+        record.backdropBytes = Math.max(0, backdropBytes);
+        record.estimatedResidentBytes = Math.round((record.canvasBytes + record.backdropBytes) * 2.4);
+        record.dpr = dpr;
+    }
+
+    snapshot(): GraphGalaxyRuntimeSnapshot {
+        const now = this.now();
+        let rafActive = 0;
+        let nodes = 0;
+        let links = 0;
+        let backingPixels = 0;
+        let canvasBytes = 0;
+        let backdropBytes = 0;
+        let estimatedResidentBytes = 0;
+        const canvases: GraphGalaxyCanvasMeter[] = [];
+        for (const [id, record] of this.canvases) {
+            rafActive += record.rafActive ? 1 : 0;
+            nodes += record.nodes;
+            links += record.links;
+            backingPixels += record.backingPixels;
+            canvasBytes += record.canvasBytes;
+            backdropBytes += record.backdropBytes;
+            estimatedResidentBytes += record.estimatedResidentBytes;
+            canvases.push({
+                id,
+                rafActive: record.rafActive,
+                nodes: record.nodes,
+                links: record.links,
+                lastDrawAgeMs: record.lastDrawAt ? Math.round(now - record.lastDrawAt) : null,
+                backingPixels: record.backingPixels,
+                canvasBytes: record.canvasBytes,
+                backdropBytes: record.backdropBytes,
+                estimatedResidentBytes: record.estimatedResidentBytes,
+                backingWidth: record.backingWidth,
+                backingHeight: record.backingHeight,
+                dpr: record.dpr,
+            });
+        }
+        return {
+            compilerSource: this.compilerSource,
+            activeCanvases: this.canvases.size,
+            rafActive,
+            rafSleeping: this.canvases.size - rafActive,
+            nodes,
+            links,
+            backingPixels,
+            canvasBytes,
+            backdropBytes,
+            estimatedResidentBytes,
+            canvases,
+        };
+    }
+
+    private publish(): void {
+        if (!this.enabled) return;
+        window.__PHOENIX_GALAXY_METER__ = { snapshot: () => this.snapshot() };
+    }
+
+    private now(): number {
+        return typeof performance !== 'undefined' ? performance.now() : Date.now();
+    }
+}
+
+export const graphGalaxyRuntimeMeter = new GraphGalaxyRuntimeMeter();

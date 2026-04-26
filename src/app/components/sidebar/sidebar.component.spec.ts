@@ -19,9 +19,11 @@ import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { GoKittService } from '../../services/gokitt.service';
 import { DocumentIngestionService } from '../../lib/services/document-ingestion.service';
+import { DocumentExportService } from '../../lib/services/document-export.service';
 import { Router } from '@angular/router';
-import { GoChatService } from '../../lib/services/go-chat.service';
+import { PhoenixChatService } from '../../lib/services/phoenix-chat.service';
 import { GraphPipelineService } from '../../services/graph-pipeline.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 
 describe('SidebarComponent graph scan', () => {
     let injector: EnvironmentInjector;
@@ -62,9 +64,11 @@ describe('SidebarComponent graph scan', () => {
             },
             { provide: GoKittService, useValue: goKittMock },
             { provide: DocumentIngestionService, useValue: {} },
+            { provide: DocumentExportService, useValue: { exportText: vi.fn() } },
             { provide: Router, useValue: { navigate: vi.fn(), events: of(), url: '/' } },
-            { provide: GoChatService, useValue: { threads: signal([]), loadThread: vi.fn() } },
+            { provide: PhoenixChatService, useValue: { threads: signal([]), loadThread: vi.fn() } },
             { provide: GraphPipelineService, useValue: graphPipelineMock },
+            { provide: PhoenixUiApiService, useValue: { isReady: true } },
         ], Injector.create({ providers: [] }));
 
         component = runInInjectionContext(injector, () => new SidebarComponent());

@@ -3,7 +3,7 @@
  * Extracts edges and pushes them to the Registry.
  * No ProseMirror dependency. No highlighting logic.
  */
-import type { GoKittService, ProvenanceContext } from '../../services/gokitt.service';
+import type { PhoenixUiApiService, ProvenanceContext } from '../../services/phoenix-ui-api.service';
 
 export interface GraphNode {
     id: string;
@@ -36,7 +36,7 @@ export interface GraphSink {
 
 export class GraphScanner {
     constructor(
-        private readonly goKitt: GoKittService,
+        private readonly phoenixUiApi: PhoenixUiApiService,
         private readonly sink: GraphSink,
     ) { }
 
@@ -54,7 +54,7 @@ export class GraphScanner {
         }
 
         try {
-            const result = await this.goKitt.scan(text, provenance);
+            const result = await this.phoenixUiApi.scan(text, provenance);
 
             if (!result || !result.graph) {
                 return { nodes: [], edges: [], timingUs: result?.timing_us ?? 0, raw: result };

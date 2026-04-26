@@ -1,0 +1,266 @@
+import { CommonModule } from '@angular/common';
+import { ScrollingModule } from '@angular/cdk/scrolling';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, computed, signal } from '@angular/core';
+import {
+    BookOpen,
+    Brain,
+    Calendar,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Lightbulb,
+    MapPin,
+    Package,
+    PanelLeft,
+    PanelLeftClose,
+    Pencil,
+    Plus,
+    Search,
+    Settings,
+    Shield,
+    Sparkles,
+    Trash2,
+    User,
+    Users,
+    Wand2,
+    X,
+    Zap,
+} from 'lucide-angular';
+import { LucideAngularModule } from 'lucide-angular';
+
+import type { RegisteredEntity } from '../../../../lib/registry';
+import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
+import { entityColorStore } from '../../../../lib/store/entityColorStore';
+import type { NerSuggestion } from '../../../../services/ner.service';
+import { EntityStewardComponent } from '../../../fact-sheets/entity-steward/entity-steward.component';
+import type { GraphLensMode } from './graph-lens';
+
+interface EntityGroup {
+    kind: string;
+    entities: RegisteredEntity[];
+    expanded: boolean;
+}
+
+type EntitySidebarRow =
+    | { type: 'suggestion-group'; count: number }
+    | { type: 'suggestion'; suggestion: NerSuggestion }
+    | { type: 'group'; kind: string; count: number; expanded: boolean }
+    | { type: 'entity'; entity: RegisteredEntity };
+
+const ENTITY_ICONS: Record<string, any> = {
+    CHARACTER: User,
+    LOCATION: MapPin,
+    NPC: Users,
+    ITEM: Package,
+    FACTION: Shield,
+    EVENT: Calendar,
+    CONCEPT: Lightbulb,
+};
+
+@Component({
+    selector: 'app-graph-entity-sidebar',
+    standalone: true,
+    imports: [CommonModule, ScrollingModule, LucideAngularModule, EntityStewardComponent],
+    templateUrl: './graph-entity-sidebar.component.html',
+    styleUrls: ['./graph-entity-sidebar.component.css'],
+})
+export class GraphEntitySidebarComponent implements OnChanges {
+    @Input() entities: RegisteredEntity[] = [];
+    @Input() suggestions: NerSuggestion[] = [];
+    @Input() selectedEntity: RegisteredEntity | null = null;
+    @Input() linkCount = 0;
+    @Input() lensMode: GraphLensMode = 'narrative';
+    @Input() isExtracting = false;
+    @Input() extractionProgress: { current: number; total: number } = { current: 0, total: 0 };
+    @Input() isScanning = false;
+    @Input() activeProvider: EntitySuggestionProviderId | null = null;
+    @Input() scanError: string | null = null;
+    @Input() contextId = 'global';
+    @Input() searchText = '';
+
+    @Output() entitySelected = new EventEmitter<RegisteredEntity>();
+    @Output() editEntityRequested = new EventEmitter<RegisteredEntity>();
+    @Output() deleteEntityRequested = new EventEmitter<RegisteredEntity>();
+    @Output() addEntityRequested = new EventEmitter<void>();
+    @Output() extractRequested = new EventEmitter<void>();
+    @Output() settingsRequested = new EventEmitter<void>();
+    @Output() flushRequested = new EventEmitter<void>();
+    @Output() scanRequested = new EventEmitter<EntitySuggestionProviderId>();
+    @Output() acceptSuggestionRequested = new EventEmitter<string>();
+    @Output() rejectSuggestionRequested = new EventEmitter<string>();
+    @Output() styleRequested = new EventEmitter<void>();
+    @Output() lensModeChange = new EventEmitter<GraphLensMode>();
+    @Output() searchTextChange = new EventEmitter<string>();
+
+    readonly isOpen = signal(true);
+    readonly controlsOpen = signal(false);
+    readonly entitySearch = signal('');
+    readonly expandedKinds = signal<Set<string>>(new Set());
+    private readonly dataRevision = signal(0);
+
+    readonly rows = computed<EntitySidebarRow[]>(() => {
+        this.dataRevision();
+        return this.flattenRows(this.groupedEntities());
+    });
+
+    readonly lensModes: { id: GraphLensMode; label: string }[] = [
+        { id: 'global', label: 'Global' },
+        { id: 'narrative', label: 'Narrative' },
+        { id: 'note', label: 'Note' },
+        { id: 'multiNote', label: 'Compare' },
+    ];
+
+    readonly BookIcon = BookOpen;
+    readonly BrainIcon = Brain;
+    readonly CheckIcon = Check;
+    readonly ChevronDownIcon = ChevronDown;
+    readonly ChevronRightIcon = ChevronRight;
+    readonly PanelLeftIcon = PanelLeft;
+    readonly PanelLeftCloseIcon = PanelLeftClose;
+    readonly PencilIcon = Pencil;
+    readonly PlusIcon = Plus;
+    readonly SearchIcon = Search;
+    readonly SettingsIcon = Settings;
+    readonly SparklesIcon = Sparkles;
+    readonly TrashIcon = Trash2;
+    readonly WandIcon = Wand2;
+    readonly XIcon = X;
+    readonly ZapIcon = Zap;
+
+    ngOnChanges(changes: SimpleChanges): void {
+        if (changes['entities']) {
+            const nextKinds = new Set(this.entities.map((entity) => entity.kind));
+            this.expandedKinds.update((current) => new Set([...current, ...nextKinds]));
+            this.dataRevision.update((value) => value + 1);
+        }
+        if (changes['suggestions']) {
+            this.dataRevision.update((value) => value + 1);
+        }
+        if (changes['searchText'] && this.searchText !== this.entitySearch()) {
+            this.entitySearch.set(this.searchText || '');
+            this.dataRevision.update((value) => value + 1);
+        }
+    }
+
+    updateEntitySearch(value: string): void {
+        this.entitySearch.set(value);
+        this.searchTextChange.emit(value);
+        this.dataRevision.update((revision) => revision + 1);
+    }
+
+    toggleOpen(): void {
+        this.isOpen.update((open) => !open);
+    }
+
+    toggleControls(): void {
+        this.controlsOpen.update((open) => !open);
+    }
+
+    toggleActions(): void {
+        this.toggleControls();
+    }
+
+    toggleKind(kind: string): void {
+        this.expandedKinds.update((current) => {
+            const next = new Set(current);
+            next.has(kind) ? next.delete(kind) : next.add(kind);
+            return next;
+        });
+    }
+
+    getIcon(kind: string): any {
+        return ENTITY_ICONS[kind] || Sparkles;
+    }
+
+    getColor(kind: string): string {
+        return entityColorStore.getEntityColor(kind);
+    }
+
+    trackRow(_index: number, row: EntitySidebarRow): string {
+        if (row.type === 'suggestion-group') return 'suggestion-group';
+        if (row.type === 'suggestion') return `suggestion:${row.suggestion.id}`;
+        return row.type === 'group' ? `group:${row.kind}` : `entity:${row.entity.id}`;
+    }
+
+    editClicked(entity: RegisteredEntity, event: Event): void {
+        event.stopPropagation();
+        this.editEntityRequested.emit(entity);
+    }
+
+    deleteClicked(entity: RegisteredEntity, event: Event): void {
+        event.stopPropagation();
+        this.deleteEntityRequested.emit(entity);
+    }
+
+    acceptSuggestionClicked(id: string, event: Event): void {
+        event.stopPropagation();
+        this.acceptSuggestionRequested.emit(id);
+    }
+
+    rejectSuggestionClicked(id: string, event: Event): void {
+        event.stopPropagation();
+        this.rejectSuggestionRequested.emit(id);
+    }
+
+    confidencePercent(value: number): number {
+        return Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+    }
+
+    sourceLabel(source: EntitySuggestionProviderId): string {
+        if (source === 'lfm_local_experiment') return 'LFM';
+        if (source === 'gliner_local') return 'GLiNER';
+        return 'Phoenix';
+    }
+
+    private groupedEntities(): EntityGroup[] {
+        const query = this.entitySearch().trim().toLowerCase();
+        const groups = new Map<string, RegisteredEntity[]>();
+        for (const entity of this.entities) {
+            if (query && !this.matchesQuery(entity, query)) continue;
+            const list = groups.get(entity.kind) ?? [];
+            list.push(entity);
+            groups.set(entity.kind, list);
+        }
+        const expanded = this.expandedKinds();
+        return [...groups.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([kind, entities]) => ({
+                kind,
+                entities: entities.sort((left, right) => left.label.localeCompare(right.label)),
+                expanded: expanded.has(kind),
+            }));
+    }
+
+    private flattenRows(groups: EntityGroup[]): EntitySidebarRow[] {
+        const rows: EntitySidebarRow[] = [];
+        const suggestions = this.filteredSuggestions();
+        if (suggestions.length) {
+            rows.push({ type: 'suggestion-group', count: suggestions.length });
+            rows.push(...suggestions.map((suggestion) => ({ type: 'suggestion' as const, suggestion })));
+        }
+        for (const group of groups) {
+            rows.push({ type: 'group', kind: group.kind, count: group.entities.length, expanded: group.expanded });
+            if (group.expanded) rows.push(...group.entities.map((entity) => ({ type: 'entity' as const, entity })));
+        }
+        return rows;
+    }
+
+    private filteredSuggestions(): NerSuggestion[] {
+        const query = this.entitySearch().trim().toLowerCase();
+        return this.suggestions
+            .filter((suggestion) => !query || this.matchesSuggestionQuery(suggestion, query))
+            .sort((left, right) => right.confidence - left.confidence || left.label.localeCompare(right.label));
+    }
+
+    private matchesQuery(entity: RegisteredEntity, query: string): boolean {
+        return entity.label.toLowerCase().includes(query)
+            || entity.kind.toLowerCase().includes(query)
+            || entity.aliases.some((alias) => alias.toLowerCase().includes(query));
+    }
+
+    private matchesSuggestionQuery(suggestion: NerSuggestion, query: string): boolean {
+        return suggestion.label.toLowerCase().includes(query)
+            || suggestion.kind.toLowerCase().includes(query)
+            || this.sourceLabel(suggestion.source).toLowerCase().includes(query);
+    }
+}

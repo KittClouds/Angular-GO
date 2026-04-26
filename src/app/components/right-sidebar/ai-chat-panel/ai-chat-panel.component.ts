@@ -1,10 +1,10 @@
 /**
  * AI Chat Panel Component
 // Native UI replaces quikchat vanilla JS library with Angular integration.
- * Uses GoChatService for Go/SQLite persistence + memory extraction.
+ * Uses PhoenixChatService for Phoenix persistence + OpenRouter streaming.
  *
  * Architecture:
- * - GoChatService (Go WASM) — persistence, thread management, OpenRouter streaming
+ * - PhoenixChatService — persistence, thread management, OpenRouter streaming
  * - GoogleGenAIService (TypeScript) — Google Gemini streaming fallback
  */
 
@@ -23,11 +23,15 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Trash2, Download, Plus, Settings, Send, History, ArrowLeft, Database, Brain, RotateCcw, Bot, User, Sparkles } from 'lucide-angular';
 import { computed, untracked } from '@angular/core';
 import { getSetting, setSetting } from '../../../lib/dexie/settings.service';
-import { GoChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage, type ChatApprovalRequest, type ChatRunSnapshot, type RunOptions } from '../../../lib/services/go-chat.service';
+import { PhoenixChatService, type Thread, type ChatConfig, type ChatProgressEvent, type OpenRouterMessage, type ChatApprovalRequest, type ChatRunSnapshot, type RunOptions } from '../../../lib/services/phoenix-chat.service';
 import { OrchestratorService } from '../../../services/orchestrator.service';
 import { GoogleGenAIService, GoogleGenAIMessage } from '../../../lib/services/google-genai.service';
+import { NvidiaNimService } from '../../../lib/services/nvidia-nim.service';
 import { ChatContextClipStore } from '../../../lib/store/chat-context-clip.store';
 import { ChatToolHostService } from '../../../lib/services/chat-tool-host.service';
+import { AiSidebarModeService, type AiSidebarMode } from '../../../lib/services/ai-sidebar-mode.service';
+import { EditorAgentWorkspaceService } from '../../../lib/services/editor-agent-workspace.service';
+import { NoteEditorStore } from '../../../lib/store/note-editor.store';
 
 interface SessionInfo {
     id: string;
@@ -122,6 +126,72 @@ Keep responses concise but helpful. If you don't know something specific about t
                 }
             </div>
 
+            @if (!showHistory()) {
+                <div class="px-3 py-2 border-b border-border/40 bg-black/10 shrink-0 space-y-2">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 flex gap-1 p-1 rounded-xl bg-muted/40 border border-border/50">
+                            <button
+                                class="flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
+                                [class.bg-teal-600]="aiMode() === 'chat'"
+                                [class.text-white]="aiMode() === 'chat'"
+                                [class.text-muted-foreground]="aiMode() !== 'chat'"
+                                (click)="setAiMode('chat')">
+                                Chat
+                            </button>
+                            <button
+                                class="flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
+                                [class.bg-teal-600]="aiMode() === 'canvas'"
+                                [class.text-white]="aiMode() === 'canvas'"
+                                [class.text-muted-foreground]="aiMode() !== 'canvas'"
+                                (click)="setAiMode('canvas')">
+                                Canvas
+                            </button>
+                        </div>
+                        @if (aiMode() === 'canvas') {
+                            <span class="text-[10px] uppercase tracking-[0.16em] text-teal-300/90">Note Editing</span>
+                        }
+                    </div>
+
+                    @if (aiMode() === 'canvas') {
+                        <div class="rounded-xl border border-teal-500/20 bg-teal-950/15 p-3 space-y-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="min-w-0">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-teal-300/80">Active Note</div>
+                                    <div class="text-[13px] font-medium text-foreground truncate">
+                                        {{ activeCanvasNote()?.title || activeCanvasNote()?.id || 'No open note' }}
+                                    </div>
+                                </div>
+                                @if (pendingApprovals().length > 0) {
+                                    <div class="text-[10px] font-medium text-amber-300">
+                                        {{ pendingApprovals().length }} approval{{ pendingApprovals().length === 1 ? '' : 's' }}
+                                    </div>
+                                }
+                            </div>
+                            <div class="grid grid-cols-1 gap-2">
+                                <div class="rounded-lg border border-white/5 bg-black/15 px-2.5 py-2">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-1">Editor</div>
+                                    <div class="text-[12px] text-foreground/90">{{ liveSelectionLabel() }}</div>
+                                </div>
+                                <div class="rounded-lg border border-white/5 bg-black/15 px-2.5 py-2">
+                                    <div class="text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-1">Attached To Chat</div>
+                                    <div class="text-[12px] text-foreground/90">{{ attachedSelectionLabel() }}</div>
+                                    @if (canvasSelectionContext()?.text) {
+                                        <div class="mt-2 text-[11px] leading-relaxed text-foreground/80 max-h-20 overflow-auto whitespace-pre-wrap">
+                                            {{ canvasSelectionContext()?.text }}
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            @if (!hasCanvasDocument()) {
+                                <div class="text-[11px] text-amber-300/90">
+                                    Open a note to let Canvas inspect, highlight, and propose edits.
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
             <!-- Settings Panel -->
             @if (showSettings()) {
                 <div class="settings-panel p-3 border-b border-border/50 bg-muted/30 space-y-3">
@@ -141,7 +211,15 @@ Keep responses concise but helpful. If you don't know something specific about t
                             [class.text-white]="activeProvider() === 'go-openrouter'"
                             [class.text-muted-foreground]="activeProvider() !== 'go-openrouter'"
                             (click)="activeProvider.set('go-openrouter')">
-                            OpenRouter (Go)
+                            OpenRouter (Phoenix)
+                        </button>
+                        <button
+                            class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                            [class.bg-teal-600]="activeProvider() === 'nvidia-nim'"
+                            [class.text-white]="activeProvider() === 'nvidia-nim'"
+                            [class.text-muted-foreground]="activeProvider() !== 'nvidia-nim'"
+                            (click)="activeProvider.set('nvidia-nim')">
+                            NVIDIA NIM
                         </button>
                     </div>
 
@@ -176,7 +254,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                         }
                     }
 
-                    <!-- Go OpenRouter Settings -->
+                    <!-- Phoenix OpenRouter Settings -->
                     @if (activeProvider() === 'go-openrouter') {
                         <div class="space-y-1">
                             <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
@@ -314,6 +392,73 @@ Keep responses concise but helpful. If you don't know something specific about t
                                     />
                                 </div>
                             </div>
+                        </div>
+                    }
+
+                    <!-- NVIDIA NIM Settings -->
+                    @if (activeProvider() === 'nvidia-nim') {
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-muted-foreground">NVIDIA API Key</label>
+                            <input
+                                type="password"
+                                class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                placeholder="nvapi-..."
+                                [value]="nvidiaApiKeyInput()"
+                                (input)="nvidiaApiKeyInput.set($any($event.target).value)"
+                            />
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-muted-foreground">Model</label>
+                            <select
+                                class="w-full px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                [value]="nvidiaModelInput()"
+                                (change)="nvidiaModelInput.set($any($event.target).value)"
+                            >
+                                @for (model of nvidiaNim.availableModels; track model.id) {
+                                    <option [value]="model.id">{{ model.name }} - {{ model.description }}</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div class="space-y-1">
+                                <label class="text-xs font-medium text-muted-foreground flex justify-between">
+                                    <span>Temperature</span>
+                                    <span>{{ nvidiaTemperatureInput() }}</span>
+                                </label>
+                                <input
+                                    type="range"
+                                    min="0" max="2" step="0.1"
+                                    class="w-full"
+                                    [value]="nvidiaTemperatureInput()"
+                                    (input)="nvidiaTemperatureInput.set(+$any($event.target).value)"
+                                />
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-xs font-medium text-muted-foreground flex justify-between">
+                                    <span>Top P</span>
+                                    <span>{{ nvidiaTopPInput() }}</span>
+                                </label>
+                                <input
+                                    type="range"
+                                    min="0.1" max="1" step="0.05"
+                                    class="w-full"
+                                    [value]="nvidiaTopPInput()"
+                                    (input)="nvidiaTopPInput.set(+$any($event.target).value)"
+                                />
+                            </div>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-medium text-muted-foreground flex justify-between">
+                                <span>Max Tokens</span>
+                                <span>{{ nvidiaMaxTokensInput() }}</span>
+                            </label>
+                            <input
+                                type="range"
+                                min="512" max="32768" step="512"
+                                class="w-full"
+                                [value]="nvidiaMaxTokensInput()"
+                                (input)="nvidiaMaxTokensInput.set(+$any($event.target).value)"
+                            />
                         </div>
                     }
 
@@ -456,7 +601,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                     </div>
 
                     <!-- Active Provider Indicator -->
-                    @if (googleGenAI.isConfigured() || isGoConfigured()) {
+                    @if (googleGenAI.isConfigured() || isGoConfigured() || isNvidiaConfigured()) {
                         <div class="text-[10px] text-center text-muted-foreground">
                             Using: <span class="text-teal-400 font-medium">{{ getActiveProviderName() }}</span>
                         </div>
@@ -593,7 +738,7 @@ Keep responses concise but helpful. If you don't know something specific about t
                 <div class="shrink-0 border-t border-border/50 p-3 chat-input-area bg-gradient-to-t from-teal-900/10 to-transparent">
                     <div class="flex items-end gap-2 relative">
                         <textarea #messageInput class="w-full pl-3 pr-10 py-2.5 text-[13px] rounded-xl border border-border bg-background focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 resize-none transition-all placeholder:text-muted-foreground/60 shadow-sm"
-                            placeholder="Ask Kammi anything..." [(ngModel)]="currentMessage" (keydown.enter)="onEnterKey($event)" [disabled]="isStreaming()" rows="1" style="max-height: 120px"></textarea>
+                            [placeholder]="aiMode() === 'canvas' ? 'Ask Kammi to inspect or edit the open note...' : 'Ask Kammi anything...'" [(ngModel)]="currentMessage" (keydown.enter)="onEnterKey($event)" [disabled]="isStreaming()" rows="1" style="max-height: 120px"></textarea>
                         <button class="absolute right-1.5 bottom-1.5 w-7 h-7 rounded-lg flex items-center justify-center transition-all send-btn"
                             [class.active]="currentMessage.trim() && !isStreaming()" [disabled]="!currentMessage.trim() || isStreaming()" (click)="sendMessage()">
                             <lucide-icon [img]="SendIcon" class="h-3.5 w-3.5"></lucide-icon>
@@ -1026,14 +1171,37 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     isStreaming = signal(false);
     currentMessage = '';
 
-    // GoChatService for persistence, memory, and Go OpenRouter streaming
-    goChatService = inject(GoChatService);
+    // PhoenixChatService for persistence, run state, and OpenRouter streaming
+    goChatService = inject(PhoenixChatService);
     // Google GenAI fallback (TypeScript)
     googleGenAI = inject(GoogleGenAIService);
+    nvidiaNim = inject(NvidiaNimService);
     private orchestrator = inject(OrchestratorService);
     private readonly chatContextClipStore = inject(ChatContextClipStore);
     private readonly toolHost = inject(ChatToolHostService);
+    private readonly aiSidebarMode = inject(AiSidebarModeService);
+    private readonly workspace = inject(EditorAgentWorkspaceService);
+    private readonly noteEditorStore = inject(NoteEditorStore);
     private goChatInitialized = false;
+    readonly aiMode = this.aiSidebarMode.mode;
+    readonly canvasSelectionContext = this.aiSidebarMode.selectionContext;
+    readonly liveEditorSelection = this.workspace.liveSelection;
+    readonly activeCanvasNote = computed(() => this.noteEditorStore.currentNote());
+    readonly hasCanvasDocument = computed(() => !!this.activeCanvasNote());
+    readonly liveSelectionLabel = computed(() => {
+        const selection = this.liveEditorSelection();
+        if (!selection || selection.empty) {
+            return 'No live editor selection';
+        }
+        return `Live selection ${selection.from}-${selection.to} (${selection.text.length} chars)`;
+    });
+    readonly attachedSelectionLabel = computed(() => {
+        const selection = this.canvasSelectionContext();
+        if (!selection) {
+            return 'No attached note range';
+        }
+        return `Attached range ${selection.from}-${selection.to}${selection.autoApplyEligible ? ' • auto-apply ready' : ''}`;
+    });
 
     // Icon references for template
     readonly PlusIcon = Plus;
@@ -1052,7 +1220,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     // Settings panel state
     showSettings = signal(false);
-    activeProvider = signal<'google' | 'go-openrouter'>('go-openrouter'); // Go-first
+    activeProvider = signal<'google' | 'go-openrouter' | 'nvidia-nim'>('go-openrouter'); // Go-first
     constructor() {
         effect(() => {
             this.goChatService.currentThread();
@@ -1062,6 +1230,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 this.restoreHistory();
             });
         });
+        effect(() => {
+            const ticket = this.aiSidebarMode.composerFocusTicket();
+            if (ticket === 0) return;
+            this.showHistory.set(false);
+            this.showSettings.set(false);
+            setTimeout(() => this.focusComposer(), 0);
+        });
     }
 
     onEnterKey(event: Event): void {
@@ -1069,6 +1244,18 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (kbEvent.shiftKey) return;
         kbEvent.preventDefault();
         this.sendMessage();
+    }
+
+    setAiMode(mode: AiSidebarMode): void {
+        if (mode === 'canvas') {
+            this.aiSidebarMode.switchToCanvas();
+            return;
+        }
+        this.aiSidebarMode.switchToChat();
+    }
+
+    private focusComposer(): void {
+        this.messageInput?.nativeElement?.focus();
     }
 
 
@@ -1118,11 +1305,19 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     googleApiKeyInput = signal('');
     googleModelInput = signal('gemini-3-flash-preview');
 
+    // NVIDIA NIM settings
+    nvidiaApiKeyInput = signal('');
+    nvidiaModelInput = signal('moonshotai/kimi-k2-thinking');
+    nvidiaTemperatureInput = signal(1);
+    nvidiaTopPInput = signal(0.9);
+    nvidiaMaxTokensInput = signal(16384);
+
     // Index toggle - enables tool calling
     indexEnabled = signal(false);
 
-    /** True when a Go OpenRouter API key has been entered/saved. */
+    /** True when a Phoenix OpenRouter API key has been entered/saved. */
     readonly isGoConfigured = computed(() => !!this.apiKeyInput());
+    readonly isNvidiaConfigured = computed(() => !!this.nvidiaApiKeyInput());
 
     // History panel state
     showHistory = signal(false);
@@ -1135,7 +1330,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
     ngAfterViewInit(): void {
 
-        // Pre-fill Go OpenRouter config from saved openrouter:config (shared key store)
+        // Pre-fill Phoenix OpenRouter config from saved openrouter:config (shared key store)
         const savedOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
         if (savedOrConfig) {
             this.apiKeyInput.set(savedOrConfig.apiKey || '');
@@ -1163,12 +1358,23 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             this.googleModelInput.set(googleConfig.model || 'gemini-2.0-flash');
         }
 
-        // Default to Go OpenRouter; fallback to Google if configured
-        if (this.googleGenAI.isConfigured() && !savedOrConfig?.apiKey) {
-            this.activeProvider.set('google');
+        const nvidiaConfig = this.nvidiaNim.config();
+        if (nvidiaConfig) {
+            this.nvidiaApiKeyInput.set(nvidiaConfig.apiKey || '');
+            this.nvidiaModelInput.set(nvidiaConfig.model || 'moonshotai/kimi-k2-thinking');
+            this.nvidiaTemperatureInput.set(nvidiaConfig.temperature ?? 1);
+            this.nvidiaTopPInput.set(nvidiaConfig.topP ?? 0.9);
+            this.nvidiaMaxTokensInput.set(nvidiaConfig.maxTokens ?? 16384);
         }
 
-        // Initialize Go chat service
+        // Default to Phoenix OpenRouter; fallback to Google if configured
+        if (this.googleGenAI.isConfigured() && !savedOrConfig?.apiKey) {
+            this.activeProvider.set('google');
+        } else if (this.nvidiaNim.isConfigured() && !savedOrConfig?.apiKey) {
+            this.activeProvider.set('nvidia-nim');
+        }
+
+        // Initialize Phoenix chat service
         this.initGoChatService();
 
         // Load saved system prompt
@@ -1182,7 +1388,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Initialize Go chat service with OpenRouter config.
+     * Initialize Phoenix chat service with OpenRouter config.
      * This enables persistence + memory extraction.
      */
     private async initGoChatService(): Promise<void> {
@@ -1191,7 +1397,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
         await this.goChatService.init();
         this.goChatInitialized = true;
-        console.log('[AiChatPanel] Go chat service initialized');
+        console.log('[AiChatPanel] Phoenix chat service initialized');
     }
 
     ngOnDestroy(): void {
@@ -1207,7 +1413,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     saveSettings(): void {
-        // Persist Go OpenRouter config to the shared openrouter:config key
+        // Persist Phoenix OpenRouter config to the shared openrouter:config key
         if (this.apiKeyInput()) {
             const existingOrConfig = getSetting<ChatConfig | null>('openrouter:config', null);
             const orConfig: ChatConfig = {
@@ -1258,6 +1464,18 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             });
         }
 
+        if (this.nvidiaApiKeyInput()) {
+            this.nvidiaNim.saveConfig({
+                apiKey: this.nvidiaApiKeyInput(),
+                model: this.nvidiaModelInput(),
+                temperature: this.nvidiaTemperatureInput(),
+                topP: this.nvidiaTopPInput(),
+                maxTokens: this.nvidiaMaxTokensInput(),
+            });
+        } else if (this.nvidiaNim.isConfigured()) {
+            this.nvidiaNim.clearConfig();
+        }
+
         setSetting('chat:systemPrompt', this.systemPromptInput());
         // console.log('[AiChatPanel] Settings saved, active provider:', this.activeProvider());
         this.showSettings.set(false);
@@ -1267,8 +1485,11 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (this.activeProvider() === 'google' && this.googleGenAI.isConfigured()) {
             return `Google Gemini (${this.googleGenAI.getModel()})`;
         }
+        if (this.activeProvider() === 'nvidia-nim' && this.nvidiaNim.isConfigured()) {
+            return `NVIDIA NIM (${this.nvidiaNim.getModel().split('/').pop()})`;
+        }
         const model = this.selectedModel();
-        return model ? `Go OpenRouter (${model.split('/').pop()})` : 'Go OpenRouter';
+        return model ? `Phoenix OpenRouter (${model.split('/').pop()})` : 'Phoenix OpenRouter';
     }
 
     toggleIndexMode(): void {
@@ -1434,8 +1655,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
 
         const googleConfigured = this.googleGenAI.isConfigured();
         const openRouterConfigured = this.isGoConfigured();
+        const nvidiaConfigured = this.isNvidiaConfigured();
 
-        if (!googleConfigured && !openRouterConfigured) {
+        if (!googleConfigured && !openRouterConfigured && !nvidiaConfigured) {
             this.finishActivityStep(traceId, 'error', 'AI provider is not configured.');
             this.displayMessages.update(msgs => [...msgs, {
                 id: this.generateId(), content: '[Warning] Please configure an API key in settings to enable responses.', role: 'assistant', timestamp: new Date()
@@ -1528,6 +1750,35 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
+            if (this.activeProvider() === 'nvidia-nim' && this.nvidiaNim.isConfigured()) {
+                await this.nvidiaNim.streamChat(
+                    history,
+                    {
+                        onChunk: (chunk: string) => {
+                            if (onProgress) onProgress({ stage: 'stream', status: 'running' });
+                            void this.goChatService.appendMessage(botMsgId, chunk);
+                        },
+                        onComplete: async (response: string) => {
+                            if (onProgress) onProgress({ stage: 'stream', status: 'done', detail: 'Completed successfully.' });
+                            await this.goChatService.updateMessage(botMsgId, response);
+                            await this.goChatService.completeRun(runId, botMsgId, response);
+                            this.currentBotMsgId = null;
+                        },
+                        onError: (err: Error) => {
+                            const errStr = err.message;
+                            if (onProgress) onProgress({ stage: 'stream', status: 'error', detail: errStr });
+                            void this.goChatService.updateMessage(botMsgId, `Error: ${errStr}`);
+                            void this.goChatService.completeRun(runId, botMsgId, '', errStr);
+                            this.currentBotMsgId = null;
+                        },
+                        onEvent: onProgress,
+                        onReasoningChunk: onReasoning,
+                    },
+                    systemPrompt
+                );
+                return;
+            }
+
             // Otherwise, use openrouter (WASM)
             await this.goChatService.streamChat(
                 history,
@@ -1568,6 +1819,9 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         const currentThread = this.goChatService.currentThread() as any;
         const narrativeId = appContext?.narrativeId || currentThread?.narrativeId || currentThread?.narrative_id || '';
         const folderId = appContext?.folderId || '';
+        const canvasMode = this.aiMode() === 'canvas';
+        const workspaceEnabled = this.indexEnabled() || canvasMode;
+        const plannerEnabled = workspaceEnabled && this.isGoConfigured();
 
         const externalParts: string[] = [];
         if (appContext?.activeNoteTitle || appContext?.activeNoteSnippet) {
@@ -1578,24 +1832,62 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         if (highlightedContext) {
             externalParts.push(highlightedContext);
         }
+        if (canvasMode) {
+            const liveSelection = this.workspace.getSelection();
+            externalParts.push(
+                `Canvas mode is enabled for the currently open note. The assistant may inspect the note, highlight candidate ranges, and use proposal tools for edits.`
+            );
+            if (liveSelection && !liveSelection.empty) {
+                externalParts.push(
+                    `Live editor selection range=${liveSelection.from}-${liveSelection.to}\n${liveSelection.text}`.trim()
+                );
+            }
+        }
 
         return {
             finalProvider: this.activeProvider(),
-            finalModel: this.activeProvider() === 'google' ? this.googleModelInput() : this.selectedModel(),
+            finalModel: this.getActiveModelForProvider(),
             plannerModel: this.selectedModel(),
             omModel: this.omModelInput(),
-            plannerEnabled: this.indexEnabled() && this.isGoConfigured(),
+            plannerEnabled,
             omEnabled: this.omEnabledInput(),
-            workspaceEnabled: this.indexEnabled(),
-            mutationsEnabled: true,
+            workspaceEnabled,
+            mutationsEnabled: canvasMode,
             deadlineMs: 8000,
             mutationPolicy: 'confirm',
             narrativeId,
             folderId,
             scopeId: narrativeId,
-            baseSystemPrompt: this.systemPromptInput(),
+            baseSystemPrompt: this.buildBaseSystemPrompt(),
             initialExternalContext: externalParts.join('\n\n'),
         };
+    }
+
+    private buildBaseSystemPrompt(): string {
+        if (this.aiMode() !== 'canvas') {
+            return this.systemPromptInput();
+        }
+
+        return `${this.systemPromptInput().trim()}
+
+Canvas mode is enabled.
+- You are working against the currently open note in the editor.
+- You may inspect the active note, inspect the current selection, and highlight candidate ranges before editing.
+- Proposal tools create diffs or save actions that may require approval; never assume a proposal has already been applied.
+- Prefer focused edits tied to the user's request over broad rewrites.
+- After edits are approved/applied, describe what changed clearly.`;
+    }
+
+    private getActiveModelForProvider(): string {
+        switch (this.activeProvider()) {
+            case 'google':
+                return this.googleModelInput();
+            case 'nvidia-nim':
+                return this.nvidiaModelInput();
+            case 'go-openrouter':
+            default:
+                return this.selectedModel();
+        }
     }
 
     private async waitForRunReady(runId: string): Promise<ChatRunSnapshot | null> {
@@ -1632,10 +1924,13 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
                 }
                 case 'queued':
                 case 'gathering':
-                case 'planning':
                 case 'executing_tools':
                 case 'streaming':
                     await this.sleep(200);
+                    continue;
+                case 'planning':
+                    await this.goChatService.processPlannerRun(runId);
+                    await this.sleep(100);
                     continue;
                 default:
                     return snapshot;
@@ -1648,7 +1943,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     private async streamPreparedRun(snapshot: ChatRunSnapshot): Promise<void> {
         const runId = snapshot.run.id;
         const history = this.buildConversationHistory();
-        const reasoningStepId = this.activeProvider() === 'go-openrouter' && this.reasoningEnabledInput()
+        const reasoningStepId = this.activeProvider() !== 'google' && this.reasoningEnabledInput()
             ? this.addActivityStep('reasoning', 'Reasoning', 'Waiting for model reasoning...')
             : null;
 
@@ -1755,7 +2050,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         return this.addActivityStep(
             'reasoning',
             'Thinking',
-            this.reasoningEnabledInput() && this.activeProvider() === 'go-openrouter'
+            this.reasoningEnabledInput() && this.activeProvider() !== 'google'
                 ? 'Reasoning through your request...'
                 : 'Reading your request...'
         );

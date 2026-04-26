@@ -44,4 +44,59 @@ describe('EditorService lifecycle guards', () => {
         expect(() => service.undo()).not.toThrow();
         expect(() => service.redo()).not.toThrow();
     });
+
+    it('emits lightweight live updates without generating markdown snapshots', () => {
+        const service = new EditorService();
+        const liveListener = vi.fn();
+        const getMarkdown = vi.fn();
+        const crepe = {
+            getMarkdown,
+            editor: { ctx: { get: vi.fn() } },
+        } as any;
+
+        service.liveUpdate$.subscribe(liveListener);
+        service.registerEditor(crepe);
+        service.updateLiveContent({
+            noteId: 'note-1',
+            revision: 1,
+            plainText: 'hello world',
+            textLength: 11,
+            timings: { plainTextMs: 1.25 },
+        });
+
+        expect(liveListener).toHaveBeenCalledWith({
+            noteId: 'note-1',
+            revision: 1,
+            plainText: 'hello world',
+            textLength: 11,
+            timings: { plainTextMs: 1.25 },
+        });
+        expect(getMarkdown).not.toHaveBeenCalled();
+    });
+
+    it('builds full snapshots only on explicit request', () => {
+        const service = new EditorService();
+        const toJSON = vi.fn(() => ({ type: 'doc' }));
+        const getMarkdown = vi.fn(() => 'hello world');
+        const crepe = {
+            getMarkdown,
+            editor: {
+                ctx: {
+                    get: vi.fn(() => ({
+                        state: {
+                            doc: { toJSON },
+                        },
+                    })),
+                },
+            },
+        } as any;
+
+        service.registerEditor(crepe);
+        const snapshot = service.captureSnapshot('manual-save');
+
+        expect(snapshot?.json).toEqual({ type: 'doc' });
+        expect(snapshot?.markdown).toBe('hello world');
+        expect(toJSON).toHaveBeenCalledTimes(1);
+        expect(getMarkdown).toHaveBeenCalledTimes(1);
+    });
 });

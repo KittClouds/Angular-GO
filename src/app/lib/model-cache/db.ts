@@ -6,7 +6,7 @@
  * - Embedding models (@xenova/transformers)
  * - Voice files (.bin)
  * 
- * Completely isolated from Nebula/CozoDB storage.
+ * Completely isolated from application document and graph storage.
  * Uses its own IndexedDB quota (~500MB+).
  */
 

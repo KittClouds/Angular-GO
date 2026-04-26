@@ -1,0 +1,16 @@
+{
+  "class_token_index": 128001,
+  "text_token_index": 128002,
+  "embed_class_token": true,
+  "extract_text_features": false,
+  "use_segment_embeddings": true,
+  "hidden_size": 768,
+  "scorer_type": "mlp",
+  "normalize_features": false,
+  "architecture_type": "uni-encoder",
+  "onnx_files": {
+    "encoder": "encoder.onnx",
+    "projectors": "projectors.onnx",
+    "scorer": "scorer.onnx"
+  }
+}

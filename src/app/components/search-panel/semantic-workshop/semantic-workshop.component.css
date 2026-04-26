@@ -1,0 +1,210 @@
+:host {
+    display: block;
+}
+
+.semantic-workshop {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.6rem;
+    border: 1px solid rgba(39, 39, 42, 0.78);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.workshop-head,
+.title-row,
+.result-top,
+.result-foot,
+.tool-strip {
+    display: flex;
+    align-items: center;
+}
+
+.workshop-head,
+.result-top,
+.result-foot {
+    justify-content: space-between;
+    gap: 0.7rem;
+}
+
+.title-row {
+    min-width: 0;
+    gap: 0.55rem;
+}
+
+.title-icon {
+    flex: 0 0 auto;
+    color: rgb(45, 212, 191);
+}
+
+h3,
+p {
+    margin: 0;
+}
+
+h3 {
+    color: #f4f4f5;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+.title-row p,
+.source-preview p,
+.workshop-result p,
+.result-foot span {
+    color: #a1a1aa;
+}
+
+.title-row p,
+.source-preview span,
+.result-foot,
+.kind-pill,
+.score-pill {
+    font-size: 0.66rem;
+}
+
+.run-btn,
+.tool-btn,
+.workshop-result,
+.result-foot button {
+    border-radius: 6px;
+}
+
+.run-btn {
+    display: inline-flex;
+    min-height: 1.9rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border: 1px solid rgba(45, 212, 191, 0.28);
+    background: rgba(20, 184, 166, 0.12);
+    padding: 0 0.65rem;
+    color: rgb(153, 246, 228);
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.tool-strip {
+    gap: 0.35rem;
+}
+
+.tool-btn {
+    display: inline-flex;
+    min-width: 0;
+    flex: 1 1 0;
+    min-height: 2rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    background: rgba(0, 0, 0, 0.20);
+    padding: 0 0.35rem;
+    color: #a1a1aa;
+}
+
+.tool-btn.active {
+    border-color: rgba(45, 212, 191, 0.32);
+    background: rgba(20, 184, 166, 0.10);
+    color: rgb(153, 246, 228);
+}
+
+.tool-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.66rem;
+    font-weight: 800;
+}
+
+.source-preview {
+    border: 1px solid rgba(45, 212, 191, 0.16);
+    border-radius: 8px;
+    background: rgba(20, 184, 166, 0.06);
+    padding: 0.5rem;
+}
+
+.source-preview span {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: rgb(94, 234, 212);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.source-preview p,
+.workshop-result p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 0.72rem;
+    line-height: 1.42;
+}
+
+.workshop-notice {
+    border: 1px solid rgba(251, 191, 36, 0.20);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.07);
+    padding: 0.5rem;
+    color: rgb(252, 211, 77);
+    font-size: 0.72rem;
+}
+
+.workshop-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.workshop-result {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    background: rgba(24, 24, 27, 0.40);
+    padding: 0.6rem;
+    color: #f4f4f5;
+    text-align: left;
+}
+
+.workshop-result strong {
+    display: block;
+    margin: 0.35rem 0 0.2rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78rem;
+}
+
+.kind-pill,
+.score-pill,
+.result-foot button {
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.26);
+    padding: 0.15rem 0.4rem;
+    color: #d4d4d8;
+}
+
+.kind-pill {
+    color: rgb(153, 246, 228);
+}
+
+.result-foot {
+    margin-top: 0.45rem;
+}
+
+.result-foot button {
+    color: rgb(94, 234, 212);
+    font-weight: 800;
+}
+
+.spin {
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

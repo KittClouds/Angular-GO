@@ -1,44 +1,49 @@
 // src/app/lib/services/folder.service.ts
 // Angular service for folder CRUD with liveQuery
-// Writes through to SQLite via GoKittStoreService (Direct Mode)
+// Writes through to Phoenix store (Direct Mode)
 
 import { Injectable, inject } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Folder, FolderSchema, AllowedSubfolderDef, AllowedNoteTypeDef } from '../dexie/db';
 import { getNextFolderOrder } from '../operations';
-import { GoKittStoreService } from '../../services/gokitt-store.service';
+import { PhoenixStoreService } from '../../services/phoenix-store.service';
 import { ScopedDocumentService } from './scoped-document.service';
 import { ScopedEntityFieldService } from './scoped-entity-field.service';
+import { deleteNoteStructureProjections } from '../notes/note-structure-projection';
+import {
+    isGlobalContextScope,
+    scheduleGlobalContextIslandRefresh,
+} from '../notes/context-islands';
 
 @Injectable({
     providedIn: 'root'
 })
 export class FolderService {
-    private goKittStore = inject(GoKittStoreService);
+    private phoenixStore = inject(PhoenixStoreService);
     private scopedDocuments = inject(ScopedDocumentService);
     private scopedEntityFields = inject(ScopedEntityFieldService);
 
     /**
-     * Write-through to SQLite directly via GoKittStoreService.
+     * Write-through to Phoenix directly via PhoenixStoreService.
      */
-    private async syncToSqlite(folder: Folder): Promise<void> {
+    private async syncToPhoenix(folder: Folder): Promise<void> {
         try {
-            if (this.goKittStore.isReady) {
-                await this.goKittStore.upsertFolder(GoKittStoreService.fromDexieFolder(folder));
+            if (this.phoenixStore.isReady) {
+                await this.phoenixStore.upsertFolder(PhoenixStoreService.fromDexieFolder(folder));
             }
         } catch (err) {
-            console.warn('[FolderService] SQLite sync failed (non-fatal):', err);
+            console.warn('[FolderService] Phoenix sync failed (non-fatal):', err);
         }
     }
 
-    private async deleteFromSqlite(id: string): Promise<void> {
+    private async deleteFromPhoenix(id: string): Promise<void> {
         try {
-            if (this.goKittStore.isReady) {
-                await this.goKittStore.deleteFolder(id);
+            if (this.phoenixStore.isReady) {
+                await this.phoenixStore.deleteFolder(id);
             }
         } catch (err) {
-            console.warn('[FolderService] SQLite delete failed (non-fatal):', err);
+            console.warn('[FolderService] Phoenix delete failed (non-fatal):', err);
         }
     }
     // ==========================================================================
@@ -153,7 +158,8 @@ export class FolderService {
         } as Folder;
 
         await db.folders.add(fullFolder);
-        await this.syncToSqlite(fullFolder);
+        await this.syncToPhoenix(fullFolder);
+        this.scheduleFolderContextRefresh(fullFolder);
 
         return id;
     }
@@ -188,7 +194,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         return id;
     }
@@ -222,7 +229,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         return id;
     }
@@ -256,7 +264,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         if (entityKind === 'ACT' && folder.narrativeId) {
             try {
@@ -320,7 +329,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         return id;
     }
@@ -366,7 +376,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         return id;
     }
@@ -422,7 +433,8 @@ export class FolderService {
         };
 
         await db.folders.add(folder);
-        await this.syncToSqlite(folder);
+        await this.syncToPhoenix(folder);
+        this.scheduleFolderContextRefresh(folder);
 
         return id;
     }
@@ -431,19 +443,25 @@ export class FolderService {
      * Update a folder
      */
     async updateFolder(id: string, updates: Partial<Folder>): Promise<void> {
+        const existing = await db.folders.get(id);
         await db.folders.update(id, {
             ...updates,
             updatedAt: Date.now(),
         });
         // Re-read full folder and sync to SQLite
         const updated = await db.folders.get(id);
-        if (updated) await this.syncToSqlite(updated);
+        if (updated) {
+            await this.syncToPhoenix(updated);
+            this.scheduleFolderContextRefresh(updated);
+        }
+        this.scheduleFolderContextRefresh(existing);
     }
 
     /**
      * Delete a folder (and optionally its children)
      */
     async deleteFolder(id: string, deleteChildren = false): Promise<void> {
+        const folder = await db.folders.get(id);
         if (deleteChildren) {
             // Recursively delete all children
             const children = await db.folders.where('parentId').equals(id).toArray();
@@ -451,10 +469,16 @@ export class FolderService {
                 await this.deleteFolder(child.id, true);
             }
             // Also delete notes in this folder
-            await db.notes.where('folderId').equals(id).delete();
+            const notes = await db.notes.where('folderId').equals(id).toArray();
+            if (notes.length) {
+                await deleteNoteStructureProjections(notes.map(note => note.id));
+                await db.notes.where('folderId').equals(id).delete();
+                this.scheduleFolderContextRefresh(folder || notes[0]);
+            }
         }
         await db.folders.delete(id);
-        await this.deleteFromSqlite(id);
+        await this.deleteFromPhoenix(id);
+        this.scheduleFolderContextRefresh(folder);
     }
 
     /**
@@ -476,7 +500,11 @@ export class FolderService {
 
         // Sync the moved folder to SQLite
         const updated = await db.folders.get(id);
-        if (updated) await this.syncToSqlite(updated);
+        if (updated) {
+            await this.syncToPhoenix(updated);
+            this.scheduleFolderContextRefresh(updated);
+        }
+        this.scheduleFolderContextRefresh(folder);
 
         // Propagate new narrativeId if changed
         if (folder.narrativeId !== newParent.narrativeId && !folder.isNarrativeRoot) {
@@ -488,17 +516,25 @@ export class FolderService {
      * Propagate narrativeId to all descendants
      */
     async propagateNarrativeId(folderId: string, narrativeId: string): Promise<void> {
+        const priorFolder = await db.folders.get(folderId);
         // Update this folder
         await db.folders.update(folderId, { narrativeId, updatedAt: Date.now() });
 
         // Sync updated folder to SQLite
         const updatedFolder = await db.folders.get(folderId);
-        if (updatedFolder) await this.syncToSqlite(updatedFolder);
+        if (updatedFolder) {
+            await this.syncToPhoenix(updatedFolder);
+            this.scheduleFolderContextRefresh(updatedFolder);
+        }
+        this.scheduleFolderContextRefresh(priorFolder);
 
         // Update all notes in this folder
         const notes = await db.notes.where('folderId').equals(folderId).toArray();
         for (const note of notes) {
             await db.notes.update(note.id, { narrativeId, updatedAt: Date.now() });
+        }
+        if (notes.length) {
+            this.scheduleFolderContextRefresh(notes[0]);
         }
 
         // Recursively update child folders
@@ -556,5 +592,11 @@ export class FolderService {
             actFolder.narrativeId,
             sourceScopeFolderId
         );
+    }
+
+    private scheduleFolderContextRefresh(scope?: { worldId?: string; narrativeId?: string | null }): void {
+        if (scope && isGlobalContextScope(scope)) {
+            scheduleGlobalContextIslandRefresh(scope.worldId || '');
+        }
     }
 }

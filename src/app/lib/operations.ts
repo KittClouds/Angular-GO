@@ -8,7 +8,27 @@
  * - All CRUD goes directly to Go SQLite via the WASM worker
  */
 import { db } from './dexie/db';
-import { GoKittStoreService, StoreNote, StoreFolder, StoreEntity, StoreEdge } from '../services/gokitt-store.service';
+import {
+    deleteNoteStructureProjection,
+    replaceNoteStructureProjection,
+} from './notes/note-structure-projection';
+import {
+    isGlobalContextScope,
+    scheduleGlobalContextIslandRefresh,
+} from './notes/context-islands';
+import {
+    deleteNoteEntityOccurrences,
+    scheduleLoadedNoteEntityOccurrenceRebuild,
+    syncNoteEntityOccurrences,
+} from './notes/entity-occurrence-index';
+import {
+    PhoenixStoreService,
+    StoreEdge,
+    StoreEntity,
+    StoreFolder,
+    StoreNote,
+    StoreNoteHeader,
+} from '../services/phoenix-store.service';
 
 // =============================================================================
 // INTERFACES
@@ -29,8 +49,10 @@ export interface Note {
     ownerId: string;
     createdAt: number;
     updatedAt: number;
+    version?: number;
     narrativeId?: string;
     order: number;
+    hasBody?: boolean;
 }
 
 export interface Folder {
@@ -85,29 +107,34 @@ export interface Edge {
 // STORE ACCESS (Direct to GoKittStoreService — NO DataSyncService)
 // =============================================================================
 
-let _store: GoKittStoreService | null = null;
+let _store: PhoenixStoreService | null = null;
 let _storeResolve: (() => void) | null = null;
 const _storeReady = new Promise<void>(resolve => { _storeResolve = resolve; });
 
-export function setGoSqliteBridge(store: GoKittStoreService): void {
+export function setPhoenixStoreBridge(store: PhoenixStoreService): void {
     _store = store;
-    console.log('[Operations] GoKittStoreService connected (Direct Mode)');
+    console.log('[Operations] PhoenixStoreService connected');
     _storeResolve?.();
 }
+export const setGoSqliteBridge = setPhoenixStoreBridge;
 
-function requireStore(): GoKittStoreService {
+function requireStore(): PhoenixStoreService {
     if (!_store || !_store.isReady) {
-        throw new Error('[Operations] GoKittStoreService not ready - called too early');
+        throw new Error('[Operations] PhoenixStoreService not ready - called too early');
     }
     return _store;
 }
 
-async function waitForStore(): Promise<GoKittStoreService> {
+async function waitForStore(): Promise<PhoenixStoreService> {
     await _storeReady;
-    return _store!;
+    const store = _store!;
+    if (!store.isReady) {
+        await store.initialize();
+    }
+    return store;
 }
 
-export function getBridge(): GoKittStoreService | null {
+export function getBridge(): PhoenixStoreService | null {
     return _store?.isReady ? _store : null;
 }
 
@@ -116,7 +143,36 @@ export function getBridge(): GoKittStoreService | null {
 // =============================================================================
 
 function warmDexieNote(note: Note): void {
-    db.notes.put(note as any).catch(() => { });
+    db.notes.put({ ...note, hasBody: note.hasBody ?? true } as any).catch(() => { });
+}
+
+function warmDexieNoteHeader(note: Note | StoreNoteHeader): void {
+    const existing = note as Partial<Note>;
+    db.notes.put({
+        id: note.id,
+        worldId: note.worldId || '',
+        title: note.title || '',
+        content: '',
+        markdownContent: '',
+        folderId: note.folderId || '',
+        entityKind: note.entityKind || '',
+        entitySubtype: note.entitySubtype || '',
+        isEntity: note.isEntity || false,
+        isPinned: note.isPinned || false,
+        favorite: note.favorite || false,
+        ownerId: note.ownerId || '',
+        createdAt: note.createdAt || Date.now(),
+        updatedAt: note.updatedAt || Date.now(),
+        version: existing.version,
+        narrativeId: note.narrativeId || '',
+        order: Number(note.order || 0),
+        hasBody: false,
+        ...(existing.hasBody ? {
+            content: existing.content || '',
+            markdownContent: existing.markdownContent || '',
+            hasBody: true,
+        } : {}),
+    } as any).catch(() => { });
 }
 
 function warmDexieFolder(folder: Folder): void {
@@ -132,7 +188,7 @@ function warmDexieEntity(entity: Entity): void {
 // =============================================================================
 
 export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
-    const store = requireStore();
+    const store = await waitForStore();
     const id = crypto.randomUUID();
     const now = Date.now();
     const order = await getNextNoteOrder(note.folderId);
@@ -143,36 +199,61 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
         order,
         createdAt: now,
         updatedAt: now,
+        version: now,
     } as Note;
 
-    await store.upsertNote(GoKittStoreService.fromDexieNote(fullNote));
-    warmDexieNote(fullNote);
+    await store.upsertNote(PhoenixStoreService.fromDexieNote(fullNote));
+    warmDexieNote({ ...fullNote, hasBody: true });
+    await refreshNoteStructureProjection({ ...fullNote, hasBody: true });
+    await syncNoteEntityIndex({ ...fullNote, hasBody: true });
+    void scheduleLoadedNoteEntityOccurrenceRebuild();
     return id;
 }
 
-export async function updateNote(id: string, updates: Partial<Note>): Promise<void> {
+export async function updateNote(id: string, updates: Partial<Note>): Promise<Note | undefined> {
     const store = await waitForStore();
     const existing = await store.getNote(id);
     if (!existing) {
         console.warn(`[Operations] Note ${id} not found`);
-        return;
+        return undefined;
     }
 
-    const merged = { ...existing, ...updates, updatedAt: Date.now() };
+    const now = Date.now();
+    const merged = { ...existing, ...updates, updatedAt: now, version: now };
     await store.upsertNote(merged as StoreNote);
-    warmDexieNote(storeNoteToNote(merged as StoreNote));
+    const note = { ...storeNoteToNote(merged as StoreNote), hasBody: true };
+    warmDexieNote(note);
 
-    if (updates.content !== undefined) {
-        syncNoteToDocStore(id, updates.content, merged.updatedAt);
+    if (updates.content !== undefined || updates.markdownContent !== undefined || updates.title !== undefined) {
+        syncNoteToDocStore(note);
     }
+    if (
+        updates.content !== undefined ||
+        updates.markdownContent !== undefined ||
+        updates.folderId !== undefined ||
+        updates.narrativeId !== undefined
+    ) {
+        await refreshNoteStructureProjection(note);
+        await syncNoteEntityIndex(note);
+        schedulePriorGlobalContextRefresh(existing);
+    }
+    if (updates.title !== undefined) {
+        void scheduleLoadedNoteEntityOccurrenceRebuild();
+    }
+
+    return note;
 }
 
-function syncNoteToDocStore(id: string, content: any, version: number): void {
+function syncNoteToDocStore(note: Note): void {
     import('../api/pretty-text-api').then((api) => {
-        const goKitt = (api as any).getGoKittService?.();
-        if (goKitt) {
-            const text = typeof content === 'string' ? content : JSON.stringify(content);
-            goKitt.upsertNote(id, text, version).catch((e: any) =>
+        const phoenixUiApi = (api as any).getPhoenixUiApi?.();
+        if (phoenixUiApi) {
+            const text = note.markdownContent || (typeof note.content === 'string' ? note.content : JSON.stringify(note.content));
+            phoenixUiApi.upsertNote(note.id, text, note.updatedAt, {
+                title: note.title,
+                narrativeId: note.narrativeId,
+                folderPath: note.folderId,
+            }).catch((e: any) =>
                 console.warn('[Operations] DocStore sync failed:', e)
             );
         }
@@ -180,39 +261,85 @@ function syncNoteToDocStore(id: string, content: any, version: number): void {
 }
 
 export async function deleteNote(id: string): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
+    const existing = await store.getNoteHeader(id);
     await store.deleteNote(id);
     db.notes.delete(id).catch(() => { });
+    await clearNoteStructureProjection(id);
+    await deleteNoteEntityOccurrences(id);
+    void scheduleLoadedNoteEntityOccurrenceRebuild();
+    schedulePriorGlobalContextRefresh(existing || undefined);
 }
 
 export async function getNote(id: string): Promise<Note | undefined> {
     const store = getBridge();
     if (!store) return undefined;
     const note = await store.getNote(id);
-    return note ? storeNoteToNote(note) : undefined;
+    return note ? { ...storeNoteToNote(note), hasBody: true } : undefined;
+}
+
+export async function getNoteHeader(id: string): Promise<Note | undefined> {
+    const store = getBridge();
+    if (!store) return undefined;
+    const note = await store.getNoteHeader(id);
+    return note ? { ...storeNoteHeaderToNote(note), hasBody: false } : undefined;
 }
 
 export async function getAllNotes(): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const notes = await store.listNotes();
-    return notes.map(storeNoteToNote);
+    const notes = await store.listNoteHeaders();
+    return notes.map(storeNoteHeaderToNote);
 }
 
 export async function getNotesByFolder(folderId: string): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const notes = await store.listNotes(folderId);
-    return notes.map(storeNoteToNote);
+    const notes = await store.listNoteHeaders(folderId);
+    return notes.map(storeNoteHeaderToNote);
 }
 
 export async function getNotesByNarrative(narrativeId: string): Promise<Note[]> {
     const store = getBridge();
     if (!store) return [];
-    const allNotes = await store.listNotes();
+    const allNotes = await store.listNoteHeaders();
     return allNotes
         .filter(n => n.narrativeId === narrativeId)
-        .map(storeNoteToNote);
+        .map(storeNoteHeaderToNote);
+}
+
+export async function getNotesByIds(ids: string[]): Promise<Note[]> {
+    const store = getBridge();
+    if (!store || ids.length === 0) return [];
+    const notes = await store.getNotesByIds(ids);
+    return notes.map((note) => ({ ...storeNoteToNote(note), hasBody: true }));
+}
+
+export async function ensureNoteBodyLoaded(id: string): Promise<Note | undefined> {
+    const cached = await db.notes.get(id);
+    if (cached?.hasBody) {
+        return cached as Note;
+    }
+
+    const note = await getNote(id);
+    if (!note) {
+        return undefined;
+    }
+
+    await db.notes.put({ ...note, hasBody: true } as any);
+    return note;
+}
+
+export async function trimNoteBody(id: string): Promise<void> {
+    const note = await db.notes.get(id);
+    if (!note?.hasBody || note.entityKind === 'EVENT') {
+        return;
+    }
+    await db.notes.update(id, {
+        content: '',
+        markdownContent: '',
+        hasBody: false,
+    } as any);
 }
 
 function storeNoteToNote(sn: StoreNote): Note {
@@ -231,8 +358,33 @@ function storeNoteToNote(sn: StoreNote): Note {
         ownerId: sn.ownerId,
         createdAt: sn.createdAt,
         updatedAt: sn.updatedAt,
+        version: sn.version,
         narrativeId: sn.narrativeId,
         order: sn.order,
+        hasBody: true,
+    };
+}
+
+function storeNoteHeaderToNote(sn: StoreNoteHeader): Note {
+    return {
+        id: sn.id,
+        worldId: sn.worldId,
+        title: sn.title,
+        content: '',
+        markdownContent: '',
+        folderId: sn.folderId,
+        entityKind: sn.entityKind,
+        entitySubtype: sn.entitySubtype,
+        isEntity: sn.isEntity,
+        isPinned: sn.isPinned,
+        favorite: sn.favorite,
+        ownerId: sn.ownerId,
+        createdAt: sn.createdAt,
+        updatedAt: sn.updatedAt,
+        version: sn.version,
+        narrativeId: sn.narrativeId,
+        order: sn.order,
+        hasBody: false,
     };
 }
 
@@ -241,7 +393,7 @@ function storeNoteToNote(sn: StoreNote): Note {
 // =============================================================================
 
 export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'order'>): Promise<string> {
-    const store = requireStore();
+    const store = await waitForStore();
     const id = crypto.randomUUID();
     const now = Date.now();
     const order = await getNextFolderOrder(folder.parentId);
@@ -254,13 +406,14 @@ export async function createFolder(folder: Omit<Folder, 'id' | 'createdAt' | 'up
         updatedAt: now,
     } as Folder;
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(fullFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(fullFolder));
     warmDexieFolder(fullFolder);
+    scheduleGlobalContextRefreshFor(fullFolder);
     return id;
 }
 
 export async function updateFolder(id: string, updates: Partial<Folder>): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
     const existing = await store.getFolder(id);
     if (!existing) {
         console.warn(`[Operations] Folder ${id} not found`);
@@ -270,12 +423,16 @@ export async function updateFolder(id: string, updates: Partial<Folder>): Promis
     const merged = { ...existing, ...updates, updatedAt: Date.now() };
     await store.upsertFolder(merged as StoreFolder);
     warmDexieFolder(storeFolderToFolder(merged as StoreFolder));
+    scheduleGlobalContextRefreshFor(storeFolderToFolder(merged as StoreFolder));
+    schedulePriorGlobalContextRefresh(existing);
 }
 
 export async function deleteFolder(id: string): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
+    const existing = await store.getFolder(id);
     await store.deleteFolder(id);
     db.folders.delete(id).catch(() => { });
+    schedulePriorGlobalContextRefresh(existing || undefined);
 }
 
 export async function getFolder(id: string): Promise<Folder | undefined> {
@@ -340,7 +497,7 @@ export async function upsertEntity(entity: Entity): Promise<void> {
         console.warn('[Operations] Store not ready for entity upsert');
         return;
     }
-    await store.upsertEntity(GoKittStoreService.fromDexieEntity(entity));
+    await store.upsertEntity(PhoenixStoreService.fromDexieEntity(entity));
     warmDexieEntity(entity);
 }
 
@@ -439,8 +596,18 @@ async function rebalanceNoteOrders(folderId: string): Promise<void> {
     const notes = await getNotesByFolder(folderId);
     notes.sort((a, b) => a.order - b.order);
     for (let i = 0; i < notes.length; i++) {
-        const updated = { ...notes[i], order: (i + 1) * DEFAULT_ORDER_STEP };
-        await store.upsertNote(GoKittStoreService.fromDexieNote(updated));
+        const existing = await store.getNote(notes[i].id);
+        if (!existing) {
+            continue;
+        }
+        const updated = { ...existing, order: (i + 1) * DEFAULT_ORDER_STEP };
+        await store.upsertNote(updated);
+        warmDexieNote({
+            ...storeNoteToNote(updated),
+            hasBody: notes[i].hasBody || false,
+            content: notes[i].hasBody ? updated.content : '',
+            markdownContent: notes[i].hasBody ? updated.markdownContent : '',
+        });
     }
     console.log(`[Operations] Rebalanced ${notes.length} note orders in folder ${folderId || 'root'}`);
 }
@@ -452,13 +619,13 @@ async function rebalanceFolderOrders(parentId: string): Promise<void> {
     folders.sort((a, b) => a.order - b.order);
     for (let i = 0; i < folders.length; i++) {
         const updated = { ...folders[i], order: (i + 1) * DEFAULT_ORDER_STEP };
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updated));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updated));
     }
     console.log(`[Operations] Rebalanced ${folders.length} folder orders in parent ${parentId || 'root'}`);
 }
 
 export async function reorderNote(noteId: string, targetIndex: number): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
     const note = await store.getNote(noteId);
     if (!note) throw new Error(`Note ${noteId} not found`);
 
@@ -497,7 +664,7 @@ export async function reorderFolder(folderId: string, targetIndex: number): Prom
 
     const updatedFolder = { ...folder, order: newOrder, updatedAt: Date.now() };
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedFolder));
     warmDexieFolder(updatedFolder);
 
     const allOrders = [...filteredSiblings.map(f => f.order), newOrder].sort((a, b) => a - b);
@@ -508,7 +675,7 @@ export async function reorderFolder(folderId: string, targetIndex: number): Prom
 }
 
 export async function moveNoteToFolder(noteId: string, targetFolderId: string, targetIndex: number): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
     const note = await store.getNote(noteId);
     if (!note) throw new Error(`Note ${noteId} not found`);
 
@@ -534,6 +701,9 @@ export async function moveNoteToFolder(noteId: string, targetFolderId: string, t
 
     await store.upsertNote(movedNote);
     warmDexieNote(storeNoteToNote(movedNote));
+    await refreshNoteStructureProjection(storeNoteToNote(movedNote));
+    await syncNoteEntityIndex(storeNoteToNote(movedNote));
+    schedulePriorGlobalContextRefresh(note);
 
     const allOrders = [...siblings.map(n => n.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
@@ -545,12 +715,49 @@ export async function moveNoteToFolder(noteId: string, targetFolderId: string, t
     console.log(`[Operations] Moved note ${noteId} to folder ${targetFolderId || 'root'} with narrative ${targetNarrativeId || 'global'}`);
 }
 
+async function refreshNoteStructureProjection(note: Note): Promise<void> {
+    try {
+        await replaceNoteStructureProjection(note);
+        scheduleGlobalContextRefreshFor(note);
+    } catch (error) {
+        console.warn('[Operations] Note structure projection failed:', error);
+    }
+}
+
+async function clearNoteStructureProjection(noteId: string): Promise<void> {
+    try {
+        await deleteNoteStructureProjection(noteId);
+    } catch (error) {
+        console.warn('[Operations] Note structure projection cleanup failed:', error);
+    }
+}
+
+async function syncNoteEntityIndex(note: Note): Promise<void> {
+    try {
+        await syncNoteEntityOccurrences(note as any);
+    } catch (error) {
+        console.warn('[Operations] Entity occurrence projection failed:', error);
+    }
+}
+
+function scheduleGlobalContextRefreshFor(scope: { worldId?: string; narrativeId?: string | null }): void {
+    if (isGlobalContextScope(scope)) {
+        scheduleGlobalContextIslandRefresh(scope.worldId || '');
+    }
+}
+
+function schedulePriorGlobalContextRefresh(scope?: { worldId?: string; narrativeId?: string | null }): void {
+    if (scope && isGlobalContextScope(scope)) {
+        scheduleGlobalContextIslandRefresh(scope.worldId || '');
+    }
+}
+
 export async function moveFolderToParent(folderId: string, targetParentId: string, targetIndex: number): Promise<void> {
     const folder = await getFolder(folderId);
     if (!folder) throw new Error(`Folder ${folderId} not found`);
 
     const sourceParentId = folder.parentId || '';
-    const store = requireStore();
+    const store = await waitForStore();
     const siblings = await getFolderChildren(targetParentId);
     siblings.sort((a, b) => a.order - b.order);
 
@@ -564,8 +771,10 @@ export async function moveFolderToParent(folderId: string, targetParentId: strin
         updatedAt: Date.now()
     };
 
-    await store.upsertFolder(GoKittStoreService.fromDexieFolder(movedFolder));
+    await store.upsertFolder(PhoenixStoreService.fromDexieFolder(movedFolder));
     warmDexieFolder(movedFolder);
+    scheduleGlobalContextRefreshFor(movedFolder);
+    schedulePriorGlobalContextRefresh(folder);
 
     const allOrders = [...siblings.map(f => f.order), newOrder].sort((a, b) => a - b);
     if (needsRebalancing(allOrders)) {
@@ -578,7 +787,7 @@ export async function moveFolderToParent(folderId: string, targetParentId: strin
 }
 
 export async function swapItems(sourceId: string, targetId: string, type: 'folder' | 'note'): Promise<void> {
-    const store = requireStore();
+    const store = await waitForStore();
 
     if (type === 'folder') {
         const source = await getFolder(sourceId);
@@ -587,8 +796,8 @@ export async function swapItems(sourceId: string, targetId: string, type: 'folde
 
         const updatedSource = { ...source, order: target.order, updatedAt: Date.now() };
         const updatedTarget = { ...target, order: source.order, updatedAt: Date.now() };
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedSource));
-        await store.upsertFolder(GoKittStoreService.fromDexieFolder(updatedTarget));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedSource));
+        await store.upsertFolder(PhoenixStoreService.fromDexieFolder(updatedTarget));
         warmDexieFolder(updatedSource);
         warmDexieFolder(updatedTarget);
     } else {

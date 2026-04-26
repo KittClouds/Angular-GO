@@ -1,10 +1,10 @@
 import { Injectable, signal } from '@angular/core';
 
-import { GoKittService, type KnowledgeGraphData } from './gokitt.service';
+import { PhoenixUiApiService, type KnowledgeGraphData } from './phoenix-ui-api.service';
 
 /**
- * High-level service for interacting with the GoKitt knowledge graph.
- * The graphstore is SQLite-backed and used as the canonical visualization source.
+ * High-level service for interacting with the Phoenix knowledge graph.
+ * The runtime graph view is the canonical visualization source.
  */
 @Injectable({
     providedIn: 'root'
@@ -13,9 +13,9 @@ export class KnowledgeService {
     readonly graphStats = signal<{ nodes: number; edges: number }>({ nodes: 0, edges: 0 });
     readonly isReady = signal<boolean>(false);
 
-    constructor(private gokitt: GoKittService) {
-        this.gokitt.onReady(() => {
-            console.log('[KnowledgeService] GoKitt ready (waiting for explicit init)');
+    constructor(private phoenixUiApi: PhoenixUiApiService) {
+        this.phoenixUiApi.onReady(() => {
+            console.log('[KnowledgeService] Phoenix ready (waiting for explicit init)');
         });
     }
 
@@ -27,11 +27,11 @@ export class KnowledgeService {
         if (this.isReady()) return;
 
         try {
-            const initRes = await this.gokitt.knowledgeInit();
+            const initRes = await this.phoenixUiApi.knowledgeInit();
             if (!initRes.success) throw new Error(initRes.error || 'knowledgeInit returned success=false');
 
-            console.log('[KnowledgeService] Loading graph from SQLite...');
-            const loadRes = await this.gokitt.knowledgeLoad();
+            console.log('[KnowledgeService] Loading runtime graph view...');
+            const loadRes = await this.phoenixUiApi.knowledgeLoad();
             if (!loadRes.success) throw new Error(loadRes.error || 'knowledgeLoad returned success=false');
 
             this.isReady.set(true);
@@ -53,7 +53,7 @@ export class KnowledgeService {
 
     async sync(): Promise<{ success: boolean; message?: string; error?: string }> {
         await this.ensureReady();
-        const result = await this.gokitt.knowledgeSync();
+        const result = await this.phoenixUiApi.knowledgeSync();
         if (result.success) {
             await this.refreshStats();
         }
@@ -62,55 +62,55 @@ export class KnowledgeService {
 
     async save(): Promise<void> {
         try {
-            const res = await this.gokitt.knowledgeSave();
+            const res = await this.phoenixUiApi.knowledgeSave();
             if (!res.success) throw new Error(res.error);
-            console.log('[KnowledgeService] Graph saved to SQLite.');
+            console.log('[KnowledgeService] Graph state is runtime-persisted.');
         } catch (e) {
             console.error('[KnowledgeService] Save failed:', e);
         }
     }
 
     async addNode(id: string, kind: string, label?: string, props?: Record<string, any>): Promise<void> {
-        await this.gokitt.knowledgeAddNode({ id, kind, label, props });
+        await this.phoenixUiApi.knowledgeAddNode({ id, kind, label, props });
     }
 
     async addEdge(source: string, target: string, relation: string, weight = 1.0, props?: Record<string, any>): Promise<void> {
-        await this.gokitt.knowledgeAddEdge({ source, target, relation, weight, props });
+        await this.phoenixUiApi.knowledgeAddEdge({ source, target, relation, weight, props });
     }
 
     async getNode(id: string): Promise<any> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetNode(id);
+        return this.phoenixUiApi.knowledgeGetNode(id);
     }
 
     async getChildren(id: string, relation?: string): Promise<any[]> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetChildren(id, relation);
+        return this.phoenixUiApi.knowledgeGetChildren(id, relation);
     }
 
     async getParents(id: string, relation?: string): Promise<any[]> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetParents(id, relation);
+        return this.phoenixUiApi.knowledgeGetParents(id, relation);
     }
 
     async getDescendants(id: string, relation?: string, maxDepth = -1): Promise<any[]> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetDescendants(id, relation, maxDepth);
+        return this.phoenixUiApi.knowledgeGetDescendants(id, relation, maxDepth);
     }
 
     async getAncestors(id: string, relation?: string, maxDepth = -1): Promise<any[]> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetAncestors(id, relation, maxDepth);
+        return this.phoenixUiApi.knowledgeGetAncestors(id, relation, maxDepth);
     }
 
     async getNeighborhood(id: string): Promise<any[]> {
         await this.ensureReady();
-        return this.gokitt.knowledgeGetNeighborhood(id);
+        return this.phoenixUiApi.knowledgeGetNeighborhood(id);
     }
 
     async getGraph(): Promise<KnowledgeGraphData> {
         await this.ensureReady();
-        const graph = await this.gokitt.knowledgeGetGraph();
+        const graph = await this.phoenixUiApi.knowledgeGetGraph();
         this.graphStats.set({
             nodes: Object.keys(graph.nodes || {}).length,
             edges: graph.edges?.length || 0,
@@ -119,7 +119,7 @@ export class KnowledgeService {
     }
 
     private async refreshStats(): Promise<void> {
-        const graph = await this.gokitt.knowledgeGetGraph();
+        const graph = await this.phoenixUiApi.knowledgeGetGraph();
         this.graphStats.set({
             nodes: Object.keys(graph.nodes || {}).length,
             edges: graph.edges?.length || 0,

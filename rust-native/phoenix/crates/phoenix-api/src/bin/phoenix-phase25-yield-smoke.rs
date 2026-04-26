@@ -1,0 +1,133 @@
+use std::env;
+use std::path::PathBuf;
+
+use phoenix_api::PhoenixPipelineApi;
+use phoenix_store_overgraph::PhoenixOvergraphStore;
+use serde::Serialize;
+
+#[derive(Clone, Debug)]
+struct Config {
+    store_path: PathBuf,
+    created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidecarCounts {
+    states: usize,
+    events: usize,
+    claims: usize,
+    gaps: usize,
+    conflicts: usize,
+    cards: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YieldSmokeReport {
+    store_path: String,
+    created_at: i64,
+    event_identity: phoenix_api::EventIdentityRunReport,
+    temporal: phoenix_api::TemporalRunReport,
+    causal: phoenix_api::CausalRunReport,
+    state_schema: phoenix_api::StateSchemaRunReport,
+    memory_scope_count: usize,
+    memory_sidecar: SidecarCounts,
+    graph: phoenix_api::GraphRunReport,
+}
+
+fn main() {
+    match run(parse_args(env::args().skip(1).collect())) {
+        Ok(report) => println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("serialize phase2.5 report")
+        ),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run(config: Config) -> Result<YieldSmokeReport, String> {
+    if config.store_path.as_os_str().is_empty() {
+        return Err("missing --store-path".to_owned());
+    }
+
+    let store =
+        PhoenixOvergraphStore::open(&config.store_path).map_err(|error| error.to_string())?;
+    let api = PhoenixPipelineApi::new(store);
+
+    let sidecars = api
+        .run_sidecar_continuity_scope(None, config.created_at)
+        .map_err(|error| error.to_string())?;
+    let phoenix_api::SidecarContinuityRunReport {
+        event_identity,
+        temporal,
+        causal,
+        late_sidecars,
+        graph,
+        scheduler: _,
+    } = sidecars;
+    let phoenix_api::LateSidecarRunReport {
+        state_schema,
+        memory_scope_count,
+        memory_state_count,
+        memory_event_count,
+        memory_claim_count,
+        memory_gap_count,
+        memory_conflict_count,
+        memory_card_count,
+        scheduler: _,
+    } = late_sidecars;
+
+    let report = YieldSmokeReport {
+        store_path: config.store_path.display().to_string(),
+        created_at: config.created_at,
+        event_identity,
+        temporal,
+        causal,
+        state_schema,
+        memory_scope_count,
+        memory_sidecar: SidecarCounts {
+            states: memory_state_count,
+            events: memory_event_count,
+            claims: memory_claim_count,
+            gaps: memory_gap_count,
+            conflicts: memory_conflict_count,
+            cards: memory_card_count,
+        },
+        graph,
+    };
+    api.into_store()
+        .publish_and_close()
+        .map_err(|error| error.to_string())?;
+    Ok(report)
+}
+
+fn parse_args(args: Vec<String>) -> Config {
+    let mut config = Config {
+        store_path: PathBuf::new(),
+        created_at: now_ms(),
+    };
+    if let Some(path) = string_arg(&args, "--store-path") {
+        config.store_path = PathBuf::from(path);
+    }
+    if let Some(created_at) = string_arg(&args, "--created-at").and_then(|value| value.parse().ok())
+    {
+        config.created_at = created_at;
+    }
+    config
+}
+
+fn string_arg(args: &[String], flag: &str) -> Option<String> {
+    args.windows(2)
+        .find_map(|window| (window[0] == flag).then(|| window[1].clone()))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}

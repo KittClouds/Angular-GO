@@ -12,7 +12,8 @@ import {
     Bold, Italic, Underline, Strikethrough, Code, Link2,
     AlignLeft, AlignCenter, AlignRight, AlignJustify,
     Sparkles, Type, Highlighter, ALargeSmall,
-    Indent, Outdent, Tag, User, MapPin, Users, Shield, Calendar, Lightbulb, Plus
+    Indent, Outdent, Tag, User, MapPin, Users, Shield, Calendar, Lightbulb, Plus,
+    Megaphone,
 } from 'lucide-angular';
 
 import { ToolbarDropdownComponent, DropdownItem } from './toolbar-dropdown.component';
@@ -27,9 +28,15 @@ import { setTextAlignCommand, indentCommand, outdentCommand } from '../nodes';
 
 // Registry for entity creation
 import { smartGraphRegistry } from '../../../../lib/registry';
+import { recordManualEntityTag } from '../../../../lib/entity-learning/entity-feedback';
 import { ChatContextClipStore } from '../../../../lib/store/chat-context-clip.store';
 import { FONT_FAMILIES, FONT_SIZES } from '../../../../lib/constants/fonts';
 import type { EntityKind } from '../../../../lib/Scanner/types';
+import { RightSidebarService } from '../../../../lib/services/right-sidebar.service';
+import { AiSidebarModeService } from '../../../../lib/services/ai-sidebar-mode.service';
+import { PhoenixChatService } from '../../../../lib/services/phoenix-chat.service';
+import { EditorAgentWorkspaceService } from '../../../../lib/services/editor-agent-workspace.service';
+import { TtsService } from '../../../../services/tts.service';
 
 @Component({
     selector: 'app-editor-toolbar',
@@ -45,6 +52,15 @@ import type { EntityKind } from '../../../../lib/Scanner/types';
                     <lucide-icon [img]="SparklesIcon" class="w-4 h-4 text-teal-500"></lucide-icon>
                 </div>
             </app-toolbar-dropdown>
+            <button
+                type="button"
+                class="btn-icon text-teal-500"
+                title="Read Selection"
+                (mousedown)="$event.preventDefault()"
+                (click)="readSelection()"
+            >
+                <lucide-icon [img]="MegaphoneIcon" class="w-4 h-4"></lucide-icon>
+            </button>
 
             <div class="w-px h-5 bg-toolbar-border mx-1"></div>
 
@@ -165,6 +181,7 @@ export class EditorToolbarComponent {
     readonly TypeIcon = Type;
     readonly SizeIcon = ALargeSmall;
     readonly TagIcon = Tag;
+    readonly MegaphoneIcon = Megaphone;
 
     // Schemas for checking active state
     strongSchema = strongSchema;
@@ -221,7 +238,15 @@ export class EditorToolbarComponent {
         { id: 'CUSTOM', label: 'Custom...', icon: Plus },
     ];
 
-    constructor(private cdr: ChangeDetectorRef, private readonly chatContextClipStore: ChatContextClipStore) { }
+    constructor(
+        private cdr: ChangeDetectorRef,
+        private readonly chatContextClipStore: ChatContextClipStore,
+        private readonly rightSidebar: RightSidebarService,
+        private readonly aiSidebarMode: AiSidebarModeService,
+        private readonly phoenixChat: PhoenixChatService,
+        private readonly workspace: EditorAgentWorkspaceService,
+        private readonly ttsService: TtsService,
+    ) { }
 
     update(state: EditorState) {
         this.editorState = state;
@@ -284,20 +309,17 @@ export class EditorToolbarComponent {
                     to,
                     text: selectedText.trim(),
                 });
+                this.rightSidebar.open();
+                this.rightSidebar.setActivePanel('ai');
+                this.aiSidebarMode.switchToCanvas({
+                    noteId: this.noteId ?? null,
+                    from,
+                    to,
+                    text: selectedText.trim(),
+                    clipId: clip.id,
+                });
                 console.log(`[AI] Added highlighted text to chat context (${clip.id})`);
                 this.hide.emit();
-                return;
-            }
-
-            // Lazily import GoKittService to avoid circular deps
-            const { GoKittService } = await import('../../../../services/gokitt.service');
-            const { inject: inj } = await import('@angular/core');
-            // Grab the singleton from the injector tree
-            let goKitt: InstanceType<typeof GoKittService>;
-            try {
-                goKitt = inj(GoKittService);
-            } catch {
-                alert('Go WASM service not available. Open the AI Chat panel first to initialise it.');
                 return;
             }
 
@@ -308,44 +330,80 @@ export class EditorToolbarComponent {
                 'continue': 'Continue writing from this text in the same style and tone. Only output the continuation, nothing else.',
             };
             const systemPrompt = prompts[item.id] || prompts['improve'];
-
-            // Use Go batch streaming (reuses configured OpenRouter key from goKitt)
-            let result = '';
-            const { GoChatService } = await import('../../../../lib/services/go-chat.service');
-            let goChatSvc: InstanceType<typeof GoChatService>;
-            try {
-                goChatSvc = inj(GoChatService);
-            } catch {
-                alert('Go chat service not available.');
+            const snapshot = this.workspace.getSnapshot();
+            const session = item.id === 'continue'
+                ? this.workspace.beginStreamInsert(to, snapshot?.revision)
+                : this.workspace.beginStreamReplace(from, to, snapshot?.revision);
+            if (!session.ok || !session.sessionId) {
+                alert(`AI Error: ${session.error || 'Unable to start a streamed edit session.'}`);
                 return;
             }
 
-            await goChatSvc.streamChat(
+            let streamedText = '';
+            let streamEditFailed: string | null = null;
+            let sessionClosed = false;
+            const closeFailedSession = (message: string, preservePartial: boolean) => {
+                if (sessionClosed) return;
+                sessionClosed = true;
+                const cancelResult = this.workspace.cancelStreamEdit(session.sessionId!, { preservePartial });
+                if (!cancelResult.ok) {
+                    console.error('[AI] Failed to close streamed edit session:', cancelResult.error);
+                }
+                alert(`AI Error: ${message}`);
+            };
+
+            this.hide.emit();
+            await this.phoenixChat.streamChat(
                 [{ role: 'user', content: selectedText }],
                 {
-                    onChunk: (chunk) => { result += chunk; },
-                    onComplete: (fullResponse) => {
-                        if (item.id === 'continue') {
-                            const tr = state.tr.insertText(fullResponse, to);
-                            view.dispatch(tr);
-                        } else {
-                            const tr = state.tr.replaceWith(from, to, state.schema.text(fullResponse));
-                            view.dispatch(tr);
+                    onChunk: (chunk) => {
+                        if (sessionClosed || streamEditFailed) return;
+                        streamedText += chunk;
+                        const appendResult = this.workspace.appendStreamChunk(session.sessionId!, chunk);
+                        if (!appendResult.ok) {
+                            streamEditFailed = appendResult.error || 'Failed to append streamed edit chunk.';
                         }
+                    },
+                    onComplete: async () => {
+                        if (streamEditFailed) {
+                            closeFailedSession(streamEditFailed, streamedText.length > 0);
+                            return;
+                        }
+                        if (streamedText.length === 0) {
+                            closeFailedSession('The model returned no text.', false);
+                            return;
+                        }
+
+                        const finalResult = await this.workspace.finalizeStreamEdit(session.sessionId!);
+                        if (!finalResult.ok) {
+                            closeFailedSession(finalResult.error || 'Failed to finalize streamed edit.', streamedText.length > 0);
+                            return;
+                        }
+
+                        sessionClosed = true;
                         console.log(`[AI] ${item.id} complete`);
                     },
                     onError: (error) => {
-                        console.error('[AI] Go stream error:', error);
-                        alert(`AI Error: ${error.message}`);
+                        console.error('[AI] Phoenix stream error:', error);
+                        closeFailedSession(error.message, streamedText.length > 0);
                     },
                 },
                 systemPrompt
             );
-
-            this.hide.emit();
         } catch (e) {
             console.error('[AI] Action failed:', e);
         }
+    }
+
+    readSelection(): void {
+        const selectedText = this.getSelectedText();
+        if (!selectedText) {
+            console.log('[TTS] No text selected');
+            return;
+        }
+
+        this.ttsService.speakOnce(selectedText);
+        this.hide.emit();
     }
 
     onAlignAction(item: DropdownItem) {
@@ -366,6 +424,27 @@ export class EditorToolbarComponent {
 
     setTextColor(color: string | null) {
         this.exec(setTextColorCommand, color);
+    }
+
+    private getSelectedText(): string {
+        if (!this.ctx) return '';
+
+        try {
+            const view = this.ctx.get(editorViewCtx);
+            const { selection, doc } = view.state;
+            const { from, to, empty } = selection;
+
+            if (empty) return '';
+
+            return doc
+                .textBetween(from, to, '\n', '\n')
+                .replace(/[ \t\f\v]+/g, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        } catch (error) {
+            console.error('[TTS] Failed to read selected text:', error);
+            return '';
+        }
     }
 
     /**
@@ -407,12 +486,21 @@ export class EditorToolbarComponent {
                 return;
             }
 
-            // Create the entity mark with attributes
+            const noteIdToUse = this.noteId || 'unknown-note';
+            const registration = smartGraphRegistry.registerEntity(
+                selectedText.trim(),
+                entityType as EntityKind,
+                noteIdToUse,
+                { source: 'user' }
+            );
+            const entity = registration.entity;
+
+            // Create the entity mark with canonical registry attributes.
             const entityMark = entityMarkType.create({
                 type: 'entity',
-                kind: entityType,
-                label: selectedText.trim(),
-                id: '', // Will be assigned by registry
+                kind: entity.kind,
+                label: entity.label,
+                id: entity.id,
                 mode: 'vivid',
             });
 
@@ -420,14 +508,15 @@ export class EditorToolbarComponent {
             const tr = state.tr.addMark(from, to, entityMark);
             view.dispatch(tr);
 
-            // Register the entity in the registry
-            const noteIdToUse = this.noteId || 'unknown-note';
-            smartGraphRegistry.registerEntity(
-                selectedText.trim(),
-                entityType as EntityKind,
-                noteIdToUse,
-                { source: 'user' }
-            );
+            recordManualEntityTag({
+                entityId: entity.id,
+                label: entity.label,
+                kind: entity.kind,
+                surface: selectedText.trim(),
+                noteId: noteIdToUse,
+            }).catch(error => {
+                console.warn('[EntityTag] Failed to record manual feedback:', error);
+            });
 
             console.log(`[EntityTag] Tagged "${selectedText}" as ${entityType}`);
 

@@ -1,7 +1,7 @@
 // src/app/lib/store/note-editor.store.ts
 // Single source of truth for the currently active note
 // Uses signals + Dexie liveQuery for reactive state
-// INCLUDES: Dexie settings persistence for active note and editor position
+// INCLUDES: Dexie settings persistence for active note and lightweight editor session
 
 import { Injectable, signal, computed, effect, Inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
@@ -9,28 +9,30 @@ import { Observable, Subject, from, of, switchMap, debounceTime, distinctUntilCh
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { db, Note } from '../dexie/db';
-import { getSetting, setSetting, removeSetting } from '../dexie/settings.service';
+import { setSetting, removeSetting } from '../dexie/settings.service';
 import * as ops from '../operations';
-
-const ACTIVE_NOTE_KEY = 'kittclouds-active-note';
-const EDITOR_POSITION_KEY = 'kittclouds-editor-position';
-
-interface EditorPosition {
-    noteId: string;
-    scrollTop: number;
-    cursorFrom: number;
-    cursorTo: number;
-}
+import {
+    type EditorSessionState,
+    type LegacyEditorPosition,
+    type StoredEditorPosition,
+    EDITOR_SESSION_KEY,
+    LEGACY_ACTIVE_NOTE_KEY,
+    LEGACY_EDITOR_POSITION_KEY,
+    OPEN_TABS_STORAGE_KEY,
+    createSessionPositionFromLegacy,
+    getFallbackActiveNoteIdFromTabs,
+    normalizeEditorSessionState,
+    normalizeLegacyEditorPosition,
+    shouldRestoreStoredPosition,
+} from './note-editor-session';
 
 @Injectable({
     providedIn: 'root'
 })
 export class NoteEditorStore {
-    private isBrowser: boolean;
-
-    // ─────────────────────────────────────────────────────────────
-    // State (Signals)
-    // ─────────────────────────────────────────────────────────────
+    private readonly isBrowser: boolean;
+    private editorSessionState: EditorSessionState = { activeNoteId: null };
+    private legacyKeysMigrated = false;
 
     /** ID of the currently open note (null = no note open) */
     readonly activeNoteId = signal<string | null>(null);
@@ -48,18 +50,12 @@ export class NoteEditorStore {
     private saveSubject = new Subject<{ noteId: string; json: object; markdown: string }>();
 
     /** Cached editor position for restoration */
-    private pendingPosition: EditorPosition | null = null;
-
-
+    private pendingPosition: StoredEditorPosition | null = null;
 
     /** Flag to prevent clearing storage during initial restoration */
-    private isRestoring = true; // Default to true to block effects until restoration is complete
+    private isRestoring = true;
 
-    // ─────────────────────────────────────────────────────────────
-    // Derived State (Observables from liveQuery)
-    // ─────────────────────────────────────────────────────────────
-
-    /** 
+    /**
      * Reactive stream of the active note data.
      * Automatically updates when:
      * - activeNoteId changes
@@ -76,10 +72,6 @@ export class NoteEditorStore {
     /** Signal-based accessor for the current note (for signal consumers like AnalyticsPanel) */
     readonly currentNote = toSignal(this.activeNote$, { initialValue: undefined });
 
-    // ─────────────────────────────────────────────────────────────
-    // Constructor: Setup debounced save pipeline + persistence
-    // ─────────────────────────────────────────────────────────────
-
     constructor(@Inject(PLATFORM_ID) platformId: Object) {
         this.isBrowser = isPlatformBrowser(platformId);
         console.log('[NoteEditorStore] Constructor called');
@@ -87,7 +79,6 @@ export class NoteEditorStore {
         // NOTE: restoreActiveNote() is NOT called here.
         // It must be called AFTER Dexie hydration completes (by app.component).
 
-        // Debounce saves by 300ms to avoid hammering IndexedDB
         this.saveSubject.pipe(
             debounceTime(300)
         ).subscribe(async ({ noteId, json, markdown }) => {
@@ -96,35 +87,54 @@ export class NoteEditorStore {
                 return;
             }
             try {
-                await ops.updateNote(noteId, {
+                const savedNote = await ops.updateNote(noteId, {
                     content: JSON.stringify(json),
                     markdownContent: markdown,
                 });
+                this.refreshStoredPositionMetadata(savedNote);
                 console.log(`[NoteEditorStore] Saved note ${noteId}`);
             } catch (e) {
                 console.error('[NoteEditorStore] Failed to save note:', e);
             }
         });
 
-        // Persist active note ID whenever it changes
         effect(() => {
             const noteId = this.activeNoteId();
             if (noteId === null && this.isRestoring) {
-                console.log('[NoteEditorStore] Skipping persistence wipe during restoration');
+                console.log('[NoteEditorStore] Skipping editor session update during restoration');
                 return;
             }
-            this.persistActiveNote(noteId);
+
+            this.editorSessionState = this.withActiveNote(noteId);
+            this.persistEditorSession();
+        });
+
+        effect(() => {
+            const note = this.currentNote();
+            const position = this.editorSessionState.position;
+            if (!note || !position || position.noteId !== note.id) {
+                return;
+            }
+
+            if (position.noteVersion === note.version && position.noteUpdatedAt === note.updatedAt) {
+                return;
+            }
+
+            this.editorSessionState = {
+                activeNoteId: this.editorSessionState.activeNoteId,
+                position: {
+                    ...position,
+                    noteVersion: note.version,
+                    noteUpdatedAt: note.updatedAt,
+                },
+            };
+            this.persistEditorSession();
         });
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Persistence Methods
-    // ─────────────────────────────────────────────────────────────
-
     /**
      * Restore the previously-active note from Dexie settings.
-     * MUST be called AFTER Dexie hydration from SQLite is complete.
-     * Verifies note existence against Go SQLite (the truth), not Dexie.
+     * MUST be called AFTER Dexie hydration from Phoenix is complete.
      */
     async restoreActiveNote(): Promise<void> {
         if (!this.isBrowser) return;
@@ -132,29 +142,31 @@ export class NoteEditorStore {
         console.log('[NoteEditorStore] restoreActiveNote: checking settings...');
 
         try {
-            const setting = await db.settings.get(ACTIVE_NOTE_KEY);
-            const storedNoteId = setting?.value as string | undefined;
-            console.log(`[NoteEditorStore] restoreActiveNote: stored ID = "${storedNoteId}"`);
+            const resolved = await this.loadInitialEditorSession();
+            this.editorSessionState = resolved.session ?? { activeNoteId: null };
 
-            if (storedNoteId) {
-                // Restore editor position
-                const posSetting = await db.settings.get(EDITOR_POSITION_KEY);
-                const position = posSetting?.value as EditorPosition | undefined;
-                if (position && position.noteId === storedNoteId) {
-                    this.pendingPosition = position;
-                }
+            const targetNoteId = resolved.session?.activeNoteId ?? resolved.fallbackNoteId;
+            console.log(`[NoteEditorStore] restoreActiveNote: target ID = "${targetNoteId}"`);
 
-                // Verify note exists via Go SQLite (NOT Dexie)
-                const note = await ops.getNote(storedNoteId);
-                if (note) {
-                    this.activeNoteId.set(storedNoteId);
-                    console.log(`[NoteEditorStore] Restored active note: ${storedNoteId}`);
-                } else {
-                    console.log(`[NoteEditorStore] Note ${storedNoteId} no longer exists — clearing`);
-                    removeSetting(ACTIVE_NOTE_KEY);
-                    removeSetting(EDITOR_POSITION_KEY);
-                }
+            if (!targetNoteId) {
+                return;
             }
+
+            const noteHeader = await ops.getNoteHeader(targetNoteId);
+            if (!noteHeader) {
+                console.log(`[NoteEditorStore] Note ${targetNoteId} no longer exists; clearing editor session`);
+                this.clearStoredEditorSession();
+                return;
+            }
+
+            const resolvedPosition = this.resolveRestorablePosition(noteHeader, resolved.legacyPosition);
+            this.pendingPosition = resolvedPosition;
+            this.editorSessionState = resolvedPosition
+                ? { activeNoteId: targetNoteId, position: resolvedPosition }
+                : { activeNoteId: targetNoteId };
+
+            await this.activateNote(targetNoteId);
+            console.log(`[NoteEditorStore] Restored active note: ${targetNoteId}`);
         } catch (e) {
             console.error('[NoteEditorStore] Restoration failed:', e);
         } finally {
@@ -163,26 +175,13 @@ export class NoteEditorStore {
         }
     }
 
-    private persistActiveNote(noteId: string | null): void {
-        if (!this.isBrowser) return;
-
-        if (noteId) {
-            console.log(`[NoteEditorStore] Persisting active note ID: ${noteId}`);
-            setSetting(ACTIVE_NOTE_KEY, noteId);
-        } else {
-            console.log(`[NoteEditorStore] Clearing active note ID (noteId is null)`);
-            removeSetting(ACTIVE_NOTE_KEY);
-            removeSetting(EDITOR_POSITION_KEY);
-        }
-    }
-
     /**
      * Get pending position for restoration (consumed once).
      * Called by editor component after loading.
      */
-    getPendingPosition(): EditorPosition | null {
+    getPendingPosition(): StoredEditorPosition | null {
         const position = this.pendingPosition;
-        this.pendingPosition = null; // Consume it
+        this.pendingPosition = null;
         return position;
     }
 
@@ -190,40 +189,48 @@ export class NoteEditorStore {
      * Save current editor position (called by editor on scroll/cursor change).
      * Debounce this call from the editor side.
      */
-    saveEditorPosition(scrollTop: number, cursorFrom: number, cursorTo: number): void {
+    saveEditorPosition(scrollTop: number, anchor: number, head: number, targetNoteId?: string): void {
         if (!this.isBrowser) return;
 
-        const noteId = this.activeNoteId();
+        const noteId = targetNoteId || this.activeNoteId();
         if (!noteId) return;
 
-        const position: EditorPosition = {
-            noteId,
-            scrollTop,
-            cursorFrom,
-            cursorTo
+        const note = this.currentNote();
+        const matchingNote = note?.id === noteId ? note : undefined;
+        const existingPosition = this.editorSessionState.position?.noteId === noteId
+            ? this.editorSessionState.position
+            : undefined;
+
+        this.editorSessionState = {
+            activeNoteId: noteId,
+            position: {
+                noteId,
+                scrollTop,
+                anchor,
+                head,
+                noteVersion: matchingNote?.version ?? existingPosition?.noteVersion,
+                noteUpdatedAt: matchingNote?.updatedAt ?? existingPosition?.noteUpdatedAt ?? Date.now(),
+                savedAt: Date.now(),
+            },
         };
-
-        setSetting(EDITOR_POSITION_KEY, position);
+        this.persistEditorSession();
     }
-
-    // ─────────────────────────────────────────────────────────────
-    // Actions
-    // ─────────────────────────────────────────────────────────────
 
     /**
      * Open a note for editing.
      * This sets the activeNoteId, which triggers activeNote$ to emit.
      */
-    openNote(id: string): void {
-        if (this.activeNoteId() === id) return; // Already open
+    async openNote(id: string): Promise<void> {
+        if (this.activeNoteId() === id) return;
 
         console.log(`[NoteEditorStore] Opening note: ${id}`);
         this.isLoading.set(true);
-        this.pendingPosition = null; // Clear pending position when switching notes
-        this.activeNoteId.set(id);
-
-        // Loading will be cleared when editor receives the content
-        setTimeout(() => this.isLoading.set(false), 100);
+        this.pendingPosition = null;
+        try {
+            await this.activateNote(id);
+        } finally {
+            setTimeout(() => this.isLoading.set(false), 100);
+        }
     }
 
     /**
@@ -231,7 +238,12 @@ export class NoteEditorStore {
      */
     closeNote(): void {
         console.log('[NoteEditorStore] Closing note');
+        const previousNoteId = this.activeNoteId();
+        this.pendingPosition = null;
         this.activeNoteId.set(null);
+        if (previousNoteId) {
+            void this.releaseNoteBody(previousNoteId);
+        }
     }
 
     /**
@@ -255,10 +267,11 @@ export class NoteEditorStore {
 
         this.isSaving.set(true);
         try {
-            await ops.updateNote(noteId, {
+            const savedNote = await ops.updateNote(noteId, {
                 content: JSON.stringify(json),
                 markdownContent: markdown,
             });
+            this.refreshStoredPositionMetadata(savedNote);
             console.log(`[NoteEditorStore] Force-saved note ${noteId}`);
         } finally {
             this.isSaving.set(false);
@@ -286,7 +299,7 @@ export class NoteEditorStore {
             narrativeId,
         });
 
-        this.openNote(id);
+        void this.openNote(id);
         return id;
     }
 
@@ -297,14 +310,132 @@ export class NoteEditorStore {
         const noteId = this.activeNoteId();
         if (!noteId) return;
 
-        await ops.updateNote(noteId, { title });
+        const savedNote = await ops.updateNote(noteId, { title });
+        this.refreshStoredPositionMetadata(savedNote);
         console.log(`[NoteEditorStore] Updated title: ${title}`);
     }
+
     /**
      * Rename any note by ID.
      */
     async renameNote(id: string, title: string): Promise<void> {
-        await ops.updateNote(id, { title });
+        const savedNote = await ops.updateNote(id, { title });
+        this.refreshStoredPositionMetadata(savedNote);
         console.log(`[NoteEditorStore] Renamed note ${id} to "${title}"`);
+    }
+
+    async releaseNoteBody(id: string): Promise<void> {
+        if (this.activeNoteId() === id) {
+            return;
+        }
+        await ops.trimNoteBody(id);
+    }
+
+    private async activateNote(id: string): Promise<void> {
+        const previousNoteId = this.activeNoteId();
+        const note = await ops.ensureNoteBodyLoaded(id);
+        if (!note) {
+            return;
+        }
+        this.activeNoteId.set(id);
+        if (previousNoteId && previousNoteId !== id) {
+            void this.releaseNoteBody(previousNoteId);
+        }
+    }
+
+    private withActiveNote(noteId: string | null): EditorSessionState {
+        const position = this.editorSessionState.position;
+        return {
+            activeNoteId: noteId,
+            position: position && position.noteId === noteId ? position : undefined,
+        };
+    }
+
+    private persistEditorSession(): void {
+        if (!this.isBrowser) return;
+        setSetting(EDITOR_SESSION_KEY, this.editorSessionState);
+        if (!this.legacyKeysMigrated) {
+            removeSetting(LEGACY_ACTIVE_NOTE_KEY);
+            removeSetting(LEGACY_EDITOR_POSITION_KEY);
+            this.legacyKeysMigrated = true;
+        }
+    }
+
+    private clearStoredEditorSession(): void {
+        this.pendingPosition = null;
+        this.editorSessionState = { activeNoteId: null };
+        this.persistEditorSession();
+    }
+
+    private refreshStoredPositionMetadata(note: ops.Note | undefined): void {
+        if (!note) {
+            return;
+        }
+
+        const position = this.editorSessionState.position;
+        if (!position || position.noteId !== note.id) {
+            return;
+        }
+
+        this.editorSessionState = {
+            activeNoteId: this.editorSessionState.activeNoteId,
+            position: {
+                ...position,
+                noteVersion: note.version,
+                noteUpdatedAt: note.updatedAt,
+                savedAt: Date.now(),
+            },
+        };
+        this.persistEditorSession();
+    }
+
+    private resolveRestorablePosition(note: ops.Note, legacyPosition?: LegacyEditorPosition): StoredEditorPosition | null {
+        const sessionPosition = this.editorSessionState.position;
+        if (shouldRestoreStoredPosition(sessionPosition, note)) {
+            return sessionPosition;
+        }
+
+        if (legacyPosition && legacyPosition.noteId === note.id) {
+            return createSessionPositionFromLegacy(legacyPosition, note);
+        }
+
+        return null;
+    }
+
+    private async loadInitialEditorSession(): Promise<{
+        session: EditorSessionState | null;
+        fallbackNoteId: string | null;
+        legacyPosition?: LegacyEditorPosition;
+    }> {
+        const sessionSetting = await db.settings.get(EDITOR_SESSION_KEY);
+        const normalizedSession = normalizeEditorSessionState(sessionSetting?.value);
+        if (normalizedSession) {
+            this.legacyKeysMigrated = true;
+            return {
+                session: normalizedSession,
+                fallbackNoteId: null,
+            };
+        }
+
+        const legacyActiveSetting = await db.settings.get(LEGACY_ACTIVE_NOTE_KEY);
+        const legacyPositionSetting = await db.settings.get(LEGACY_EDITOR_POSITION_KEY);
+        const legacyActiveNoteId = typeof legacyActiveSetting?.value === 'string' && legacyActiveSetting.value.trim().length > 0
+            ? legacyActiveSetting.value
+            : null;
+        const legacyPosition = normalizeLegacyEditorPosition(legacyPositionSetting?.value);
+
+        if (legacyActiveNoteId) {
+            return {
+                session: { activeNoteId: legacyActiveNoteId },
+                fallbackNoteId: null,
+                legacyPosition,
+            };
+        }
+
+        const tabsSetting = await db.settings.get(OPEN_TABS_STORAGE_KEY);
+        return {
+            session: null,
+            fallbackNoteId: getFallbackActiveNoteIdFromTabs(tabsSetting?.value),
+        };
     }
 }

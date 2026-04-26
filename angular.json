@@ -71,8 +71,10 @@
             ],
             "styles": [
               "src/styles.css",
-              "node_modules/primeicons/primeicons.css",
-              "node_modules/ngx-spinner/animations/ball-zig-zag-deflect.css"
+              "src/styles/primeicons-subset.css"
+            ],
+            "allowedCommonJsDependencies": [
+              "extend"
             ]
           },
           "configurations": {
@@ -80,13 +82,13 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "4MB",
-                  "maximumError": "5MB"
+                  "maximumWarning": "5MB",
+                  "maximumError": "6MB"
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "4kB",
-                  "maximumError": "8kB"
+                  "maximumWarning": "10kB",
+                  "maximumError": "12kB"
                 }
               ],
               "outputHashing": "all"

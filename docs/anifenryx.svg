@@ -1,0 +1,865 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048">
+  <defs>
+    <linearGradient id="phoenixGrad" x1="300" y1="230" x2="1740" y2="1780" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7ffdf3"/>
+      <stop offset="16%" stop-color="#36e4df"/>
+      <stop offset="31%" stop-color="#2eb8ff"/>
+      <stop offset="48%" stop-color="#646bff"/>
+      <stop offset="66%" stop-color="#913dff"/>
+      <stop offset="84%" stop-color="#c335ff"/>
+      <stop offset="100%" stop-color="#f560ff"/>
+    </linearGradient>
+
+    <radialGradient id="innerGlow" cx="50%" cy="43%" r="62%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.38"/>
+      <stop offset="22%" stop-color="#b8ffff" stop-opacity="0.26"/>
+      <stop offset="48%" stop-color="#66f5ff" stop-opacity="0.13"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="graphEdge" x1="430" y1="430" x2="1620" y2="1530" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#d7ffff"/>
+      <stop offset="26%" stop-color="#7efff4"/>
+      <stop offset="50%" stop-color="#37e5f4"/>
+      <stop offset="75%" stop-color="#55baff"/>
+      <stop offset="100%" stop-color="#8e84ff"/>
+    </linearGradient>
+
+    <radialGradient id="nodeFill" cx="48%" cy="38%" r="64%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="24%" stop-color="#d8ffff"/>
+      <stop offset="52%" stop-color="#78fff2"/>
+      <stop offset="82%" stop-color="#34b9d7"/>
+      <stop offset="100%" stop-color="#247ba8"/>
+    </radialGradient>
+
+    <filter id="softGlow" x="-12%" y="-12%" width="124%" height="124%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.34 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="edgeGlow" x="-22%" y="-22%" width="144%" height="144%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.46 0" result="g"/>
+      <feMerge>
+        <feMergeNode in="g"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="nodeGlow" x="-45%" y="-45%" width="190%" height="190%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.66 0" result="g"/>
+      <feMerge>
+        <feMergeNode in="g"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+
+
+    <linearGradient id="ringRedGrad" x1="120" y1="980" x2="1920" y2="1320" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7ffdf3"/>
+      <stop offset="18%" stop-color="#36e4df"/>
+      <stop offset="34%" stop-color="#2eb8ff"/>
+      <stop offset="54%" stop-color="#646bff"/>
+      <stop offset="76%" stop-color="#913dff"/>
+      <stop offset="100%" stop-color="#c335ff"/>
+    </linearGradient>
+
+    <linearGradient id="ringRedHot" x1="160" y1="1180" x2="1880" y2="1110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#bafcff" stop-opacity="0.32"/>
+      <stop offset="28%" stop-color="#53ebf2" stop-opacity="0.54"/>
+      <stop offset="52%" stop-color="#56a5ff" stop-opacity="0.66"/>
+      <stop offset="76%" stop-color="#8953ff" stop-opacity="0.58"/>
+      <stop offset="100%" stop-color="#c870ff" stop-opacity="0.34"/>
+    </linearGradient>
+
+    <radialGradient id="redNodeFill" cx="38%" cy="33%" r="68%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="20%" stop-color="#e8ffff"/>
+      <stop offset="42%" stop-color="#7ffdf3"/>
+      <stop offset="70%" stop-color="#5f86ff"/>
+      <stop offset="100%" stop-color="#9d4cff"/>
+    </radialGradient>
+
+    <filter id="redGlow" x="-25%" y="-65%" width="150%" height="230%">
+      <feGaussianBlur stdDeviation="8" result="rb"/>
+      <feColorMatrix in="rb" type="matrix"
+        values="0.7 0 0 0 0.08
+                0 0.92 0 0 0.10
+                0 0 1 0 0.18
+                0 0 0 0.56 0" result="rg"/>
+      <feMerge>
+        <feMergeNode in="rg"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="redNodeGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="10" result="rb"/>
+      <feColorMatrix in="rb" type="matrix"
+        values="0.7 0 0 0 0.14
+                0 0.95 0 0 0.12
+                0 0 1 0 0.24
+                0 0 0 0.72 0" result="rg"/>
+      <feMerge>
+        <feMergeNode in="rg"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <style>
+      .edge-back {
+        fill: none;
+        stroke: url(#graphEdge);
+        stroke-width: 10;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.18;
+      }
+
+      .edge {
+        fill: none;
+        stroke: url(#graphEdge);
+        stroke-width: 4.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.62;
+      }
+
+      .edge-thin {
+        fill: none;
+        stroke: url(#graphEdge);
+        stroke-width: 3.1;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.48;
+      }
+
+      .edge-hair {
+        fill: none;
+        stroke: url(#graphEdge);
+        stroke-width: 2.1;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.36;
+      }
+
+      .hub {
+        fill: url(#nodeFill);
+        stroke: #ecffff;
+        stroke-width: 3.5;
+      }
+
+      .node {
+        fill: url(#nodeFill);
+        stroke: #e5ffff;
+        stroke-width: 2.2;
+      }
+
+      .small-node {
+        fill: #baffff;
+        stroke: #ffffff;
+        stroke-width: 1.2;
+      }
+
+      .ring {
+        fill: none;
+        stroke: #aaffff;
+        stroke-width: 2.2;
+        opacity: 0.34;
+      }
+
+      .orbit-backbone {
+        fill: none;
+        stroke: url(#ringRedHot);
+        stroke-width: 16;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.18;
+      }
+
+      .orbit-backbone-front {
+        fill: none;
+        stroke: url(#ringRedHot);
+        stroke-width: 20;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.23;
+      }
+
+      .red-edge-back {
+        fill: none;
+        stroke: url(#ringRedGrad);
+        stroke-width: 4.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.38;
+      }
+
+      .red-edge {
+        fill: none;
+        stroke: url(#ringRedGrad);
+        stroke-width: 4.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.75;
+      }
+
+      .red-edge-thin {
+        fill: none;
+        stroke: url(#ringRedGrad);
+        stroke-width: 2.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.58;
+      }
+
+      .red-edge-hair {
+        fill: none;
+        stroke: #86eaff;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.42;
+      }
+
+      .red-node-big {
+        fill: url(#redNodeFill);
+        stroke: #f1ffff;
+        stroke-width: 3.2;
+      }
+
+      .red-node {
+        fill: url(#redNodeFill);
+        stroke: #edffff;
+        stroke-width: 2.1;
+      }
+
+      .red-node-small {
+        fill: #ecffff;
+        stroke: #66dfff;
+        stroke-width: 1.4;
+      }
+
+
+      .orbit-flow-line {
+        fill: none;
+        stroke: url(#ringRedGrad);
+        stroke-width: 7;
+        stroke-linecap: round;
+        opacity: 0.75;
+        stroke-dasharray: 88 172;
+      }
+
+      .orbit-flow-soft {
+        fill: none;
+        stroke: url(#ringRedHot);
+        stroke-width: 14;
+        stroke-linecap: round;
+        opacity: 0.34;
+        stroke-dasharray: 140 210;
+      }
+
+      .orbit-tracer-core {
+        fill: url(#redNodeFill);
+        stroke: #f4ffff;
+        stroke-width: 2.2;
+      }
+
+      .orbit-tracer-small {
+        fill: #efffff;
+        stroke: #9ce9ff;
+        stroke-width: 1.4;
+      }
+
+      .orbit-tracer-link {
+        fill: none;
+        stroke: url(#ringRedGrad);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        opacity: 0.68;
+      }
+
+    </style>
+
+    <path id="phoenixShape" d="M 1385 235 L 1384 239 L 1417 289 L 1441 338 L 1464 415 L 1471 489 L 1466 552 L 1458 593 L 1431 683 L 1426 684 L 1422 660 L 1412 641 L 1399 712 L 1375 767 L 1334 827 L 1256 911 L 1234 944 L 1215 996 L 1213 1041 L 1226 1089 L 1251 1127 L 1285 1152 L 1314 1164 L 1330 1166 L 1314 1132 L 1313 1104 L 1359 1104 L 1393 1091 L 1445 1106 L 1489 1110 L 1490 1114 L 1471 1118 L 1434 1117 L 1396 1110 L 1369 1119 L 1327 1114 L 1333 1141 L 1366 1181 L 1345 1183 L 1316 1179 L 1266 1158 L 1284 1219 L 1283 1246 L 1278 1246 L 1269 1237 L 1264 1205 L 1249 1164 L 1210 1101 L 1196 1068 L 1188 1033 L 1188 997 L 1195 956 L 1158 970 L 1140 966 L 1119 950 L 1102 916 L 1098 883 L 1110 852 L 1131 831 L 1161 825 L 1156 812 L 1135 798 L 1118 797 L 1097 803 L 1082 797 L 1057 798 L 1023 812 L 990 837 L 966 849 L 953 852 L 918 849 L 923 863 L 935 875 L 967 888 L 964 903 L 945 948 L 926 968 L 908 972 L 871 956 L 878 994 L 879 1031 L 870 1070 L 858 1098 L 814 1171 L 802 1206 L 798 1235 L 789 1246 L 782 1245 L 781 1225 L 801 1158 L 752 1179 L 727 1183 L 701 1182 L 701 1178 L 730 1147 L 740 1123 L 739 1114 L 700 1119 L 671 1110 L 606 1118 L 576 1113 L 577 1110 L 639 1102 L 674 1091 L 713 1105 L 753 1103 L 755 1118 L 752 1132 L 737 1166 L 745 1166 L 795 1144 L 822 1119 L 843 1083 L 854 1035 L 851 995 L 834 947 L 807 907 L 732 827 L 692 768 L 667 712 L 654 641 L 644 660 L 641 681 L 636 683 L 608 594 L 596 507 L 596 465 L 602 414 L 613 371 L 628 332 L 682 236 L 661 248 L 625 277 L 584 319 L 544 374 L 532 400 L 531 443 L 527 443 L 519 425 L 507 457 L 498 499 L 495 567 L 490 563 L 472 508 L 463 461 L 460 404 L 448 424 L 437 460 L 427 514 L 427 595 L 443 673 L 459 718 L 488 779 L 459 746 L 437 713 L 399 643 L 378 587 L 375 591 L 374 633 L 383 695 L 397 738 L 415 773 L 411 776 L 382 754 L 401 807 L 432 854 L 469 893 L 504 923 L 565 962 L 562 965 L 538 957 L 457 917 L 409 884 L 358 834 L 367 868 L 383 900 L 401 925 L 439 963 L 434 966 L 400 954 L 419 986 L 451 1016 L 482 1036 L 556 1065 L 499 1070 L 452 1065 L 403 1049 L 405 1055 L 434 1086 L 465 1107 L 494 1120 L 523 1127 L 522 1132 L 498 1138 L 506 1145 L 560 1156 L 619 1150 L 619 1154 L 599 1169 L 576 1180 L 536 1189 L 535 1192 L 560 1204 L 589 1211 L 618 1211 L 651 1201 L 650 1207 L 636 1221 L 597 1247 L 620 1254 L 648 1254 L 688 1237 L 681 1275 L 687 1308 L 710 1293 L 757 1219 L 760 1224 L 746 1257 L 743 1290 L 748 1310 L 765 1329 L 778 1334 L 778 1311 L 786 1293 L 800 1279 L 821 1270 L 837 1269 L 858 1276 L 887 1300 L 905 1325 L 925 1371 L 934 1429 L 932 1457 L 924 1482 L 891 1535 L 886 1556 L 887 1577 L 909 1555 L 911 1586 L 917 1605 L 929 1623 L 953 1643 L 946 1605 L 945 1566 L 956 1518 L 967 1497 L 962 1586 L 967 1614 L 978 1640 L 994 1664 L 1031 1702 L 1039 1700 L 1073 1664 L 1101 1608 L 1105 1569 L 1099 1497 L 1103 1499 L 1114 1529 L 1121 1566 L 1121 1607 L 1114 1643 L 1137 1624 L 1150 1603 L 1156 1583 L 1156 1555 L 1163 1557 L 1180 1577 L 1181 1557 L 1175 1532 L 1148 1492 L 1138 1468 L 1133 1417 L 1138 1383 L 1152 1344 L 1163 1322 L 1185 1294 L 1205 1278 L 1221 1271 L 1240 1269 L 1255 1273 L 1269 1281 L 1283 1297 L 1289 1315 L 1288 1332 L 1296 1332 L 1313 1317 L 1323 1293 L 1322 1264 L 1306 1223 L 1309 1219 L 1322 1234 L 1348 1283 L 1364 1300 L 1379 1308 L 1385 1285 L 1379 1237 L 1418 1254 L 1445 1254 L 1470 1247 L 1470 1244 L 1429 1220 L 1414 1204 L 1415 1200 L 1455 1212 L 1482 1211 L 1508 1204 L 1532 1192 L 1470 1170 L 1447 1153 L 1447 1149 L 1508 1156 L 1558 1146 L 1569 1138 L 1546 1132 L 1544 1126 L 1575 1119 L 1613 1100 L 1636 1083 L 1664 1051 L 1658 1050 L 1615 1065 L 1534 1069 L 1510 1065 L 1582 1037 L 1615 1016 L 1647 986 L 1667 953 L 1633 966 L 1627 963 L 1652 940 L 1680 906 L 1703 858 L 1709 833 L 1653 888 L 1616 913 L 1557 945 L 1508 964 L 1504 961 L 1569 918 L 1604 887 L 1633 855 L 1665 808 L 1679 777 L 1684 754 L 1656 776 L 1651 774 L 1668 743 L 1683 697 L 1692 639 L 1691 589 L 1688 587 L 1665 648 L 1639 698 L 1612 740 L 1576 783 L 1615 699 L 1631 645 L 1638 606 L 1640 524 L 1623 436 L 1607 403 L 1604 455 L 1593 516 L 1577 562 L 1572 567 L 1569 502 L 1560 459 L 1548 426 L 1544 428 L 1539 445 L 1535 445 L 1535 401 L 1521 371 L 1472 307 L 1429 266 Z M 899 386 L 888 427 L 888 459 L 901 503 L 913 466 L 936 428 L 975 398 L 1015 385 L 1066 388 L 1108 408 L 1139 439 L 1156 471 L 1163 501 L 1169 497 L 1179 459 L 1179 426 L 1168 386 L 1137 341 L 1094 311 L 1067 302 L 1032 298 L 984 307 L 939 332 L 916 356 Z M 433 1176 L 441 1207 L 476 1281 L 517 1332 L 550 1349 L 580 1350 L 615 1338 L 642 1318 L 598 1317 L 572 1306 L 551 1280 L 535 1245 L 505 1233 L 471 1212 Z M 1633 1177 L 1597 1211 L 1567 1230 L 1533 1244 L 1516 1279 L 1493 1307 L 1469 1317 L 1425 1316 L 1425 1319 L 1462 1343 L 1496 1351 L 1525 1346 L 1549 1332 L 1566 1315 L 1590 1281 L 1625 1208 Z M 896 1355 L 872 1401 L 841 1434 L 814 1456 L 799 1487 L 803 1517 L 807 1516 L 818 1495 L 825 1489 L 829 1490 L 828 1511 L 836 1532 L 866 1563 L 869 1562 L 867 1530 L 872 1510 L 906 1449 L 914 1420 L 915 1401 L 898 1432 L 886 1446 L 883 1445 L 899 1399 Z M 1171 1355 L 1167 1391 L 1182 1443 L 1179 1444 L 1170 1434 L 1154 1403 L 1153 1422 L 1165 1458 L 1189 1497 L 1198 1520 L 1200 1563 L 1233 1528 L 1239 1510 L 1238 1490 L 1250 1497 L 1263 1517 L 1267 1487 L 1255 1459 L 1195 1402 Z M 1592 643 L 1589 670 L 1576 712 L 1560 747 L 1530 795 L 1484 851 L 1419 914 L 1398 943 L 1369 948 L 1368 945 L 1399 916 L 1415 889 L 1430 850 L 1438 804 L 1442 804 L 1445 817 L 1442 864 L 1445 864 L 1488 818 L 1526 766 L 1557 715 Z M 474 642 L 502 701 L 537 761 L 571 809 L 622 864 L 625 861 L 621 820 L 624 805 L 629 805 L 636 850 L 647 880 L 665 912 L 699 945 L 698 948 L 669 943 L 647 912 L 582 850 L 539 798 L 499 732 L 479 675 Z M 743 1338 L 704 1337 L 671 1331 L 640 1342 L 611 1346 L 575 1359 L 575 1362 L 613 1363 L 657 1352 L 658 1355 L 636 1374 L 596 1392 L 596 1395 L 654 1398 L 683 1391 L 716 1374 L 733 1356 Z M 1324 1338 L 1333 1356 L 1350 1374 L 1376 1388 L 1410 1398 L 1445 1399 L 1472 1395 L 1429 1373 L 1410 1357 L 1410 1352 L 1457 1363 L 1492 1362 L 1489 1358 L 1454 1346 L 1422 1341 L 1396 1331 L 1363 1337 Z M 1567 978 L 1555 990 L 1514 1011 L 1459 1029 L 1414 1036 L 1394 1052 L 1357 1065 L 1352 1070 L 1324 1058 L 1327 1054 L 1364 1046 L 1401 1023 L 1422 1022 L 1478 1009 Z M 498 977 L 576 1006 L 625 1018 L 665 1023 L 702 1046 L 739 1054 L 742 1058 L 716 1070 L 713 1066 L 671 1051 L 653 1036 L 605 1028 L 550 1010 L 512 990 Z M 631 933 L 647 935 L 663 959 L 680 976 L 740 1009 L 687 1011 L 685 1007 L 696 1002 L 669 985 L 651 968 L 636 947 Z M 1435 933 L 1420 963 L 1395 987 L 1370 1002 L 1380 1007 L 1378 1011 L 1328 1009 L 1329 1005 L 1382 979 L 1404 959 L 1421 935 Z"/>
+
+    <clipPath id="phoenixClip">
+      <use href="#phoenixShape"/>
+    </clipPath>
+
+    <mask id="phoenixMaskNoCrest" maskUnits="userSpaceOnUse" x="0" y="0" width="2048" height="2048">
+      <rect x="0" y="0" width="2048" height="2048" fill="black"/>
+      <g transform="translate(0 52)">
+        <use href="#phoenixShape" fill="white" fill-rule="evenodd"/>
+        <path d="M 868 446
+                 C 900 388, 952 346, 1004 322
+                 C 1060 322, 1112 344, 1158 384
+                 C 1170 406, 1178 425, 1180 448
+                 L 1128 438
+                 C 1117 410, 1095 390, 1064 378
+                 C 1038 368, 1008 366, 980 372
+                 C 947 379, 919 398, 899 423
+                 C 891 433, 885 440, 879 448 Z"
+              fill="black"/>
+      </g>
+    </mask>
+
+    <path id="ringOrbitBackMotion" d="M 152.5 1132.9 L 220.5 1090.6 L 323.6 1049.7 L 457.2 1011.9 L 615.7 979.0 L 792.0 952.2 L 978.4 932.9 L 1166.9 921.9 L 1349.1 919.6 L 1517.1 926.2 L 1663.5 941.3 L 1782.0 964.3 L 1867.3 994.2" fill="none"/>
+    <path id="ringOrbitFrontMotion" d="M 1915.8 1029.7 L 1925.4 1069.2 L 1895.5 1111.1 L 1827.5 1153.4 L 1724.4 1194.3 L 1590.8 1232.1 L 1432.3 1265.0 L 1256.0 1291.8 L 1069.6 1311.1 L 881.1 1322.1 L 698.9 1324.4 L 530.9 1317.8 L 384.5 1302.7 L 266.0 1279.7 L 180.7 1249.8 L 132.2 1214.3 L 122.6 1174.8" fill="none"/>
+
+  </defs>
+
+  <g transform="translate(0 52)">
+
+    <!-- Crimson GraphRAG Saturn ring — rear orbital pass. Drawn behind the phoenix so the bird occludes the center. -->
+    <g id="crimsonGraphRingBack" filter="url(#redGlow)">
+      <path class="orbit-backbone" d="M 152.5 1132.9 L 220.5 1090.6 L 323.6 1049.7 L 457.2 1011.9 L 615.7 979.0 L 792.0 952.2 L 978.4 932.9 L 1166.9 921.9 L 1349.1 919.6 L 1517.1 926.2 L 1663.5 941.3 L 1782.0 964.3 L 1867.3 994.2"/>
+      <path class="red-edge-back" d="M 96.7 1134.1 L 169.0 1089.5 L 278.8 1046.3 L 421.0 1006.3 L 589.7 971.5 L 777.3 943.2 L 975.7 922.7 L 1176.2 910.9 L 1370.0 908.4 L 1548.8 915.2 L 1704.6 931.0 L 1830.6 955.2 L 1921.4 986.7"/>
+      <path class="red-edge-back" d="M 152.5 1132.9 L 220.5 1090.6 L 323.6 1049.7 L 457.2 1011.9 L 615.7 979.0 L 792.0 952.2 L 978.4 932.9 L 1166.9 921.9 L 1349.1 919.6 L 1517.1 926.2 L 1663.5 941.3 L 1782.0 964.3 L 1867.3 994.2"/>
+      <path class="red-edge-back" d="M 208.3 1131.7 L 271.9 1091.8 L 368.4 1053.1 L 493.5 1017.5 L 641.7 986.4 L 806.7 961.3 L 981.2 943.2 L 1157.6 932.9 L 1328.1 930.9 L 1485.3 937.2 L 1622.4 951.6 L 1733.3 973.4 L 1813.2 1001.8"/>
+      <path class="red-edge-back" d="M 96.7 1134.1 L 152.5 1132.9"/>
+      <path class="red-edge-back" d="M 152.5 1132.9 L 208.3 1131.7"/>
+      <path class="red-edge-hair" d="M 169.0 1089.5 L 220.5 1090.6"/>
+      <path class="red-edge-hair" d="M 220.5 1090.6 L 271.9 1091.8"/>
+      <path class="red-edge-back" d="M 278.8 1046.3 L 323.6 1049.7"/>
+      <path class="red-edge-back" d="M 323.6 1049.7 L 368.4 1053.1"/>
+      <path class="red-edge-hair" d="M 421.0 1006.3 L 457.2 1011.9"/>
+      <path class="red-edge-hair" d="M 457.2 1011.9 L 493.5 1017.5"/>
+      <path class="red-edge-back" d="M 589.7 971.5 L 615.7 979.0"/>
+      <path class="red-edge-back" d="M 615.7 979.0 L 641.7 986.4"/>
+      <path class="red-edge-hair" d="M 777.3 943.2 L 792.0 952.2"/>
+      <path class="red-edge-hair" d="M 792.0 952.2 L 806.7 961.3"/>
+      <path class="red-edge-back" d="M 975.7 922.7 L 978.4 932.9"/>
+      <path class="red-edge-back" d="M 978.4 932.9 L 981.2 943.2"/>
+      <path class="red-edge-hair" d="M 1176.2 910.9 L 1166.9 921.9"/>
+      <path class="red-edge-hair" d="M 1166.9 921.9 L 1157.6 932.9"/>
+      <path class="red-edge-back" d="M 1370.0 908.4 L 1349.1 919.6"/>
+      <path class="red-edge-back" d="M 1349.1 919.6 L 1328.1 930.9"/>
+      <path class="red-edge-hair" d="M 1548.8 915.2 L 1517.1 926.2"/>
+      <path class="red-edge-hair" d="M 1517.1 926.2 L 1485.3 937.2"/>
+      <path class="red-edge-back" d="M 1704.6 931.0 L 1663.5 941.3"/>
+      <path class="red-edge-back" d="M 1663.5 941.3 L 1622.4 951.6"/>
+      <path class="red-edge-hair" d="M 1830.6 955.2 L 1782.0 964.3"/>
+      <path class="red-edge-hair" d="M 1782.0 964.3 L 1733.3 973.4"/>
+      <path class="red-edge-back" d="M 1921.4 986.7 L 1867.3 994.2"/>
+      <path class="red-edge-back" d="M 1867.3 994.2 L 1813.2 1001.8"/>
+      <path class="red-edge-hair" d="M 96.7 1134.1 L 271.9 1091.8"/>
+      <path class="red-edge-hair" d="M 271.9 1091.8 L 278.8 1046.3"/>
+      <path class="red-edge-hair" d="M 278.8 1046.3 L 493.5 1017.5"/>
+      <path class="red-edge-hair" d="M 493.5 1017.5 L 589.7 971.5"/>
+      <path class="red-edge-hair" d="M 589.7 971.5 L 806.7 961.3"/>
+      <path class="red-edge-hair" d="M 806.7 961.3 L 975.7 922.7"/>
+      <path class="red-edge-hair" d="M 975.7 922.7 L 1157.6 932.9"/>
+      <path class="red-edge-hair" d="M 1157.6 932.9 L 1370.0 908.4"/>
+      <path class="red-edge-hair" d="M 1370.0 908.4 L 1485.3 937.2"/>
+      <path class="red-edge-hair" d="M 1485.3 937.2 L 1704.6 931.0"/>
+      <path class="red-edge-hair" d="M 1704.6 931.0 L 1733.3 973.4"/>
+      <path class="red-edge-hair" d="M 1733.3 973.4 L 1921.4 986.7"/>
+      <path class="red-edge-hair" d="M 152.5 1132.9 L 457.2 1011.9"/>
+      <path class="red-edge-hair" d="M 457.2 1011.9 L 978.4 932.9"/>
+      <path class="red-edge-hair" d="M 978.4 932.9 L 1517.1 926.2"/>
+      <path class="red-edge-hair" d="M 1517.1 926.2 L 1867.3 994.2"/>
+      <path class="red-edge-thin" d="M 169.0 1089.5 L 493.5 1017.5"/>
+      <path class="red-edge-thin" d="M 777.3 943.2 L 1157.6 932.9"/>
+      <path class="red-edge-thin" d="M 1548.8 915.2 L 1733.3 973.4"/>
+      <g filter="url(#redNodeGlow)">
+        <circle class="red-node-small" cx="152.5" cy="1132.9" r="7"/>
+        <circle class="red-node-small" cx="96.7" cy="1134.1" r="5"/>
+        <circle class="red-node-small" cx="208.3" cy="1131.7" r="5"/>
+        <circle class="red-node" cx="220.5" cy="1090.6" r="16"/>
+        <circle class="red-node-small" cx="323.6" cy="1049.7" r="7"/>
+        <circle class="red-node-small" cx="278.8" cy="1046.3" r="5"/>
+        <circle class="red-node-small" cx="368.4" cy="1053.1" r="5"/>
+        <circle class="red-node" cx="457.2" cy="1011.9" r="10"/>
+        <circle class="red-node-small" cx="615.7" cy="979.0" r="7"/>
+        <circle class="red-node-small" cx="589.7" cy="971.5" r="5"/>
+        <circle class="red-node-small" cx="641.7" cy="986.4" r="5"/>
+        <circle class="red-node" cx="792.0" cy="952.2" r="16"/>
+        <circle class="red-node-small" cx="978.4" cy="932.9" r="7"/>
+        <circle class="red-node-small" cx="975.7" cy="922.7" r="5"/>
+        <circle class="red-node-small" cx="981.2" cy="943.2" r="5"/>
+        <circle class="red-node" cx="1166.9" cy="921.9" r="10"/>
+        <circle class="red-node-small" cx="1349.1" cy="919.6" r="7"/>
+        <circle class="red-node-small" cx="1370.0" cy="908.4" r="5"/>
+        <circle class="red-node-small" cx="1328.1" cy="930.9" r="5"/>
+        <circle class="red-node" cx="1517.1" cy="926.2" r="16"/>
+        <circle class="red-node-small" cx="1663.5" cy="941.3" r="7"/>
+        <circle class="red-node-small" cx="1704.6" cy="931.0" r="5"/>
+        <circle class="red-node-small" cx="1622.4" cy="951.6" r="5"/>
+        <circle class="red-node" cx="1782.0" cy="964.3" r="10"/>
+        <circle class="red-node-small" cx="1867.3" cy="994.2" r="7"/>
+        <circle class="red-node-small" cx="1921.4" cy="986.7" r="5"/>
+        <circle class="red-node-small" cx="1813.2" cy="1001.8" r="5"/>
+      </g>
+    </g>
+
+
+
+    <!-- animated orbital flow: rear pass -->
+    <g id="animatedOrbitBack" filter="url(#redGlow)">
+      <path class="orbit-flow-soft" d="M 152.5 1132.9 L 220.5 1090.6 L 323.6 1049.7 L 457.2 1011.9 L 615.7 979.0 L 792.0 952.2 L 978.4 932.9 L 1166.9 921.9 L 1349.1 919.6 L 1517.1 926.2 L 1663.5 941.3 L 1782.0 964.3 L 1867.3 994.2">
+        <animate attributeName="stroke-dashoffset" values="0;-350" dur="8s" repeatCount="indefinite"/>
+      </path>
+      <path class="orbit-flow-line" d="M 152.5 1132.9 L 220.5 1090.6 L 323.6 1049.7 L 457.2 1011.9 L 615.7 979.0 L 792.0 952.2 L 978.4 932.9 L 1166.9 921.9 L 1349.1 919.6 L 1517.1 926.2 L 1663.5 941.3 L 1782.0 964.3 L 1867.3 994.2">
+        <animate attributeName="stroke-dashoffset" values="0;-260" dur="6.5s" repeatCount="indefinite"/>
+      </path>
+      <g filter="url(#redNodeGlow)">
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="14"/>
+          <circle class="orbit-tracer-small" cx="-26" cy="-6" r="5.5"/>
+          <circle class="orbit-tracer-small" cx="22" cy="7" r="5"/>
+          <path class="orbit-tracer-link" d="M -26 -6 L 0 0 L 22 7"/>
+          <animateMotion dur="8s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitBackMotion"/>
+          </animateMotion>
+        </g>
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="10"/>
+          <circle class="orbit-tracer-small" cx="18" cy="-10" r="4.5"/>
+          <circle class="orbit-tracer-small" cx="-16" cy="12" r="4.5"/>
+          <path class="orbit-tracer-link" d="M -16 12 L 0 0 L 18 -10"/>
+          <animateMotion dur="8s" begin="-2.6s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitBackMotion"/>
+          </animateMotion>
+        </g>
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="8"/>
+          <circle class="orbit-tracer-small" cx="-14" cy="-9" r="4"/>
+          <circle class="orbit-tracer-small" cx="12" cy="11" r="4"/>
+          <path class="orbit-tracer-link" d="M -14 -9 L 0 0 L 12 11"/>
+          <animateMotion dur="8s" begin="-5.1s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitBackMotion"/>
+          </animateMotion>
+        </g>
+      </g>
+    </g>
+
+    <!-- Phoenix body -->
+    <g filter="url(#softGlow)" mask="url(#phoenixMaskNoCrest)">
+      <use href="#phoenixShape" fill="url(#phoenixGrad)" fill-rule="evenodd"/>
+      <use href="#phoenixShape" fill="url(#innerGlow)" fill-rule="evenodd" opacity="0.92"/>
+    </g>
+
+    <!-- Systemic GraphRAG / knowledge graph layer -->
+    <g clip-path="url(#phoenixClip)" mask="url(#phoenixMaskNoCrest)">
+      <!-- broad topology glow -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge-back" d="M 534 958 L 676 902 L 804 870 L 920 845 L 1024 870 L 1126 892 L 1244 932 L 1380 970 L 1518 978"/>
+        <path class="edge-back" d="M 1028 454 L 1024 630 L 1024 770 L 1024 870 L 1024 1012 L 1024 1184 L 1024 1342 L 1032 1488"/>
+        <path class="edge-back" d="M 664 666 L 760 742 L 840 808 L 920 845 L 944 1000 L 1024 1012 L 1096 1002 L 1126 892 L 1208 808 L 1288 742 L 1384 666"/>
+        <path class="edge-back" d="M 744 1188 L 840 1126 L 932 1068 L 1024 1012 L 1116 1068 L 1208 1126 L 1302 1188"/>
+      </g>
+
+      <!-- central spine / retrieval spine -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge" d="M 1028 454 L 1024 630 L 1024 770 L 1024 870 L 1024 1012 L 1024 1184 L 1024 1342 L 1032 1488"/>
+        <path class="edge-thin" d="M 984 520 L 1024 630 L 1068 520"/>
+        <path class="edge-thin" d="M 960 702 L 1024 770 L 1090 704"/>
+        <path class="edge-thin" d="M 920 845 L 1024 870 L 1126 892"/>
+        <path class="edge-thin" d="M 944 1000 L 1024 1012 L 1096 1002"/>
+        <path class="edge-thin" d="M 932 1068 L 1024 1184 L 1116 1068"/>
+        <path class="edge-thin" d="M 972 1162 L 1024 1184 L 1078 1162"/>
+        <path class="edge-thin" d="M 920 1278 L 1024 1342 L 1128 1278"/>
+      </g>
+
+      <!-- left wing graph: layered evidence cluster -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge" d="M 534 958 L 676 902 L 804 870 L 920 845"/>
+        <path class="edge" d="M 664 666 L 760 742 L 840 808 L 920 845"/>
+        <path class="edge" d="M 500 785 L 598 840 L 676 902"/>
+        <path class="edge-thin" d="M 474 642 L 558 734 L 664 666"/>
+        <path class="edge-thin" d="M 512 990 L 640 1068 L 744 1188"/>
+        <path class="edge-thin" d="M 676 902 L 640 1068 L 744 1188"/>
+        <path class="edge-thin" d="M 804 870 L 880 946 L 944 1000 L 1024 1012"/>
+        <path class="edge-thin" d="M 744 1188 L 840 1126 L 932 1068 L 1024 1012"/>
+        <path class="edge-thin" d="M 744 1188 L 842 1216 L 920 1278 L 886 1362"/>
+        <path class="edge-thin" d="M 886 1362 L 830 1485 L 909 1555 L 953 1643"/>
+        <path class="edge-hair" d="M 598 840 L 760 742"/>
+        <path class="edge-hair" d="M 598 840 L 804 870"/>
+        <path class="edge-hair" d="M 676 902 L 880 946"/>
+        <path class="edge-hair" d="M 640 1068 L 840 1126"/>
+        <path class="edge-hair" d="M 842 1216 L 972 1162"/>
+        <path class="edge-hair" d="M 830 1485 L 920 1278"/>
+      </g>
+
+      <!-- right wing graph: mirrored evidence cluster -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge" d="M 1518 978 L 1380 970 L 1244 932 L 1126 892"/>
+        <path class="edge" d="M 1384 666 L 1288 742 L 1208 808 L 1126 892"/>
+        <path class="edge" d="M 1548 790 L 1452 848 L 1380 970"/>
+        <path class="edge-thin" d="M 1592 643 L 1492 734 L 1384 666"/>
+        <path class="edge-thin" d="M 1536 990 L 1406 1068 L 1302 1188"/>
+        <path class="edge-thin" d="M 1380 970 L 1406 1068 L 1302 1188"/>
+        <path class="edge-thin" d="M 1244 932 L 1166 974 L 1096 1002 L 1024 1012"/>
+        <path class="edge-thin" d="M 1302 1188 L 1208 1126 L 1116 1068 L 1024 1012"/>
+        <path class="edge-thin" d="M 1302 1188 L 1206 1216 L 1128 1278 L 1162 1362"/>
+        <path class="edge-thin" d="M 1162 1362 L 1218 1485 L 1156 1555 L 1114 1643"/>
+        <path class="edge-hair" d="M 1452 848 L 1288 742"/>
+        <path class="edge-hair" d="M 1452 848 L 1244 932"/>
+        <path class="edge-hair" d="M 1380 970 L 1166 974"/>
+        <path class="edge-hair" d="M 1406 1068 L 1208 1126"/>
+        <path class="edge-hair" d="M 1206 1216 L 1078 1162"/>
+        <path class="edge-hair" d="M 1218 1485 L 1128 1278"/>
+      </g>
+
+      <!-- cross-links: GraphRAG retrieval / evidence reconciliation -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge-thin" d="M 760 742 C 900 700, 1148 700, 1288 742"/>
+        <path class="edge-thin" d="M 840 808 C 934 780, 1112 786, 1208 808"/>
+        <path class="edge-thin" d="M 676 902 C 798 968, 1250 986, 1380 970"/>
+        <path class="edge-thin" d="M 640 1068 C 820 1120, 1224 1120, 1406 1068"/>
+        <path class="edge-hair" d="M 744 1188 C 900 1248, 1148 1248, 1302 1188"/>
+        <path class="edge-hair" d="M 886 1362 C 982 1402, 1066 1402, 1162 1362"/>
+        <path class="edge-hair" d="M 830 1485 C 938 1538, 1100 1538, 1218 1485"/>
+      </g>
+
+      <!-- dense feather subgraphs -->
+      <g filter="url(#edgeGlow)">
+        <path class="edge-hair" d="M 534 958 L 598 955 L 676 902"/>
+        <path class="edge-hair" d="M 598 955 L 512 990 L 640 1068"/>
+        <path class="edge-hair" d="M 512 990 L 498 1077 L 640 1068"/>
+        <path class="edge-hair" d="M 640 1068 L 576 1156 L 744 1188"/>
+        <path class="edge-hair" d="M 576 1156 L 688 1237 L 744 1188"/>
+        <path class="edge-hair" d="M 688 1237 L 842 1216 L 886 1362"/>
+
+        <path class="edge-hair" d="M 1518 978 L 1450 955 L 1380 970"/>
+        <path class="edge-hair" d="M 1450 955 L 1536 990 L 1406 1068"/>
+        <path class="edge-hair" d="M 1536 990 L 1548 1077 L 1406 1068"/>
+        <path class="edge-hair" d="M 1406 1068 L 1470 1156 L 1302 1188"/>
+        <path class="edge-hair" d="M 1470 1156 L 1379 1237 L 1302 1188"/>
+        <path class="edge-hair" d="M 1379 1237 L 1206 1216 L 1162 1362"/>
+      </g>
+
+      <!-- hub rings -->
+      <g filter="url(#edgeGlow)">
+        <circle class="ring" cx="1024" cy="1012" r="58"/>
+        <circle class="ring" cx="1024" cy="870" r="45"/>
+        <circle class="ring" cx="920" cy="845" r="35"/>
+        <circle class="ring" cx="1126" cy="892" r="35"/>
+        <circle class="ring" cx="744" cy="1188" r="34"/>
+        <circle class="ring" cx="1302" cy="1188" r="34"/>
+      </g>
+
+      <!-- nodes -->
+      <g filter="url(#nodeGlow)">
+        <!-- central hubs -->
+        <circle class="hub" cx="1028" cy="454" r="18"/>
+        <circle class="hub" cx="1024" cy="630" r="14"/>
+        <circle class="hub" cx="1024" cy="770" r="15"/>
+        <circle class="hub" cx="1024" cy="870" r="17"/>
+        <circle class="hub" cx="1024" cy="1012" r="21"/>
+        <circle class="hub" cx="1024" cy="1184" r="16"/>
+        <circle class="hub" cx="1024" cy="1342" r="15"/>
+        <circle class="hub" cx="1032" cy="1488" r="13"/>
+
+        <!-- head/detail nodes -->
+        <circle class="node" cx="984" cy="520" r="9"/>
+        <circle class="node" cx="1068" cy="520" r="9"/>
+        <circle class="node" cx="960" cy="702" r="8"/>
+        <circle class="node" cx="1090" cy="704" r="8"/>
+        <circle class="node" cx="920" cy="845" r="14"/>
+        <circle class="node" cx="1126" cy="892" r="14"/>
+        <circle class="node" cx="944" cy="1000" r="10"/>
+        <circle class="node" cx="1096" cy="1002" r="10"/>
+
+        <!-- left wing hubs -->
+        <circle class="hub" cx="664" cy="666" r="12"/>
+        <circle class="node" cx="558" cy="734" r="8"/>
+        <circle class="node" cx="500" cy="785" r="9"/>
+        <circle class="node" cx="598" cy="840" r="10"/>
+        <circle class="node" cx="760" cy="742" r="10"/>
+        <circle class="node" cx="840" cy="808" r="9"/>
+        <circle class="hub" cx="804" cy="870" r="12"/>
+        <circle class="hub" cx="676" cy="902" r="13"/>
+        <circle class="node" cx="534" cy="958" r="10"/>
+        <circle class="node" cx="598" cy="955" r="7"/>
+        <circle class="node" cx="512" cy="990" r="8"/>
+        <circle class="node" cx="498" cy="1077" r="7"/>
+        <circle class="hub" cx="640" cy="1068" r="11"/>
+        <circle class="node" cx="576" cy="1156" r="8"/>
+        <circle class="hub" cx="744" cy="1188" r="13"/>
+        <circle class="node" cx="688" cy="1237" r="8"/>
+        <circle class="node" cx="842" cy="1216" r="9"/>
+        <circle class="node" cx="880" cy="946" r="8"/>
+        <circle class="node" cx="932" cy="1068" r="9"/>
+        <circle class="node" cx="972" cy="1162" r="9"/>
+        <circle class="node" cx="920" cy="1278" r="11"/>
+        <circle class="hub" cx="886" cy="1362" r="13"/>
+        <circle class="node" cx="830" cy="1485" r="10"/>
+        <circle class="node" cx="909" cy="1555" r="9"/>
+        <circle class="node" cx="953" cy="1643" r="10"/>
+
+        <!-- right wing hubs -->
+        <circle class="hub" cx="1384" cy="666" r="12"/>
+        <circle class="node" cx="1492" cy="734" r="8"/>
+        <circle class="node" cx="1548" cy="790" r="9"/>
+        <circle class="node" cx="1452" cy="848" r="10"/>
+        <circle class="node" cx="1288" cy="742" r="10"/>
+        <circle class="node" cx="1208" cy="808" r="9"/>
+        <circle class="hub" cx="1244" cy="932" r="12"/>
+        <circle class="hub" cx="1380" cy="970" r="13"/>
+        <circle class="node" cx="1518" cy="978" r="10"/>
+        <circle class="node" cx="1450" cy="955" r="7"/>
+        <circle class="node" cx="1536" cy="990" r="8"/>
+        <circle class="node" cx="1548" cy="1077" r="7"/>
+        <circle class="hub" cx="1406" cy="1068" r="11"/>
+        <circle class="node" cx="1470" cy="1156" r="8"/>
+        <circle class="hub" cx="1302" cy="1188" r="13"/>
+        <circle class="node" cx="1379" cy="1237" r="8"/>
+        <circle class="node" cx="1206" cy="1216" r="9"/>
+        <circle class="node" cx="1166" cy="974" r="8"/>
+        <circle class="node" cx="1116" cy="1068" r="9"/>
+        <circle class="node" cx="1078" cy="1162" r="9"/>
+        <circle class="node" cx="1128" cy="1278" r="11"/>
+        <circle class="hub" cx="1162" cy="1362" r="13"/>
+        <circle class="node" cx="1218" cy="1485" r="10"/>
+        <circle class="node" cx="1156" cy="1555" r="9"/>
+        <circle class="node" cx="1114" cy="1643" r="10"/>
+      </g>
+
+      <!-- tiny inference particles -->
+      <g opacity="0.82">
+        <circle class="small-node" cx="632" cy="790" r="4"/>
+        <circle class="small-node" cx="720" cy="846" r="4"/>
+        <circle class="small-node" cx="725" cy="1018" r="4"/>
+        <circle class="small-node" cx="786" cy="1096" r="4"/>
+        <circle class="small-node" cx="812" cy="1298" r="4"/>
+        <circle class="small-node" cx="930" cy="1450" r="4"/>
+        <circle class="small-node" cx="984" cy="612" r="4"/>
+        <circle class="small-node" cx="1064" cy="612" r="4"/>
+        <circle class="small-node" cx="1002" cy="934" r="4"/>
+        <circle class="small-node" cx="1046" cy="934" r="4"/>
+        <circle class="small-node" cx="1118" cy="1450" r="4"/>
+        <circle class="small-node" cx="1236" cy="1298" r="4"/>
+        <circle class="small-node" cx="1262" cy="1096" r="4"/>
+        <circle class="small-node" cx="1324" cy="1018" r="4"/>
+        <circle class="small-node" cx="1328" cy="846" r="4"/>
+        <circle class="small-node" cx="1416" cy="790" r="4"/>
+      </g>
+    </g>
+
+
+
+    <!-- Crimson GraphRAG Saturn ring — front orbital pass. This is the visible lower sweep crossing in front. -->
+    <g id="crimsonGraphRingFront" filter="url(#redGlow)">
+      <path class="orbit-backbone-front" d="M 1915.8 1029.7 L 1925.4 1069.2 L 1895.5 1111.1 L 1827.5 1153.4 L 1724.4 1194.3 L 1590.8 1232.1 L 1432.3 1265.0 L 1256.0 1291.8 L 1069.6 1311.1 L 881.1 1322.1 L 698.9 1324.4 L 530.9 1317.8 L 384.5 1302.7 L 266.0 1279.7 L 180.7 1249.8 L 132.2 1214.3 L 122.6 1174.8"/>
+      <path class="red-edge-thin" d="M 1973.0 1024.1 L 1983.1 1065.7 L 1951.3 1109.9 L 1879.0 1154.5 L 1769.2 1197.7 L 1627.0 1237.7 L 1458.3 1272.5 L 1270.7 1300.8 L 1072.3 1321.3 L 871.8 1333.1 L 678.0 1335.6 L 499.2 1328.8 L 343.4 1313.0 L 217.4 1288.8 L 126.6 1257.3 L 75.0 1219.9 L 64.9 1178.3"/>
+      <path class="red-edge" d="M 1915.8 1029.7 L 1925.4 1069.2 L 1895.5 1111.1 L 1827.5 1153.4 L 1724.4 1194.3 L 1590.8 1232.1 L 1432.3 1265.0 L 1256.0 1291.8 L 1069.6 1311.1 L 881.1 1322.1 L 698.9 1324.4 L 530.9 1317.8 L 384.5 1302.7 L 266.0 1279.7 L 180.7 1249.8 L 132.2 1214.3 L 122.6 1174.8"/>
+      <path class="red-edge-thin" d="M 1858.7 1035.4 L 1867.6 1072.7 L 1839.7 1112.3 L 1776.1 1152.2 L 1679.6 1190.9 L 1554.5 1226.5 L 1406.3 1257.6 L 1241.3 1282.7 L 1066.8 1300.8 L 890.4 1311.1 L 719.9 1313.1 L 562.7 1306.8 L 425.6 1292.4 L 314.7 1270.6 L 234.8 1242.2 L 189.3 1208.6 L 180.4 1171.3"/>
+      <path class="red-edge-thin" d="M 1973.0 1024.1 L 1915.8 1029.7"/>
+      <path class="red-edge-thin" d="M 1915.8 1029.7 L 1858.7 1035.4"/>
+      <path class="red-edge-hair" d="M 1983.1 1065.7 L 1925.4 1069.2"/>
+      <path class="red-edge-hair" d="M 1925.4 1069.2 L 1867.6 1072.7"/>
+      <path class="red-edge-thin" d="M 1951.3 1109.9 L 1895.5 1111.1"/>
+      <path class="red-edge-thin" d="M 1895.5 1111.1 L 1839.7 1112.3"/>
+      <path class="red-edge-hair" d="M 1879.0 1154.5 L 1827.5 1153.4"/>
+      <path class="red-edge-hair" d="M 1827.5 1153.4 L 1776.1 1152.2"/>
+      <path class="red-edge-thin" d="M 1769.2 1197.7 L 1724.4 1194.3"/>
+      <path class="red-edge-thin" d="M 1724.4 1194.3 L 1679.6 1190.9"/>
+      <path class="red-edge-hair" d="M 1627.0 1237.7 L 1590.8 1232.1"/>
+      <path class="red-edge-hair" d="M 1590.8 1232.1 L 1554.5 1226.5"/>
+      <path class="red-edge-thin" d="M 1458.3 1272.5 L 1432.3 1265.0"/>
+      <path class="red-edge-thin" d="M 1432.3 1265.0 L 1406.3 1257.6"/>
+      <path class="red-edge-hair" d="M 1270.7 1300.8 L 1256.0 1291.8"/>
+      <path class="red-edge-hair" d="M 1256.0 1291.8 L 1241.3 1282.7"/>
+      <path class="red-edge-thin" d="M 1072.3 1321.3 L 1069.6 1311.1"/>
+      <path class="red-edge-thin" d="M 1069.6 1311.1 L 1066.8 1300.8"/>
+      <path class="red-edge-hair" d="M 871.8 1333.1 L 881.1 1322.1"/>
+      <path class="red-edge-hair" d="M 881.1 1322.1 L 890.4 1311.1"/>
+      <path class="red-edge-thin" d="M 678.0 1335.6 L 698.9 1324.4"/>
+      <path class="red-edge-thin" d="M 698.9 1324.4 L 719.9 1313.1"/>
+      <path class="red-edge-hair" d="M 499.2 1328.8 L 530.9 1317.8"/>
+      <path class="red-edge-hair" d="M 530.9 1317.8 L 562.7 1306.8"/>
+      <path class="red-edge-thin" d="M 343.4 1313.0 L 384.5 1302.7"/>
+      <path class="red-edge-thin" d="M 384.5 1302.7 L 425.6 1292.4"/>
+      <path class="red-edge-hair" d="M 217.4 1288.8 L 266.0 1279.7"/>
+      <path class="red-edge-hair" d="M 266.0 1279.7 L 314.7 1270.6"/>
+      <path class="red-edge-thin" d="M 126.6 1257.3 L 180.7 1249.8"/>
+      <path class="red-edge-thin" d="M 180.7 1249.8 L 234.8 1242.2"/>
+      <path class="red-edge-hair" d="M 75.0 1219.9 L 132.2 1214.3"/>
+      <path class="red-edge-hair" d="M 132.2 1214.3 L 189.3 1208.6"/>
+      <path class="red-edge-thin" d="M 64.9 1178.3 L 122.6 1174.8"/>
+      <path class="red-edge-thin" d="M 122.6 1174.8 L 180.4 1171.3"/>
+      <path class="red-edge-hair" d="M 1973.0 1024.1 L 1867.6 1072.7"/>
+      <path class="red-edge-hair" d="M 1867.6 1072.7 L 1951.3 1109.9"/>
+      <path class="red-edge-hair" d="M 1951.3 1109.9 L 1776.1 1152.2"/>
+      <path class="red-edge-hair" d="M 1776.1 1152.2 L 1769.2 1197.7"/>
+      <path class="red-edge-hair" d="M 1769.2 1197.7 L 1554.5 1226.5"/>
+      <path class="red-edge-hair" d="M 1554.5 1226.5 L 1458.3 1272.5"/>
+      <path class="red-edge-hair" d="M 1458.3 1272.5 L 1241.3 1282.7"/>
+      <path class="red-edge-hair" d="M 1241.3 1282.7 L 1072.3 1321.3"/>
+      <path class="red-edge-hair" d="M 1072.3 1321.3 L 890.4 1311.1"/>
+      <path class="red-edge-hair" d="M 890.4 1311.1 L 678.0 1335.6"/>
+      <path class="red-edge-hair" d="M 678.0 1335.6 L 562.7 1306.8"/>
+      <path class="red-edge-hair" d="M 562.7 1306.8 L 343.4 1313.0"/>
+      <path class="red-edge-hair" d="M 343.4 1313.0 L 314.7 1270.6"/>
+      <path class="red-edge-hair" d="M 314.7 1270.6 L 126.6 1257.3"/>
+      <path class="red-edge-hair" d="M 126.6 1257.3 L 189.3 1208.6"/>
+      <path class="red-edge-hair" d="M 189.3 1208.6 L 64.9 1178.3"/>
+      <path class="red-edge-hair" d="M 1915.8 1029.7 L 1827.5 1153.4"/>
+      <path class="red-edge-hair" d="M 1827.5 1153.4 L 1432.3 1265.0"/>
+      <path class="red-edge-hair" d="M 1432.3 1265.0 L 881.1 1322.1"/>
+      <path class="red-edge-hair" d="M 881.1 1322.1 L 384.5 1302.7"/>
+      <path class="red-edge-hair" d="M 384.5 1302.7 L 132.2 1214.3"/>
+      <path class="red-edge-thin" d="M 1983.1 1065.7 L 1776.1 1152.2"/>
+      <path class="red-edge-thin" d="M 1627.0 1237.7 L 1241.3 1282.7"/>
+      <path class="red-edge-thin" d="M 871.8 1333.1 L 562.7 1306.8"/>
+      <path class="red-edge-thin" d="M 217.4 1288.8 L 189.3 1208.6"/>
+      <g filter="url(#redNodeGlow)">
+        <circle class="red-node-small" cx="1915.8" cy="1029.7" r="7"/>
+        <circle class="red-node-small" cx="1973.0" cy="1024.1" r="7"/>
+        <circle class="red-node-small" cx="1858.7" cy="1035.4" r="7"/>
+        <circle class="red-node-big" cx="1925.4" cy="1069.2" r="22"/>
+        <circle class="red-node-small" cx="1983.1" cy="1065.7" r="5"/>
+        <circle class="red-node-small" cx="1867.6" cy="1072.7" r="5"/>
+        <circle class="red-node-small" cx="1895.5" cy="1111.1" r="7"/>
+        <circle class="red-node-small" cx="1951.3" cy="1109.9" r="5"/>
+        <circle class="red-node-small" cx="1839.7" cy="1112.3" r="5"/>
+        <circle class="red-node" cx="1827.5" cy="1153.4" r="10"/>
+        <circle class="red-node-small" cx="1879.0" cy="1154.5" r="7"/>
+        <circle class="red-node-small" cx="1776.1" cy="1152.2" r="7"/>
+        <circle class="red-node-big" cx="1724.4" cy="1194.3" r="22"/>
+        <circle class="red-node-small" cx="1769.2" cy="1197.7" r="5"/>
+        <circle class="red-node-small" cx="1679.6" cy="1190.9" r="5"/>
+        <circle class="red-node" cx="1590.8" cy="1232.1" r="10"/>
+        <circle class="red-node-small" cx="1627.0" cy="1237.7" r="5"/>
+        <circle class="red-node-small" cx="1554.5" cy="1226.5" r="5"/>
+        <circle class="red-node-small" cx="1432.3" cy="1265.0" r="7"/>
+        <circle class="red-node-small" cx="1458.3" cy="1272.5" r="7"/>
+        <circle class="red-node-small" cx="1406.3" cy="1257.6" r="7"/>
+        <circle class="red-node-big" cx="1256.0" cy="1291.8" r="22"/>
+        <circle class="red-node-small" cx="1270.7" cy="1300.8" r="5"/>
+        <circle class="red-node-small" cx="1241.3" cy="1282.7" r="5"/>
+        <circle class="red-node-big" cx="1069.6" cy="1311.1" r="22"/>
+        <circle class="red-node-small" cx="1072.3" cy="1321.3" r="5"/>
+        <circle class="red-node-small" cx="1066.8" cy="1300.8" r="5"/>
+        <circle class="red-node" cx="881.1" cy="1322.1" r="10"/>
+        <circle class="red-node-small" cx="871.8" cy="1333.1" r="7"/>
+        <circle class="red-node-small" cx="890.4" cy="1311.1" r="7"/>
+        <circle class="red-node-big" cx="698.9" cy="1324.4" r="22"/>
+        <circle class="red-node-small" cx="678.0" cy="1335.6" r="5"/>
+        <circle class="red-node-small" cx="719.9" cy="1313.1" r="5"/>
+        <circle class="red-node" cx="530.9" cy="1317.8" r="10"/>
+        <circle class="red-node-small" cx="499.2" cy="1328.8" r="5"/>
+        <circle class="red-node-small" cx="562.7" cy="1306.8" r="5"/>
+        <circle class="red-node-small" cx="384.5" cy="1302.7" r="7"/>
+        <circle class="red-node-small" cx="343.4" cy="1313.0" r="7"/>
+        <circle class="red-node-small" cx="425.6" cy="1292.4" r="7"/>
+        <circle class="red-node-big" cx="266.0" cy="1279.7" r="22"/>
+        <circle class="red-node-small" cx="217.4" cy="1288.8" r="5"/>
+        <circle class="red-node-small" cx="314.7" cy="1270.6" r="5"/>
+        <circle class="red-node-small" cx="180.7" cy="1249.8" r="7"/>
+        <circle class="red-node-small" cx="126.6" cy="1257.3" r="5"/>
+        <circle class="red-node-small" cx="234.8" cy="1242.2" r="5"/>
+        <circle class="red-node" cx="132.2" cy="1214.3" r="10"/>
+        <circle class="red-node-small" cx="75.0" cy="1219.9" r="7"/>
+        <circle class="red-node-small" cx="189.3" cy="1208.6" r="7"/>
+        <circle class="red-node-small" cx="122.6" cy="1174.8" r="7"/>
+        <circle class="red-node-small" cx="64.9" cy="1178.3" r="5"/>
+        <circle class="red-node-small" cx="180.4" cy="1171.3" r="5"/>
+      </g>
+    </g>
+
+
+
+
+    <!-- animated orbital flow: front pass -->
+    <g id="animatedOrbitFront" filter="url(#redGlow)">
+      <path class="orbit-flow-soft" d="M 1915.8 1029.7 L 1925.4 1069.2 L 1895.5 1111.1 L 1827.5 1153.4 L 1724.4 1194.3 L 1590.8 1232.1 L 1432.3 1265.0 L 1256.0 1291.8 L 1069.6 1311.1 L 881.1 1322.1 L 698.9 1324.4 L 530.9 1317.8 L 384.5 1302.7 L 266.0 1279.7 L 180.7 1249.8 L 132.2 1214.3 L 122.6 1174.8">
+        <animate attributeName="stroke-dashoffset" values="0;-350" dur="8s" repeatCount="indefinite"/>
+      </path>
+      <path class="orbit-flow-line" d="M 1915.8 1029.7 L 1925.4 1069.2 L 1895.5 1111.1 L 1827.5 1153.4 L 1724.4 1194.3 L 1590.8 1232.1 L 1432.3 1265.0 L 1256.0 1291.8 L 1069.6 1311.1 L 881.1 1322.1 L 698.9 1324.4 L 530.9 1317.8 L 384.5 1302.7 L 266.0 1279.7 L 180.7 1249.8 L 132.2 1214.3 L 122.6 1174.8">
+        <animate attributeName="stroke-dashoffset" values="0;-260" dur="6.5s" repeatCount="indefinite"/>
+      </path>
+      <g filter="url(#redNodeGlow)">
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="15"/>
+          <circle class="orbit-tracer-small" cx="-24" cy="-7" r="5.5"/>
+          <circle class="orbit-tracer-small" cx="24" cy="5" r="5"/>
+          <path class="orbit-tracer-link" d="M -24 -7 L 0 0 L 24 5"/>
+          <animateMotion dur="8s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitFrontMotion"/>
+          </animateMotion>
+        </g>
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="10"/>
+          <circle class="orbit-tracer-small" cx="16" cy="-11" r="4.5"/>
+          <circle class="orbit-tracer-small" cx="-15" cy="10" r="4.5"/>
+          <path class="orbit-tracer-link" d="M -15 10 L 0 0 L 16 -11"/>
+          <animateMotion dur="8s" begin="-2.6s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitFrontMotion"/>
+          </animateMotion>
+        </g>
+        <g>
+          <circle class="orbit-tracer-core" cx="0" cy="0" r="8"/>
+          <circle class="orbit-tracer-small" cx="-13" cy="-8" r="4"/>
+          <circle class="orbit-tracer-small" cx="12" cy="10" r="4"/>
+          <path class="orbit-tracer-link" d="M -13 -8 L 0 0 L 12 10"/>
+          <animateMotion dur="8s" begin="-5.1s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#ringOrbitFrontMotion"/>
+          </animateMotion>
+        </g>
+      </g>
+    </g>
+
+    <!-- standalone crest graph: nodes and edges only -->
+    <g id="crestGraphStandalone">
+      <g filter="url(#edgeGlow)">
+        <path class="edge-thin" d="M 868 446 L 900 388 L 952 346 L 1004 322 L 1060 322 L 1112 344 L 1158 384 L 1180 448"/>
+        <path class="edge-thin" d="M 920 452 L 952 404 L 998 378 L 1048 378 L 1094 398 L 1128 438"/>
+        <path class="edge-hair" d="M 900 388 L 952 404"/>
+        <path class="edge-hair" d="M 952 346 L 998 378"/>
+        <path class="edge-hair" d="M 1004 322 L 998 378"/>
+        <path class="edge-hair" d="M 1060 322 L 1048 378"/>
+        <path class="edge-hair" d="M 1112 344 L 1094 398"/>
+        <path class="edge-hair" d="M 1158 384 L 1128 438"/>
+        <path class="edge-hair" d="M 998 378 L 1024 454 L 1048 378"/>
+      </g>
+      <g filter="url(#nodeGlow)">
+        <circle class="node" cx="868" cy="446" r="8"/>
+        <circle class="node" cx="900" cy="388" r="9"/>
+        <circle class="node" cx="952" cy="346" r="10"/>
+        <circle class="hub" cx="1004" cy="322" r="11"/>
+        <circle class="hub" cx="1060" cy="322" r="11"/>
+        <circle class="node" cx="1112" cy="344" r="10"/>
+        <circle class="node" cx="1158" cy="384" r="9"/>
+        <circle class="node" cx="1180" cy="448" r="8"/>
+        <circle class="node" cx="920" cy="452" r="8"/>
+        <circle class="node" cx="952" cy="404" r="8"/>
+        <circle class="hub" cx="998" cy="378" r="10"/>
+        <circle class="hub" cx="1048" cy="378" r="10"/>
+        <circle class="node" cx="1094" cy="398" r="8"/>
+        <circle class="node" cx="1128" cy="438" r="8"/>
+      </g>
+    </g>
+
+    <!-- subtle outer teal rim -->
+    <use href="#phoenixShape"
+         fill="none"
+         stroke="#baffff"
+         stroke-opacity="0.18"
+         stroke-width="5"
+         filter="url(#edgeGlow)"
+         fill-rule="evenodd"
+         mask="url(#phoenixMaskNoCrest)"/>
+  </g>
+</svg>

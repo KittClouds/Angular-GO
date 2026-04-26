@@ -1,0 +1,21 @@
+[package]
+name = "phoenix-er-post"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rustc-hash.workspace = true
+phoenix-embed = { path = "../phoenix-embed" }
+phoenix-ingest-overgraph = { path = "../phoenix-ingest-overgraph" }
+phoenix-kernel = { path = "../phoenix-kernel" }
+phoenix-semantic-v2 = { path = "../phoenix-semantic-v2" }
+phoenix-store-native-core = { path = "../phoenix-store-native-core" }
+phoenix-store-overgraph = { path = "../phoenix-store-overgraph" }
+phoenix-types = { path = "../phoenix-types" }
+
+[dev-dependencies]
+phoenix-graph-kernel = { path = "../phoenix-graph-kernel" }

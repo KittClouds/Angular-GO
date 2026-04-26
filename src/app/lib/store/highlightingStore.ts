@@ -9,7 +9,7 @@ import { getSetting, setSetting } from '../dexie/settings.service';
 // TYPES
 // ============================================
 
-export type HighlightMode = 'clean' | 'vivid' | 'subtle' | 'focus' | 'off';
+export type HighlightMode = 'clean' | 'vivid' | 'subtle' | 'gradient' | 'focus' | 'off';
 
 export interface HighlightSettings {
     /** Current highlighting mode */
@@ -41,15 +41,17 @@ export const HIGHLIGHT_MODE_LABELS: Record<HighlightMode, string> = {
     clean: 'Clean',
     vivid: 'Vivid',
     subtle: 'Subtle',
+    gradient: 'Gradient',
     focus: 'Focus',
     off: 'Off',
 };
 
 /** Mode descriptions for UI tooltips */
 export const HIGHLIGHT_MODE_DESCRIPTIONS: Record<HighlightMode, string> = {
-    clean: 'Minimal highlighting - shows entities on interaction',
+    clean: 'Plain text rendering with entity metadata still attached',
     vivid: 'Full colorful highlighting - all entities always visible',
-    subtle: 'Text-only coloring without background pills',
+    subtle: 'Solid inline text without pill chrome',
+    gradient: 'Gradient inline text without pill chrome',
     focus: 'Only highlight selected entity types',
     off: 'No entity highlighting',
 };
@@ -116,6 +118,16 @@ class HighlightingStore {
         return this.settings.focusEntityKinds;
     }
 
+    reloadFromStorage(): void {
+        const next = this.loadFromStorage();
+        if (this.settingsEqual(this.settings, next)) {
+            return;
+        }
+
+        this.settings = next;
+        this.notify();
+    }
+
     // ============================================
     // SETTERS (with live notification)
     // ============================================
@@ -163,6 +175,16 @@ class HighlightingStore {
 
     private saveToStorage(): void {
         setSetting(STORAGE_KEY, this.settings);
+    }
+
+    private settingsEqual(left: HighlightSettings, right: HighlightSettings): boolean {
+        return left.mode === right.mode
+            && left.showWikilinks === right.showWikilinks
+            && left.showTags === right.showTags
+            && left.showMentions === right.showMentions
+            && left.showTemporal === right.showTemporal
+            && left.focusEntityKinds.length === right.focusEntityKinds.length
+            && left.focusEntityKinds.every((kind, index) => kind === right.focusEntityKinds[index]);
     }
 
     reset(): void {

@@ -21,7 +21,8 @@ import {
     textColorAttr, textColorSchema, setTextColorCommand,
     fontFamilyMark, setFontFamilyCommand,
     fontSizeMark, setFontSizeCommand,
-    underlineAttr, underlineSchema, setUnderlineCommand
+    underlineAttr, underlineSchema, setUnderlineCommand,
+    entityImplicitSchema,
 } from './plugins/marks';
 import { textAlignPlugin, setTextAlignCommand, indentPlugin, indentCommand, outdentCommand } from './plugins/nodes';
 
@@ -32,15 +33,17 @@ import { keywordFocusPlugin } from './plugins/keywordFocusPlugin';
 
 import { detailsNodes, detailsInteractivePlugin } from './plugins/details';
 import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
-import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
+import { commandsCtx, editorViewCtx, parserCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { EditorService } from '../../services/editor.service';
+import { EditorPositionPersistMode, EditorService, EditorSnapshotReason } from '../../services/editor.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { getPrettyTextApi } from '../../api/pretty-text-api';
 import type { Note } from '../../lib/dexie/db';
 import { configurePlainTextClipboard } from './plugins/plain-text-clipboard';
+import { configureEditorCursor, editorCursorPlugin, editorVirtualCursorPlugin } from './plugins/virtual-cursor';
 import { sanitizeEntityMarksInDocJson } from './entity-mark-sanitizer';
 import { smartGraphRegistry } from '../../lib/registry';
+import { extractProjectedText } from '../../lib/Scanner/prosemirror-bridge';
 
 @Component({
     selector: 'app-editor',
@@ -50,15 +53,28 @@ import { smartGraphRegistry } from '../../lib/registry';
     styleUrls: ['./editor.component.css']
 })
 export class EditorComponent implements AfterViewInit, OnDestroy {
+    private static readonly POSITION_PERSIST_DEBOUNCE_MS = 250;
+
     @ViewChild('editorContainer') editorContainer!: ElementRef<HTMLDivElement>;
     private crepe?: Crepe;
     private noteSubscription?: Subscription;
     private saveRequestSubscription?: Subscription;
     private currentNoteId: string | null = null;
+    private editorRevision = 0;
     private isLoadingContent = false; // Prevent save during load
+    private pendingPositionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    private editorInteractionTarget: HTMLElement | null = null;
     private readonly beforeUnloadHandler = () => {
-        this.saveCurrentContent();
-        this.saveEditorPosition();
+        this.saveCurrentContent('before-unload');
+    };
+    private readonly editorScrollHandler = () => {
+        this.scheduleEditorPositionSave();
+    };
+    private readonly editorMouseupHandler = () => {
+        this.scheduleEditorPositionSave();
+    };
+    private readonly editorKeyupHandler = () => {
+        this.scheduleEditorPositionSave();
     };
 
     noteEditorStore = inject(NoteEditorStore);
@@ -81,6 +97,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             root: this.editorContainer.nativeElement,
             defaultValue: '', // Empty - will be loaded from Dexie
             features: {
+                [Crepe.Feature.Cursor]: false,
                 [Crepe.Feature.Toolbar]: false,
                 [Crepe.Feature.BlockEdit]: false,
             }
@@ -90,6 +107,9 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         this.crepe.editor
             .use(gfm)
             .use(history)
+            .config(configureEditorCursor())
+            .use(editorCursorPlugin)
+            .use(editorVirtualCursorPlugin)
             .config(configurePlainTextClipboard())
             .config(configureAngularToolbar(this.injector, this.appRef, () => this.currentNoteId ?? undefined))
             .use(angularToolbarPlugin)
@@ -114,6 +134,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             // PRETTY TEXT PLUGIN (Unified Highlighting System)
             // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             .use(entitySchema)
+            .use(entityImplicitSchema)
             .use(prettyTextPlugin)
             .use(keywordFocusPlugin)
             // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -122,6 +143,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
         await this.crepe.create();
         this.editorService.registerEditor(this.crepe);
+        this.attachEditorPositionListeners();
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Subscribe to active note changes from NoteEditorStore
@@ -130,7 +152,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             // If we're switching away from a valid note to another note (or null), save the old one first
             if (this.currentNoteId && (!note || note.id !== this.currentNoteId)) {
                 console.log(`[EditorComponent] Switching from ${this.currentNoteId} -> ${note?.id ?? 'null'}. Saving previous.`);
-                this.saveCurrentContent();
+                this.saveCurrentContent('note-switch');
             }
 
             if (note) {
@@ -152,17 +174,20 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 if (this.isLoadingContent) return;
 
                 if (prevDoc && !doc.eq(prevDoc)) {
-                    const json = doc.toJSON();
-                    const markdown = this.crepe?.getMarkdown() ?? '';
+                    const plainTextStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                    const { text: plainText } = extractProjectedText(doc as any);
+                    const plainTextMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - plainTextStart;
 
-                    // REMOVED: Automatic DB Save
-                    // this.noteEditorStore.saveContent(json, markdown);
+                    this.editorRevision++;
+                    this.editorService.updateLiveContent({
+                        noteId: this.currentNoteId,
+                        revision: this.editorRevision,
+                        plainText,
+                        textLength: plainText.length,
+                        timings: { plainTextMs },
+                    });
 
-                    // Still broadcast for other listeners (e.g., hub panels, preview)
-                    this.editorService.updateContent({ json, markdown });
-
-                    // Save editor position on content change
-                    this.saveEditorPosition();
+                    this.scheduleEditorPositionSave();
                 }
             });
         });
@@ -176,7 +201,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         // Listen for Manual Save Requests (Header Button)
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         this.saveRequestSubscription = this.editorService.saveRequest$.subscribe(() => {
-            this.saveCurrentContent();
+            this.saveCurrentContent('manual-save');
         });
 
         console.log('[EditorComponent] Initialized - waiting for note selection');
@@ -189,28 +214,29 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     @HostListener('window:keydown.meta.s', ['$event']) // Mac Cmd+S
     onCtrlS(event: Event) {
         event.preventDefault();
-        this.saveCurrentContent();
+        this.saveCurrentContent('manual-save');
     }
 
     /**
      * Captures current editor state and forces a save to NoteEditorStore
      */
-    private saveCurrentContent(): void {
+    private saveCurrentContent(reason: Exclude<EditorSnapshotReason, 'api'>): void {
         if (!this.crepe || !this.currentNoteId || this.isLoadingContent) return;
 
         console.log(`[EditorComponent] saving content for ${this.currentNoteId}`);
 
         try {
-            const editorView = this.getEditorView();
-            if (!editorView) {
+            const snapshot = this.editorService.captureSnapshot(reason);
+            if (!snapshot) {
                 return;
             }
-            const json = editorView.state.doc.toJSON();
-            const markdown = this.crepe.getMarkdown();
 
             // Force immediate save (skipping debounce)
             // MUST pass currentNoteId because the store's activeNoteId might have already changed (if switching notes)
-            this.noteEditorStore.saveContentNow(json, markdown, this.currentNoteId);
+            void this.noteEditorStore.saveContentNow(snapshot.json, snapshot.markdown, this.currentNoteId);
+            if (reason !== 'note-switch') {
+                this.persistEditorPosition(reason);
+            }
         } catch (e) {
             console.error('[EditorComponent] Failed to extract content for save:', e);
         }
@@ -221,11 +247,21 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
      */
     private loadNoteContent(note: Note): void {
         if (!this.crepe) return;
-        if (this.currentNoteId === note.id) return; // Already loaded
+        if (this.currentNoteId === note.id) {
+            const prettyTextApi = getPrettyTextApi();
+            prettyTextApi.setNoteId(note.id, note.narrativeId || '');
+            const editorView = this.getEditorView();
+            if (editorView) {
+                prettyTextApi.primeImplicitDecorations(editorView.state.doc);
+            }
+            return;
+        }
 
         console.log(`[EditorComponent] Loading note: ${note.title} (${note.id})`);
         this.currentNoteId = note.id;
+        this.editorRevision = 0;
         this.isLoadingContent = true;
+        this.attachEditorPositionListeners();
 
         try {
             // Parse the stored JSON content
@@ -237,17 +273,15 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 content = null;
             }
 
+            if (this.shouldReparseMarkdownFallback(content, note.markdownContent || '')) {
+                content = this.parseMarkdownContent(note.markdownContent);
+            }
+
             // If parsed content is not a valid doc (e.g. empty object from new note), create default
             if (!content || !content.type || !content.content) {
-                // If we have markdown, try to use it (simple text node)
+                // If we have markdown, parse it into real ProseMirror blocks.
                 if (note.markdownContent) {
-                    content = {
-                        type: 'doc',
-                        content: [{
-                            type: 'paragraph',
-                            content: [{ type: 'text', text: note.markdownContent }]
-                        }]
-                    };
+                    content = this.parseMarkdownContent(note.markdownContent);
                 } else {
                     // Default empty doc
                     content = {
@@ -262,6 +296,11 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 hasEntityLabel: (label) => !!smartGraphRegistry.findEntityByLabel(label),
             });
             content = sanitized.content;
+
+            // Update pretty text context before dispatching content so edit-time
+            // refresh scheduling uses the correct note id/cache key.
+            const prettyTextApi = getPrettyTextApi();
+            prettyTextApi.setNoteId(note.id, note.narrativeId || '');
 
             // Set editor content
             // Milkdown/Crepe uses ProseMirror, so we need to set the document
@@ -286,9 +325,9 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 void this.noteEditorStore.saveContentNow(content, note.markdownContent || '', note.id);
             }
 
-            // Update pretty text API with current note context
-            const prettyTextApi = getPrettyTextApi();
-            prettyTextApi.setNoteId(note.id, note.narrativeId || '');
+            if (editorView) {
+                prettyTextApi.primeImplicitDecorations(editorView.state.doc);
+            }
 
         } catch (e) {
             console.error('[EditorComponent] Failed to load note content:', e);
@@ -325,8 +364,8 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
                 const minPos = 1;
                 const maxPos = Math.max(minPos, docSize - 1);
-                const anchor = Math.max(minPos, Math.min(pendingPosition.cursorFrom, maxPos));
-                const head = Math.max(minPos, Math.min(pendingPosition.cursorTo, maxPos));
+                const anchor = Math.max(minPos, Math.min(pendingPosition.anchor, maxPos));
+                const head = Math.max(minPos, Math.min(pendingPosition.head, maxPos));
 
                 const tr = editorView.state.tr.setSelection(
                     TextSelection.create(doc, anchor, head)
@@ -344,7 +383,18 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     /**
      * Save current editor position (scroll and cursor)
      */
-    private saveEditorPosition(): void {
+    private scheduleEditorPositionSave(): void {
+        if (this.pendingPositionSaveTimer) {
+            clearTimeout(this.pendingPositionSaveTimer);
+        }
+
+        this.pendingPositionSaveTimer = setTimeout(() => {
+            this.pendingPositionSaveTimer = null;
+            this.persistEditorPosition('debounced');
+        }, EditorComponent.POSITION_PERSIST_DEBOUNCE_MS);
+    }
+
+    private persistEditorPosition(mode: EditorPositionPersistMode): void {
         if (!this.crepe || !this.currentNoteId) return;
 
         try {
@@ -357,10 +407,35 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             const scrollTop = scrollContainer?.scrollTop ?? 0;
             const { from, to } = editorView.state.selection;
 
-            this.noteEditorStore.saveEditorPosition(scrollTop, from, to);
+            this.noteEditorStore.saveEditorPosition(scrollTop, from, to, this.currentNoteId ?? undefined);
+            this.editorService.recordPositionPersist(this.currentNoteId, mode);
         } catch (e) {
             // Silently fail - position saving is best-effort
         }
+    }
+
+    private attachEditorPositionListeners(): void {
+        const target = this.getScrollContainer();
+        if (!target || this.editorInteractionTarget === target) {
+            return;
+        }
+
+        this.detachEditorPositionListeners();
+        target.addEventListener('scroll', this.editorScrollHandler, { passive: true });
+        target.addEventListener('mouseup', this.editorMouseupHandler);
+        target.addEventListener('keyup', this.editorKeyupHandler);
+        this.editorInteractionTarget = target;
+    }
+
+    private detachEditorPositionListeners(): void {
+        if (!this.editorInteractionTarget) {
+            return;
+        }
+
+        this.editorInteractionTarget.removeEventListener('scroll', this.editorScrollHandler);
+        this.editorInteractionTarget.removeEventListener('mouseup', this.editorMouseupHandler);
+        this.editorInteractionTarget.removeEventListener('keyup', this.editorKeyupHandler);
+        this.editorInteractionTarget = null;
     }
 
     /**
@@ -371,7 +446,9 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
         console.log('[EditorComponent] Clearing editor');
         this.currentNoteId = null;
+        this.editorRevision = 0;
         this.isLoadingContent = true;
+        getPrettyTextApi().setNoteId('');
 
         try {
             const editorView = this.getEditorView();
@@ -395,7 +472,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy() {
         this.noteSubscription?.unsubscribe();
         this.saveRequestSubscription?.unsubscribe();
+        if (this.pendingPositionSaveTimer) {
+            clearTimeout(this.pendingPositionSaveTimer);
+            this.pendingPositionSaveTimer = null;
+        }
         window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+        this.detachEditorPositionListeners();
         this.editorService.unregisterEditor(this.crepe);
         this.crepe?.destroy();
     }
@@ -410,6 +492,43 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         } catch {
             return null;
         }
+    }
+
+    private parseMarkdownContent(markdown: string): any {
+        try {
+            const parser = this.crepe?.editor.ctx.get(parserCtx);
+            const doc = parser?.(markdown);
+            const json = doc?.toJSON?.();
+            if (json?.type === 'doc') {
+                return json;
+            }
+        } catch (error) {
+            console.warn('[EditorComponent] Failed to parse markdown content:', error);
+        }
+
+        return {
+            type: 'doc',
+            content: [{ type: 'paragraph' }]
+        };
+    }
+
+    private shouldReparseMarkdownFallback(content: any, markdown: string): boolean {
+        if (!markdown.includes('\n') || content?.type !== 'doc') {
+            return false;
+        }
+
+        const blocks = Array.isArray(content.content) ? content.content : [];
+        const onlyBlock = blocks.length === 1 ? blocks[0] : null;
+        if (onlyBlock?.type !== 'paragraph') {
+            return false;
+        }
+
+        const inline = Array.isArray(onlyBlock.content) ? onlyBlock.content : [];
+        return inline.length === 1 && inline[0]?.type === 'text' && inline[0]?.text === markdown;
+    }
+
+    private getScrollContainer(): HTMLElement | null {
+        return this.editorContainer?.nativeElement?.querySelector('.ProseMirror') as HTMLElement | null;
     }
 
     undo() {

@@ -2,19 +2,16 @@
 // Angular service for reactive note operations using Dexie liveQuery
 // TODO: This still uses Dexie for liveQuery - needs full migration to GoSQLite
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { liveQuery, Observable as DexieObservable } from 'dexie';
 import { from, Observable } from 'rxjs';
 import { db, Note, Folder, Entity } from './db';
 import * as ops from '../operations';
-import { EmbeddingQueueService } from '../services/embedding-queue.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class NotesService {
-    private embeddingQueue = inject(EmbeddingQueueService);
-
     // ==========================================================================
     // REACTIVE QUERIES (liveQuery wrapped as RxJS Observable)
     // ==========================================================================
@@ -92,19 +89,6 @@ export class NotesService {
 
     async updateNote(id: string, updates: Partial<Note>): Promise<void> {
         await ops.updateNote(id, updates);
-
-        // Trigger embedding if content changed
-        if (updates.content || updates.title || updates.markdownContent) {
-            const note = await db.notes.get(id);
-            if (note) {
-                this.embeddingQueue.markDirty(
-                    id,
-                    note.narrativeId || 'default',
-                    note.title,
-                    note.content
-                );
-            }
-        }
     }
 
     async deleteNote(id: string): Promise<void> {

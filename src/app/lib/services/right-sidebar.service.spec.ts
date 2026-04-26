@@ -18,12 +18,12 @@ describe('RightSidebarService', () => {
         setRightSidebarActivePanel: ReturnType<typeof vi.fn>;
     };
     let modeSignal: ReturnType<typeof signal<'open' | 'closed'>>;
-    let panelSignal: ReturnType<typeof signal<'entities' | 'analytics' | 'timeline' | 'ai'>>;
+    let panelSignal: ReturnType<typeof signal<'entities' | 'analytics' | 'timeline' | 'ai' | 'history'>>;
     let service: RightSidebarService;
 
     beforeEach(() => {
         modeSignal = signal<'open' | 'closed'>('open');
-        panelSignal = signal<'entities' | 'analytics' | 'timeline' | 'ai'>('entities');
+        panelSignal = signal<'entities' | 'analytics' | 'timeline' | 'ai' | 'history'>('entities');
 
         appStateMock = {
             rightSidebarMode: computed(() => modeSignal()),
@@ -52,15 +52,20 @@ describe('RightSidebarService', () => {
 
         panelSignal.set('ai');
         expect(service.activePanel()).toBe('ai');
+
+        panelSignal.set('history');
+        expect(service.activePanel()).toBe('history');
     });
 
     it('delegates panel changes back to app state persistence', () => {
         service.setActivePanel('timeline');
         service.setActivePanel('analytics');
         service.setActivePanel('ai');
+        service.setActivePanel('history');
 
         expect(appStateMock.setRightSidebarActivePanel).toHaveBeenNthCalledWith(1, 'timeline');
         expect(appStateMock.setRightSidebarActivePanel).toHaveBeenNthCalledWith(2, 'analytics');
         expect(appStateMock.setRightSidebarActivePanel).toHaveBeenNthCalledWith(3, 'ai');
+        expect(appStateMock.setRightSidebarActivePanel).toHaveBeenNthCalledWith(4, 'history');
     });
 });

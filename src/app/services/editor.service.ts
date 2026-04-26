@@ -1,14 +1,85 @@
-import { Injectable } from '@angular/core';
+import { Injectable, isDevMode } from '@angular/core';
 import { Subject } from 'rxjs';
 import { Crepe } from '@milkdown/crepe';
-import { commandsCtx } from '@milkdown/kit/core';
+import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
 import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
+import { TextSelection } from '@milkdown/kit/prose/state';
+import { stripDerivedEntityMarksInDocJson } from '../components/editor/entity-mark-sanitizer';
+import { extractProjectedText } from '../lib/Scanner/prosemirror-bridge';
+
+export interface EditorLiveUpdate {
+    noteId: string | null;
+    revision: number;
+    plainText: string;
+    textLength: number;
+    timings: {
+        plainTextMs: number;
+    };
+}
+
+export type EditorSnapshotReason = 'manual-save' | 'before-unload' | 'note-switch' | 'api';
+
+export interface EditorSnapshot {
+    json: object;
+    markdown: string;
+    timings: {
+        jsonMs: number;
+        markdownMs: number;
+        totalMs: number;
+    };
+}
+
+export type EditorPositionPersistMode = 'debounced' | 'manual-save' | 'before-unload' | 'note-switch';
+
+type EditorPerfTelemetry = {
+    liveUpdateCount: number;
+    snapshotCount: number;
+    analyticsRequestCount: number;
+    staleAnalyticsCount: number;
+    positionPersistCount: number;
+    lastLiveUpdate: {
+        noteId: string | null;
+        revision: number;
+        textLength: number;
+        plainTextMs: number;
+    } | null;
+    lastSnapshot: {
+        reason: EditorSnapshotReason;
+        jsonMs: number;
+        markdownMs: number;
+        totalMs: number;
+        markdownLength: number;
+    } | null;
+    lastAnalyticsRequest: {
+        noteId: string | null;
+        requestChars: number;
+        requestBytes: number;
+        roundTripMs: number;
+        stale: boolean;
+    } | null;
+    lastPositionPersist: {
+        noteId: string | null;
+        mode: EditorPositionPersistMode;
+    } | null;
+};
+
+type PerfWindow = typeof globalThis & {
+    __kittEditorPerf?: EditorPerfTelemetry;
+};
+
+function nowMs(): number {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+        return performance.now();
+    }
+    return Date.now();
+}
 
 @Injectable({
     providedIn: 'root'
 })
 export class EditorService {
     private crepe?: Crepe;
+    private readonly latestLiveContentByNote = new Map<string, EditorLiveUpdate>();
     private undoTrigger = new Subject<void>();
     private redoTrigger = new Subject<void>();
 
@@ -17,6 +88,20 @@ export class EditorService {
 
     private saveRequestSubject = new Subject<void>();
     saveRequest$ = this.saveRequestSubject.asObservable();
+    private liveUpdateSubject = new Subject<EditorLiveUpdate>();
+    liveUpdate$ = this.liveUpdateSubject.asObservable();
+    private readonly devPerfEnabled = isDevMode();
+    private readonly telemetry: EditorPerfTelemetry = {
+        liveUpdateCount: 0,
+        snapshotCount: 0,
+        analyticsRequestCount: 0,
+        staleAnalyticsCount: 0,
+        positionPersistCount: 0,
+        lastLiveUpdate: null,
+        lastSnapshot: null,
+        lastAnalyticsRequest: null,
+        lastPositionPersist: null,
+    };
 
     constructor() { }
 
@@ -71,10 +156,185 @@ export class EditorService {
         this.saveRequestSubject.next();
     }
 
-    private contentSubject = new Subject<{ json: object; markdown: string }>();
-    content$ = this.contentSubject.asObservable();
-
-    updateContent(content: { json: object; markdown: string }) {
-        this.contentSubject.next(content);
+    updateLiveContent(content: EditorLiveUpdate) {
+        if (content.noteId) {
+            this.latestLiveContentByNote.set(content.noteId, content);
+        }
+        this.liveUpdateSubject.next(content);
+        this.recordLiveUpdate(content);
     }
+
+    captureSnapshot(reason: EditorSnapshotReason = 'api'): EditorSnapshot | null {
+        if (!this.crepe) {
+            return null;
+        }
+
+        let editorView: { state: { doc: { toJSON: () => object } } } | null = null;
+        try {
+            editorView = this.crepe.editor.ctx.get(editorViewCtx);
+        } catch {
+            return null;
+        }
+
+        if (!editorView) {
+            return null;
+        }
+
+        const snapshotStart = nowMs();
+        const jsonStart = nowMs();
+        const rawJson = editorView.state.doc.toJSON() as any;
+        const json = stripDerivedEntityMarksInDocJson(rawJson).content as object;
+        const jsonMs = nowMs() - jsonStart;
+
+        const markdownStart = nowMs();
+        const markdown = this.crepe.getMarkdown();
+        const markdownMs = nowMs() - markdownStart;
+        const totalMs = nowMs() - snapshotStart;
+
+        const snapshot: EditorSnapshot = {
+            json,
+            markdown,
+            timings: {
+                jsonMs,
+                markdownMs,
+                totalMs,
+            },
+        };
+
+        this.recordSnapshot(reason, snapshot);
+        return snapshot;
+    }
+
+    selectProjectedRange(from: number, to: number): boolean {
+        if (!this.crepe || to <= from) {
+            return false;
+        }
+
+        let editorView: any | null = null;
+        try {
+            editorView = this.crepe.editor.ctx.get(editorViewCtx);
+        } catch {
+            return false;
+        }
+
+        if (!editorView) {
+            return false;
+        }
+
+        const projected = extractProjectedText(editorView.state.doc);
+        const start = mapProjectedOffsetToPm(projected.segments, from, 'start');
+        const end = mapProjectedOffsetToPm(projected.segments, Math.max(from, to - 1), 'end');
+        if (start === null || end === null) {
+            return false;
+        }
+
+        const docSize = editorView.state.doc.content.size;
+        const anchor = Math.max(1, Math.min(start, docSize - 1));
+        const head = Math.max(anchor, Math.min(end, docSize - 1));
+        const tr = editorView.state.tr
+            .setSelection(TextSelection.create(editorView.state.doc, anchor, head))
+            .scrollIntoView();
+        editorView.dispatch(tr);
+        editorView.focus();
+        return true;
+    }
+
+    recordPositionPersist(noteId: string | null, mode: EditorPositionPersistMode) {
+        if (!this.devPerfEnabled) {
+            return;
+        }
+
+        this.telemetry.positionPersistCount++;
+        this.telemetry.lastPositionPersist = { noteId, mode };
+        this.publishTelemetry();
+    }
+
+    recordAnalyticsRequest(metrics: {
+        noteId: string | null;
+        requestChars: number;
+        requestBytes: number;
+        roundTripMs: number;
+        stale: boolean;
+    }) {
+        if (!this.devPerfEnabled) {
+            return;
+        }
+
+        this.telemetry.analyticsRequestCount++;
+        if (metrics.stale) {
+            this.telemetry.staleAnalyticsCount++;
+        }
+        this.telemetry.lastAnalyticsRequest = { ...metrics };
+        this.publishTelemetry();
+    }
+
+    getPerfSnapshot(): EditorPerfTelemetry | null {
+        if (!this.devPerfEnabled) {
+            return null;
+        }
+
+        return {
+            ...this.telemetry,
+            lastLiveUpdate: this.telemetry.lastLiveUpdate ? { ...this.telemetry.lastLiveUpdate } : null,
+            lastSnapshot: this.telemetry.lastSnapshot ? { ...this.telemetry.lastSnapshot } : null,
+            lastAnalyticsRequest: this.telemetry.lastAnalyticsRequest ? { ...this.telemetry.lastAnalyticsRequest } : null,
+            lastPositionPersist: this.telemetry.lastPositionPersist ? { ...this.telemetry.lastPositionPersist } : null,
+        };
+    }
+
+    private recordLiveUpdate(content: EditorLiveUpdate) {
+        if (!this.devPerfEnabled) {
+            return;
+        }
+
+        this.telemetry.liveUpdateCount++;
+        this.telemetry.lastLiveUpdate = {
+            noteId: content.noteId,
+            revision: content.revision,
+            textLength: content.textLength,
+            plainTextMs: content.timings.plainTextMs,
+        };
+        this.publishTelemetry();
+    }
+
+    private recordSnapshot(reason: EditorSnapshotReason, snapshot: EditorSnapshot) {
+        if (!this.devPerfEnabled) {
+            return;
+        }
+
+        this.telemetry.snapshotCount++;
+        this.telemetry.lastSnapshot = {
+            reason,
+            jsonMs: snapshot.timings.jsonMs,
+            markdownMs: snapshot.timings.markdownMs,
+            totalMs: snapshot.timings.totalMs,
+            markdownLength: snapshot.markdown.length,
+        };
+        this.publishTelemetry();
+    }
+
+    private publishTelemetry() {
+        if (!this.devPerfEnabled) {
+            return;
+        }
+
+        (globalThis as PerfWindow).__kittEditorPerf = this.getPerfSnapshot() ?? undefined;
+    }
+}
+
+function mapProjectedOffsetToPm(
+    segments: ReturnType<typeof extractProjectedText>['segments'],
+    offset: number,
+    side: 'start' | 'end',
+): number | null {
+    for (const segment of segments) {
+        const segmentStart = segment.concatStart;
+        const segmentEnd = segment.concatStart + segment.length;
+        if (offset >= segmentStart && offset < segmentEnd) {
+            const localOffset = offset - segmentStart;
+            return segment.pmPos + localOffset + (side === 'end' ? 1 : 0);
+        }
+    }
+
+    return null;
 }

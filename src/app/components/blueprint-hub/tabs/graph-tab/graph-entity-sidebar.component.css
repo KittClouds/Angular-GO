@@ -1,0 +1,421 @@
+.atlas-sidebar {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    height: 100%;
+    width: 318px;
+    flex-shrink: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid rgba(63, 63, 70, 0.72);
+    background: linear-gradient(180deg, rgba(11, 15, 24, 0.98), rgba(5, 7, 11, 0.98));
+    color: rgb(244 244 245);
+    transition: width 200ms ease;
+}
+
+.atlas-sidebar-closed {
+    width: 48px;
+}
+
+.atlas-header {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+    background: rgba(255, 255, 255, 0.025);
+    padding: 0 8px;
+}
+
+.atlas-kicker {
+    color: rgb(94 234 212);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.atlas-pill {
+    border: 1px solid rgba(45, 212, 191, 0.18);
+    border-radius: 999px;
+    background: rgba(20, 184, 166, 0.08);
+    padding: 2px 7px;
+    color: rgb(153 246 228);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+}
+
+.atlas-pill-violet {
+    border-color: rgba(168, 85, 247, 0.18);
+    background: rgba(168, 85, 247, 0.08);
+    color: rgb(221 214 254);
+}
+
+.atlas-icon-button,
+.row-icon-button,
+.graph-rail-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 140ms ease, color 140ms ease;
+}
+
+.atlas-icon-button {
+    width: 28px;
+    height: 28px;
+    color: rgb(161 161 170);
+}
+
+.atlas-icon-button:hover,
+.row-icon-button:hover,
+.graph-rail-button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+}
+
+.atlas-control-stack {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    padding: 9px;
+}
+
+.atlas-panel {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+    padding: 9px;
+}
+
+.atlas-soft-button,
+.atlas-action-trigger,
+.atlas-action-button,
+.lens-button {
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.20);
+    color: rgb(212 212 216);
+    font-size: 11px;
+    font-weight: 800;
+    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.atlas-soft-button {
+    padding: 5px 8px;
+    color: rgb(221 214 254);
+}
+
+.atlas-header-pill {
+    flex-shrink: 0;
+    padding: 5px 7px;
+    color: rgb(153 246 228);
+}
+
+.lens-grid,
+.atlas-action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.lens-button {
+    min-height: 32px;
+    color: rgb(113 113 122);
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+}
+
+.lens-button-active {
+    border-color: rgba(45, 212, 191, 0.28);
+    background: rgba(20, 184, 166, 0.12);
+    color: rgb(153 246 228);
+}
+
+.atlas-action-trigger,
+.atlas-action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 34px;
+}
+
+.atlas-action-trigger {
+    width: 100%;
+    color: rgb(207 250 254);
+}
+
+.atlas-action-grid {
+    margin-top: 8px;
+}
+
+.atlas-control-actions {
+    margin-top: 0;
+}
+
+.atlas-controls-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+    padding: 8px;
+}
+
+.atlas-controls-shell app-entity-steward {
+    display: block;
+    flex: 1;
+    min-height: 0;
+}
+
+.atlas-control-empty {
+    margin-top: 8px;
+}
+
+.atlas-control-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    border: 1px solid rgba(94, 234, 212, 0.16);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.22);
+    padding: 5px;
+}
+
+.atlas-control-actions .atlas-action-button {
+    min-height: 31px;
+    gap: 5px;
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0 5px;
+    font-size: 10px;
+}
+
+.atlas-control-actions .atlas-action-button:hover {
+    border-color: rgba(45, 212, 191, 0.24);
+    background: rgba(20, 184, 166, 0.12);
+    color: rgb(204 251 241);
+}
+
+.atlas-control-actions .scan-action {
+    color: rgb(253 230 138);
+}
+
+.atlas-control-actions .gliner-action {
+    color: rgb(221 214 254);
+}
+
+.scan-action {
+    border-color: rgba(245, 158, 11, 0.18);
+    background: rgba(245, 158, 11, 0.07);
+    color: rgb(253 230 138);
+}
+
+.gliner-action {
+    border-color: rgba(168, 85, 247, 0.18);
+    background: rgba(168, 85, 247, 0.08);
+    color: rgb(221 214 254);
+}
+
+.atlas-error {
+    margin-top: 8px;
+    border: 1px solid rgba(248, 113, 113, 0.20);
+    border-radius: 8px;
+    background: rgba(127, 29, 29, 0.24);
+    padding: 8px;
+    color: rgb(254 202 202);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.atlas-search {
+    display: flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+    padding: 0 12px;
+}
+
+.atlas-search input {
+    min-width: 0;
+    flex: 1;
+    background: transparent;
+    color: white;
+    font-size: 13px;
+    outline: none;
+}
+
+.atlas-list-shell {
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+    padding: 9px;
+}
+
+.graph-entity-viewport {
+    height: 100%;
+    width: 100%;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.graph-entity-viewport::-webkit-scrollbar {
+    width: 5px;
+}
+
+.graph-entity-viewport::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.graph-entity-viewport::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.atlas-group-row,
+.atlas-suggestion-row,
+.atlas-entity-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 9px;
+    border-radius: 9px;
+    padding: 0 10px;
+}
+
+.atlas-group-row {
+    height: 42px;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    background: rgba(255, 255, 255, 0.025);
+    color: rgb(161 161 170);
+    text-align: left;
+}
+
+.atlas-group-row span {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.atlas-group-row strong {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.24);
+    padding: 2px 7px;
+    color: rgb(161 161 170);
+    font-size: 10px;
+}
+
+.suggestion-group {
+    border-color: rgba(245, 158, 11, 0.14);
+    background: rgba(245, 158, 11, 0.05);
+}
+
+.atlas-suggestion-row,
+.atlas-entity-row {
+    height: 52px;
+    border: 1px solid transparent;
+    text-align: left;
+}
+
+.atlas-suggestion-row {
+    border-color: rgba(245, 158, 11, 0.12);
+    background: rgba(245, 158, 11, 0.035);
+}
+
+.atlas-entity-row:hover,
+.atlas-entity-selected {
+    border-color: rgba(45, 212, 191, 0.22);
+    background: rgba(20, 184, 166, 0.08);
+}
+
+.entity-dot,
+.suggestion-dot {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    border-radius: 999px;
+}
+
+.suggestion-dot {
+    background: rgb(252 211 77);
+    box-shadow: 0 0 12px rgba(252, 211, 77, 0.42);
+}
+
+.row-actions {
+    display: flex;
+    opacity: 0;
+    transition: opacity 140ms ease;
+}
+
+.atlas-entity-row:hover .row-actions {
+    opacity: 1;
+}
+
+.row-icon-button {
+    width: 28px;
+    height: 28px;
+    color: rgb(161 161 170);
+}
+
+.row-delete:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: rgb(254 202 202);
+}
+
+.atlas-empty {
+    display: flex;
+    min-height: 160px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    padding: 22px;
+    text-align: center;
+    color: rgb(113 113 122);
+}
+
+.atlas-empty p {
+    margin-top: 12px;
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.atlas-empty span {
+    margin-top: 6px;
+    color: rgb(113 113 122);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.atlas-rail {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+}
+
+.graph-rail-button {
+    width: 36px;
+    height: 36px;
+}

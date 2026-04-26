@@ -1,8 +1,15 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, NgZone, computed, signal } from '@angular/core';
 import type { TTSWorkerMessage, TTSResponseMessage } from '../workers/tts.worker';
 import { modelCache } from '../lib/model-cache';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../lib/core/worker-zone';
+import { createTauRPCProxy, type NativeTtsSynthResult } from '../generated/phoenix-taurpc';
 
 export type TTSModelState = 'idle' | 'loading' | 'ready' | 'error';
+export type TTSEngine = 'nativeChatterbox' | 'nativeQwenClone' | 'nativeSupertonicRust' | 'browserSupertonic';
+type SpeakOptions = {
+    autoLoad?: boolean;
+    unloadWhenFinished?: boolean;
+};
 
 // Voice configuration
 export interface TtsVoice {
@@ -27,6 +34,29 @@ export const TTS_VOICES: TtsVoice[] = [
     { id: 'M4', name: 'Henry', gender: 'male', url: `${VOICE_BASE}/M4.bin` },
 ];
 
+export const NATIVE_TTS_MODEL_ROOT = 'G:\\phoenix-tts\\chatterbox-turbo-onnx';
+export const NATIVE_TTS_REFERENCE_WAV = 'G:\\phoenix-tts\\reference-sapi.wav';
+export const NATIVE_TTS_MAX_NEW_TOKENS = 1024;
+export const NATIVE_SUPERTONIC_RUNNER = 'G:\\phoenix-tts\\supertonic-rust\\example_onnx.exe';
+export const NATIVE_SUPERTONIC_MODEL_ROOT = 'G:\\phoenix-tts\\supertonic-2';
+export const NATIVE_SUPERTONIC_OUTPUT_ROOT = 'G:\\phoenix-tts\\supertonic-rust-outputs';
+export const NATIVE_SUPERTONIC_TOTAL_STEP = 5;
+export const NATIVE_SUPERTONIC_SPEED = 1.05;
+export const NATIVE_QWEN_RUNNER = 'G:\\phoenix-tts\\qwen3-tts-rs\\bin\\qwen-tts.exe';
+export const NATIVE_QWEN_MODEL = 'Qwen/Qwen3-TTS-12Hz-0.6B-Base';
+export const NATIVE_QWEN_OUTPUT_ROOT = 'G:\\phoenix-tts\\qwen-tts-outputs';
+export const NATIVE_QWEN_LANGUAGE = 'english';
+export const NATIVE_QWEN_DEVICE = 'cpu';
+export const NATIVE_QWEN_DTYPE = 'f32';
+export const NATIVE_QWEN_MAX_TOKENS = 1536;
+export const NATIVE_QWEN_TIMEOUT_SECS = 600;
+export const NATIVE_QWEN_PROMPT_CACHE = 'G:\\phoenix-tts\\qwen-reference-prompt.json';
+const QWEN_REF_AUDIO_KEY = 'phoenix.tts.qwen.refAudio';
+const QWEN_REF_TEXT_KEY = 'phoenix.tts.qwen.refText';
+const QWEN_PROMPT_KEY = 'phoenix.tts.qwen.promptPath';
+const QWEN_PROMPT_CACHE_KEY = 'phoenix.tts.qwen.usePromptCache';
+export type QwenCloneMode = 'prompt-cache' | 'icl' | 'x-vector';
+
 /**
  * Get a voice embedding buffer, using cache if available.
  */
@@ -46,20 +76,50 @@ export class TtsService {
     private readonly _loadProgress = signal<number>(0);
     private readonly _loadStatus = signal<string>('');
     private readonly _isPlaying = signal<boolean>(false);
+    private readonly _isPaused = signal<boolean>(false);
     private readonly _errorMessage = signal<string | null>(null);
     private readonly _selectedVoice = signal<TtsVoice>(TTS_VOICES[0]);
+    private readonly _selectedEngine = signal<TTSEngine>('browserSupertonic');
+    private readonly _qwenCloneReferenceAudio = signal<string>(
+        readStoredString(QWEN_REF_AUDIO_KEY, NATIVE_TTS_REFERENCE_WAV),
+    );
+    private readonly _qwenCloneReferenceText = signal<string>(
+        readStoredString(QWEN_REF_TEXT_KEY, ''),
+    );
+    private readonly _qwenClonePromptPath = signal<string>(
+        readStoredString(QWEN_PROMPT_KEY, NATIVE_QWEN_PROMPT_CACHE),
+    );
+    private readonly _qwenCloneUsePromptCache = signal<boolean>(
+        readStoredBoolean(QWEN_PROMPT_CACHE_KEY, true),
+    );
 
     // Public readonly signals
     readonly modelState = this._modelState.asReadonly();
     readonly loadProgress = this._loadProgress.asReadonly();
     readonly loadStatus = this._loadStatus.asReadonly();
     readonly isPlaying = this._isPlaying.asReadonly();
+    readonly isPaused = this._isPaused.asReadonly();
     readonly errorMessage = this._errorMessage.asReadonly();
     readonly selectedVoice = this._selectedVoice.asReadonly();
+    readonly selectedEngine = this._selectedEngine.asReadonly();
+    readonly nativeReferencePath = this._qwenCloneReferenceAudio.asReadonly();
+    readonly qwenCloneReferenceAudio = this._qwenCloneReferenceAudio.asReadonly();
+    readonly qwenCloneReferenceText = this._qwenCloneReferenceText.asReadonly();
+    readonly qwenClonePromptPath = this._qwenClonePromptPath.asReadonly();
+    readonly qwenCloneUsePromptCache = this._qwenCloneUsePromptCache.asReadonly();
 
     // Computed
     readonly isModelReady = computed(() => this._modelState() === 'ready');
     readonly isModelLoading = computed(() => this._modelState() === 'loading');
+    readonly nativeAvailable = computed(() => isTauriDesktop());
+    readonly nativeSupertonicRustAvailable = computed(() => isTauriDesktop());
+    readonly nativeQwenCloneAvailable = computed(() => isTauriDesktop());
+    readonly qwenCloneMode = computed<QwenCloneMode>(() => {
+        if (this._qwenCloneUsePromptCache() && this._qwenClonePromptPath().trim()) {
+            return 'prompt-cache';
+        }
+        return this._qwenCloneReferenceText().trim() ? 'icl' : 'x-vector';
+    });
 
     // ========================================================================
     // Worker & Audio
@@ -68,6 +128,8 @@ export class TtsService {
     private worker: Worker | null = null;
     private audioContext: AudioContext | null = null;
     private idleUnloadTimer: ReturnType<typeof setTimeout> | null = null;
+    private nativeRpc: ReturnType<typeof createTauRPCProxy> | null = null;
+    private pendingEngineSwitch: Promise<void> | null = null;
 
     // ========================================================================
     // Prefetch Pipeline State
@@ -86,6 +148,8 @@ export class TtsService {
     private playbackGeneration = 0;
     private nextRequestId = 0;
     private activePlaybackVoiceId: string | null = null;
+    private queuedSpeakRequest: { text: string; unloadWhenFinished: boolean } | null = null;
+    private unloadAfterPlayback = false;
 
     private readonly cachedWorkerVoiceIds = new Set<string>();
     private readonly voicePreloadPromises = new Map<string, Promise<void>>();
@@ -100,6 +164,8 @@ export class TtsService {
         timeout: ReturnType<typeof setTimeout>;
     } | null = null;
 
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {}
+
     // ========================================================================
     // Voice Selection
     // ========================================================================
@@ -108,9 +174,83 @@ export class TtsService {
         this._selectedVoice.set(voice);
         console.log(`[TtsService] Voice changed to ${voice.name} (${voice.id})`);
 
-        if (this._modelState() === 'ready') {
+        if (this._selectedEngine() === 'browserSupertonic' && this._modelState() === 'ready') {
             void this.preloadVoice(voice);
         }
+    }
+
+    setQwenCloneReferenceAudio(path: string): void {
+        const value = path.trim();
+        this._qwenCloneReferenceAudio.set(value || NATIVE_TTS_REFERENCE_WAV);
+        storeString(QWEN_REF_AUDIO_KEY, this._qwenCloneReferenceAudio());
+    }
+
+    setQwenCloneReferenceText(text: string): void {
+        this._qwenCloneReferenceText.set(text);
+        storeString(QWEN_REF_TEXT_KEY, text);
+    }
+
+    setQwenClonePromptPath(path: string): void {
+        const value = path.trim();
+        this._qwenClonePromptPath.set(value || NATIVE_QWEN_PROMPT_CACHE);
+        storeString(QWEN_PROMPT_KEY, this._qwenClonePromptPath());
+    }
+
+    setQwenCloneUsePromptCache(enabled: boolean): void {
+        this._qwenCloneUsePromptCache.set(enabled);
+        storeBoolean(QWEN_PROMPT_CACHE_KEY, enabled);
+    }
+
+    createFreshQwenPromptCache(): void {
+        const stamp = new Date()
+            .toISOString()
+            .replaceAll('-', '')
+            .replaceAll(':', '')
+            .replaceAll('.', '')
+            .replaceAll('T', '')
+            .replaceAll('Z', '')
+            .slice(0, 14);
+        this.setQwenClonePromptPath(`G:\\phoenix-tts\\qwen-reference-prompt-${stamp}.json`);
+        this.setQwenCloneUsePromptCache(true);
+    }
+
+    setEngine(engine: TTSEngine): void {
+        const previousEngine = this._selectedEngine();
+        if (engine === previousEngine) return;
+        if ((engine === 'nativeChatterbox' || engine === 'nativeQwenClone' || engine === 'nativeSupertonicRust') && !isTauriDesktop()) {
+            this._errorMessage.set('Native TTS engines are only available in the desktop app.');
+            return;
+        }
+
+        this._selectedEngine.set(engine);
+        this._modelState.set('loading');
+        this._loadProgress.set(0);
+        this._loadStatus.set('Switching TTS engine...');
+        this._errorMessage.set(null);
+
+        const switchPromise = this.performUnload(previousEngine, false)
+            .then(() => {
+                if (this._selectedEngine() !== engine) {
+                    return;
+                }
+                this._modelState.set('idle');
+                this._loadProgress.set(0);
+                this._loadStatus.set('');
+            })
+            .catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                this._modelState.set('error');
+                this._loadProgress.set(0);
+                this._loadStatus.set('Engine switch failed');
+                this._errorMessage.set(message);
+            })
+            .finally(() => {
+                if (this.pendingEngineSwitch === switchPromise) {
+                    this.pendingEngineSwitch = null;
+                }
+            });
+
+        this.pendingEngineSwitch = switchPromise;
     }
 
     // ========================================================================
@@ -123,6 +263,16 @@ export class TtsService {
     loadModel(): void {
         this.cancelIdleUnloadTimer();
 
+        if (this.pendingEngineSwitch) {
+            const engine = this._selectedEngine();
+            void this.pendingEngineSwitch.then(() => {
+                if (this._selectedEngine() === engine) {
+                    this.loadModel();
+                }
+            });
+            return;
+        }
+
         if (this._modelState() === 'loading') {
             console.log('[TtsService] Model already loading.');
             return;
@@ -131,6 +281,19 @@ export class TtsService {
         if (this._modelState() === 'ready') {
             console.log('[TtsService] Model already loaded.');
             void this.preloadVoice(this._selectedVoice());
+            return;
+        }
+
+        if (this._selectedEngine() === 'nativeChatterbox') {
+            void this.loadNativeModel();
+            return;
+        }
+        if (this._selectedEngine() === 'nativeSupertonicRust') {
+            this.loadNativeSupertonicRustModel();
+            return;
+        }
+        if (this._selectedEngine() === 'nativeQwenClone') {
+            this.loadNativeQwenCloneModel();
             return;
         }
 
@@ -146,20 +309,66 @@ export class TtsService {
     /**
      * Synthesize speech from text and play it with prefetching for seamless playback.
      */
-    speak(text: string): void {
+    speak(text: string, options: SpeakOptions = {}): void {
+        const normalizedText = normalizeSpeechInput(text);
+        if (!normalizedText) {
+            console.warn('[TtsService] No text to speak.');
+            return;
+        }
+
         if (this._modelState() !== 'ready') {
+            if (options.autoLoad) {
+                this.queuedSpeakRequest = {
+                    text: normalizedText,
+                    unloadWhenFinished: Boolean(options.unloadWhenFinished),
+                };
+                this.loadModel();
+                return;
+            }
+
             console.warn('[TtsService] Model not ready. Call loadModel() first.');
             return;
         }
 
-        void this.startPlayback(text);
+        void this.startPlayback(normalizedText, Boolean(options.unloadWhenFinished));
+    }
+
+    /**
+     * Speak a short, user-selected excerpt and unload runtime resources afterward.
+     */
+    speakOnce(text: string): void {
+        this.speak(text, { autoLoad: true, unloadWhenFinished: true });
     }
 
     /**
      * Stop current playback, clear transient buffers, and begin idle cleanup.
      */
     stop(): void {
-        this.stopPlayback(true);
+        this.queuedSpeakRequest = null;
+        this.unloadAfterPlayback = false;
+        this.stopPlayback(true, 'user-stop');
+    }
+
+    /**
+     * Pause current playback.
+     */
+    pause(): void {
+        if (!this._isPlaying() || this._isPaused() || !this.audioContext) return;
+        this.audioContext.suspend().then(() => {
+            this._isPaused.set(true);
+            this.scheduleIdleUnload();
+        });
+    }
+
+    /**
+     * Resume current playback.
+     */
+    resume(): void {
+        if (!this._isPlaying() || !this._isPaused() || !this.audioContext) return;
+        this.audioContext.resume().then(() => {
+            this._isPaused.set(false);
+            this.cancelIdleUnloadTimer();
+        });
     }
 
     /**
@@ -167,6 +376,8 @@ export class TtsService {
      */
     async unloadModel(): Promise<void> {
         this.cancelIdleUnloadTimer();
+        this.queuedSpeakRequest = null;
+        this.unloadAfterPlayback = false;
 
         if (this.pendingUnload) {
             return this.pendingUnload;
@@ -184,18 +395,85 @@ export class TtsService {
      * Cleanup resources.
      */
     destroy(): void {
-        this.stopPlayback(false);
+        this.stopPlayback(false, 'destroy');
         void this.unloadModel();
+    }
+
+    private async loadNativeModel(): Promise<void> {
+        if (!isTauriDesktop()) {
+            this._modelState.set('error');
+            this._errorMessage.set('Native Chatterbox TTS is only available in the desktop app.');
+            return;
+        }
+
+        this._modelState.set('loading');
+        this._loadProgress.set(5);
+        this._loadStatus.set('Loading Chatterbox Turbo...');
+        this._errorMessage.set(null);
+
+        try {
+            const status = await this.getNativeRpc().phoenix.tts_load({
+                modelRoot: NATIVE_TTS_MODEL_ROOT,
+                voiceWav: NATIVE_TTS_REFERENCE_WAV,
+                dtype: 'q4f16',
+                maxNewTokens: NATIVE_TTS_MAX_NEW_TOKENS,
+                repetitionPenalty: 1.2,
+                threads: 8,
+            });
+            this.ngZone.run(() => {
+                this._modelState.set(status.loaded ? 'ready' : 'error');
+                this._loadProgress.set(status.loaded ? 100 : 0);
+                this._loadStatus.set(status.loaded ? 'Chatterbox ready' : 'Chatterbox unavailable');
+                this._errorMessage.set(status.lastError ?? null);
+                this.runQueuedSpeakIfReady();
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.ngZone.run(() => {
+                this._modelState.set('error');
+                this._loadProgress.set(0);
+                this._loadStatus.set('Chatterbox failed');
+                this._errorMessage.set(message);
+            });
+        }
+    }
+
+    private loadNativeSupertonicRustModel(): void {
+        if (!isTauriDesktop()) {
+            this._modelState.set('error');
+            this._errorMessage.set('Supertonic Rust is only available in the desktop app.');
+            return;
+        }
+
+        this._modelState.set('ready');
+        this._loadProgress.set(100);
+        this._loadStatus.set('Supertonic Rust ready');
+        this._errorMessage.set(null);
+        this.runQueuedSpeakIfReady();
+    }
+
+    private loadNativeQwenCloneModel(): void {
+        if (!isTauriDesktop()) {
+            this._modelState.set('error');
+            this._errorMessage.set('Qwen voice clone is only available in the desktop app.');
+            return;
+        }
+
+        this._modelState.set('ready');
+        this._loadProgress.set(100);
+        this._loadStatus.set('Qwen 0.6B clone ready');
+        this._errorMessage.set(null);
+        this.runQueuedSpeakIfReady();
     }
 
     // ========================================================================
     // Text Chunking
     // ========================================================================
 
-    private chunkText(text: string): string[] {
+    private chunkText(text: string, maxChunkSize = this.MAX_CHUNK_SIZE): string[] {
         if (!text || text.trim().length === 0) return [];
 
-        const sentencePattern = /[^.!?]+[.!?]+\s*/g;
+        const sentencePattern = /[^.!?]+(?:[.!?]+|$)/g;
         const sentences = text.match(sentencePattern) || [text];
 
         const chunks: string[] = [];
@@ -205,8 +483,17 @@ export class TtsService {
             const trimmedSentence = sentence.trim();
             if (!trimmedSentence) continue;
 
+            if (trimmedSentence.length > maxChunkSize) {
+                if (currentChunk.trim()) {
+                    chunks.push(currentChunk.trim());
+                    currentChunk = '';
+                }
+                chunks.push(...splitByWordBudget(trimmedSentence, maxChunkSize));
+                continue;
+            }
+
             if (currentChunk.length > 0 &&
-                (currentChunk.length + trimmedSentence.length) > this.MAX_CHUNK_SIZE) {
+                (currentChunk.length + trimmedSentence.length) > maxChunkSize) {
                 chunks.push(currentChunk.trim());
                 currentChunk = trimmedSentence;
             } else {
@@ -222,7 +509,7 @@ export class TtsService {
             const words = text.split(/\s+/);
             currentChunk = '';
             for (const word of words) {
-                if ((currentChunk + ' ' + word).length > this.MAX_CHUNK_SIZE && currentChunk) {
+                if ((currentChunk + ' ' + word).length > maxChunkSize && currentChunk) {
                     chunks.push(currentChunk.trim());
                     currentChunk = word;
                 } else {
@@ -241,31 +528,38 @@ export class TtsService {
     // Prefetch Pipeline
     // ========================================================================
 
-    private async startPlayback(text: string): Promise<void> {
+    private async startPlayback(text: string, unloadWhenFinished = false): Promise<void> {
+        if (this.pendingEngineSwitch) {
+            await this.pendingEngineSwitch;
+        }
+
         if (this._isPlaying()) {
-            this.stopPlayback(false);
+            this.stopPlayback(false, 'restart-playback');
         } else {
             this.cancelIdleUnloadTimer();
         }
 
+        const engine = this._selectedEngine();
         const chunks = this.chunkText(text);
         if (chunks.length === 0) {
             console.warn('[TtsService] No text to speak.');
             return;
         }
 
-        const voice = this._selectedVoice();
+        const voiceId = this._selectedVoice().id;
         const generation = ++this.playbackGeneration;
 
         this.resetPlaybackBuffers();
         this.pendingChunks = chunks;
         this.stopRequested = false;
-        this.activePlaybackVoiceId = voice.id;
+        this.unloadAfterPlayback = unloadWhenFinished;
+        this.activePlaybackVoiceId = voiceId;
         this._isPlaying.set(true);
+        this._isPaused.set(false);
         this._errorMessage.set(null);
 
         try {
-            await this.preloadVoice(voice);
+            await this.preloadVoice(this._selectedVoice());
             if (generation !== this.playbackGeneration || this.stopRequested) {
                 return;
             }
@@ -275,7 +569,7 @@ export class TtsService {
                 return;
             }
 
-            console.log(`[TtsService] Starting prefetch pipeline for ${this.pendingChunks.length} chunks...`);
+            console.log(`[TtsService] Starting ${engine} prefetch pipeline for ${this.pendingChunks.length} chunks...`);
             this.fillPrefetchBuffer();
         } catch (error) {
             if (generation !== this.playbackGeneration) {
@@ -286,7 +580,7 @@ export class TtsService {
             console.error('[TtsService] Failed to start playback:', message);
             this._errorMessage.set(message);
             this._isPlaying.set(false);
-            this.scheduleIdleUnload();
+            this.finishOrScheduleIdleUnload();
         }
     }
 
@@ -317,6 +611,19 @@ export class TtsService {
         const requestId = ++this.nextRequestId;
         this.isGenerating = true;
 
+        if (this._selectedEngine() === 'nativeChatterbox') {
+            void this.requestNativeChunk(chunk, generation, requestId);
+            return;
+        }
+        if (this._selectedEngine() === 'nativeSupertonicRust') {
+            void this.requestSupertonicRustChunk(chunk, generation, requestId);
+            return;
+        }
+        if (this._selectedEngine() === 'nativeQwenClone') {
+            void this.requestQwenCloneChunk(chunk, generation, requestId);
+            return;
+        }
+
         console.log(`[TtsService] Requesting synthesis (${this.pendingChunks.length} pending): "${chunk.substring(0, 40)}..."`);
         this.sendMessage({
             type: 'SPEAK',
@@ -327,6 +634,126 @@ export class TtsService {
                 requestId
             }
         });
+    }
+
+    private async requestNativeChunk(chunk: string, generation: number, requestId: number): Promise<void> {
+        try {
+            const result = await this.getNativeRpc().phoenix.tts_speak({
+                text: chunk,
+                voiceWav: NATIVE_TTS_REFERENCE_WAV,
+                maxNewTokens: NATIVE_TTS_MAX_NEW_TOKENS,
+                repetitionPenalty: 1.2,
+            });
+            if (generation !== this.playbackGeneration || this.stopRequested) {
+                return;
+            }
+            if (!result.stopped) {
+                console.warn(
+                    `[TtsService] Native Chatterbox hit the ${NATIVE_TTS_MAX_NEW_TOKENS} token cap before STOP. ` +
+                    `Chunk may be incomplete: "${chunk.substring(0, 80)}..."`,
+                );
+            }
+            const samples = pcm16ToFloat32(result);
+            await this.handleAudioReady(
+                samples.buffer,
+                samples.length,
+                result.sampleRate,
+                generation,
+                requestId,
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.handleSpeakError(generation, requestId, message);
+        }
+    }
+
+    private async requestSupertonicRustChunk(
+        chunk: string,
+        generation: number,
+        requestId: number,
+    ): Promise<void> {
+        try {
+            const voiceStyle = this.activePlaybackVoiceId || this._selectedVoice().id;
+            console.log(
+                `[TtsService] Requesting Supertonic Rust synthesis ` +
+                `(${this.pendingChunks.length} pending, voice=${voiceStyle}): "${chunk.substring(0, 40)}..."`,
+            );
+            const result = await this.getNativeRpc().phoenix.tts_supertonic_speak({
+                text: chunk,
+                voiceStyle,
+                runnerPath: NATIVE_SUPERTONIC_RUNNER,
+                modelRoot: NATIVE_SUPERTONIC_MODEL_ROOT,
+                outputDir: NATIVE_SUPERTONIC_OUTPUT_ROOT,
+                totalStep: NATIVE_SUPERTONIC_TOTAL_STEP,
+                speed: NATIVE_SUPERTONIC_SPEED,
+                lang: 'en',
+            });
+            if (generation !== this.playbackGeneration || this.stopRequested) {
+                return;
+            }
+            const samples = pcm16ToFloat32(result);
+            await this.handleAudioReady(
+                samples.buffer,
+                samples.length,
+                result.sampleRate,
+                generation,
+                requestId,
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.handleSpeakError(generation, requestId, message);
+        }
+    }
+
+    private async requestQwenCloneChunk(
+        chunk: string,
+        generation: number,
+        requestId: number,
+    ): Promise<void> {
+        try {
+            console.log(
+                `[TtsService] Requesting Qwen 0.6B voice clone ` +
+                `(${this.pendingChunks.length} pending): "${chunk.substring(0, 40)}..."`,
+            );
+            const refAudio = this._qwenCloneReferenceAudio().trim() || NATIVE_TTS_REFERENCE_WAV;
+            const refText = this._qwenCloneReferenceText().trim();
+            const promptPath = this._qwenClonePromptPath().trim() || NATIVE_QWEN_PROMPT_CACHE;
+            const usePromptCache = this._qwenCloneUsePromptCache();
+            const result = await this.getNativeRpc().phoenix.tts_qwen_speak({
+                text: chunk,
+                runnerPath: NATIVE_QWEN_RUNNER,
+                model: NATIVE_QWEN_MODEL,
+                modelPath: null,
+                refAudio,
+                refText: refText || null,
+                outputDir: NATIVE_QWEN_OUTPUT_ROOT,
+                loadPrompt: usePromptCache ? promptPath : null,
+                savePrompt: usePromptCache ? promptPath : null,
+                usePromptCache,
+                language: NATIVE_QWEN_LANGUAGE,
+                device: NATIVE_QWEN_DEVICE,
+                dtype: NATIVE_QWEN_DTYPE,
+                maxTokens: NATIVE_QWEN_MAX_TOKENS,
+                greedy: false,
+                xVectorOnly: !refText,
+                timeoutSecs: NATIVE_QWEN_TIMEOUT_SECS,
+            });
+            if (generation !== this.playbackGeneration || this.stopRequested) {
+                return;
+            }
+            const samples = pcm16ToFloat32(result);
+            await this.handleAudioReady(
+                samples.buffer,
+                samples.length,
+                result.sampleRate,
+                generation,
+                requestId,
+            );
+        } catch (error) {
+            const rawMessage = error instanceof Error ? error.message : String(error);
+            const message = explainNativeQwenError(rawMessage);
+            this.handleSpeakError(generation, requestId, message);
+        }
     }
 
     /**
@@ -390,17 +817,32 @@ export class TtsService {
             console.log('[TtsService] Finished playing all chunks.');
             this._isPlaying.set(false);
             this.activePlaybackVoiceId = null;
-            this.scheduleIdleUnload();
+            this.finishOrScheduleIdleUnload();
         }
     }
 
-    private stopPlayback(scheduleIdleUnload: boolean): void {
-        console.log('[TtsService] Stopping playback...');
+    private finishOrScheduleIdleUnload(): void {
+        if (this.unloadAfterPlayback) {
+            this.unloadAfterPlayback = false;
+            void this.unloadModel();
+            return;
+        }
+
+        this.scheduleIdleUnload();
+    }
+
+    private stopPlayback(scheduleIdleUnload: boolean, reason = 'unknown'): void {
+        console.log(
+            `[TtsService] Stopping playback (${reason}). ` +
+            `pending=${this.pendingChunks.length}, queue=${this.audioBufferQueue.length}, ` +
+            `active=${this.activeSourceNodes.length}, generating=${this.isGenerating}`,
+        );
 
         const cancelledGeneration = ++this.playbackGeneration;
         this.stopRequested = true;
         this.isGenerating = false;
         this.activePlaybackVoiceId = null;
+        this.unloadAfterPlayback = false;
 
         this.resetPlaybackBuffers();
 
@@ -417,8 +859,9 @@ export class TtsService {
 
         this.activeSourceNodes = [];
         this._isPlaying.set(false);
+        this._isPaused.set(false);
 
-        if (this.worker) {
+        if (this.worker && this._selectedEngine() === 'browserSupertonic') {
             this.sendMessage({
                 type: 'STOP',
                 payload: { generation: cancelledGeneration }
@@ -471,21 +914,28 @@ export class TtsService {
     private initWorker(): void {
         if (this.worker) return;
 
-        this.worker = new Worker(new URL('../workers/tts.worker', import.meta.url), {
-            type: 'module'
-        });
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('../workers/tts.worker', import.meta.url), {
+                    type: 'module',
+                }),
+            (worker) => {
+                worker.onmessage = (e: MessageEvent<TTSResponseMessage>) => {
+                    this.handleWorkerMessage(e.data);
+                };
 
-        this.worker.onmessage = (e: MessageEvent<TTSResponseMessage>) => {
-            this.handleWorkerMessage(e.data);
-        };
-
-        this.worker.onerror = (error) => {
-            console.error('[TtsService] Worker error:', error);
-            this.resolveUnloadWaiter();
-            this.rejectAllVoicePreloads(new Error('Worker failed to initialize.'));
-            this._modelState.set('error');
-            this._errorMessage.set('Worker failed to initialize.');
-        };
+                worker.onerror = (error) => {
+                    this.ngZone.run(() => {
+                        console.error('[TtsService] Worker error:', error);
+                        this.resolveUnloadWaiter();
+                        this.rejectAllVoicePreloads(new Error('Worker failed to initialize.'));
+                        this._modelState.set('error');
+                        this._errorMessage.set('Worker failed to initialize.');
+                    });
+                };
+            },
+        );
     }
 
     private sendMessage(msg: TTSWorkerMessage, transfer: Transferable[] = []): void {
@@ -509,42 +959,53 @@ export class TtsService {
                 break;
 
             case 'MODEL_READY':
-                this._modelState.set('ready');
-                this._loadProgress.set(100);
-                this._loadStatus.set('Ready');
-                console.log('[TtsService] Model ready!');
-                void this.preloadVoice(this._selectedVoice());
+                this.ngZone.run(() => {
+                    this._modelState.set('ready');
+                    this._loadProgress.set(100);
+                    this._loadStatus.set('Ready');
+                    console.log('[TtsService] Model ready!');
+                    void this.preloadVoice(this._selectedVoice());
+                    this.runQueuedSpeakIfReady();
+                });
                 break;
 
             case 'MODEL_UNLOADED':
-                this.resolveUnloadWaiter();
+                this.ngZone.run(() => {
+                    this.resolveUnloadWaiter();
+                });
                 break;
 
             case 'MODEL_ERROR':
-                this.resolveUnloadWaiter();
-                this._modelState.set('error');
-                this._errorMessage.set(msg.payload.message);
-                this.isGenerating = false;
-                console.error('[TtsService] Model load error:', msg.payload.message);
+                this.ngZone.run(() => {
+                    this.resolveUnloadWaiter();
+                    this._modelState.set('error');
+                    this._errorMessage.set(msg.payload.message);
+                    this.isGenerating = false;
+                    console.error('[TtsService] Model load error:', msg.payload.message);
+                });
                 break;
 
             case 'VOICE_READY': {
-                this.cachedWorkerVoiceIds.add(msg.payload.voiceId);
-                const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
-                if (resolver) {
-                    this.voicePreloadResolvers.delete(msg.payload.voiceId);
-                    resolver.resolve();
-                }
+                this.ngZone.run(() => {
+                    this.cachedWorkerVoiceIds.add(msg.payload.voiceId);
+                    const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
+                    if (resolver) {
+                        this.voicePreloadResolvers.delete(msg.payload.voiceId);
+                        resolver.resolve();
+                    }
+                });
                 break;
             }
 
             case 'VOICE_ERROR': {
-                this.cachedWorkerVoiceIds.delete(msg.payload.voiceId);
-                const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
-                if (resolver) {
-                    this.voicePreloadResolvers.delete(msg.payload.voiceId);
-                    resolver.reject(new Error(msg.payload.message));
-                }
+                this.ngZone.run(() => {
+                    this.cachedWorkerVoiceIds.delete(msg.payload.voiceId);
+                    const resolver = this.voicePreloadResolvers.get(msg.payload.voiceId);
+                    if (resolver) {
+                        this.voicePreloadResolvers.delete(msg.payload.voiceId);
+                        resolver.reject(new Error(msg.payload.message));
+                    }
+                });
                 break;
             }
 
@@ -563,9 +1024,11 @@ export class TtsService {
                 break;
 
             case 'STATUS':
-                if (msg.payload.modelLoaded && this._modelState() !== 'ready') {
-                    this._modelState.set('ready');
-                }
+                this.ngZone.run(() => {
+                    if (msg.payload.modelLoaded && this._modelState() !== 'ready') {
+                        this._modelState.set('ready');
+                    }
+                });
                 break;
         }
     }
@@ -585,7 +1048,7 @@ export class TtsService {
      * Handle synthesized audio from worker and add it to the playback queue.
      */
     private async handleAudioReady(
-        samplesBuffer: ArrayBuffer,
+        samplesBuffer: ArrayBufferLike,
         length: number,
         sampleRate: number,
         generation: number,
@@ -602,7 +1065,9 @@ export class TtsService {
                 return;
             }
 
-            const samples = new Float32Array(samplesBuffer, 0, length);
+            const sourceSamples = new Float32Array(samplesBuffer, 0, length);
+            const samples = new Float32Array(sourceSamples.length);
+            samples.set(sourceSamples);
             const audioBuffer = this.audioContext!.createBuffer(1, samples.length, sampleRate);
             audioBuffer.copyToChannel(samples, 0);
 
@@ -644,6 +1109,10 @@ export class TtsService {
     // ========================================================================
 
     private preloadVoice(voice: TtsVoice): Promise<void> {
+        if (this._selectedEngine() !== 'browserSupertonic') {
+            return Promise.resolve();
+        }
+
         if (this._modelState() !== 'ready' || !this.worker) {
             return Promise.resolve();
         }
@@ -700,6 +1169,17 @@ export class TtsService {
     // ========================================================================
 
     private scheduleIdleUnload(): void {
+        if (
+            this._isPlaying() ||
+            this.isGenerating ||
+            this.pendingChunks.length > 0 ||
+            this.audioBufferQueue.length > 0 ||
+            this.activeSourceNodes.length > 0
+        ) {
+            console.log('[TtsService] Skipping idle unload while playback work is active.');
+            return;
+        }
+
         this.cancelIdleUnloadTimer();
         this.idleUnloadTimer = setTimeout(() => {
             void this.unloadModel();
@@ -713,10 +1193,21 @@ export class TtsService {
         }
     }
 
-    private async performUnload(): Promise<void> {
-        this.stopPlayback(false);
+    private async performUnload(
+        engineToUnload: TTSEngine = this._selectedEngine(),
+        resetModelState = true,
+    ): Promise<void> {
+        this.stopPlayback(false, 'unload');
         this.rejectAllVoicePreloads(new Error('TTS model unloaded.'));
         await this.closeAudioContext();
+
+        if (engineToUnload === 'nativeChatterbox' && isTauriDesktop()) {
+            try {
+                await this.getNativeRpc().phoenix.tts_unload();
+            } catch (error) {
+                console.warn('[TtsService] Native Chatterbox unload failed:', error);
+            }
+        }
 
         const worker = this.worker;
         if (worker) {
@@ -729,10 +1220,14 @@ export class TtsService {
 
         this.cachedWorkerVoiceIds.clear();
         this.activePlaybackVoiceId = null;
-        this._modelState.set('idle');
-        this._loadProgress.set(0);
-        this._loadStatus.set('');
         this._isPlaying.set(false);
+        this._isPaused.set(false);
+
+        if (resetModelState) {
+            this._modelState.set('idle');
+            this._loadProgress.set(0);
+            this._loadStatus.set('');
+        }
     }
 
     private createUnloadWaiter(): Promise<void> {
@@ -765,4 +1260,102 @@ export class TtsService {
             waiter.resolve();
         }
     }
+
+    private runQueuedSpeakIfReady(): void {
+        if (this._modelState() !== 'ready' || !this.queuedSpeakRequest) {
+            return;
+        }
+
+        const request = this.queuedSpeakRequest;
+        this.queuedSpeakRequest = null;
+        void this.startPlayback(request.text, request.unloadWhenFinished);
+    }
+
+    private getNativeRpc(): ReturnType<typeof createTauRPCProxy> {
+        if (!this.nativeRpc) {
+            this.nativeRpc = createTauRPCProxy();
+        }
+        return this.nativeRpc;
+    }
+}
+
+function isTauriDesktop(): boolean {
+    return typeof window !== 'undefined'
+        && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+}
+
+function readStoredString(key: string, fallback: string): string {
+    if (typeof localStorage === 'undefined') {
+        return fallback;
+    }
+    return localStorage.getItem(key) || fallback;
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+    if (typeof localStorage === 'undefined') {
+        return fallback;
+    }
+    const value = localStorage.getItem(key);
+    if (value === null) {
+        return fallback;
+    }
+    return value === 'true';
+}
+
+function storeString(key: string, value: string): void {
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, value);
+    }
+}
+
+function storeBoolean(key: string, value: boolean): void {
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, String(value));
+    }
+}
+
+function explainNativeQwenError(message: string): string {
+    if (message.includes('TaurPC__phoenix.tts_qwen_speak') && message.includes('not found')) {
+        return 'Qwen TTS is wired in Angular, but the running desktop shell is stale. Restart the Tauri app so the new native tts_qwen_speak command is registered.';
+    }
+    return message;
+}
+
+function normalizeSpeechInput(text: string): string {
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t\f\v]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function splitByWordBudget(text: string, maxChunkSize: number): string[] {
+    const chunks: string[] = [];
+    let currentChunk = '';
+    for (const word of text.split(/\s+/)) {
+        if (!word) continue;
+        if (currentChunk && (currentChunk.length + 1 + word.length) > maxChunkSize) {
+            chunks.push(currentChunk);
+            currentChunk = word;
+            continue;
+        }
+        currentChunk = currentChunk ? `${currentChunk} ${word}` : word;
+    }
+    if (currentChunk) {
+        chunks.push(currentChunk);
+    }
+    return chunks;
+}
+
+function pcm16ToFloat32(result: NativeTtsSynthResult): Float32Array {
+    const bytes = result.pcmS16Le instanceof Uint8Array
+        ? result.pcmS16Le
+        : new Uint8Array(result.pcmS16Le);
+    const sampleCount = Math.min(result.sampleCount, Math.floor(bytes.byteLength / 2));
+    const samples = new Float32Array(sampleCount);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let index = 0; index < sampleCount; index += 1) {
+        samples[index] = view.getInt16(index * 2, true) / 32768;
+    }
+    return samples;
 }

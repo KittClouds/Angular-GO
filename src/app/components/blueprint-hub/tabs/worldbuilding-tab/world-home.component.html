@@ -1,0 +1,656 @@
+@if (hasNarrative()) {
+<div class="wp custom-scrollbar">
+    <div class="ws">
+        <section class="wh">
+            <div class="whe">
+                <span class="wo"><i class="pi pi-globe"></i></span>
+                <span class="wc wct">{{ scopeChip() }}</span>
+                <span class="wc wcs">{{ vm().inheritance.label }}</span>
+            </div>
+            <p class="whs">{{ vm().scope.label || 'Narrative scope' }}</p>
+            <h2 class="wht">World Home</h2>
+            <p class="whl">{{ vm().snapshot.logline || 'Set the through-line for this scope.' }}</p>
+            <p class="whd">{{ vm().snapshot.description || vm().inheritance.detail }}</p>
+            @if (vm().snapshot.tone.length) {
+            <div class="wcr">
+                @for (tag of vm().snapshot.tone; track tag) {
+                <span class="wc wcg">{{ tag }}</span>
+                }
+            </div>
+            }
+        </section>
+
+        <div class="wbw">
+            <nav class="wcb" aria-label="Worldbuilding actions">
+                <button class="cb" (click)="toggleComposer('constraint')">
+                    <i class="pi pi-plus-circle"></i>
+                    <span>Add Rule</span>
+                </button>
+                <button class="cb" (click)="toggleComposer('pillar')">
+                    <i class="pi pi-sparkles"></i>
+                    <span>Add Pillar</span>
+                </button>
+                <button class="cb" [disabled]="!isActScope()" (click)="toggleComposer('delta')">
+                    <i class="pi pi-bolt"></i>
+                    <span>Log Change</span>
+                </button>
+                <button class="cb" (click)="toggleComposer('lore')">
+                    <i class="pi pi-compass"></i>
+                    <span>New Lore Thread</span>
+                </button>
+                <button class="cb" (click)="openCalendar()">
+                    <i class="pi pi-calendar"></i>
+                    <span>Open Calendar</span>
+                </button>
+                <button class="cb" (click)="openBoard()">
+                    <i class="pi pi-th-large"></i>
+                    <span>Open Board</span>
+                </button>
+            </nav>
+        </div>
+
+        <div class="wps">
+            <details class="cp" open>
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-compass"></i></span>
+                        <div>
+                            <h3 class="cpt">Story Now</h3>
+                            <p class="cpu">Narrative baseline, act pressure, and the voice this scope inherits.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mps">{{ isActScope() ? 'Act pressure live' : 'Narrative baseline' }}</span>
+                        <span class="mp mpv">{{ vm().snapshot.tone.length }} tone</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    <div class="pa">
+                        <button class="bs" (click)="startSnapshotEdit()">Edit logline</button>
+                        <button class="bs" [disabled]="!isActScope()" (click)="startStatusQuoEdit()">Edit act state</button>
+                    </div>
+
+                    @if (editingSnapshot) {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Snapshot composer</h4>
+                            <p>Shape the title-page version of the world for this scope.</p>
+                        </div>
+                        <div class="cg">
+                            <input [(ngModel)]="snapshotDraft.logline" class="ci" placeholder="Set the through-line for this scope." />
+                            <input [(ngModel)]="toneDraft" class="ci" placeholder="Tone tags, comma separated" />
+                        </div>
+                        <textarea [(ngModel)]="snapshotDraft.description" rows="4" class="ct" placeholder="Describe the current shape of the world."></textarea>
+                        <div class="ca">
+                            <button class="bp" (click)="saveSnapshot()">Save</button>
+                            <button class="bs" (click)="cancelSnapshotEdit()">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    @if (editingStatusQuo) {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Act state composer</h4>
+                            <p>Log the pressure the act is carrying right now.</p>
+                        </div>
+                        <textarea [(ngModel)]="statusQuoDraft" rows="5" class="ct" placeholder="Describe the act-level state in this arc."></textarea>
+                        <div class="ca">
+                            <button class="bp" (click)="saveStatusQuo()">Save</button>
+                            <button class="bs" (click)="cancelStatusQuoEdit()">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    <div class="sl">
+                        <section class="sf">
+                            <p class="sfe">Logline</p>
+                            <p class="stc">{{ vm().snapshot.logline || 'No logline set yet.' }}</p>
+                            <p class="sfb">{{ vm().snapshot.description || 'Add a concise status readout so each arc can inherit something real instead of starting blank.' }}</p>
+                            @if (vm().snapshot.tone.length) {
+                            <div class="crw">
+                                @for (tag of vm().snapshot.tone; track tag) {
+                                <span class="wc wcg">{{ tag }}</span>
+                                }
+                            </div>
+                            }
+                        </section>
+
+                        <div class="ssd">
+                            <section class="sf">
+                                <p class="sfe">Act status</p>
+                                <p class="sfb">
+                                    {{ vm().statusQuo || (isActScope() ? 'No act status quo yet.' : 'Switch into an act folder to log act-specific status and deltas.') }}
+                                </p>
+                            </section>
+                            <div class="ms">
+                                <div class="mt">
+                                    <span class="mtl">Active Stakes</span>
+                                    <span class="mtv">{{ vm().stakes.length }}</span>
+                                </div>
+                                <div class="mt">
+                                    <span class="mtl">Act Deltas</span>
+                                    <span class="mtv">{{ vm().deltas.length }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-shield"></i></span>
+                        <div>
+                            <h3 class="cpt">Canon</h3>
+                            <p class="cpu">Rules, pillars, and the things the world refuses to break.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mpt">Rules {{ vm().constraints.length }}</span>
+                        <span class="mp mpk">Pillars {{ vm().pillars.length }}</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    @if (activeComposer === 'constraint') {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Rule composer</h4>
+                            <p>Write the guardrail the world is not allowed to forget.</p>
+                        </div>
+                        <textarea [(ngModel)]="constraintText" rows="3" class="ct" placeholder="Write the rule, prohibition, or canon guardrail."></textarea>
+                        <div class="ca">
+                            <button class="bp" (click)="addConstraint()">Save rule</button>
+                            <button class="bs" (click)="toggleComposer('constraint')">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    @if (activeComposer === 'pillar') {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Pillar composer</h4>
+                            <p>Capture the truth that still stands when everything else shifts.</p>
+                        </div>
+                        <input [(ngModel)]="pillarTitle" class="ci" placeholder="Pillar title" />
+                        <textarea [(ngModel)]="pillarDescription" rows="3" class="ct" placeholder="What stays true when everything else shifts?"></textarea>
+                        <div class="ca">
+                            <button class="bp" (click)="addPillar()">Save pillar</button>
+                            <button class="bs" (click)="toggleComposer('pillar')">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    <div class="spl">
+                        <section class="sfs">
+                            <div class="sec">
+                                <h4>Rules & Constraints</h4>
+                                <span>{{ vm().constraints.length }} total</span>
+                            </div>
+                            <div class="ls">
+                                @for (constraint of vm().constraints; track constraint.id) {
+                                <div class="lr">
+                                    <div class="lrc">
+                                        <p>{{ constraint.text }}</p>
+                                    </div>
+                                    <div class="lra">
+                                        <button class="mp mpg" [class.mpe]="constraint.isActive" [class.mps]="!constraint.isActive" (click)="toggleConstraint(constraint.id)">
+                                            {{ constraint.isActive ? 'Active' : 'Dormant' }}
+                                        </button>
+                                        <button class="bd" (click)="removeConstraint(constraint.id)">Remove</button>
+                                    </div>
+                                </div>
+                                } @empty {
+                                <div class="es esin">
+                                    <i class="pi pi-sparkles esic"></i>
+                                    <p class="est">No canon constraints yet</p>
+                                    <p class="esd">Write the law the narrative cannot wriggle out of.</p>
+                                </div>
+                                }
+                            </div>
+                        </section>
+
+                        <section class="sfs">
+                            <div class="sec">
+                                <h4>World Pillars</h4>
+                                <span>{{ vm().pillars.length }} total</span>
+                            </div>
+                            <div class="ls">
+                                @for (pillar of vm().pillars; track pillar.id) {
+                                <div class="lr">
+                                    <div class="lrc">
+                                        <p class="lrt">{{ pillar.title }}</p>
+                                        <p class="sfb">{{ pillar.description || 'No description yet.' }}</p>
+                                    </div>
+                                    <div class="lra">
+                                        <button class="bd" (click)="removePillar(pillar.id)">Remove</button>
+                                    </div>
+                                </div>
+                                } @empty {
+                                <div class="es esin">
+                                    <i class="pi pi-globe esic"></i>
+                                    <p class="est">No pillars yet</p>
+                                    <p class="esd">Anchor the truths that hold even when the plot gets violent.</p>
+                                </div>
+                                }
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-sitemap"></i></span>
+                        <div>
+                            <h3 class="cpt">World Modules</h3>
+                            <p class="cpu">Compact summaries for the narrative systems shaping the page.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mps">{{ vm().modules.length }} lenses</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    <div class="mg">
+                        @for (module of vm().modules; track module.id) {
+                        <section class="mr">
+                            <div class="mrh">
+                                <div>
+                                    <div class="mrt">
+                                        <h4>{{ module.label }}</h4>
+                                        <span class="wc wcs">{{ getSourceLabel(module.state) }}</span>
+                                    </div>
+                                    <p class="mrn">{{ module.headline }}</p>
+                                </div>
+                                @if (module.id === 'politics') {
+                                <button class="bs" (click)="startPoliticsEdit()">Edit</button>
+                                } @else {
+                                <button class="bs" (click)="toggleModuleComposer(module.id)">Quick add</button>
+                                }
+                            </div>
+
+                            <p class="sfb">{{ module.detail }}</p>
+                            @if (module.sampleLabels.length) {
+                            <div class="crw">
+                                @for (sample of module.sampleLabels; track sample) {
+                                <span class="wc wcg">{{ sample }}</span>
+                                }
+                            </div>
+                            }
+
+                            @if (module.id === 'politics' && editingPolitics) {
+                            <div class="cd cdt">
+                                <textarea [(ngModel)]="politicsDraft" rows="4" class="ct" placeholder="Write the compact power map for this scope."></textarea>
+                                <div class="ca">
+                                    <button class="bp" (click)="savePolitics()">Save</button>
+                                    <button class="bs" (click)="cancelPoliticsEdit()">Cancel</button>
+                                </div>
+                            </div>
+                            }
+
+                            @if (activeModuleComposer === module.id) {
+                            <div class="cd cdt">
+                                @if (module.id === 'cultures') {
+                                <input [(ngModel)]="cultureName" class="ci" placeholder="Culture name" />
+                                <textarea [(ngModel)]="cultureSummary" rows="3" class="ct" placeholder="Short summary"></textarea>
+                                }
+                                @if (module.id === 'magic') {
+                                <input [(ngModel)]="systemName" class="ci" placeholder="System name" />
+                                <textarea [(ngModel)]="systemDescription" rows="3" class="ct" placeholder="Short rules summary"></textarea>
+                                }
+                                @if (module.id === 'religion') {
+                                <input [(ngModel)]="religionName" class="ci" placeholder="Faith name" />
+                                <textarea [(ngModel)]="religionDescription" rows="3" class="ct" placeholder="Short cosmology summary"></textarea>
+                                }
+                                <div class="ca">
+                                    <button class="bp" (click)="createModule(module)">Save</button>
+                                    <button class="bs" (click)="toggleModuleComposer(module.id)">Cancel</button>
+                                </div>
+                            </div>
+                            }
+                        </section>
+                        }
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-users"></i></span>
+                        <div>
+                            <h3 class="cpt">Characters</h3>
+                            <p class="cpu">Scoped fact-sheet rollups for the people active in this slice of the story.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mpt">{{ vm().characters.length }} visible</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    <div class="cl">
+                        @for (character of vm().characters; track character.entityId) {
+                        <button class="cr" (click)="openCharacter(character.entityId)">
+                            <div class="cri">
+                                <span class="crg"><i class="pi pi-user"></i></span>
+                                <div class="crc">
+                                    <div class="crt">
+                                        <p class="crn">{{ character.fullName }}</p>
+                                        <p class="crr">{{ character.role || 'No role set' }}</p>
+                                    </div>
+                                    @if (character.factions.length) {
+                                    <div class="crw">
+                                        @for (faction of character.factions; track faction) {
+                                        <span class="wc wcg">{{ faction }}</span>
+                                        }
+                                    </div>
+                                    }
+                                </div>
+                            </div>
+                            <div class="crm">
+                                <span class="mp mps">{{ character.status }}</span>
+                                <div class="crs">
+                                    <span>Mentions {{ character.totalMentions }}</span>
+                                    <span>Last seen {{ character.lastSeenLabel }}</span>
+                                </div>
+                            </div>
+                        </button>
+                        } @empty {
+                        <div class="es">
+                            <i class="pi pi-users esic"></i>
+                            <p class="est">No scoped characters yet</p>
+                            <p class="esd">Once the registry and fact sheets wake up in this scope, they land here.</p>
+                        </div>
+                        }
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-sparkles"></i></span>
+                        <div>
+                            <h3 class="cpt">Mysteries</h3>
+                            <p class="cpu">Lore threads, revelation pressure, and the open questions still humming.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mpt">Open {{ vm().lore.open }}</span>
+                        <span class="mp mpk">Hinted {{ vm().lore.hinted }}</span>
+                        <span class="mp mpe">Revealed {{ vm().lore.revealed }}</span>
+                        <span class="mp mpv">Dropped {{ vm().lore.dropped }}</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    @if (activeComposer === 'lore') {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Lore thread composer</h4>
+                            <p>Open the question and let the story worry about answering it later.</p>
+                        </div>
+                        <textarea [(ngModel)]="loreQuestion" rows="3" class="ct" placeholder="What question is this arc holding open?"></textarea>
+                        <input [(ngModel)]="loreEntityText" class="ci" placeholder="Connected entities, comma separated" />
+                        <div class="ca">
+                            <button class="bp" (click)="addLoreThread()">Save thread</button>
+                            <button class="bs" (click)="toggleComposer('lore')">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    <div class="ls">
+                        @for (thread of vm().lore.featured; track thread.id) {
+                        <div class="tr">
+                            <div class="trh">
+                                <div>
+                                    <p class="lrt">{{ thread.question }}</p>
+                                    <span class="mp"
+                                        [class.mpt]="thread.status === 'open'"
+                                        [class.mpk]="thread.status === 'hinted'"
+                                        [class.mpe]="thread.status === 'revealed'"
+                                        [class.mpv]="thread.status === 'dropped'">
+                                        {{ thread.status }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="trs">
+                                @for (status of ['open', 'hinted', 'revealed', 'dropped']; track status) {
+                                <button class="sc" [class.is-active]="thread.status === status"
+                                    [class.sco]="$any(status) === 'open'"
+                                    [class.sch]="$any(status) === 'hinted'"
+                                    [class.scr]="$any(status) === 'revealed'"
+                                    [class.scd]="$any(status) === 'dropped'"
+                                    (click)="updateLoreStatus(thread.id, $any(status))">
+                                    {{ status }}
+                                </button>
+                                }
+                            </div>
+                        </div>
+                        } @empty {
+                        <div class="es">
+                            <i class="pi pi-question-circle esic"></i>
+                            <p class="est">No lore threads yet</p>
+                            <p class="esd">Open a question and the revelation pressure starts collecting here.</p>
+                        </div>
+                        }
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-calendar"></i></span>
+                        <div>
+                            <h3 class="cpt">Timeline & Board</h3>
+                            <p class="cpu">Scoped event snapshots and the task current humming underneath them.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mpt">Events {{ vm().calendar.total }}</span>
+                        <span class="mp mpk">Board {{ vm().kanban.total }}</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    <div class="tl">
+                        <section class="sf">
+                            <div class="sec">
+                                <h4>Upcoming</h4>
+                                <span>{{ vm().calendar.upcoming.length }} shown</span>
+                            </div>
+                            <div class="ls">
+                                @for (event of vm().calendar.upcoming; track event.id) {
+                                <div class="lr lre">
+                                    <div class="lrc">
+                                        <p class="lrt">{{ event.title }}</p>
+                                        <p class="erd">{{ formatEventDate(event) }}</p>
+                                        <p class="sfb">{{ event.description || 'No description.' }}</p>
+                                    </div>
+                                </div>
+                                } @empty {
+                                <div class="es esin">
+                                    <i class="pi pi-clock esic"></i>
+                                    <p class="est">{{ vm().calendar.emptyLabel }}</p>
+                                    <p class="esd">The calendar wakes up here when this scope starts carrying events.</p>
+                                </div>
+                                }
+                            </div>
+                        </section>
+
+                        <section class="sf">
+                            <div class="sec">
+                                <h4>Board Pulse</h4>
+                                <span>{{ vm().kanban.total }} total</span>
+                            </div>
+                            <div class="kanban-pulse">
+                                <div class="mt">
+                                    <span class="mtl">To Do</span>
+                                    <span class="mtv">{{ vm().kanban.todo }}</span>
+                                </div>
+                                <div class="mt">
+                                    <span class="mtl">In Progress</span>
+                                    <span class="mtv">{{ vm().kanban.inProgress }}</span>
+                                </div>
+                                <div class="mt">
+                                    <span class="mtl">Completed</span>
+                                    <span class="mtv">{{ vm().kanban.completed }}</span>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </details>
+
+            <details class="cp">
+                <summary class="cps">
+                    <div class="cpm">
+                        <span class="cpi"><i class="pi pi-bolt"></i></span>
+                        <div>
+                            <h3 class="cpt">Act Deltas</h3>
+                            <p class="cpu">What changed in this arc and what pressure is live right now.</p>
+                        </div>
+                    </div>
+                    <div class="cpx">
+                        <span class="mp mpt">Stakes {{ vm().stakes.length }}</span>
+                        <span class="mp mpk">Deltas {{ vm().deltas.length }}</span>
+                        <i class="pi pi-chevron-down cpc"></i>
+                    </div>
+                </summary>
+                <div class="cpb">
+                    <div class="pa">
+                        <button class="bs" [disabled]="!isActScope()" (click)="toggleComposer('stake')">Add stake</button>
+                        <button class="bs" [disabled]="!isActScope()" (click)="toggleComposer('delta')">Add delta</button>
+                    </div>
+
+                    @if (activeComposer === 'stake') {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Stake composer</h4>
+                            <p>Name the pressure point and how hard the act is leaning on it.</p>
+                        </div>
+                        <input [(ngModel)]="stakeTitle" class="ci" placeholder="Stake title" />
+                        <textarea [(ngModel)]="stakeDetails" rows="3" class="ct" placeholder="What is under pressure?"></textarea>
+                        <select [(ngModel)]="stakePressure" class="cs">
+                            <option value="safe">Safe</option>
+                            <option value="warning">Warning</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                        <div class="ca">
+                            <button class="bp" (click)="addStake()">Save stake</button>
+                            <button class="bs" (click)="toggleComposer('stake')">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    @if (activeComposer === 'delta') {
+                    <div class="cd">
+                        <div class="cdh">
+                            <h4>Delta composer</h4>
+                            <p>Record what changed so later arcs inherit the scar instead of the fog.</p>
+                        </div>
+                        <input [(ngModel)]="deltaTitle" class="ci" placeholder="Delta title" />
+                        <textarea [(ngModel)]="deltaDescription" rows="3" class="ct" placeholder="Describe what changed."></textarea>
+                        <select [(ngModel)]="deltaType" class="cs">
+                            <option value="new">New</option>
+                            <option value="changed">Changed</option>
+                            <option value="removed">Removed</option>
+                        </select>
+                        <div class="ca">
+                            <button class="bp" (click)="addDelta()">Save delta</button>
+                            <button class="bs" (click)="toggleComposer('delta')">Cancel</button>
+                        </div>
+                    </div>
+                    }
+
+                    <div class="spl">
+                        <section class="sfs">
+                            <div class="sec">
+                                <h4>Stakes</h4>
+                                <span>{{ vm().stakes.length }}</span>
+                            </div>
+                            <div class="ls">
+                                @for (stake of vm().stakes; track stake.id) {
+                                <div class="lr">
+                                    <div class="lrc">
+                                        <p class="lrt">{{ stake.title }}</p>
+                                        <p class="sfb">{{ stake.details || 'No details yet.' }}</p>
+                                    </div>
+                                    <div class="lra">
+                                        <span class="mp"
+                                            [class.mpe]="stake.pressure === 'safe'"
+                                            [class.mpk]="stake.pressure === 'warning'"
+                                            [class.mpv]="stake.pressure === 'critical'">
+                                            {{ stake.pressure }}
+                                        </span>
+                                        <button class="bd" (click)="removeStake(stake.id)">Remove</button>
+                                    </div>
+                                </div>
+                                } @empty {
+                                <div class="es esin">
+                                    <i class="pi pi-bell esic"></i>
+                                    <p class="est">{{ isActScope() ? 'No stakes logged for this act yet.' : 'Switch into an act folder to track stakes here.' }}</p>
+                                </div>
+                                }
+                            </div>
+                        </section>
+
+                        <section class="sfs">
+                            <div class="sec">
+                                <h4>Delta Stream</h4>
+                                <span>{{ vm().deltas.length }}</span>
+                            </div>
+                            <div class="ls">
+                                @for (delta of vm().deltas; track delta.id) {
+                                <div class="lr">
+                                    <div class="lrc">
+                                        <p class="lrt">{{ delta.title }}</p>
+                                        <p class="sfb">{{ delta.description || 'No description yet.' }}</p>
+                                    </div>
+                                    <div class="lra">
+                                        <span class="mp"
+                                            [class.mpt]="delta.type === 'new'"
+                                            [class.mpk]="delta.type === 'changed'"
+                                            [class.mps]="delta.type === 'removed'">
+                                            {{ delta.type }}
+                                        </span>
+                                        <button class="bd" (click)="removeDelta(delta.id)">Remove</button>
+                                    </div>
+                                </div>
+                                } @empty {
+                                <div class="es esin">
+                                    <i class="pi pi-history esic"></i>
+                                    <p class="est">{{ isActScope() ? 'No act deltas logged yet.' : 'Switch into an act folder to track deltas here.' }}</p>
+                                </div>
+                                }
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+</div>
+} @else {
+<div class="we">
+    <div class="wep">
+        <div class="weo">
+            <i class="pi pi-globe"></i>
+        </div>
+        <h2>World Home waits for a narrative scope</h2>
+        <p>
+            Open a note or folder inside a narrative or act, then the inherited world state, fact sheets, lore threads,
+            and calendar summaries will all land here together.
+        </p>
+    </div>
+</div>
+}
+

@@ -5,7 +5,7 @@ import { Component, inject, signal, computed, OnInit, OnDestroy, HostListener } 
 import { Router, NavigationEnd } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, Brain, MoveVertical, RefreshCw, Share2, Upload, MessageCircle, History } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, MoveVertical, RefreshCw, Share2, Upload, Download, MessageCircle, History } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { SidebarService } from '../../lib/services/sidebar.service';
@@ -15,15 +15,15 @@ import { NoteEditorStore } from '../../lib/store/note-editor.store';
 import { ThemeService } from '../../lib/services/theme.service';
 import { EditorService } from '../../services/editor.service';
 import { ReorderService } from '../../lib/services/reorder.service';
-import { GoKittService } from '../../services/gokitt.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { FileTreeComponent } from './file-tree/file-tree.component';
 import { SearchPanelComponent } from '../search-panel/search-panel.component';
-import { NerPanelComponent } from './ner-panel/ner-panel.component';
 import { DocumentIngestionService, DocumentIngestionMode, DocumentIngestionResult } from '../../lib/services/document-ingestion.service';
+import { DocumentExportService } from '../../lib/services/document-export.service';
 import type { TreeNode } from '../../lib/arborist/types';
 import type { Folder as DexieFolder, Note } from '../../lib/dexie/db';
 import { getSetting, setSetting } from '../../lib/dexie/settings.service';
-import { GoChatService } from '../../lib/services/go-chat.service';
+import { PhoenixChatService } from '../../lib/services/phoenix-chat.service';
 import { GraphPipelineService } from '../../services/graph-pipeline.service';
 
 interface EntityFolderOption {
@@ -73,7 +73,7 @@ const ROOT_CREATE_FOLDER_OPTIONS: CreateFolderOption[] = [
 @Component({
     selector: 'app-sidebar',
     standalone: true,
-    imports: [CommonModule, DialogModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent, NerPanelComponent],
+    imports: [CommonModule, DialogModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent],
     templateUrl: './sidebar.component.html',
     styleUrls: ['./sidebar.component.css']
 })
@@ -85,11 +85,12 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private folderService = inject(FolderService);
     private notesService = inject(NotesService);
     private noteEditorStore = inject(NoteEditorStore);
-    private goKittService = inject(GoKittService);
+    private phoenixUiApi = inject(PhoenixUiApiService);
     private documentIngestionService = inject(DocumentIngestionService);
     private router = inject(Router);
     private graphPipeline = inject(GraphPipelineService);
-    goChatService = inject(GoChatService);
+    private documentExportService = inject(DocumentExportService);
+    goChatService = inject(PhoenixChatService);
 
     isChatRoute = signal(false);
 
@@ -97,7 +98,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     private notesSubscription?: Subscription;
 
     private static readonly VIEW_STORAGE_KEY = 'kittclouds_sidebar_view';
-    viewMode = signal<'files' | 'search' | 'ner'>(this.loadSavedViewMode());
+    viewMode = signal<'files' | 'search'>(this.loadSavedViewMode());
 
     readonly Plus = Plus;
     readonly Upload = Upload;
@@ -113,14 +114,15 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly Redo = Redo;
     readonly Sun = Sun;
     readonly Moon = Moon;
-    readonly Brain = Brain;
     readonly MoveVertical = MoveVertical;
     readonly RefreshCw = RefreshCw;
     readonly Share2 = Share2;
     readonly MessageCircle = MessageCircle;
     readonly HistoryIcon = History;
+    readonly Download = Download;
 
     isScanning = signal(false);
+    isExporting = signal(false);
     readonly entityFolderOptions = ENTITY_FOLDER_OPTIONS;
     folderDropdownOpen = signal(false);
 
@@ -136,6 +138,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     treeData = computed<TreeNode[]>(() => this.buildTree(this.folders(), this.notes()));
     folderOptions = computed<FolderOption[]>(() => this.buildFolderOptions(this.folders()));
     selectedDestinationFolder = computed(() => this.folderOptions().find(folder => folder.id === this.importDestinationFolderId()) ?? null);
+    activeExportNote = computed(() => this.noteEditorStore.currentNote());
     supportedImportFilesCount = computed(() => this.selectedImportFiles().filter(file => this.isTxtFile(file.name)).length);
     skippedImportFilesCount = computed(() => this.selectedImportFiles().length - this.supportedImportFilesCount());
     importPreviewFiles = computed(() => this.selectedImportFiles().slice(0, 6).map(file => this.getDisplayFileName(file)));
@@ -175,13 +178,13 @@ export class SidebarComponent implements OnInit, OnDestroy {
     createFolderError = signal('');
     createFolderInProgress = signal(false);
 
-    private loadSavedViewMode(): 'files' | 'search' | 'ner' {
+    private loadSavedViewMode(): 'files' | 'search' {
         const saved = getSetting<string | null>(SidebarComponent.VIEW_STORAGE_KEY, null);
-        if (saved === 'files' || saved === 'search' || saved === 'ner') return saved;
+        if (saved === 'files' || saved === 'search') return saved;
         return 'files';
     }
 
-    setViewMode(mode: 'files' | 'search' | 'ner'): void {
+    setViewMode(mode: 'files' | 'search'): void {
         this.viewMode.set(mode);
         setSetting(SidebarComponent.VIEW_STORAGE_KEY, mode);
         this.sidebarService.open();
@@ -472,6 +475,27 @@ export class SidebarComponent implements OnInit, OnDestroy {
         }
     }
 
+    async exportActiveNote(): Promise<void> {
+        const note = this.noteEditorStore.currentNote();
+        if (!note || this.isExporting()) {
+            return;
+        }
+
+        this.isExporting.set(true);
+        try {
+            const snapshot = this.editorService.captureSnapshot('api');
+            const text = snapshot?.markdown ?? note.markdownContent ?? '';
+            const result = await this.documentExportService.exportText(note.title, text);
+            if (result.status === 'saved') {
+                console.log(`[Sidebar] Exported note "${note.title}" as ${result.fileName}`);
+            }
+        } catch (error) {
+            console.error('[Sidebar] Note export failed:', error);
+        } finally {
+            this.isExporting.set(false);
+        }
+    }
+
     async refreshCreateFolderOptions(): Promise<void> {
         const destinationFolderId = this.importDestinationFolderId();
 
@@ -551,23 +575,15 @@ export class SidebarComponent implements OnInit, OnDestroy {
         }
     }
 
-    toggleNer(): void {
-        if (this.viewMode() !== 'ner') {
-            this.setViewMode('ner');
-        } else {
-            this.setViewMode('files');
-        }
-    }
-
     async triggerGraphScan(): Promise<void> {
         const note = this.noteEditorStore.currentNote();
         if (!note) {
-            console.warn('[Sidebar] No note open to scan.');
+            console.warn('[Sidebar] No note open to index.');
             return;
         }
 
-        if (!this.goKittService.isReady) {
-            console.warn('[Sidebar] GoKitt WASM not ready.');
+        if (!this.phoenixUiApi.isReady) {
+            console.warn('[Sidebar] Phoenix runtime not ready.');
             return;
         }
 
@@ -576,7 +592,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         try {
             await this.graphPipeline.runNoteGraphPipeline(note);
         } catch (error) {
-            console.error('[Sidebar] Graph scan failed:', error);
+            console.error('[Sidebar] Graph indexing failed:', error);
         } finally {
             this.isScanning.set(false);
         }

@@ -2,8 +2,9 @@
 // Service for managing the embedding Web Worker
 // Provides non-blocking embedding generation with progress updates
 
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, NgZone, computed, signal } from '@angular/core';
 import { EmbeddingModelRegistry } from '../embeddings/models/ModelRegistry';
+import { createNoopNgZone, createWorkerOutsideAngular } from '../core/worker-zone';
 
 // ============================================================================
 // Types
@@ -50,7 +51,7 @@ export class EmbeddingWorkerService {
     // Computed
     readonly isReady = computed(() => this.isInitialized() && !this.isProcessing());
 
-    constructor() {
+    constructor(private readonly ngZone: NgZone = createNoopNgZone()) {
         console.log('[EmbeddingWorkerService] Initialized');
     }
 
@@ -76,15 +77,22 @@ export class EmbeddingWorkerService {
         onProgress?.({ type: 'init', current: 0, total: 100, message: 'Starting...' });
 
         // Create worker
-        this.worker = new Worker(new URL('../../workers/embedding.worker', import.meta.url), {
-            type: 'module'
-        });
-
-        this.worker.onmessage = (e) => this.handleWorkerMessage(e);
-        this.worker.onerror = (e) => {
-            console.error('[EmbeddingWorkerService] Worker error:', e);
-            this.progress.set(null);
-        };
+        this.worker = createWorkerOutsideAngular(
+            this.ngZone,
+            () =>
+                new Worker(new URL('../../workers/embedding.worker', import.meta.url), {
+                    type: 'module',
+                }),
+            (worker) => {
+                worker.onmessage = (e) => this.handleWorkerMessage(e);
+                worker.onerror = (e) => {
+                    this.ngZone.run(() => {
+                        console.error('[EmbeddingWorkerService] Worker error:', e);
+                        this.progress.set(null);
+                    });
+                };
+            },
+        );
 
         // Initialize with model
         const hfModelId = model.localModel.modelId;
@@ -289,7 +297,9 @@ export class EmbeddingWorkerService {
             if (_id !== undefined && this.pendingCallbacks.has(_id)) {
                 const { resolve } = this.pendingCallbacks.get(_id)!;
                 this.pendingCallbacks.delete(_id);
-                resolve(payload);
+                this.ngZone.run(() => {
+                    resolve(payload);
+                });
             }
             return;
         }
@@ -300,16 +310,26 @@ export class EmbeddingWorkerService {
             this.pendingCallbacks.delete(_id);
 
             if (type === 'ERROR') {
-                reject(new Error(payload?.message || 'Worker error'));
+                this.ngZone.run(() => {
+                    reject(new Error(payload?.message || 'Worker error'));
+                });
             } else if (type === 'INIT_COMPLETE') {
-                this.device.set('wasm'); // Could be webgpu, but we don't know
-                resolve();
+                this.ngZone.run(() => {
+                    this.device.set('wasm'); // Could be webgpu, but we don't know
+                    resolve();
+                });
             } else if (type === 'EMBEDDINGS') {
-                resolve(payload?.embeddings);
+                this.ngZone.run(() => {
+                    resolve(payload?.embeddings);
+                });
             } else if (type === 'DISPOSED') {
-                resolve();
+                this.ngZone.run(() => {
+                    resolve();
+                });
             } else {
-                resolve(payload);
+                this.ngZone.run(() => {
+                    resolve(payload);
+                });
             }
         }
     }
