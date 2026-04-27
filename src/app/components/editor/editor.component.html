@@ -6,21 +6,28 @@
     </div>
 
     <!-- No Note Selected Placeholder (shown when no note open) -->
-    <div *ngIf="!noteEditorStore.isNoteOpen()" class="absolute inset-0 flex items-center justify-center bg-muted/5">
-        <div class="text-center p-8 max-w-md">
-            <div class="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-6">
-                <lucide-icon [img]="FileText" size="32" class="text-muted-foreground/60"></lucide-icon>
-            </div>
-            <h2 class="text-lg font-medium text-foreground mb-2">No note selected</h2>
-            <p class="text-sm text-muted-foreground mb-6">
-                Select a note from the sidebar to start editing, or create a new one.
+    <div *ngIf="!noteEditorStore.isNoteOpen()" class="faeryx-empty absolute inset-0">
+        <div class="faeryx-aura" aria-hidden="true"></div>
+        <img src="/docs/Fenryx.svg" alt="" class="faeryx-watermark" aria-hidden="true" />
+        <section class="faeryx-card" aria-label="No note selected">
+            <img src="/docs/anifenryx.svg" alt="Faeryx" class="faeryx-mark" />
+            <om-gradient-text text="Faeryx" gradientStart="#27f5ee" gradientEnd="#a855f7"
+                styleClass="faeryx-title">
+            </om-gradient-text>
+            <p class="faeryx-kicker">Narrative machine online</p>
+            <h2>No note selected</h2>
+            <p class="faeryx-copy">
+                Choose a note from the sidebar or open a fresh page for the next signal.
             </p>
-            <button
-                class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
-                (click)="createNote()">
-                <lucide-icon [img]="Plus" size="16"></lucide-icon>
+            <button type="button" class="faeryx-primary-action" (click)="createNote()">
+                <lucide-icon [img]="Plus" size="18"></lucide-icon>
                 Create New Note
             </button>
-        </div>
+            <div class="faeryx-capabilities" aria-hidden="true">
+                <span>OverGraph</span>
+                <span>Alex</span>
+                <span>Signals</span>
+            </div>
+        </section>
     </div>
 </div>

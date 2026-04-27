@@ -22,6 +22,10 @@ vi.mock('dexie', () => ({
     liveQuery: vi.fn((query: () => unknown) => Promise.resolve().then(query)),
 }));
 
+const { entityNoteIndexRows } = vi.hoisted(() => ({
+    entityNoteIndexRows: [] as Array<{ noteId: string; generation: number }>,
+}));
+
 vi.mock('../lib/dexie/db', () => ({
     Mention: class Mention {},
     db: {
@@ -42,11 +46,31 @@ vi.mock('../lib/dexie/db', () => ({
                 })),
             })),
         },
+        entityNoteIndex: {
+            where: vi.fn(() => ({
+                equals: vi.fn((noteId: string) => ({
+                    toArray: vi.fn(async () => entityNoteIndexRows.filter(row => row.noteId === noteId)),
+                })),
+            })),
+        },
     },
 }));
 
 const { analyzeTextMock } = vi.hoisted(() => ({
     analyzeTextMock: vi.fn(),
+}));
+
+const {
+    scheduleLoadedNoteEntityOccurrenceRebuildMock,
+    syncLiveNoteEntityOccurrencesMock,
+} = vi.hoisted(() => ({
+    scheduleLoadedNoteEntityOccurrenceRebuildMock: vi.fn(),
+    syncLiveNoteEntityOccurrencesMock: vi.fn(),
+}));
+
+vi.mock('../lib/notes/entity-occurrence-index', () => ({
+    scheduleLoadedNoteEntityOccurrenceRebuild: scheduleLoadedNoteEntityOccurrenceRebuildMock,
+    syncLiveNoteEntityOccurrences: syncLiveNoteEntityOccurrencesMock,
 }));
 
 vi.mock('../lib/analytics', async () => {
@@ -113,6 +137,11 @@ describe('FooterStatsService live analytics', () => {
             isSaving: signal(false),
         };
         analyzeTextMock.mockReset();
+        entityNoteIndexRows.length = 0;
+        scheduleLoadedNoteEntityOccurrenceRebuildMock.mockReset();
+        scheduleLoadedNoteEntityOccurrenceRebuildMock.mockResolvedValue(undefined);
+        syncLiveNoteEntityOccurrencesMock.mockReset();
+        syncLiveNoteEntityOccurrencesMock.mockResolvedValue(undefined);
         editorServiceMock = {
             liveUpdate$: liveUpdateSubject,
             recordAnalyticsRequest: vi.fn(),
@@ -302,5 +331,77 @@ describe('FooterStatsService live analytics', () => {
         await vi.advanceTimersByTimeAsync(300);
 
         expect(service.analytics()).toEqual(latest);
+    });
+
+    it('refreshes live signal rows from editor text after the live debounce', async () => {
+        noteStoreMock.activeNoteId.set('note-1');
+
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 7, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
+        expect(service.signalLifecycle()).toBe('queued');
+        await vi.advanceTimersByTimeAsync(449);
+        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledWith('note-1', 'Aella walked.', 7);
+        expect(service.signalLifecycle()).toBe('idle');
+    });
+
+    it('coalesces rapid live signal refreshes and keeps only the latest text', async () => {
+        noteStoreMock.activeNoteId.set('note-1');
+
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'Aella', textLength: 5, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(100);
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 2, plainText: 'Aella and Kai.', textLength: 14, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(449);
+        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(1);
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledWith('note-1', 'Aella and Kai.', 2);
+    });
+
+    it('ignores live signal updates from stale notes', async () => {
+        noteStoreMock.activeNoteId.set('note-2');
+
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
+    });
+
+    it('does not rescan signals just because a note was opened when rows are already fresh', async () => {
+        noteStoreMock.activeNoteId.set('note-1');
+        entityNoteIndexRows.push({ noteId: 'note-1', generation: 10 });
+
+        activeNoteSubject.next({
+            id: 'note-1',
+            content: '',
+            markdownContent: 'Aella walked.',
+            version: 10,
+            updatedAt: 10,
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps live signal snapshots per note so switching back is warm', async () => {
+        noteStoreMock.activeNoteId.set('note-1');
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 7, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(450);
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(1);
+
+        noteStoreMock.activeNoteId.set('note-2');
+        liveUpdateSubject.next({ noteId: 'note-2', revision: 3, plainText: 'Kai waited.', textLength: 11, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(450);
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(2);
+
+        noteStoreMock.activeNoteId.set('note-1');
+        liveUpdateSubject.next({ noteId: 'note-1', revision: 8, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(2);
     });
 });

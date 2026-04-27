@@ -76,6 +76,32 @@ export async function syncNoteEntityOccurrences(
     });
 }
 
+export async function syncLiveNoteEntityOccurrences(
+    noteId: string,
+    plainText: string,
+    generation = Date.now(),
+    scanner?: EntityMentionScanner,
+): Promise<void> {
+    if (!canUseEntityOccurrenceTables()) {
+        return;
+    }
+
+    const note = await db.notes.get(noteId);
+    if (!note) {
+        return;
+    }
+
+    const liveNote: Note = {
+        ...note,
+        content: '',
+        markdownContent: plainText,
+        version: generation,
+        updatedAt: generation,
+    };
+
+    await syncNoteEntityOccurrences(liveNote, scanner);
+}
+
 export async function deleteNoteEntityOccurrences(noteId: string): Promise<void> {
     if (!canUseEntityOccurrenceTables()) {
         return;

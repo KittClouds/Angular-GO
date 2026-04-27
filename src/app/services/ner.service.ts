@@ -53,8 +53,9 @@ class PhoenixScanEntitySuggestionProvider implements EntitySuggestionProviderApi
                 const isPromoted = Number(candidate.status || 0) === 1;
                 return !isKnown && !isPromoted;
             })
+            .filter((candidate) => isPlausiblePhoenixDiscoveryCandidate(candidate, request.plainText))
             .map((candidate) => ({
-                label: candidate.token || 'Unknown',
+                label: cleanPhoenixCandidateLabel(candidate.token) || 'Unknown',
                 kind: resolvePhoenixScanKind(candidate, request.plainText),
                 confidence: mapScoreToConfidenceLevel(Number(candidate.score || 0.8)),
                 rawScore: Number(candidate.score || 0.8),
@@ -81,16 +82,41 @@ const PERSON_LIKE_ACTIONS = [
     'said', 'says', 'asked', 'asks', 'answered', 'answers', 'replied', 'replies',
     'murmured', 'whispered', 'called', 'shouted', 'laughed', 'smiled', 'sighed',
     'huffed', 'glanced', 'looked', 'watched', 'turned', 'lifted', 'rolled',
-    'stood', 'sat', 'walked', 'moved', 'held', 'gave', 'took',
+    'stood', 'sat', 'walked', 'crossed', 'dragged', 'muttered', 'moved',
+    'held', 'gave', 'took',
 ];
+
+const PHOENIX_DISCOVERY_STOPWORDS = new Set([
+    'a', 'an', 'and', 'are', 'as', 'at', 'above', 'absolute', 'absolutely',
+    'again', 'all', 'almost', 'also', 'any', 'around',
+    'behind', 'better', 'bigger', 'black', 'built', 'but', 'by', 'can',
+    'came', 'could', 'did', 'do', 'does', 'down', 'every', 'for', 'from',
+    'get', 'got', 'had', 'has', 'have', 'he', 'her', 'here', 'him', 'his',
+    'i', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
+    'many', 'more', 'no', 'not', 'of', 'off', 'on', 'or', 'our', 'out',
+    'over', 'really', 'said', 'same', 'she', 'should', 'so', 'some',
+    'still', 'that', 'the', 'their', 'them', 'then', 'there', 'these',
+    'they', 'this', 'those', 'through', 'to', 'too', 'under', 'up', 'very',
+    'was', 'we', 'well', 'were', 'what', 'when', 'where', 'which', 'who',
+    'will', 'with', 'without', 'would', 'you', 'your',
+]);
+
+const COMMON_SENTENCE_STARTERS = new Set([
+    'all', 'air', 'aye', 'before', 'do', 'everyone', 'hearing', 'life',
+    'looks', 'no', 'not', 'only', 'somewhere', 'that', 'then', 'their',
+    'they', 'this', 'when', 'well', 'yes',
+]);
 
 function resolvePhoenixScanKind(candidate: PhoenixDiscoveryCandidate, text: string): string {
     const normalized = normalizeSuggestedEntityKind(String(candidate.kind || 'UNKNOWN'));
+    const label = String(candidate.token || '').trim();
+    if (normalized === 'CHARACTER') {
+        return isLikelyCharacterName(label, text) ? 'CHARACTER' : 'UNKNOWN';
+    }
     if (normalized !== 'UNKNOWN' && normalized !== 'OTHER') {
         return normalized;
     }
 
-    const label = String(candidate.token || '').trim();
     if (isLikelyCharacterName(label, text)) {
         return 'CHARACTER';
     }
@@ -98,8 +124,48 @@ function resolvePhoenixScanKind(candidate: PhoenixDiscoveryCandidate, text: stri
     return normalized;
 }
 
+function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandidate, text: string): boolean {
+    const label = cleanPhoenixCandidateLabel(candidate.token);
+    if (isLikelyJunkEntityLabel(label)) {
+        return false;
+    }
+
+    const normalized = label.toLocaleLowerCase();
+    const words = normalized.split(/\s+/).filter(Boolean);
+    if (!words.length || words.length > 4) {
+        return false;
+    }
+    if (words.every((word) => PHOENIX_DISCOVERY_STOPWORDS.has(word))) {
+        return false;
+    }
+    if (words.length > 1 && (
+        PHOENIX_DISCOVERY_STOPWORDS.has(words[0]) ||
+        PHOENIX_DISCOVERY_STOPWORDS.has(words[words.length - 1])
+    )) {
+        return false;
+    }
+    if (words.length === 1 && COMMON_SENTENCE_STARTERS.has(words[0])) {
+        return false;
+    }
+
+    const kind = normalizeSuggestedEntityKind(String(candidate.kind || 'UNKNOWN'));
+    if (kind === 'CHARACTER') {
+        return isLikelyCharacterName(label, text);
+    }
+
+    if (words.length === 1) {
+        return /^[\p{Lu}][\p{L}'-]{1,31}$/u.test(label);
+    }
+
+    return words.some((word) => /^[\p{Lu}]/u.test(word));
+}
+
 function isLikelyCharacterName(label: string, text: string): boolean {
     if (!/^[\p{Lu}][\p{L}'-]{1,31}$/u.test(label)) {
+        return false;
+    }
+    const normalized = label.toLocaleLowerCase();
+    if (PHOENIX_DISCOVERY_STOPWORDS.has(normalized) || COMMON_SENTENCE_STARTERS.has(normalized)) {
         return false;
     }
 
@@ -126,6 +192,13 @@ function normalizeSuggestionKey(value: string): string {
         .trim()
         .toLocaleLowerCase()
         .replace(/\s+/g, ' ');
+}
+
+function cleanPhoenixCandidateLabel(value: string): string {
+    return String(value || '')
+        .replace(/^["'“”‘’]+|["'“”‘’.,;:!?]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 export interface NerSuggestion {
@@ -339,6 +412,14 @@ export class NerService {
         return providerSuggestions
             .filter((suggestion) => !smartGraphRegistry.isRegisteredEntity(suggestion.label))
             .filter((suggestion) => !isLikelyJunkEntityLabel(suggestion.label))
+            .filter((suggestion) => providerId !== 'fst' || isPlausiblePhoenixDiscoveryCandidate({
+                key: suggestion.label,
+                token: suggestion.label,
+                kind: suggestion.kind,
+                score: typeof suggestion.rawScore === 'number' ? suggestion.rawScore : mapConfidenceLevelToScore(suggestion.confidence),
+                count: 1,
+                status: 0,
+            }, this.currentText))
             .map((suggestion) => ({
                 id: uuidv4(),
                 label: suggestion.label || 'Unknown',

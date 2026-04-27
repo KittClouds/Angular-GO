@@ -149,8 +149,16 @@ pub(super) fn build_label_set(
         let encoding = tokenizer
             .encode(label.as_str(), false)
             .map_err(|error| GlinerBiError::Inference(format!("tokenize label failed: {error}")))?;
-        max_label_len = max_label_len.max(encoding.get_ids().len() + 2);
-        label_encodings.push(encoding.get_ids().to_vec());
+        
+        let ids = encoding.get_ids();
+        let mask = encoding.get_attention_mask();
+        let actual_ids: Vec<u32> = ids.iter().zip(mask.iter())
+            .filter(|(_, &m)| m == 1)
+            .map(|(&id, _)| id)
+            .collect();
+
+        max_label_len = max_label_len.max(actual_ids.len() + 2);
+        label_encodings.push(actual_ids);
     }
 
     let mut input_ids = Vec::with_capacity(labels.len() * max_label_len);

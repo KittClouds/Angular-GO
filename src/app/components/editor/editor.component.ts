@@ -1,6 +1,7 @@
 ﻿import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, EnvironmentInjector, ApplicationRef, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LucideAngularModule, FileText, Plus } from 'lucide-angular';
+import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
+import { LucideAngularModule, Plus } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/prosemirror.css';
@@ -41,14 +42,18 @@ import { getPrettyTextApi } from '../../api/pretty-text-api';
 import type { Note } from '../../lib/dexie/db';
 import { configurePlainTextClipboard } from './plugins/plain-text-clipboard';
 import { configureEditorCursor, editorCursorPlugin, editorVirtualCursorPlugin } from './plugins/virtual-cursor';
-import { sanitizeEntityMarksInDocJson } from './entity-mark-sanitizer';
+import {
+    repairDuplicatedEntityLabelsInDocJson,
+    repairDuplicatedEntityLabelsInText,
+    sanitizeEntityMarksInDocJson,
+} from './entity-mark-sanitizer';
 import { smartGraphRegistry } from '../../lib/registry';
 import { extractProjectedText } from '../../lib/Scanner/prosemirror-bridge';
 
 @Component({
     selector: 'app-editor',
     standalone: true,
-    imports: [CommonModule, LucideAngularModule],
+    imports: [CommonModule, LucideAngularModule, NgxGradientTextComponent],
     templateUrl: './editor.component.html',
     styleUrls: ['./editor.component.css']
 })
@@ -80,7 +85,6 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     noteEditorStore = inject(NoteEditorStore);
 
     // Icons for template
-    readonly FileText = FileText;
     readonly Plus = Plus;
 
     constructor(
@@ -296,6 +300,11 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 hasEntityLabel: (label) => !!smartGraphRegistry.findEntityByLabel(label),
             });
             content = sanitized.content;
+            const entityLabels = smartGraphRegistry
+                .getAllEntities()
+                .flatMap(entity => [entity.label, ...(entity.aliases || [])]);
+            const repaired = repairDuplicatedEntityLabelsInDocJson(content, entityLabels);
+            content = repaired.content;
 
             // Update pretty text context before dispatching content so edit-time
             // refresh scheduling uses the correct note id/cache key.
@@ -321,8 +330,11 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 }
             }
 
-            if (sanitized.changed) {
-                void this.noteEditorStore.saveContentNow(content, note.markdownContent || '', note.id);
+            if (sanitized.changed || repaired.changed) {
+                const markdown = repaired.changed
+                    ? repairDuplicatedEntityLabelsInText(note.markdownContent || '', entityLabels)
+                    : note.markdownContent || '';
+                void this.noteEditorStore.saveContentNow(content, markdown, note.id);
             }
 
             if (editorView) {

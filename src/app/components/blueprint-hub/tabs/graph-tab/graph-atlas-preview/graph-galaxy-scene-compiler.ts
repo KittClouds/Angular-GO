@@ -45,7 +45,8 @@ export async function compileGalaxyScene(
         graphGalaxyRuntimeMeter.recordCompilerSource('native');
         return {
             nodes: scene.nodes.map((node) => {
-                const color = hslToRgb(entityColorStore.getRawHsl(node.entity.kind as any));
+                const source = entities.find((entity) => entity.id === node.entity.id);
+                const color = hslToRgb(source?.colorHsl ?? entityColorStore.getRawHsl(node.entity.kind as any));
                 return {
                 ...node,
                 ...color,

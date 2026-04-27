@@ -42,6 +42,26 @@ export function stripDerivedEntityMarksInDocJson<T extends JsonValue>(content: T
     };
 }
 
+export function repairDuplicatedEntityLabelsInDocJson<T extends JsonValue>(
+    content: T,
+    labels: Iterable<string>
+): SanitizedDocResult<T> {
+    const normalizedLabels = [...labels]
+        .map(label => label.trim())
+        .filter(label => label.length >= 2)
+        .sort((a, b) => b.length - a.length);
+
+    if (normalizedLabels.length === 0) {
+        return { content, changed: false };
+    }
+
+    const { content: repairedContent, changed } = repairDuplicatedLabels(content, normalizedLabels);
+    return {
+        content: repairedContent as T,
+        changed,
+    };
+}
+
 function sanitizeValue(
     value: JsonValue,
     shouldRemoveMark: (mark: JsonValue) => boolean
@@ -82,6 +102,57 @@ function sanitizeValue(
         content: changed ? next : value,
         changed,
     };
+}
+
+function repairDuplicatedLabels(value: JsonValue, labels: string[]): SanitizedDocResult<JsonValue> {
+    if (Array.isArray(value)) {
+        let changed = false;
+        const next = value.map(item => {
+            const result = repairDuplicatedLabels(item, labels);
+            changed = changed || result.changed;
+            return result.content;
+        });
+        return { content: changed ? next : value, changed };
+    }
+
+    if (value === null || typeof value !== 'object') {
+        return { content: value, changed: false };
+    }
+
+    let changed = false;
+    const next: Record<string, JsonValue> = {};
+
+    for (const [key, child] of Object.entries(value)) {
+        if (key === 'text' && typeof child === 'string') {
+            const repaired = repairTextWithNormalizedLabels(child, labels);
+            changed = changed || repaired !== child;
+            next[key] = repaired;
+            continue;
+        }
+
+        const result = repairDuplicatedLabels(child, labels);
+        changed = changed || result.changed;
+        next[key] = result.content;
+    }
+
+    return { content: changed ? next : value, changed };
+}
+
+export function repairDuplicatedEntityLabelsInText(text: string, labels: Iterable<string>): string {
+    const normalizedLabels = [...labels]
+        .map(label => label.trim())
+        .filter(label => label.length >= 2)
+        .sort((a, b) => b.length - a.length);
+
+    return repairTextWithNormalizedLabels(text, normalizedLabels);
+}
+
+function repairTextWithNormalizedLabels(text: string, normalizedLabels: string[]): string {
+    let repaired = text;
+    for (const label of normalizedLabels) {
+        repaired = repaired.split(`${label}${label}`).join(label);
+    }
+    return repaired;
 }
 
 export function classifyExplicitEntityAttrs(attrs: unknown, lookup: EntityLookup): ExplicitEntityMarkStatus {

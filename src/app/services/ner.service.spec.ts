@@ -213,4 +213,60 @@ describe('NerService provider orchestration', () => {
       }),
     ]);
   });
+
+  it('keeps Phoenix scan suggestions behind stopword and character heuristics', async () => {
+    const service = makeService();
+    service.fstProvider.scan.mockResolvedValue([
+      {
+        label: 'Above',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'All the',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'And',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 'high',
+        rawScore: 0.91,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+    ]);
+
+    await service.runManualScan('fst', {
+      noteId: 'note-1',
+      noteTitle: 'Untitled Note',
+      plainText: 'Above the room, Kai watched. And then Kai laughed.',
+    });
+
+    expect(service.suggestions()).toEqual([
+      expect.objectContaining({
+        label: 'Kai',
+        kind: 'CHARACTER',
+        source: 'fst',
+      }),
+    ]);
+  });
 });

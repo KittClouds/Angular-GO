@@ -49,6 +49,7 @@ export const fontFamilyMark = $mark('font_family', () => ({
             const fontFamily = mark.attrs['fontFamily'];
             const text = node.text || '';
             state.addNode('html', undefined, `<span style="font-family:${fontFamily}">${text}</span>`);
+            return true;
         },
     },
 }));

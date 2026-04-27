@@ -135,3 +135,138 @@
 .scrollbar-thin::-webkit-scrollbar-corner {
     background: transparent;
 }
+
+.faeryx-empty {
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 46%, rgba(45, 212, 191, 0.10), transparent 26%),
+        radial-gradient(circle at 58% 52%, rgba(168, 85, 247, 0.12), transparent 31%),
+        linear-gradient(180deg, rgba(12, 14, 18, 0.88), rgba(3, 5, 8, 0.98));
+}
+
+.faeryx-aura,
+.faeryx-watermark {
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+}
+
+.faeryx-aura {
+    inset: 0;
+    background:
+        linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.08), transparent),
+        radial-gradient(circle at 50% 54%, rgba(239, 68, 68, 0.08), transparent 18%);
+    opacity: 0.85;
+}
+
+.faeryx-watermark {
+    width: min(112vw, 1360px);
+    max-height: 108vh;
+    opacity: 0.19;
+    filter: saturate(1.25) blur(0.2px);
+}
+
+.faeryx-card {
+    position: relative;
+    z-index: 1;
+    width: min(430px, calc(100vw - 48px));
+    padding: 30px 28px 24px;
+    text-align: center;
+    border: 1px solid rgba(125, 249, 244, 0.28);
+    border-radius: 26px;
+    background:
+        linear-gradient(140deg, rgba(8, 22, 26, 0.82), rgba(16, 12, 31, 0.82)),
+        rgba(5, 6, 10, 0.82);
+    box-shadow:
+        0 24px 80px rgba(0, 0, 0, 0.46),
+        0 0 0 1px rgba(168, 85, 247, 0.10) inset,
+        0 0 56px rgba(45, 212, 191, 0.12);
+    backdrop-filter: blur(18px);
+}
+
+.faeryx-mark {
+    display: block;
+    width: min(210px, 58vw);
+    margin: -10px auto -2px;
+    filter: drop-shadow(0 0 20px rgba(45, 212, 191, 0.32));
+}
+
+:host ::ng-deep .faeryx-title {
+    display: block;
+    font-size: clamp(56px, 9vw, 84px);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: 0;
+    text-shadow: 0 12px 36px rgba(34, 211, 238, 0.16);
+}
+
+.faeryx-kicker {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(153, 246, 228, 0.78);
+}
+
+.faeryx-card h2 {
+    margin: 18px 0 0;
+    font-size: 22px;
+    font-weight: 760;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.faeryx-copy {
+    max-width: 300px;
+    margin: 9px auto 22px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: rgba(212, 212, 216, 0.78);
+}
+
+.faeryx-primary-action {
+    display: inline-flex;
+    min-height: 44px;
+    min-width: 220px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px solid rgba(125, 249, 244, 0.62);
+    border-radius: 14px;
+    background:
+        linear-gradient(90deg, rgba(20, 184, 166, 0.30), rgba(168, 85, 247, 0.28)),
+        rgba(2, 6, 11, 0.70);
+    color: white;
+    font-size: 14px;
+    font-weight: 800;
+    box-shadow: 0 0 26px rgba(45, 212, 191, 0.15);
+    transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.faeryx-primary-action:hover {
+    transform: translateY(-1px);
+    border-color: rgba(196, 181, 253, 0.78);
+    box-shadow: 0 0 34px rgba(168, 85, 247, 0.22);
+}
+
+.faeryx-capabilities {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.faeryx-capabilities span {
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 7px 8px;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(224, 242, 254, 0.78);
+    font-size: 11px;
+    font-weight: 760;
+}

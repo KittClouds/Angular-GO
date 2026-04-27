@@ -75,34 +75,36 @@
 
 
     <linearGradient id="ringRedGrad" x1="120" y1="980" x2="1920" y2="1320" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ff2a16"/>
-      <stop offset="24%" stop-color="#e60000"/>
-      <stop offset="52%" stop-color="#ff3b21"/>
-      <stop offset="76%" stop-color="#c80013"/>
-      <stop offset="100%" stop-color="#ff6a26"/>
+      <stop offset="0%" stop-color="#7ffdf3"/>
+      <stop offset="18%" stop-color="#36e4df"/>
+      <stop offset="34%" stop-color="#2eb8ff"/>
+      <stop offset="54%" stop-color="#646bff"/>
+      <stop offset="76%" stop-color="#913dff"/>
+      <stop offset="100%" stop-color="#c335ff"/>
     </linearGradient>
 
     <linearGradient id="ringRedHot" x1="160" y1="1180" x2="1880" y2="1110" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ff8a5a" stop-opacity="0.42"/>
-      <stop offset="36%" stop-color="#ff1c10" stop-opacity="0.78"/>
-      <stop offset="66%" stop-color="#dd0000" stop-opacity="0.72"/>
-      <stop offset="100%" stop-color="#ffb057" stop-opacity="0.38"/>
+      <stop offset="0%" stop-color="#bafcff" stop-opacity="0.32"/>
+      <stop offset="28%" stop-color="#53ebf2" stop-opacity="0.54"/>
+      <stop offset="52%" stop-color="#56a5ff" stop-opacity="0.66"/>
+      <stop offset="76%" stop-color="#8953ff" stop-opacity="0.58"/>
+      <stop offset="100%" stop-color="#c870ff" stop-opacity="0.34"/>
     </linearGradient>
 
     <radialGradient id="redNodeFill" cx="38%" cy="33%" r="68%">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="18%" stop-color="#fff0e7"/>
-      <stop offset="40%" stop-color="#ff6d4b"/>
-      <stop offset="70%" stop-color="#e50000"/>
-      <stop offset="100%" stop-color="#7c0000"/>
+      <stop offset="20%" stop-color="#e8ffff"/>
+      <stop offset="42%" stop-color="#7ffdf3"/>
+      <stop offset="70%" stop-color="#5f86ff"/>
+      <stop offset="100%" stop-color="#9d4cff"/>
     </radialGradient>
 
     <filter id="redGlow" x="-25%" y="-65%" width="150%" height="230%">
       <feGaussianBlur stdDeviation="8" result="rb"/>
       <feColorMatrix in="rb" type="matrix"
-        values="1 0 0 0 0.95
-                0 0.08 0 0 0
-                0 0 0.04 0 0
+        values="0.7 0 0 0 0.08
+                0 0.92 0 0 0.10
+                0 0 1 0 0.18
                 0 0 0 0.56 0" result="rg"/>
       <feMerge>
         <feMergeNode in="rg"/>
@@ -113,9 +115,9 @@
     <filter id="redNodeGlow" x="-70%" y="-70%" width="240%" height="240%">
       <feGaussianBlur stdDeviation="10" result="rb"/>
       <feColorMatrix in="rb" type="matrix"
-        values="1 0 0 0 1
-                0 0.05 0 0 0
-                0 0 0.02 0 0
+        values="0.7 0 0 0 0.14
+                0 0.95 0 0 0.12
+                0 0 1 0 0.24
                 0 0 0 0.72 0" result="rg"/>
       <feMerge>
         <feMergeNode in="rg"/>
@@ -232,7 +234,7 @@
 
       .red-edge-hair {
         fill: none;
-        stroke: #ff664f;
+        stroke: #86eaff;
         stroke-width: 1.7;
         stroke-linecap: round;
         stroke-linejoin: round;
@@ -241,19 +243,19 @@
 
       .red-node-big {
         fill: url(#redNodeFill);
-        stroke: #fff5ec;
+        stroke: #f1ffff;
         stroke-width: 3.2;
       }
 
       .red-node {
         fill: url(#redNodeFill);
-        stroke: #ffe5d7;
+        stroke: #edffff;
         stroke-width: 2.1;
       }
 
       .red-node-small {
-        fill: #ffefe6;
-        stroke: #e00000;
+        fill: #ecffff;
+        stroke: #66dfff;
         stroke-width: 1.4;
       }
     </style>
@@ -381,6 +383,7 @@
         <path class="edge-back" d="M 664 666 L 760 742 L 840 808 L 920 845 L 944 1000 L 1024 1012 L 1096 1002 L 1126 892 L 1208 808 L 1288 742 L 1384 666"/>
         <path class="edge-back" d="M 744 1188 L 840 1126 L 932 1068 L 1024 1012 L 1116 1068 L 1208 1126 L 1302 1188"/>
       </g>
+
       <!-- central spine / retrieval spine -->
       <g filter="url(#edgeGlow)">
         <path class="edge" d="M 1028 454 L 1024 630 L 1024 770 L 1024 870 L 1024 1012 L 1024 1184 L 1024 1342 L 1032 1488"/>
@@ -482,6 +485,7 @@
         <circle class="hub" cx="1024" cy="1184" r="16"/>
         <circle class="hub" cx="1024" cy="1342" r="15"/>
         <circle class="hub" cx="1032" cy="1488" r="13"/>
+
         <!-- head/detail nodes -->
         <circle class="node" cx="984" cy="520" r="9"/>
         <circle class="node" cx="1068" cy="520" r="9"/>
@@ -549,12 +553,6 @@
 
       <!-- tiny inference particles -->
       <g opacity="0.82">
-
-        <circle class="small-node" cx="936" cy="372" r="4"/>
-        <circle class="small-node" cx="976" cy="340" r="4"/>
-        <circle class="small-node" cx="1032" cy="336" r="4"/>
-        <circle class="small-node" cx="1086" cy="358" r="4"/>
-        <circle class="small-node" cx="1118" cy="404" r="4"/>
         <circle class="small-node" cx="632" cy="790" r="4"/>
         <circle class="small-node" cx="720" cy="846" r="4"/>
         <circle class="small-node" cx="725" cy="1018" r="4"/>
@@ -700,22 +698,15 @@
     <!-- standalone crest graph: nodes and edges only -->
     <g id="crestGraphStandalone">
       <g filter="url(#edgeGlow)">
-        <path class="edge-back" d="M 868 446 L 900 388 L 952 346 L 1004 322 L 1060 322 L 1112 344 L 1158 384 L 1180 448"/>
+        <path class="edge-thin" d="M 868 446 L 900 388 L 952 346 L 1004 322 L 1060 322 L 1112 344 L 1158 384 L 1180 448"/>
         <path class="edge-thin" d="M 920 452 L 952 404 L 998 378 L 1048 378 L 1094 398 L 1128 438"/>
-        <path class="edge-hair" d="M 868 446 L 920 452"/>
         <path class="edge-hair" d="M 900 388 L 952 404"/>
         <path class="edge-hair" d="M 952 346 L 998 378"/>
-        <path class="edge-hair" d="M 1004 322 L 1048 378"/>
-        <path class="edge-hair" d="M 1060 322 L 998 378"/>
+        <path class="edge-hair" d="M 1004 322 L 998 378"/>
+        <path class="edge-hair" d="M 1060 322 L 1048 378"/>
         <path class="edge-hair" d="M 1112 344 L 1094 398"/>
         <path class="edge-hair" d="M 1158 384 L 1128 438"/>
-        <path class="edge-hair" d="M 1180 448 L 1128 438"/>
-        <path class="edge-hair" d="M 900 388 L 998 378"/>
-        <path class="edge-hair" d="M 1112 344 L 1048 378"/>
-        <path class="edge-hair" d="M 952 404 L 1048 378"/>
-        <path class="edge-hair" d="M 1094 398 L 998 378"/>
-        <path class="edge-thin" d="M 998 378 L 1028 454 L 1048 378"/>
-
+        <path class="edge-hair" d="M 998 378 L 1024 454 L 1048 378"/>
       </g>
       <g filter="url(#nodeGlow)">
         <circle class="node" cx="868" cy="446" r="8"/>

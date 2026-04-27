@@ -66,6 +66,7 @@ export const underlineSchema = $markSchema('underline', (ctx) => ({
                 ? `text-decoration: underline; text-decoration-color: ${color}`
                 : 'text-decoration: underline';
             state.addNode('html', undefined, `<span style="${style}">${text}</span>`);
+            return true;
         },
     },
 }));

@@ -39,6 +39,7 @@ fn main() -> Result<(), String> {
     let label_set = model
         .prepare_labels(&config.labels)
         .map_err(|error| format!("GLiNER label preparation failed: {error}"))?;
+
     let predictions = model
         .predict_with_label_set(
             &config.text,

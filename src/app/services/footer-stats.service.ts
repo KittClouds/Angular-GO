@@ -11,7 +11,7 @@ import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
 import { analyzeText, parseContentToPlainText, TextAnalytics, getEmptyAnalytics } from '../lib/analytics';
 import {
-    scheduleLoadedNoteEntityOccurrenceRebuild,
+    syncLiveNoteEntityOccurrences,
 } from '../lib/notes/entity-occurrence-index';
 import {
     getEntitySignalRows,
@@ -40,6 +40,13 @@ const EMPTY_BACKLINK_DATA: { rows: EntitySignalRow[]; breakdown: EntitySignalBre
     rows: [],
     breakdown: EMPTY_BACKLINK_BREAKDOWN,
 };
+
+const SIGNAL_REFRESH_BOUNDARY_MS = 650;
+const SIGNAL_REFRESH_EDIT_MS = 1400;
+const SIGNAL_REFRESH_PASTE_MS = 450;
+const SIGNAL_REFRESH_CLEAR_MS = 250;
+const SIGNAL_REFRESH_MIN_DELTA = 2;
+const SIGNAL_REFRESH_PASTE_DELTA = 48;
 
 function isSeverity(value: unknown): value is 'low' | 'medium' | 'high' {
     return value === 'low' || value === 'medium' || value === 'high';
@@ -243,6 +250,25 @@ function normalizeTextAnalytics(value: unknown): TextAnalytics | null {
     };
 }
 
+function endsOnSignalBoundary(text: string): boolean {
+    return /[\s.!?;:,\n]$/.test(text);
+}
+
+function hashSignalText(text: string): string {
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
+
+function normalizeSignalGeneration(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0
+        ? value
+        : Date.now();
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -264,18 +290,28 @@ export class FooterStatsService {
     /** Monotonic request guard to drop stale async analytics results */
     private analyticsRequestVersion = 0;
 
+    /** Debounced live signal row refresh for current editor text */
+    private signalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    private signalRefreshRequestVersion = 0;
+    private readonly lastSignalSnapshots = new Map<string, { textHash: string; textLength: number; generation: number }>();
+    private _signalLifecycle = signal<'idle' | 'queued' | 'refreshing'>('idle');
+
     /** Save state tracking (derived from store) */
     readonly isSaved = computed(() => !this.noteEditorStore.isSaving());
     readonly plainText = computed(() => this.currentPlainText());
+    readonly signalLifecycle = computed(() => this._signalLifecycle());
 
     constructor() {
-        void scheduleLoadedNoteEntityOccurrenceRebuild();
+        this.destroyRef.onDestroy(() => this.clearSignalRefreshTimer());
 
         // Listen to editor content changes for analytics
         this.editorService.liveUpdate$
             .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe(({ plainText }) => {
+            .subscribe(({ noteId, revision, plainText }) => {
                 this.updateCurrentPlainText(plainText);
+                if (typeof noteId === 'string') {
+                    this.scheduleLiveSignalRefresh(noteId, plainText, revision);
+                }
             });
 
         // Also load initial content when note changes
@@ -285,14 +321,18 @@ export class FooterStatsService {
         ).subscribe(note => {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
-            void scheduleLoadedNoteEntityOccurrenceRebuild();
 
             if (note) {
-                this.updateCurrentPlainText(
-                    parseContentToPlainText(note.content || note.markdownContent || '')
+                const plainText = parseContentToPlainText(note.content || note.markdownContent || '');
+                this.updateCurrentPlainText(plainText);
+                void this.maybeRefreshOpenedNoteSignals(
+                    note.id,
+                    plainText,
+                    normalizeSignalGeneration(note.version || note.updatedAt),
                 );
             } else {
                 this.updateCurrentPlainText('');
+                this.clearSignalRefreshTimer();
             }
         });
 
@@ -335,6 +375,139 @@ export class FooterStatsService {
             this.analyticsRequestVersion++;
             this._liveAnalytics.set(getEmptyAnalytics());
         }
+    }
+
+    private scheduleLiveSignalRefresh(
+        noteId: string,
+        plainText: string,
+        revision = Date.now(),
+        force = false,
+    ): void {
+        const activeNoteId = this.noteEditorStore.activeNoteId();
+        if (!noteId || (activeNoteId && activeNoteId !== noteId)) {
+            return;
+        }
+
+        const previous = this.lastSignalSnapshots.get(noteId);
+        const trimmed = plainText.trim();
+        const textHash = hashSignalText(plainText);
+        const delay = this.signalRefreshDelay(previous?.textLength || 0, plainText);
+        if (!force && previous?.textHash === textHash && previous.textLength === plainText.length) {
+            return;
+        }
+        if (!force && trimmed && delay === null) {
+            return;
+        }
+
+        const requestVersion = ++this.signalRefreshRequestVersion;
+        const refreshDelay = force || !trimmed
+            ? SIGNAL_REFRESH_CLEAR_MS
+            : delay ?? SIGNAL_REFRESH_EDIT_MS;
+        this.clearSignalRefreshTimer();
+        this._signalLifecycle.set('queued');
+        this.signalRefreshTimer = setTimeout(() => {
+            this.signalRefreshTimer = null;
+            void this.flushLiveSignalRefresh(noteId, plainText, revision, requestVersion);
+        }, refreshDelay);
+    }
+
+    private async flushLiveSignalRefresh(
+        noteId: string,
+        plainText: string,
+        revision: number,
+        requestVersion: number,
+    ): Promise<void> {
+        if (requestVersion !== this.signalRefreshRequestVersion) {
+            return;
+        }
+
+        this._signalLifecycle.set('refreshing');
+        try {
+            await syncLiveNoteEntityOccurrences(noteId, plainText, revision || Date.now());
+            if (requestVersion === this.signalRefreshRequestVersion) {
+                this.rememberSignalSnapshot(noteId, plainText, normalizeSignalGeneration(revision));
+            }
+        } catch (error) {
+            console.warn('[FooterStatsService] Live signal refresh skipped:', error);
+        } finally {
+            if (requestVersion === this.signalRefreshRequestVersion) {
+                this._signalLifecycle.set('idle');
+            }
+        }
+    }
+
+    private clearSignalRefreshTimer(): void {
+        if (this.signalRefreshTimer) {
+            clearTimeout(this.signalRefreshTimer);
+            this.signalRefreshTimer = null;
+        }
+        this._signalLifecycle.set('idle');
+    }
+
+    private signalRefreshDelay(previousTextLength: number, nextText: string): number | null {
+        if (!nextText.trim()) {
+            return SIGNAL_REFRESH_CLEAR_MS;
+        }
+
+        const delta = Math.abs(nextText.length - previousTextLength);
+        if (!previousTextLength || delta >= SIGNAL_REFRESH_PASTE_DELTA) {
+            return SIGNAL_REFRESH_PASTE_MS;
+        }
+        if (delta < SIGNAL_REFRESH_MIN_DELTA && !endsOnSignalBoundary(nextText)) {
+            return null;
+        }
+        if (endsOnSignalBoundary(nextText)) {
+            return SIGNAL_REFRESH_BOUNDARY_MS;
+        }
+        return SIGNAL_REFRESH_EDIT_MS;
+    }
+
+    private async maybeRefreshOpenedNoteSignals(noteId: string, plainText: string, generation: number): Promise<void> {
+        const activeNoteId = this.noteEditorStore.activeNoteId();
+        if (!noteId || (activeNoteId && activeNoteId !== noteId)) {
+            return;
+        }
+
+        const requestVersion = ++this.signalRefreshRequestVersion;
+        this.clearSignalRefreshTimer();
+
+        const textHash = hashSignalText(plainText);
+        const previous = this.lastSignalSnapshots.get(noteId);
+        if (previous?.textHash === textHash && previous.textLength === plainText.length && previous.generation >= generation) {
+            return;
+        }
+
+        const isFresh = await this.hasFreshSignalRows(noteId, generation);
+        if (requestVersion !== this.signalRefreshRequestVersion) {
+            return;
+        }
+
+        if (isFresh) {
+            this.rememberSignalSnapshot(noteId, plainText, generation);
+            return;
+        }
+
+        this.scheduleLiveSignalRefresh(noteId, plainText, generation, true);
+    }
+
+    private async hasFreshSignalRows(noteId: string, generation: number): Promise<boolean> {
+        try {
+            const rows = await db.entityNoteIndex.where('noteId').equals(noteId).toArray();
+            if (!rows.length) {
+                return false;
+            }
+            return rows.some(row => typeof row.generation === 'number' && row.generation >= generation);
+        } catch {
+            return false;
+        }
+    }
+
+    private rememberSignalSnapshot(noteId: string, plainText: string, generation: number): void {
+        this.lastSignalSnapshots.set(noteId, {
+            textHash: hashSignalText(plainText),
+            textLength: plainText.length,
+            generation,
+        });
     }
 
     // ─────────────────────────────────────────────────────────────

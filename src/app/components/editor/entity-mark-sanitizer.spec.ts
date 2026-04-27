@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
     classifyEntityMark,
     classifyExplicitEntityAttrs,
+    repairDuplicatedEntityLabelsInDocJson,
+    repairDuplicatedEntityLabelsInText,
     sanitizeEntityMarksInDocJson,
     stripDerivedEntityMarksInDocJson,
 } from './entity-mark-sanitizer';
@@ -134,5 +136,34 @@ describe('sanitizeEntityMarksInDocJson', () => {
         expect((result.content as any).content[0].content[0].marks).toEqual([
             { type: 'entity', attrs: { id: 'entity-1', label: 'Brooklyn', type: 'entity' } },
         ]);
+    });
+
+    it('repairs markdown text that was duplicated by legacy entity mark serialization', () => {
+        expect(
+            repairDuplicatedEntityLabelsInText('KaiKai looked at AellaAella and IrianeIriane.', [
+                'Aella',
+                'Iriane',
+                'Kai',
+            ]),
+        ).toBe('Kai looked at Aella and Iriane.');
+    });
+
+    it('repairs duplicated entity labels inside persisted document JSON', () => {
+        const input = {
+            type: 'doc',
+            content: [
+                {
+                    type: 'paragraph',
+                    content: [
+                        { type: 'text', text: 'AellaAella watched IrianeIriane vanish.' },
+                    ],
+                },
+            ],
+        };
+
+        const result = repairDuplicatedEntityLabelsInDocJson(input, ['Aella', 'Iriane']);
+
+        expect(result.changed).toBe(true);
+        expect((result.content as any).content[0].content[0].text).toBe('Aella watched Iriane vanish.');
     });
 });

@@ -62,8 +62,8 @@ export const entitySchema = $markSchema('entity', (ctx) => ({
     },
     toMarkdown: {
         match: (mark) => mark.type.name === 'entity',
-        runner: (state, mark, node) => {
-            state.addNode('text', undefined, node.text || '');
-        },
+        // Entity marks are presentation metadata. Let the underlying text
+        // serialize normally instead of emitting another text node here.
+        runner: () => false,
     },
 }));

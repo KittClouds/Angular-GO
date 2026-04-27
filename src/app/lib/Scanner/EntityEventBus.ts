@@ -30,6 +30,7 @@ export interface ScanRequest {
 export interface EntityEventBusConfig {
     onScanRequest: (request: ScanRequest) => void;
     idleTimeoutMs?: number;
+    processedRangeLimit?: number;
 }
 
 // =============================================================================
@@ -40,6 +41,7 @@ export class EntityEventBus {
     private config: Required<EntityEventBusConfig>;
     private pendingEntities: Map<string, EntityEvent> = new Map();
     private processedRanges: Set<string> = new Set();
+    private processedRangeOrder: string[] = [];
     private idleTimer: ReturnType<typeof setTimeout> | null = null;
     private currentNoteId: string | null = null;
     private disposed = false;
@@ -47,6 +49,7 @@ export class EntityEventBus {
     constructor(config: EntityEventBusConfig) {
         this.config = {
             idleTimeoutMs: config.idleTimeoutMs ?? 500,
+            processedRangeLimit: config.processedRangeLimit ?? 4096,
             onScanRequest: config.onScanRequest,
         };
     }
@@ -114,6 +117,8 @@ export class EntityEventBus {
         this.disposed = true;
         this.clearIdleTimer();
         this.pendingEntities.clear();
+        this.processedRanges.clear();
+        this.processedRangeOrder = [];
     }
 
     // =========================================================================
@@ -188,7 +193,7 @@ export class EntityEventBus {
         for (const [key, event] of this.pendingEntities.entries()) {
             if (event.noteId === noteId) {
                 const processedKey = this.makeProcessedKey(event.span, noteId, contextText);
-                this.processedRanges.add(processedKey);
+                this.rememberProcessedRange(processedKey);
             }
         }
 
@@ -210,5 +215,24 @@ export class EntityEventBus {
             trigger,
             timestamp: Date.now(),
         });
+    }
+
+    private rememberProcessedRange(key: string): void {
+        if (this.processedRanges.has(key)) {
+            return;
+        }
+
+        this.processedRanges.add(key);
+        this.processedRangeOrder.push(key);
+
+        const overflow = this.processedRangeOrder.length - this.config.processedRangeLimit;
+        if (overflow <= 0) {
+            return;
+        }
+
+        const expired = this.processedRangeOrder.splice(0, overflow);
+        for (const expiredKey of expired) {
+            this.processedRanges.delete(expiredKey);
+        }
     }
 }

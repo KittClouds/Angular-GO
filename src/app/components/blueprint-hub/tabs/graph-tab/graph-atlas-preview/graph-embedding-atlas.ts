@@ -38,6 +38,8 @@ interface Signature {
 
 const DIMS = 32;
 const COLORS = ['184 78% 58%', '198 78% 60%', '262 70% 62%', '172 68% 52%'];
+const EMBEDDING_SHELL_RADIUS = 1.52;
+const EMBEDDING_SHELL_SMALL_RADIUS = 1.08;
 
 export function buildDocEmbeddingAtlas(notes: Note[], limit = 180, topK = 4): EmbeddingAtlasData {
     const selected = notes
@@ -215,12 +217,44 @@ function normalize(vector: Float32Array): void {
 }
 
 function projectSignature(vector: Float32Array, id: string, index: number, total: number): { x: number; y: number; z: number } {
-    const spread = total < 8 ? 0.92 : 1.55;
-    const jitter = (hashToken(id) / 4294967295 - 0.5) * 0.22;
+    const seed = hashToken(id);
+    const raw = projectVectorTo3d(vector, seed);
+    const norm = Math.hypot(raw.x, raw.y, raw.z);
+    const radius = total < 8 ? EMBEDDING_SHELL_SMALL_RADIUS : EMBEDDING_SHELL_RADIUS;
+    if (!Number.isFinite(norm) || norm < 1e-8) {
+        return fibonacciSpherePoint(index, Math.max(1, total), radius, seed);
+    }
+
     return {
-        x: clamp((vector[0] * 1.7 + vector[5] * 1.1 + vector[13] * 0.9 + jitter) * spread, -2.1, 2.1),
-        y: clamp((vector[1] * 1.6 - vector[8] * 1.0 + vector[21] * 0.8 - jitter * 0.55) * spread, -1.65, 1.65),
-        z: clamp((vector[2] * 1.7 + vector[11] * 1.1 - vector[27] * 0.85 + jitter * 0.75) * spread, -2.1, 2.1),
+        x: radius * raw.x / norm,
+        y: radius * raw.y / norm,
+        z: radius * raw.z / norm,
+    };
+}
+
+function projectVectorTo3d(vector: Float32Array, seed: number): { x: number; y: number; z: number } {
+    const phase = seed / 4294967295;
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let dim = 0; dim < vector.length; dim++) {
+        const value = vector[dim];
+        const n = dim + 1;
+        x += value * Math.sin(n * 12.9898 + phase * 6.283185307179586);
+        y += value * Math.cos(n * 78.233 + phase * 3.883222077450933);
+        z += value * Math.sin(n * 37.719 + phase * 2.399963229728653);
+    }
+    return { x, y, z };
+}
+
+function fibonacciSpherePoint(index: number, total: number, radius: number, seed: number): { x: number; y: number; z: number } {
+    const y = 1 - (index / Math.max(1, total - 1)) * 2;
+    const radial = Math.sqrt(Math.max(0, 1 - y * y));
+    const angle = (index + seed / 4294967295) * 2.399963229728653;
+    return {
+        x: Math.cos(angle) * radial * radius,
+        y: y * radius,
+        z: Math.sin(angle) * radial * radius,
     };
 }
 
@@ -293,8 +327,4 @@ function cosine(a: Float32Array, b: Float32Array): number {
     let dot = 0;
     for (let index = 0; index < a.length; index++) dot += a[index] * b[index];
     return Math.max(0, dot);
-}
-
-function clamp(value: number, min: number, max: number): number {
-    return Math.min(max, Math.max(min, value));
 }

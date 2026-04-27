@@ -49,6 +49,7 @@ export const textColorSchema = $markSchema('textColor', (ctx) => ({
             const color = mark.attrs['color'];
             const text = node.text || '';
             state.addNode('html', undefined, `<span style="color:${color}">${text}</span>`);
+            return true;
         },
     },
 }));

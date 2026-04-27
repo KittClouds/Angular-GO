@@ -568,13 +568,15 @@ export class GraphAtlasPreviewComponent {
     activeNodes(): GalaxyRenderableNode[] {
         if (this.atlasMode === 'entities') return this.entities;
         const trace = this.queryTrace();
-        return trace ? [trace.queryNode, ...this.embeddingAtlas().nodes] : this.embeddingAtlas().nodes;
+        const nodes = this.embeddingNodesWithEntityAnchors();
+        return trace ? [trace.queryNode, ...nodes] : nodes;
     }
 
     activeEdges(): AtlasPreviewEdge[] {
         if (this.atlasMode === 'entities') return this.edges;
         const trace = this.queryTrace();
-        return trace ? [...trace.edges, ...this.embeddingAtlas().edges] : this.embeddingAtlas().edges;
+        const edges = this.embeddingEdgesWithEntityAnchors();
+        return trace ? [...trace.edges, ...edges] : edges;
     }
 
     activeNodeCount(): number {
@@ -610,6 +612,56 @@ export class GraphAtlasPreviewComponent {
         this.settings = { ...this.settings, ...patch };
     }
 
+    private embeddingNodesWithEntityAnchors(): GalaxyRenderableNode[] {
+        const atlas = this.embeddingAtlas();
+        if (!this.entities.length || !atlas.nodes.length) return atlas.nodes;
+        const anchors = this.entities.slice(0, 80).map((entity, index) => {
+            const matches = matchingEmbeddingNodes(entity, atlas.nodes).slice(0, 8);
+            const point = matches.length
+                ? averageAtlasPoint(matches)
+                : fallbackEntityPoint(entity.id, index, this.entities.length);
+            return {
+                id: `embed:entity:${entity.id}`,
+                label: entity.label,
+                kind: entity.kind,
+                aliases: entity.aliases,
+                totalMentions: Math.max(4, entity.totalMentions || matches.length || 1),
+                atlasX: point.x,
+                atlasY: point.y,
+                atlasZ: point.z,
+                colorHsl: entity.colorHsl,
+                metadata: {
+                    ...entity.metadata,
+                    sourceType: 'entity',
+                    sourceEntityId: entity.id,
+                    galaxyId: `embed:entity:${entity.id}`,
+                    galaxyRole: 'primary',
+                    preview: matches.length ? `Anchored by ${matches.length} nearby text vector${matches.length === 1 ? '' : 's'}.` : 'Registry entity anchor.',
+                },
+            } satisfies GalaxyRenderableNode;
+        });
+        return [...atlas.nodes, ...anchors];
+    }
+
+    private embeddingEdgesWithEntityAnchors(): AtlasPreviewEdge[] {
+        const atlas = this.embeddingAtlas();
+        if (!this.entities.length || !atlas.nodes.length) return atlas.edges;
+        const anchorEdges: AtlasPreviewEdge[] = [];
+        for (const entity of this.entities.slice(0, 80)) {
+            const matches = matchingEmbeddingNodes(entity, atlas.nodes).slice(0, 5);
+            for (const [index, node] of matches.entries()) {
+                anchorEdges.push({
+                    id: `embed:entity-edge:${entity.id}:${node.id}`,
+                    sourceId: `embed:entity:${entity.id}`,
+                    targetId: node.id,
+                    type: 'entity-embedding-anchor',
+                    confidence: 1.4 - index * 0.12,
+                });
+            }
+        }
+        return [...atlas.edges, ...anchorEdges];
+    }
+
     private async refreshEmbeddingAtlas(scope: ResolvedScope): Promise<void> {
         const token = ++this.atlasLoadToken;
         const atlas = await loadEmbeddingAtlasForScope(scope);
@@ -618,4 +670,61 @@ export class GraphAtlasPreviewComponent {
             this.queryTrace.set(buildEmbeddingQueryTrace(this.queryText(), atlas));
         }
     }
+}
+
+function matchingEmbeddingNodes(entity: GalaxyRenderableNode, nodes: GalaxyRenderableNode[]): GalaxyRenderableNode[] {
+    const needles = [entity.label, ...(entity.aliases || [])]
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.length >= 2);
+    if (!needles.length) return [];
+    return nodes.filter((node) => {
+        const metadata = node.metadata || {};
+        const haystack = `${node.label} ${String(metadata['preview'] || '')}`.toLowerCase();
+        return needles.some((needle) => containsWordish(haystack, needle));
+    });
+}
+
+function containsWordish(haystack: string, needle: string): boolean {
+    const index = haystack.indexOf(needle);
+    if (index < 0) return false;
+    const before = index === 0 ? ' ' : haystack[index - 1];
+    const after = index + needle.length >= haystack.length ? ' ' : haystack[index + needle.length];
+    return !isWordChar(before) && !isWordChar(after);
+}
+
+function isWordChar(value: string): boolean {
+    return /[a-z0-9_]/i.test(value);
+}
+
+function averageAtlasPoint(nodes: GalaxyRenderableNode[]): { x: number; y: number; z: number } {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (const node of nodes) {
+        x += Number(node.atlasX || 0);
+        y += Number(node.atlasY || 0);
+        z += Number(node.atlasZ || 0);
+    }
+    const scale = 1 / Math.max(1, nodes.length);
+    return { x: x * scale, y: y * scale, z: z * scale };
+}
+
+function fallbackEntityPoint(id: string, index: number, total: number): { x: number; y: number; z: number } {
+    const angle = index * 2.399963229728653;
+    const radius = 0.38 + (hashUnit(id) * 0.32);
+    const y = total > 1 ? 0.7 - (index / (total - 1)) * 1.4 : 0;
+    return {
+        x: Math.cos(angle) * radius,
+        y,
+        z: Math.sin(angle) * radius,
+    };
+}
+
+function hashUnit(value: string): number {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 4294967295;
 }

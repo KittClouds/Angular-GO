@@ -1,0 +1,27 @@
+[package]
+name = "phoenix-dynamic-ner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+compact_str.workspace = true
+daachorse.workspace = true
+memchr.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+phoenix-alex = { path = "../phoenix-alex" }
+phoenix-types = { path = "../phoenix-types" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+phoenix-rel-post = { path = "../phoenix-rel-post" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "ner_bench"
+harness = false

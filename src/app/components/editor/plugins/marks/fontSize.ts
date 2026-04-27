@@ -49,6 +49,7 @@ export const fontSizeMark = $mark('font_size', () => ({
             const fontSize = mark.attrs['fontSize'];
             const text = node.text || '';
             state.addNode('html', undefined, `<span style="font-size:${fontSize}">${text}</span>`);
+            return true;
         },
     },
 }));

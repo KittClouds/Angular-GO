@@ -9,6 +9,7 @@ members = [
     "crates/phoenix-chat",
     "crates/phoenix-event-identity-post",
     "crates/phoenix-chunker",
+    "crates/phoenix-dynamic-ner",
     "crates/phoenix-embed",
     "crates/phoenix-er-post",
     "crates/phoenix-graph-post",

@@ -57,8 +57,8 @@ export const entityImplicitSchema = $markSchema('entity_implicit', () => ({
     },
     toMarkdown: {
         match: (mark) => mark.type.name === 'entity_implicit',
-        runner: (state, _mark, node) => {
-            state.addNode('text', undefined, node.text || '');
-        },
+        // Derived highlights are paint, not content. Returning false lets
+        // Milkdown serialize the original text exactly once.
+        runner: () => false,
     },
 }));
