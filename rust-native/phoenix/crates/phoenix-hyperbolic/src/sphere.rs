@@ -1,4 +1,4 @@
-//! Hypersphere metric for HNSW / DiskANN-style index.
+//! Hypersphere metric for ANN indexes.
 //!
 //! Points are normalized onto the unit sphere S^(d-1).
 //! Internal traversal uses a cheap monotone score: 1 - dot(a, b).

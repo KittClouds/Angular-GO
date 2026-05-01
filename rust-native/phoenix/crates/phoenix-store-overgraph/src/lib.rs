@@ -9,6 +9,7 @@ use overgraph::{
     DatabaseEngine, DbOptions, EngineError, NodeInput, NodeRecord, PropValue, UpsertNodeOptions,
     WalSyncMode,
 };
+use phoenix_hyperbolic::hybrid_space::{HybridPoint, HybridSpaceConfig};
 use phoenix_hyperbolic::{
     AnnMetric, Candidate as HnswCandidate, HnswBuildParams, HyperbolicDiskHnsw,
     HyperbolicHnswBuilder, PackedHnswGraph, PackedHnswMetadata,
@@ -43,8 +44,8 @@ use phoenix_types::{IndexedSpan, IngestDocument, ScopeKey, SessionId};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
-mod lexical_query;
 mod graph_topology;
+mod lexical_query;
 mod scope_runtime;
 pub use graph_topology::{
     KernelTopologyCounts, KernelTopologyShortestPath, KernelTopologyVertexId,
@@ -501,11 +502,18 @@ impl PhoenixOvergraphStore {
             return Ok(());
         }
 
-        let metric = AnnMetric::default();
+        let metric = Self::ann_metric_for_index(index);
+        let metric_label = metric.label();
+        let depth = Self::ann_hybrid_depth_for_index(index);
         let mut builder =
             HyperbolicHnswBuilder::new(SEMANTIC_VECTOR_DIM, metric, HnswBuildParams::default());
         for vector in vectors {
-            builder.insert(vector.clone());
+            builder.insert(Self::project_ann_vector(
+                index,
+                metric_label,
+                depth,
+                vector,
+            )?);
         }
         let packed = builder.into_packed();
         let generation = AnnGenerationId(
@@ -529,7 +537,7 @@ impl PhoenixOvergraphStore {
             m0: HnswBuildParams::default().m0,
             ef_construction: HnswBuildParams::default().ef_construction,
             level_mult: HnswBuildParams::default().level_mult,
-            metric: metric.label().to_owned(),
+            metric: metric_label.to_owned(),
         };
         let segments = AnnPackedSegments {
             vectors: packed.vectors,
@@ -717,11 +725,16 @@ impl PhoenixOvergraphStore {
         engine: &mut DatabaseEngine,
         index: &AnnIndexKey,
     ) -> Result<(), StoreError> {
-        if engine
+        let dirty = engine
             .get_node_by_key(TYPE_ANN_DIRTY, &ann_index_storage_key(index))
             .map_err(store_query_error)?
-            .is_none()
-        {
+            .is_some();
+        let stale_space = self
+            .load_ann_generation_components_with_engine(engine, index)?
+            .is_some_and(|(manifest, _, _)| {
+                !Self::ann_manifest_uses_current_space(index, &manifest)
+            });
+        if !dirty && !stale_space {
             return Ok(());
         }
         let built_at = now_ms();
@@ -736,6 +749,59 @@ impl PhoenixOvergraphStore {
                 self.rebuild_node_ann_index_with_engine(engine, index, built_at)
             }
         }
+    }
+
+    #[inline]
+    fn ann_metric_for_index(_index: &AnnIndexKey) -> AnnMetric {
+        AnnMetric::hybrid_interior_default()
+    }
+
+    #[inline]
+    fn ann_hybrid_depth_for_index(index: &AnnIndexKey) -> f32 {
+        match index.family {
+            AnnIndexFamily::Document => 0.75,
+            AnnIndexFamily::Leaf => 1.5,
+            AnnIndexFamily::NodePrototype => 2.0,
+        }
+    }
+
+    #[inline]
+    fn ann_manifest_uses_current_space(index: &AnnIndexKey, manifest: &AnnManifest) -> bool {
+        manifest.dimension == SEMANTIC_VECTOR_DIM
+            && manifest.metric == Self::ann_metric_for_index(index).label()
+    }
+
+    fn project_ann_vector(
+        index: &AnnIndexKey,
+        metric_label: &str,
+        depth: f32,
+        vector: &[f32],
+    ) -> Result<Vec<f32>, StoreError> {
+        Self::validate_semantic_vector(vector, "ann vector")?;
+        let metric = AnnMetric::from_label_or_default(metric_label);
+        if metric.label() != AnnMetric::LABEL_HYBRID_INTERIOR {
+            return Ok(vector.to_vec());
+        }
+        HybridPoint::from_embedding_and_depth(vector, depth, HybridSpaceConfig::default())
+            .map(|point| point.poincare)
+            .map_err(|error| {
+                StoreError::Query(format!(
+                    "failed to project {} ANN vector into hybrid space: {error}",
+                    ann_family_name(index.family)
+                ))
+            })
+    }
+
+    fn project_ann_query_vector(
+        manifest: &AnnManifest,
+        query_vector: &[f32],
+    ) -> Result<Vec<f32>, StoreError> {
+        Self::project_ann_vector(
+            &manifest.index,
+            manifest.metric.as_str(),
+            Self::ann_hybrid_depth_for_index(&manifest.index),
+            query_vector,
+        )
     }
 
     fn ann_cache_dir(&self) -> PathBuf {
@@ -1034,10 +1100,11 @@ impl PhoenixOvergraphStore {
         let Some(state) = self.load_ann_query_state(scope, family, kind)? else {
             return Ok(Vec::new());
         };
+        let query_vector = Self::project_ann_query_vector(&state.manifest, query_vector)?;
         let search_limit = oversample.max(limit);
         Ok(state
             .index_handle
-            .search(query_vector, search_limit, search_limit.max(16))
+            .search(&query_vector, search_limit, search_limit.max(16))
             .into_iter()
             .filter_map(|candidate| {
                 state
@@ -3809,6 +3876,7 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
             return Ok(Vec::new());
         };
         Self::validate_semantic_vector(query_vector, "query")?;
+        let query_vector = Self::project_ann_query_vector(&state.manifest, query_vector)?;
         let mut search_k = oversample
             .max(limit)
             .max(8)
@@ -3818,7 +3886,7 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
             hits.clear();
             for candidate in state
                 .index_handle
-                .search(query_vector, search_k, search_k.max(16))
+                .search(&query_vector, search_k, search_k.max(16))
             {
                 let Some(payload) = state.payloads.get(candidate.id as usize) else {
                     continue;
@@ -3928,6 +3996,7 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
         else {
             return Ok(Vec::new());
         };
+        let query_vector = Self::project_ann_query_vector(&state.manifest, query_vector)?;
 
         let allowed = kinds.iter().copied().collect::<BTreeSet<_>>();
         let target_hits = oversample.max(limit).max(1);
@@ -3938,7 +4007,7 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
             let mut hits = Vec::<SemanticNodeNeighbor>::new();
             for candidate in state
                 .index_handle
-                .search(query_vector, search_k, search_k.max(16))
+                .search(&query_vector, search_k, search_k.max(16))
             {
                 let Some(payload) = state.payloads.get(candidate.id as usize) else {
                     continue;
@@ -4926,7 +4995,7 @@ mod tests {
             .load_ann_query_state(&scope, AnnIndexFamily::Document, None)
             .expect("ann query state")
             .expect("document ann state");
-        assert_eq!(state.manifest.metric, AnnMetric::LABEL_SPHERE_GEODESIC);
+        assert_eq!(state.manifest.metric, AnnMetric::LABEL_HYBRID_INTERIOR);
 
         let leaf_hits = store
             .query_semantic_neighbors_in_documents(

@@ -3,16 +3,16 @@
   <section class="workbench-surface workbench-hero">
     <div class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
-        <div class="surface-icon">
+        <div class="surface-icon surface-icon-purple">
           <ng-icon name="lucideSparkles" class="h-5 w-5"></ng-icon>
         </div>
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <h2 class="truncate text-base font-semibold leading-tight text-zinc-50">Retrieval Workbench</h2>
-            <span class="mode-pill">Unified</span>
+            <h2 class="truncate text-base font-semibold leading-tight text-zinc-50">Atlas Command</h2>
+            <span class="mode-pill" [ngClass]="'mode-' + pipelineStateLabel()">{{ pipelineStateLabel() }}</span>
           </div>
           <p class="mt-0.5 line-clamp-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-            {{ headerSubtitle() }}
+            Graph compiler + model orchestration
           </p>
         </div>
       </div>
@@ -41,13 +41,31 @@
     </div>
   </section>
 
-  <section class="workbench-surface query-surface">
-    <div class="relative w-full">
-      <ng-icon name="lucideSearch" class="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"></ng-icon>
-      <input pInputText type="text"
-        class="control-input w-full"
-        placeholder="Ask the graph, notes, and evidence..." [ngModel]="query()" (ngModelChange)="query.set($event)"
-        (keydown.enter)="handleSearch()" />
+  <section class="workbench-surface command-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Pipeline State</h3>
+        <p class="section-kicker mt-0.5">Live frontend machine</p>
+      </div>
+      <span class="status-chip" [class.status-live]="activeSignals().count > 0">
+        {{ activeSignals().count }} signals
+      </span>
+    </div>
+
+    <div class="stage-grid">
+      <div *ngFor="let stage of machineStageRows()" class="stage-row" [ngClass]="stageTone(stage.status)">
+        <span>{{ stage.label }}</span>
+        <strong>{{ stage.status }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="workbench-surface command-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Scope + Query</h3>
+        <p class="section-kicker mt-0.5">Command scope and optional retrieval</p>
+      </div>
     </div>
 
     <div class="grid grid-cols-[1fr_auto] gap-2">
@@ -73,15 +91,163 @@
         </ng-template>
       </p-select>
 
-      <button type="button" (click)="handleSearch()" [disabled]="isSearching()" class="primary-action">
+      <button type="button" (click)="handleSearch()" [disabled]="isSearching()" class="secondary-action compact-action">
         <ng-icon [name]="isSearching() ? 'lucideLoader2' : 'lucideSearch'" class="h-3.5 w-3.5"
           [class.animate-spin]="isSearching()"></ng-icon>
-        Search
       </button>
     </div>
 
-    <div class="flex items-center justify-between">
-      <span class="section-kicker">Evidence lanes</span>
+    <div class="relative w-full">
+      <ng-icon name="lucideSearch" class="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"></ng-icon>
+      <input pInputText type="text"
+        class="control-input w-full"
+        placeholder="Ask the graph, notes, and evidence..." [ngModel]="query()" (ngModelChange)="query.set($event)"
+        (keydown.enter)="handleSearch()" />
+    </div>
+  </section>
+
+  <section class="workbench-surface command-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Graph Build Target</h3>
+        <p class="section-kicker mt-0.5">{{ commandSubtitle() }}</p>
+      </div>
+    </div>
+
+    <div class="preset-grid">
+      <button *ngFor="let preset of atlasPresets" type="button" class="preset-button"
+        [ngClass]="selectedPreset() === preset.id ? 'preset-active' : 'preset-muted'"
+        (click)="selectPreset(preset.id)">
+        <span>{{ preset.label }}</span>
+        <small>{{ preset.policy }}</small>
+      </button>
+    </div>
+
+    <div class="target-stack">
+      <button *ngFor="let target of graphTargets" type="button" class="target-row"
+        [ngClass]="selectedGraphTargetId() === target.id ? 'target-active' : 'target-muted'"
+        (click)="selectGraphTarget(target.id)">
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-xs font-semibold">{{ target.label }}</span>
+          <span class="block truncate text-[10px] text-zinc-500">{{ target.desc }}</span>
+        </span>
+        <span class="target-meta">{{ target.cost }}</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="workbench-surface machine-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Run Pipeline</h3>
+        <p class="section-kicker mt-0.5">{{ selectedPresetDefinition().desc }}</p>
+      </div>
+      <span class="status-chip" [class.status-live]="graphStatus() !== 'idle'">{{ graphStatus() }}</span>
+    </div>
+
+    <div class="control-bank command-bank">
+      <div class="control-copy">
+        <span>{{ selectedPresetDefinition().label }}</span>
+        <p>{{ selectedGraphTarget().label }} uses {{ selectedGraphTarget().subsystems }} subsystem{{ selectedGraphTarget().subsystems === 1 ? '' : 's' }}.</p>
+      </div>
+      <div class="pipeline-stage-list">
+        <span *ngFor="let stage of selectedPresetDefinition().stages">{{ stage }}</span>
+      </div>
+      <div class="control-actions">
+        <button type="button" (click)="runAtlasPipeline()" [disabled]="!!activeJob() || isDynamicScanning()" class="primary-action wide-action">
+          <ng-icon [name]="!!activeJob() || isDynamicScanning() ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
+            [class.animate-spin]="!!activeJob() || isDynamicScanning()"></ng-icon>
+          Run Pipeline
+        </button>
+        <button type="button" (click)="runDynamicScan()" [disabled]="isDynamicScanning()" class="purple-action">
+          <ng-icon [name]="isDynamicScanning() ? 'lucideLoader2' : 'lucideCpu'" class="h-3.5 w-3.5"
+            [class.animate-spin]="isDynamicScanning()"></ng-icon>
+          Scan
+        </button>
+      </div>
+    </div>
+
+    <div class="control-bank">
+      <div class="control-copy">
+        <span>Dynamic NER</span>
+        <p>GLiNER-BI small · label-embeds quantized · HighestScore</p>
+      </div>
+      <div class="mini-status-row">
+        <span>Threshold</span>
+        <strong>0.34</strong>
+        <span>Status</span>
+        <strong>{{ dynamicNerLabel() }}</strong>
+      </div>
+    </div>
+
+    <div class="control-bank">
+      <div class="control-copy">
+        <span>Graph Compiler</span>
+        <p>Commit the current scope into the graph lane.</p>
+      </div>
+      <div class="control-actions">
+        <button type="button" (click)="updateGraphIndex()" [disabled]="graphStatus() === 'building'" class="secondary-action">
+          <ng-icon [name]="graphStatus() === 'building' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
+            [class.animate-spin]="graphStatus() === 'building'"></ng-icon>
+          Update Dirty
+        </button>
+        <button type="button" (click)="rebuildGraphIndex()" [disabled]="graphStatus() === 'building'" class="warning-action">
+          <ng-icon [name]="graphStatus() === 'building' ? 'lucideLoader2' : 'lucideLayers'" class="h-3.5 w-3.5"
+            [class.animate-spin]="graphStatus() === 'building'"></ng-icon>
+          Rebuild
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="workbench-surface command-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Semantic Sidecar</h3>
+        <p class="section-kicker mt-0.5">Embeddings + hybrid-space candidates</p>
+      </div>
+      <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
+    </div>
+
+    <div class="semantic-control control-bank">
+      <label class="min-w-0">
+        <span class="section-kicker mb-1 block">Embedding model</span>
+        <p-select [options]="models" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)"
+          optionLabel="label" optionValue="id" styleClass="scope-select">
+        </p-select>
+      </label>
+
+      <div class="dimension-grid">
+        <button *ngFor="let dim of truncateDims" type="button" (click)="truncateDim.set(dim)"
+          [ngClass]="truncateDim() === dim ? 'dimension-active' : 'dimension-muted'">
+          {{ dim === 'full' ? 'Full' : dim + 'd' }}
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <button type="button" (click)="loadVectorModel()" [disabled]="vectorStatus() === 'loading'" class="secondary-action">
+          <ng-icon [name]="vectorStatus() === 'loading' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
+            [class.animate-spin]="vectorStatus() === 'loading'"></ng-icon>
+          Load Model
+        </button>
+        <button type="button" (click)="indexVectorNotes()" [disabled]="vectorStatus() !== 'ready' && vectorStatus() !== 'error'"
+          class="secondary-action">
+          <ng-icon [name]="vectorStatus() === 'indexing' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
+            [class.animate-spin]="vectorStatus() === 'indexing'"></ng-icon>
+          Index Scope
+        </button>
+      </div>
+    </div>
+
+    <app-semantic-workshop class="semantic-inline flex-shrink-0"></app-semantic-workshop>
+  </section>
+
+  <section class="workbench-surface command-surface">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-100">Retrieval Lanes</h3>
+        <p class="section-kicker mt-0.5">Optional query-time evidence</p>
+      </div>
       <span class="text-[10px] text-zinc-600">{{ headerSubtitle() }}</span>
     </div>
 
@@ -107,73 +273,11 @@
         </span>
       </button>
     </div>
-
-    <app-semantic-workshop class="semantic-inline flex-shrink-0"></app-semantic-workshop>
   </section>
 
-  <section class="workbench-surface machine-surface">
-    <div class="flex items-center justify-between gap-2">
-      <div>
-        <h3 class="text-sm font-semibold text-zinc-100">Machine Controls</h3>
-        <p class="section-kicker mt-0.5">Explicit mutating operations</p>
-      </div>
-      <span class="status-chip" [class.status-live]="graphStatus() !== 'idle'">{{ graphStatus() }}</span>
-    </div>
-
-    <div class="control-bank">
-      <div class="control-copy">
-        <span>OverGraph health</span>
-        <p>Commit current scope into the graph lane.</p>
-      </div>
-      <div class="control-actions">
-        <button type="button" (click)="updateGraphIndex()" [disabled]="graphStatus() === 'building'" class="secondary-action">
-          <ng-icon [name]="graphStatus() === 'building' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
-            [class.animate-spin]="graphStatus() === 'building'"></ng-icon>
-          Update
-        </button>
-        <button type="button" (click)="rebuildGraphIndex()" [disabled]="graphStatus() === 'building'" class="warning-action">
-          <ng-icon [name]="graphStatus() === 'building' ? 'lucideLoader2' : 'lucideLayers'" class="h-3.5 w-3.5"
-            [class.animate-spin]="graphStatus() === 'building'"></ng-icon>
-          Rebuild
-        </button>
-      </div>
-    </div>
-
-    <div class="semantic-control control-bank">
-      <div class="grid grid-cols-[1fr_auto] items-end gap-2">
-        <label class="min-w-0">
-          <span class="section-kicker mb-1 block">Semantic sidecar</span>
-          <p-select [options]="models" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)"
-            optionLabel="label" optionValue="id" styleClass="scope-select">
-          </p-select>
-        </label>
-        <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
-      </div>
-
-      <div class="dimension-grid">
-        <button *ngFor="let dim of truncateDims" type="button" (click)="truncateDim.set(dim)"
-          [ngClass]="truncateDim() === dim ? 'dimension-active' : 'dimension-muted'">
-          {{ dim === 'full' ? 'Full' : dim + 'd' }}
-        </button>
-      </div>
-
-      <div class="grid grid-cols-2 gap-2">
-        <button type="button" (click)="loadVectorModel()" [disabled]="vectorStatus() === 'loading'" class="secondary-action">
-          <ng-icon [name]="vectorStatus() === 'loading' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
-            [class.animate-spin]="vectorStatus() === 'loading'"></ng-icon>
-          Load
-        </button>
-        <button type="button" (click)="indexVectorNotes()" [disabled]="vectorStatus() !== 'ready' && vectorStatus() !== 'error'"
-          class="secondary-action">
-          <ng-icon [name]="vectorStatus() === 'indexing' ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
-            [class.animate-spin]="vectorStatus() === 'indexing'"></ng-icon>
-          Index
-        </button>
-      </div>
-    </div>
-
-    <div *ngIf="staleDocuments() || duplicateEdgeSamples().length || orphanEdgeSamples().length" class="audit-strip">
-      <div class="section-kicker text-amber-300">Audit samples</div>
+  <section class="workbench-surface command-surface" *ngIf="staleDocuments() || duplicateEdgeSamples().length || orphanEdgeSamples().length">
+    <div class="section-kicker text-amber-300">Audit / Health</div>
+    <div class="audit-strip mt-2">
       <div *ngIf="staleDocuments()" class="truncate">{{ staleDocuments() }} out-of-tree document id{{ staleDocuments() === 1 ? '' : 's' }} excluded</div>
       <div *ngFor="let sample of visibleStaleDocumentSamples()" class="truncate">{{ sample.relation }}.{{ sample.field }} -> {{ sample.documentId }}</div>
       <div *ngFor="let edge of duplicateEdgeSamples()" class="truncate">duplicate {{ edge.edgeType }} x{{ edge.count }}</div>

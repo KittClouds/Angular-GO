@@ -1,14 +1,10 @@
-import { Component, HostListener, computed, signal } from '@angular/core';
+import { Component, HostListener, Input, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BlueprintHubService } from './blueprint-hub.service';
 import { GraphTabComponent } from './tabs/graph-tab/graph-tab.component';
 import { PatternsTabComponent } from './tabs/patterns-tab/patterns-tab.component';
 import { PlotThreadsTabComponent } from './tabs/plot-threads-tab/plot-threads-tab.component';
 import { WorldbuildingTabComponent } from './tabs/worldbuilding-tab/worldbuilding-tab.component';
-import { getSetting, setSetting } from '../../lib/dexie/settings.service';
-
-const STORAGE_KEY = 'kittclouds-hub-tab';
-const VALID_TAB_IDS = ['graph', 'patterns', 'plot-threads', 'worldbuilding', 'attributes'];
 
 @Component({
     selector: 'app-blueprint-hub',
@@ -24,11 +20,12 @@ const VALID_TAB_IDS = ['graph', 'patterns', 'plot-threads', 'worldbuilding', 'at
     styleUrl: './blueprint-hub.component.css'
 })
 export class BlueprintHubComponent {
-    // Local state with Dexie settings persistence
-    private _activeTab = signal(this.loadFromStorage());
+    public readonly hubService = inject(BlueprintHubService);
+
+    @Input() mode: 'overlay' | 'page' = 'overlay';
 
     // Active tab (signal)
-    activeTab = computed(() => this._activeTab());
+    activeTab = computed(() => this.hubService.activeTab());
 
     // Resize state
     hubHeight = 600; // Default height in pixels
@@ -36,39 +33,29 @@ export class BlueprintHubComponent {
     private startY = 0;
     private startHeight = 0;
 
-    tabs = [
-        { id: 'graph', label: 'Graph', icon: 'pi pi-share-alt' },
-        { id: 'patterns', label: 'Patterns', icon: 'pi pi-code' },
-        { id: 'plot-threads', label: 'Plot Threads', icon: 'pi pi-sitemap' },
-        { id: 'worldbuilding', label: 'Worldbuilding', icon: 'pi pi-globe' },
-        { id: 'attributes', label: 'Attributes', icon: 'pi pi-database' },
-    ];
+    get tabs() {
+        return this.hubService.tabs;
+    }
 
-    constructor(public hubService: BlueprintHubService) { }
-
-    private loadFromStorage(): string {
-        const stored = getSetting<string | null>(STORAGE_KEY, null);
-        if (stored && VALID_TAB_IDS.includes(stored)) return stored;
-        return 'graph';
+    get isPageMode(): boolean {
+        return this.mode === 'page';
     }
 
     setActiveTab(tabId: string) {
-        this._activeTab.set(tabId);
-        setSetting(STORAGE_KEY, tabId);
+        this.hubService.setActiveTab(tabId);
     }
 
     get activeTabIcon(): string {
-        const t = this.tabs.find(x => x.id === this.activeTab());
-        return t ? t.icon : 'pi pi-info-circle';
+        return this.hubService.activeTabIcon();
     }
 
     get activeTabLabel(): string {
-        const t = this.tabs.find(x => x.id === this.activeTab());
-        return t ? t.label : '';
+        return this.hubService.activeTabLabel();
     }
 
     // Resize Logic
     startResize(event: MouseEvent) {
+        if (this.isPageMode) return;
         event.preventDefault();
         this.isResizing = true;
         this.startY = event.clientY;
@@ -81,7 +68,7 @@ export class BlueprintHubComponent {
 
     @HostListener('window:mousemove', ['$event'])
     onMouseMove(event: MouseEvent) {
-        if (!this.isResizing) return;
+        if (!this.isResizing || this.isPageMode) return;
 
         // Calculate delta: moving UP (smaller Y) means LARGER height
         const delta = this.startY - event.clientY;

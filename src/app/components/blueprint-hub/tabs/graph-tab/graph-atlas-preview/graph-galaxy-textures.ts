@@ -2,6 +2,45 @@ import * as THREE from 'three';
 
 export type LabelSprite = THREE.Sprite & { material: THREE.SpriteMaterial & { map: THREE.CanvasTexture } };
 
+export function makeAtomTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 96;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, 96, 96);
+
+    const outer = ctx.createRadialGradient(48, 48, 16, 48, 48, 34);
+    outer.addColorStop(0, 'rgba(255,255,255,0)');
+    outer.addColorStop(0.5, 'rgba(255,255,255,0.09)');
+    outer.addColorStop(0.76, 'rgba(255,255,255,0.035)');
+    outer.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = outer;
+    ctx.fillRect(0, 0, 96, 96);
+
+    const core = ctx.createRadialGradient(39, 35, 2, 48, 48, 18);
+    core.addColorStop(0, 'rgba(255,255,255,1)');
+    core.addColorStop(0.34, 'rgba(255,255,255,0.98)');
+    core.addColorStop(0.74, 'rgba(222,230,255,0.78)');
+    core.addColorStop(1, 'rgba(255,255,255,0.13)');
+    ctx.beginPath();
+    ctx.arc(48, 48, 18, 0, Math.PI * 2);
+    ctx.fillStyle = core;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(48, 48, 21, 0, Math.PI * 2);
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(40, 36, 4.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.58)';
+    ctx.fill();
+
+    return canvasTexture(canvas);
+}
+
 export function makeNodeTexture(): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 96;
@@ -9,21 +48,21 @@ export function makeNodeTexture(): THREE.CanvasTexture {
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, 96, 96);
     ctx.beginPath();
-    ctx.arc(48, 48, 15, 0, Math.PI * 2);
+    ctx.arc(48, 48, 12.5, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.96)';
     ctx.fill();
-    ctx.lineWidth = 3.2;
+    ctx.lineWidth = 2.6;
     ctx.strokeStyle = 'rgba(5,8,14,0.88)';
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(48, 48, 28, 0, Math.PI * 2);
-    ctx.lineWidth = 5.5;
-    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.arc(48, 48, 22.5, 0, Math.PI * 2);
+    ctx.lineWidth = 3.4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.66)';
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(48, 48, 35, 0, Math.PI * 2);
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.arc(48, 48, 29, 0, Math.PI * 2);
+    ctx.lineWidth = 3.8;
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.stroke();
     return canvasTexture(canvas);
 }
@@ -35,9 +74,9 @@ export function makeHaloTexture(): THREE.CanvasTexture {
     const ctx = canvas.getContext('2d')!;
     const gradient = ctx.createRadialGradient(48, 48, 0, 48, 48, 46);
     gradient.addColorStop(0, 'rgba(255,255,255,0)');
-    gradient.addColorStop(0.3, 'rgba(255,255,255,0)');
-    gradient.addColorStop(0.42, 'rgba(255,255,255,0.52)');
-    gradient.addColorStop(0.58, 'rgba(255,255,255,0.24)');
+    gradient.addColorStop(0.42, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.52, 'rgba(255,255,255,0.18)');
+    gradient.addColorStop(0.66, 'rgba(255,255,255,0.045)');
     gradient.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 96, 96);

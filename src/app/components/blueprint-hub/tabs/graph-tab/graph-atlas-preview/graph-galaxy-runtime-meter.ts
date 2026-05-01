@@ -3,6 +3,8 @@ export type GraphGalaxyCompilerSource = 'native' | 'local' | 'fallback';
 export interface GraphGalaxyCanvasMeter {
     id: number;
     rafActive: boolean;
+    surfaceActive: boolean;
+    webglContext: boolean;
     nodes: number;
     links: number;
     lastDrawAgeMs: number | null;
@@ -18,6 +20,8 @@ export interface GraphGalaxyCanvasMeter {
 export interface GraphGalaxyRuntimeSnapshot {
     compilerSource: GraphGalaxyCompilerSource;
     activeCanvases: number;
+    activeSurfaces: number;
+    webglContexts: number;
     rafActive: number;
     rafSleeping: number;
     nodes: number;
@@ -39,6 +43,8 @@ declare global {
 
 interface CanvasRecord {
     rafActive: boolean;
+    surfaceActive: boolean;
+    webglContext: boolean;
     nodes: number;
     links: number;
     lastDrawAt: number;
@@ -70,6 +76,8 @@ class GraphGalaxyRuntimeMeter {
         if (!this.enabled) return;
         this.canvases.set(id, {
             rafActive: false,
+            surfaceActive: false,
+            webglContext: false,
             nodes: 0,
             links: 0,
             lastDrawAt: 0,
@@ -106,6 +114,18 @@ class GraphGalaxyRuntimeMeter {
         record.rafActive = rafActive;
     }
 
+    recordSurface(id: number, surfaceActive: boolean): void {
+        const record = this.canvases.get(id);
+        if (!this.enabled || !record) return;
+        record.surfaceActive = surfaceActive;
+    }
+
+    recordContext(id: number, webglContext: boolean): void {
+        const record = this.canvases.get(id);
+        if (!this.enabled || !record) return;
+        record.webglContext = webglContext;
+    }
+
     recordDraw(id: number, width: number, height: number, dpr: number, time: number, backdropBytes = 0): void {
         const record = this.canvases.get(id);
         if (!this.enabled || !record) return;
@@ -122,6 +142,8 @@ class GraphGalaxyRuntimeMeter {
     snapshot(): GraphGalaxyRuntimeSnapshot {
         const now = this.now();
         let rafActive = 0;
+        let activeSurfaces = 0;
+        let webglContexts = 0;
         let nodes = 0;
         let links = 0;
         let backingPixels = 0;
@@ -131,6 +153,8 @@ class GraphGalaxyRuntimeMeter {
         const canvases: GraphGalaxyCanvasMeter[] = [];
         for (const [id, record] of this.canvases) {
             rafActive += record.rafActive ? 1 : 0;
+            activeSurfaces += record.surfaceActive ? 1 : 0;
+            webglContexts += record.webglContext ? 1 : 0;
             nodes += record.nodes;
             links += record.links;
             backingPixels += record.backingPixels;
@@ -140,6 +164,8 @@ class GraphGalaxyRuntimeMeter {
             canvases.push({
                 id,
                 rafActive: record.rafActive,
+                surfaceActive: record.surfaceActive,
+                webglContext: record.webglContext,
                 nodes: record.nodes,
                 links: record.links,
                 lastDrawAgeMs: record.lastDrawAt ? Math.round(now - record.lastDrawAt) : null,
@@ -155,6 +181,8 @@ class GraphGalaxyRuntimeMeter {
         return {
             compilerSource: this.compilerSource,
             activeCanvases: this.canvases.size,
+            activeSurfaces,
+            webglContexts,
             rafActive,
             rafSleeping: this.canvases.size - rafActive,
             nodes,

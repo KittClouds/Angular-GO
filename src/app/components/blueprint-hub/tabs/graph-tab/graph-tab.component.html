@@ -8,10 +8,7 @@
         [selectedEntity]="activeEntity()"
         [linkCount]="atlasEdges().length"
         [lensMode]="graphLensMode()"
-        [isExtracting]="isExtracting()"
-        [extractionProgress]="extractionProgress()"
         [isScanning]="isScanningSuggestions()"
-        [activeProvider]="activeSuggestionProvider()"
         [scanError]="suggestionError()"
         [contextId]="stewardContextId()"
         [searchText]="atlasSearch()"
@@ -19,10 +16,8 @@
         (editEntityRequested)="editEntity($event)"
         (deleteEntityRequested)="deleteEntityFromSidebar($event)"
         (addEntityRequested)="openCreator()"
-        (extractRequested)="extractAllFromNarrative()"
-        (settingsRequested)="openLlmSettings()"
         (flushRequested)="flushRegistry()"
-        (scanRequested)="runSuggestionScan($event)"
+        (scanRequested)="runSuggestionScan()"
         (acceptSuggestionRequested)="acceptSuggestion($event)"
         (rejectSuggestionRequested)="rejectSuggestion($event)"
         (styleRequested)="toggleStyleDrawer()"
@@ -61,14 +56,11 @@
                 <app-graph-lens-workspace class="block h-full min-h-[560px]" [narrativeEntities]="entities()" [narrativeEdges]="atlasEdges()"
                     [lensMode]="graphLensMode()"
                     [atlasSearch]="atlasSearch()"
-                    [isExtracting]="isExtracting()"
-                    [extractionProgress]="extractionProgress()"
                     [isScanning]="isScanningSuggestions()"
                     [activeProvider]="activeSuggestionProvider()"
                     (entitySelected)="selectEntity($event)"
                     (addEntityRequested)="openCreator()"
-                    (extractRequested)="extractAllFromNarrative()"
-                    (scanRequested)="runSuggestionScan($event)"
+                    (scanRequested)="runSuggestionScan()"
                     (styleRequested)="toggleStyleDrawer()"
                     (atlasSearchChange)="atlasSearch.set($event)"
                     (lensModeChange)="graphLensMode.set($event)"></app-graph-lens-workspace>
@@ -89,128 +81,3 @@
 
 <app-entity-creator-dialog [(visible)]="isCreatorOpen" [editEntity]="editingEntity()"
     (save)="onSaveEntity($event)"></app-entity-creator-dialog>
-
-@if (showLlmSettings()) {
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" (click)="showLlmSettings.set(false)">
-    <div class="max-h-[80vh] w-[420px] overflow-auto rounded-lg border border-border bg-card shadow-xl"
-        (click)="$event.stopPropagation()">
-        <div class="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 class="text-sm font-semibold">Atlas Settings</h2>
-            <span class="rounded bg-accent/50 px-2 py-0.5 text-[10px] text-muted-foreground">Graph hub</span>
-        </div>
-
-        <div class="space-y-4 p-4">
-            <div class="rounded-lg border border-border bg-accent/20 p-3">
-                <div class="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                        <div class="text-xs font-semibold text-foreground">Local LFM</div>
-                        <div class="text-[10px] text-muted-foreground">
-                            {{ lfmStatus().device || 'idle' }} / {{ lfmStatus().loading ? 'loading' : (lfmStatus().ready ? 'ready' : 'cold') }}
-                        </div>
-                    </div>
-                    <button class="rounded-md border border-teal-400/20 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-200 transition-colors hover:bg-teal-500/20"
-                        [disabled]="isScanningSuggestions()"
-                        (click)="runSuggestionScan('lfm_local_experiment')">
-                        Run LFM Scan
-                    </button>
-                </div>
-                <div class="flex items-center justify-between gap-3 border-t border-border pt-3">
-                    <div>
-                        <div class="text-xs font-semibold text-foreground">GLiNER</div>
-                        <div class="text-[10px] text-muted-foreground">
-                            {{ glinerStatus().device || 'idle' }} / {{ glinerStatus().loading ? 'loading' : (glinerStatus().ready ? 'ready' : 'cold') }}
-                        </div>
-                    </div>
-                    <button class="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/20"
-                        (click)="flushRegistry()">
-                        Flush Atlas
-                    </button>
-                </div>
-            </div>
-
-            <div class="space-y-2">
-                <label class="text-xs font-medium text-muted-foreground">Provider</label>
-                <div class="flex gap-2">
-                    <button class="flex-1 rounded-md border px-3 py-2 text-xs transition-colors"
-                        [class.bg-primary]="llmSettingsProvider() === 'google'"
-                        [class.text-primary-foreground]="llmSettingsProvider() === 'google'"
-                        [class.border-primary]="llmSettingsProvider() === 'google'"
-                        [class.bg-background]="llmSettingsProvider() !== 'google'"
-                        [class.border-border]="llmSettingsProvider() !== 'google'"
-                        (click)="llmSettingsProvider.set('google')">
-                        Google GenAI
-                    </button>
-                    <button class="flex-1 rounded-md border px-3 py-2 text-xs transition-colors"
-                        [class.bg-primary]="llmSettingsProvider() === 'openrouter'"
-                        [class.text-primary-foreground]="llmSettingsProvider() === 'openrouter'"
-                        [class.border-primary]="llmSettingsProvider() === 'openrouter'"
-                        [class.bg-background]="llmSettingsProvider() !== 'openrouter'"
-                        [class.border-border]="llmSettingsProvider() !== 'openrouter'"
-                        (click)="llmSettingsProvider.set('openrouter')">
-                        OpenRouter
-                    </button>
-                </div>
-            </div>
-
-            @if (llmSettingsProvider() === 'google') {
-            <div class="space-y-3 rounded-lg bg-accent/30 p-3">
-                <div class="space-y-1.5">
-                    <label class="text-xs font-medium text-muted-foreground">Google API Key</label>
-                    <input type="password"
-                        class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        placeholder="AIza..." [value]="llmSettingsGoogleKey()"
-                        (input)="llmSettingsGoogleKey.set($any($event.target).value)" />
-                </div>
-                <div class="space-y-1.5">
-                    <label class="text-xs font-medium text-muted-foreground">Model</label>
-                    <select class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        [value]="llmSettingsGoogleModel()"
-                        (change)="llmSettingsGoogleModel.set($any($event.target).value)">
-                        @for (model of googleModels; track model.id) {
-                        <option [value]="model.id">{{ model.name }}</option>
-                        }
-                    </select>
-                </div>
-            </div>
-            }
-
-            @if (llmSettingsProvider() === 'openrouter') {
-            <div class="space-y-3 rounded-lg bg-accent/30 p-3">
-                <div class="space-y-1.5">
-                    <label class="text-xs font-medium text-muted-foreground">OpenRouter API Key</label>
-                    <input type="password"
-                        class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        placeholder="sk-or-..." [value]="llmSettingsOrKey()"
-                        (input)="llmSettingsOrKey.set($any($event.target).value)" />
-                </div>
-                <div class="space-y-1.5">
-                    <label class="text-xs font-medium text-muted-foreground">Model</label>
-                    <select class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        [value]="llmSettingsOrModel()" (change)="llmSettingsOrModel.set($any($event.target).value)">
-                        @for (model of openRouterModels; track model.id) {
-                        <option [value]="model.id">{{ model.name }} ({{ model.provider }})</option>
-                        }
-                    </select>
-                </div>
-            </div>
-            }
-
-            <p class="text-[10px] text-muted-foreground">
-                These settings are used only for entity extraction. AI Chat uses its own separate settings.
-            </p>
-        </div>
-
-        <div class="flex justify-end gap-2 border-t border-border px-4 py-3">
-            <button class="rounded-md bg-accent px-4 py-2 text-xs transition-colors hover:bg-accent/80"
-                (click)="showLlmSettings.set(false)">
-                Cancel
-            </button>
-            <button
-                class="rounded-md bg-primary px-4 py-2 text-xs text-primary-foreground transition-colors hover:bg-primary/90"
-                (click)="saveLlmSettings()">
-                Save Settings
-            </button>
-        </div>
-    </div>
-</div>
-}

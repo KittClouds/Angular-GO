@@ -5,7 +5,8 @@ import {
     signal,
     ɵChangeDetectionScheduler as ChangeDetectionScheduler,
     ɵEffectScheduler as EffectScheduler,
-    type EnvironmentInjector
+    type EnvironmentInjector,
+    type WritableSignal
 } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,19 +61,6 @@ const { analyzeTextMock } = vi.hoisted(() => ({
     analyzeTextMock: vi.fn(),
 }));
 
-const {
-    scheduleLoadedNoteEntityOccurrenceRebuildMock,
-    syncLiveNoteEntityOccurrencesMock,
-} = vi.hoisted(() => ({
-    scheduleLoadedNoteEntityOccurrenceRebuildMock: vi.fn(),
-    syncLiveNoteEntityOccurrencesMock: vi.fn(),
-}));
-
-vi.mock('../lib/notes/entity-occurrence-index', () => ({
-    scheduleLoadedNoteEntityOccurrenceRebuild: scheduleLoadedNoteEntityOccurrenceRebuildMock,
-    syncLiveNoteEntityOccurrences: syncLiveNoteEntityOccurrencesMock,
-}));
-
 vi.mock('../lib/analytics', async () => {
     const actual = await vi.importActual<typeof import('../lib/analytics')>('../lib/analytics');
     return {
@@ -85,6 +73,7 @@ import { getEmptyAnalytics, type TextAnalytics } from '../lib/analytics';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { EditorService } from './editor.service';
 import { FooterStatsService } from './footer-stats.service';
+import { PhoenixMachineControllerService } from './phoenix-machine-controller.service';
 
 function makeAnalytics(overrides: Partial<TextAnalytics> = {}): TextAnalytics {
     return {
@@ -117,6 +106,7 @@ describe('FooterStatsService live analytics', () => {
         isSaving: ReturnType<typeof signal>;
     };
     let editorServiceMock: { liveUpdate$: Subject<any>; recordAnalyticsRequest: ReturnType<typeof vi.fn> };
+    let machineControllerMock: { signalLifecycle: WritableSignal<'idle' | 'queued' | 'refreshing'> };
     let changeDetectionSchedulerMock: { notify: ReturnType<typeof vi.fn>; runningTick: boolean };
     let effectSchedulerMock: {
         add: ReturnType<typeof vi.fn>;
@@ -138,13 +128,12 @@ describe('FooterStatsService live analytics', () => {
         };
         analyzeTextMock.mockReset();
         entityNoteIndexRows.length = 0;
-        scheduleLoadedNoteEntityOccurrenceRebuildMock.mockReset();
-        scheduleLoadedNoteEntityOccurrenceRebuildMock.mockResolvedValue(undefined);
-        syncLiveNoteEntityOccurrencesMock.mockReset();
-        syncLiveNoteEntityOccurrencesMock.mockResolvedValue(undefined);
         editorServiceMock = {
             liveUpdate$: liveUpdateSubject,
             recordAnalyticsRequest: vi.fn(),
+        };
+        machineControllerMock = {
+            signalLifecycle: signal<'idle' | 'queued' | 'refreshing'>('idle'),
         };
         changeDetectionSchedulerMock = {
             notify: vi.fn(),
@@ -185,6 +174,7 @@ describe('FooterStatsService live analytics', () => {
         injector = createEnvironmentInjector([
             { provide: NoteEditorStore, useValue: noteStoreMock },
             { provide: EditorService, useValue: editorServiceMock },
+            { provide: PhoenixMachineControllerService, useValue: machineControllerMock },
             { provide: ChangeDetectionScheduler, useValue: changeDetectionSchedulerMock },
             { provide: EffectScheduler, useValue: effectSchedulerMock },
         ], Injector.create({ providers: [] }));
@@ -333,75 +323,13 @@ describe('FooterStatsService live analytics', () => {
         expect(service.analytics()).toEqual(latest);
     });
 
-    it('refreshes live signal rows from editor text after the live debounce', async () => {
-        noteStoreMock.activeNoteId.set('note-1');
-
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 7, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
-        expect(service.signalLifecycle()).toBe('queued');
-        await vi.advanceTimersByTimeAsync(449);
-        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
-
-        await vi.advanceTimersByTimeAsync(1);
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledWith('note-1', 'Aella walked.', 7);
+    it('reads signal lifecycle from the machine controller without owning scanner work', () => {
         expect(service.signalLifecycle()).toBe('idle');
-    });
 
-    it('coalesces rapid live signal refreshes and keeps only the latest text', async () => {
-        noteStoreMock.activeNoteId.set('note-1');
+        machineControllerMock.signalLifecycle.set('queued');
+        expect(service.signalLifecycle()).toBe('queued');
 
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'Aella', textLength: 5, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(100);
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 2, plainText: 'Aella and Kai.', textLength: 14, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(449);
-        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
-
-        await vi.advanceTimersByTimeAsync(1);
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(1);
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledWith('note-1', 'Aella and Kai.', 2);
-    });
-
-    it('ignores live signal updates from stale notes', async () => {
-        noteStoreMock.activeNoteId.set('note-2');
-
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 1, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(1000);
-
-        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
-    });
-
-    it('does not rescan signals just because a note was opened when rows are already fresh', async () => {
-        noteStoreMock.activeNoteId.set('note-1');
-        entityNoteIndexRows.push({ noteId: 'note-1', generation: 10 });
-
-        activeNoteSubject.next({
-            id: 'note-1',
-            content: '',
-            markdownContent: 'Aella walked.',
-            version: 10,
-            updatedAt: 10,
-        });
-
-        await Promise.resolve();
-        await vi.advanceTimersByTimeAsync(1000);
-
-        expect(syncLiveNoteEntityOccurrencesMock).not.toHaveBeenCalled();
-    });
-
-    it('keeps live signal snapshots per note so switching back is warm', async () => {
-        noteStoreMock.activeNoteId.set('note-1');
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 7, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(450);
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(1);
-
-        noteStoreMock.activeNoteId.set('note-2');
-        liveUpdateSubject.next({ noteId: 'note-2', revision: 3, plainText: 'Kai waited.', textLength: 11, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(450);
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(2);
-
-        noteStoreMock.activeNoteId.set('note-1');
-        liveUpdateSubject.next({ noteId: 'note-1', revision: 8, plainText: 'Aella walked.', textLength: 13, timings: { plainTextMs: 1 } });
-        await vi.advanceTimersByTimeAsync(1000);
-
-        expect(syncLiveNoteEntityOccurrencesMock).toHaveBeenCalledTimes(2);
+        machineControllerMock.signalLifecycle.set('refreshing');
+        expect(service.signalLifecycle()).toBe('refreshing');
     });
 });

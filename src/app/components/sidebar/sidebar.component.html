@@ -34,17 +34,11 @@
             </button>
 
             <button
-                class="w-9 h-9 flex items-center justify-center rounded-md text-cyan-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all duration-200"
-                title="Knowledge Graph" (click)="navigateToGraph()">
-                <lucide-icon [img]="Share2" size="18"></lucide-icon>
-            </button>
-
-            <button
                 class="w-9 h-9 flex items-center justify-center rounded-md transition-all duration-200 relative group"
                 [class.bg-primary/10]="viewMode() === 'search'" [class.text-primary]="viewMode() === 'search'"
                 [class.text-muted-foreground]="viewMode() !== 'search'"
                 [class.hover:text-foreground]="viewMode() !== 'search'"
-                [class.hover:bg-muted/10]="viewMode() !== 'search'" title="Retrieval Workbench"
+                [class.hover:bg-muted/10]="viewMode() !== 'search'" title="Atlas Command"
                 (click)="setViewMode('search')">
                 <div *ngIf="viewMode() === 'search'"
                     class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full"></div>

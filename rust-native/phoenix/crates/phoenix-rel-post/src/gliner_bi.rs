@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ use tokenizers::Tokenizer;
 use crate::gliner_bi_tensors::{
     build_label_set, build_span_tensors, build_text_tensors, decode_predictions, extract_logits,
 };
-use crate::ort_runtime::load_session;
+use crate::ort_runtime::{load_session_with_intra_threads, recommended_thread_count};
 
 #[derive(Debug, Error)]
 pub enum GlinerBiError {
@@ -114,13 +115,48 @@ pub struct GlinerBiModel {
     labels_cls_id: i64,
     labels_sep_id: i64,
     label_cache: Mutex<GlinerBiLabelCache>,
+    span_cache: Mutex<GlinerBiSpanCache>,
+    label_inputs: GlinerBiLabelInputs,
     metadata: GlinerBiModelMetadata,
 }
 
 #[derive(Default)]
 struct GlinerBiLabelCache {
-    labels: Vec<String>,
-    label_set: Option<Arc<GlinerBiLabelSet>>,
+    entries: Vec<(Vec<String>, Arc<GlinerBiLabelSet>)>,
+}
+
+#[derive(Clone, Debug)]
+struct CachedSpanTensors {
+    span_idx: Arc<Vec<i64>>,
+    span_mask: Arc<Vec<bool>>,
+}
+
+#[derive(Default)]
+struct GlinerBiSpanCache {
+    entries: Vec<(usize, CachedSpanTensors)>,
+}
+
+enum GlinerBiLabelInputs {
+    Tokenized,
+    Embeddings(Arc<GlinerBiLabelEmbeddingStore>),
+}
+
+#[derive(Clone, Debug)]
+struct GlinerBiLabelEmbeddingStore {
+    hidden_size: usize,
+    labels: HashMap<String, Arc<Vec<f32>>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlinerBiLabelEmbeddingsFile {
+    hidden_size: usize,
+    labels: Vec<GlinerBiLabelEmbeddingRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlinerBiLabelEmbeddingRow {
+    label: String,
+    embedding: Vec<f32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -175,8 +211,9 @@ impl GlinerBiModel {
             .map_err(|error| GlinerBiError::ModelLoad(format!("text tokenizer: {error}")))?;
         let labels_tokenizer = Tokenizer::from_file(&labels_tokenizer_path)
             .map_err(|error| GlinerBiError::ModelLoad(format!("labels tokenizer: {error}")))?;
-        let session = load_session(&model_path)
+        let session = load_session_with_intra_threads(&model_path, gliner_bi_thread_count())
             .map_err(|error| GlinerBiError::ModelLoad(format!("session: {error}")))?;
+        let label_inputs = detect_label_input_mode(model_dir, &session)?;
 
         let root_config = load_json::<GlinerRootConfig>(&model_dir.join("gliner_config.json"))
             .or_else(|| load_json::<GlinerRootConfig>(&model_dir.join("config.json")))
@@ -230,6 +267,8 @@ impl GlinerBiModel {
             labels_cls_id,
             labels_sep_id,
             label_cache: Mutex::default(),
+            span_cache: Mutex::default(),
+            label_inputs,
             metadata,
         })
     }
@@ -302,7 +341,7 @@ impl GlinerBiModel {
         };
         let text_seq_len = text_tensors.seq_len();
         let num_words = text_tensors.word_count();
-        let (span_idx, span_mask) = build_span_tensors(num_words, self.max_width);
+        let span_tensors = self.cached_span_tensors(num_words)?;
         let num_spans = num_words * self.max_width;
 
         let input_ids_tensor = Tensor::from_array(([1, text_seq_len], text_tensors.input_ids))
@@ -314,37 +353,67 @@ impl GlinerBiModel {
             .map_err(|error| GlinerBiError::Inference(format!("words_mask: {error}")))?;
         let text_lengths_tensor = Tensor::from_array(([1, 1], vec![num_words as i64]))
             .map_err(|error| GlinerBiError::Inference(format!("text_lengths: {error}")))?;
-        let span_idx_tensor = Tensor::from_array(([1, num_spans, 2], span_idx))
-            .map_err(|error| GlinerBiError::Inference(format!("span_idx: {error}")))?;
-        let span_mask_tensor = Tensor::from_array(([1, num_spans], span_mask))
-            .map_err(|error| GlinerBiError::Inference(format!("span_mask: {error}")))?;
-        let labels_input_ids_tensor = Tensor::from_array((
-            [label_set.label_count(), label_set.max_label_len],
-            label_set.input_ids.clone(),
-        ))
-        .map_err(|error| GlinerBiError::Inference(format!("labels_input_ids: {error}")))?;
-        let labels_attention_mask_tensor = Tensor::from_array((
-            [label_set.label_count(), label_set.max_label_len],
-            label_set.attention_mask.clone(),
-        ))
-        .map_err(|error| GlinerBiError::Inference(format!("labels_attention_mask: {error}")))?;
+        let span_idx_tensor =
+            Tensor::from_array(([1, num_spans, 2], span_tensors.span_idx.as_ref().clone()))
+                .map_err(|error| GlinerBiError::Inference(format!("span_idx: {error}")))?;
+        let span_mask_tensor =
+            Tensor::from_array(([1, num_spans], span_tensors.span_mask.as_ref().clone()))
+                .map_err(|error| GlinerBiError::Inference(format!("span_mask: {error}")))?;
+        let outputs = match &self.label_inputs {
+            GlinerBiLabelInputs::Tokenized => {
+                let labels_input_ids_tensor = Tensor::from_array((
+                    [label_set.label_count(), label_set.max_label_len],
+                    label_set.input_ids.clone(),
+                ))
+                .map_err(|error| GlinerBiError::Inference(format!("labels_input_ids: {error}")))?;
+                let labels_attention_mask_tensor = Tensor::from_array((
+                    [label_set.label_count(), label_set.max_label_len],
+                    label_set.attention_mask.clone(),
+                ))
+                .map_err(|error| {
+                    GlinerBiError::Inference(format!("labels_attention_mask: {error}"))
+                })?;
 
-        let inputs = ort::inputs! {
-            "input_ids" => input_ids_tensor,
-            "attention_mask" => attention_mask_tensor,
-            "words_mask" => words_mask_tensor,
-            "text_lengths" => text_lengths_tensor,
-            "span_idx" => span_idx_tensor,
-            "span_mask" => span_mask_tensor,
-            "labels_input_ids" => labels_input_ids_tensor,
-            "labels_attention_mask" => labels_attention_mask_tensor,
-        }
-        .map_err(|error| GlinerBiError::Inference(format!("build inputs: {error}")))?;
+                let inputs = ort::inputs! {
+                    "input_ids" => input_ids_tensor,
+                    "attention_mask" => attention_mask_tensor,
+                    "words_mask" => words_mask_tensor,
+                    "text_lengths" => text_lengths_tensor,
+                    "span_idx" => span_idx_tensor,
+                    "span_mask" => span_mask_tensor,
+                    "labels_input_ids" => labels_input_ids_tensor,
+                    "labels_attention_mask" => labels_attention_mask_tensor,
+                }
+                .map_err(|error| GlinerBiError::Inference(format!("build inputs: {error}")))?;
 
-        let outputs = self
-            .session
-            .run(inputs)
-            .map_err(|error| GlinerBiError::Inference(format!("session run: {error}")))?;
+                self.session
+                    .run(inputs)
+                    .map_err(|error| GlinerBiError::Inference(format!("session run: {error}")))?
+            }
+            GlinerBiLabelInputs::Embeddings(store) => {
+                let labels_embeds = store.embeddings_for(&label_set.labels)?;
+                let labels_embeds_tensor = Tensor::from_array((
+                    [label_set.label_count(), store.hidden_size],
+                    labels_embeds,
+                ))
+                .map_err(|error| GlinerBiError::Inference(format!("labels_embeds: {error}")))?;
+
+                let inputs = ort::inputs! {
+                    "input_ids" => input_ids_tensor,
+                    "attention_mask" => attention_mask_tensor,
+                    "words_mask" => words_mask_tensor,
+                    "text_lengths" => text_lengths_tensor,
+                    "span_idx" => span_idx_tensor,
+                    "span_mask" => span_mask_tensor,
+                    "labels_embeds" => labels_embeds_tensor,
+                }
+                .map_err(|error| GlinerBiError::Inference(format!("build inputs: {error}")))?;
+
+                self.session
+                    .run(inputs)
+                    .map_err(|error| GlinerBiError::Inference(format!("session run: {error}")))?
+            }
+        };
         let logits = extract_logits(
             outputs
                 .get("logits")
@@ -366,10 +435,12 @@ impl GlinerBiModel {
             let cache = self.label_cache.lock().map_err(|_| {
                 GlinerBiError::Inference("GLiNER-BI label cache lock poisoned".to_owned())
             })?;
-            if cache.labels.as_slice() == labels {
-                if let Some(label_set) = &cache.label_set {
-                    return Ok(Arc::clone(label_set));
-                }
+            if let Some((_, label_set)) = cache
+                .entries
+                .iter()
+                .find(|(cached_labels, _)| cached_labels.as_slice() == labels)
+            {
+                return Ok(Arc::clone(label_set));
             }
         }
 
@@ -377,9 +448,106 @@ impl GlinerBiModel {
         let mut cache = self.label_cache.lock().map_err(|_| {
             GlinerBiError::Inference("GLiNER-BI label cache lock poisoned".to_owned())
         })?;
-        cache.labels = labels.to_vec();
-        cache.label_set = Some(Arc::clone(&label_set));
+        if let Some((_, existing)) = cache
+            .entries
+            .iter()
+            .find(|(cached_labels, _)| cached_labels.as_slice() == labels)
+        {
+            return Ok(Arc::clone(existing));
+        }
+        if cache.entries.len() >= 16 {
+            cache.entries.remove(0);
+        }
+        cache
+            .entries
+            .push((labels.to_vec(), Arc::clone(&label_set)));
         Ok(label_set)
+    }
+
+    fn cached_span_tensors(&self, num_words: usize) -> Result<CachedSpanTensors, GlinerBiError> {
+        {
+            let cache = self.span_cache.lock().map_err(|_| {
+                GlinerBiError::Inference("GLiNER-BI span cache lock poisoned".to_owned())
+            })?;
+            if let Some((_, tensors)) = cache
+                .entries
+                .iter()
+                .find(|(word_count, _)| *word_count == num_words)
+            {
+                return Ok(tensors.clone());
+            }
+        }
+
+        let (span_idx, span_mask) = build_span_tensors(num_words, self.max_width);
+        let tensors = CachedSpanTensors {
+            span_idx: Arc::new(span_idx),
+            span_mask: Arc::new(span_mask),
+        };
+        let mut cache = self.span_cache.lock().map_err(|_| {
+            GlinerBiError::Inference("GLiNER-BI span cache lock poisoned".to_owned())
+        })?;
+        if let Some((_, existing)) = cache
+            .entries
+            .iter()
+            .find(|(word_count, _)| *word_count == num_words)
+        {
+            return Ok(existing.clone());
+        }
+        if cache.entries.len() >= 128 {
+            cache.entries.remove(0);
+        }
+        cache.entries.push((num_words, tensors.clone()));
+        Ok(tensors)
+    }
+}
+
+impl GlinerBiLabelEmbeddingStore {
+    fn load(model_dir: &Path) -> Result<Self, GlinerBiError> {
+        let path = env::var("PHOENIX_GLINER_BI_LABEL_EMBEDDINGS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_dir.join("labels_embeddings.json"));
+        let contents = fs::read_to_string(&path).map_err(|error| {
+            GlinerBiError::ModelLoad(format!(
+                "failed to read label embeddings {}: {error}",
+                path.display()
+            ))
+        })?;
+        let file: GlinerBiLabelEmbeddingsFile =
+            serde_json::from_str(&contents).map_err(|error| {
+                GlinerBiError::ModelLoad(format!(
+                    "failed to parse label embeddings {}: {error}",
+                    path.display()
+                ))
+            })?;
+        let mut labels = HashMap::with_capacity(file.labels.len());
+        for row in file.labels {
+            if row.embedding.len() != file.hidden_size {
+                return Err(GlinerBiError::ModelLoad(format!(
+                    "label embedding '{}' has width {}, expected {}",
+                    row.label,
+                    row.embedding.len(),
+                    file.hidden_size
+                )));
+            }
+            labels.insert(row.label, Arc::new(row.embedding));
+        }
+        Ok(Self {
+            hidden_size: file.hidden_size,
+            labels,
+        })
+    }
+
+    fn embeddings_for(&self, labels: &[String]) -> Result<Vec<f32>, GlinerBiError> {
+        let mut out = Vec::with_capacity(labels.len() * self.hidden_size);
+        for label in labels {
+            let Some(embedding) = self.labels.get(label.as_str()) else {
+                return Err(GlinerBiError::InvalidInput(format!(
+                    "no precomputed GLiNER-BI label embedding for '{label}'"
+                )));
+            };
+            out.extend_from_slice(embedding);
+        }
+        Ok(out)
     }
 }
 
@@ -403,6 +571,30 @@ fn find_model_asset(root: &Path) -> Result<PathBuf, GlinerBiError> {
             "onnx/model_quantized.onnx",
         ],
     )
+}
+
+fn detect_label_input_mode(
+    model_dir: &Path,
+    session: &Session,
+) -> Result<GlinerBiLabelInputs, GlinerBiError> {
+    let has_label_embeds = session
+        .inputs
+        .iter()
+        .any(|input| input.name == "labels_embeds");
+    if has_label_embeds {
+        return Ok(GlinerBiLabelInputs::Embeddings(Arc::new(
+            GlinerBiLabelEmbeddingStore::load(model_dir)?,
+        )));
+    }
+    Ok(GlinerBiLabelInputs::Tokenized)
+}
+
+fn gliner_bi_thread_count() -> usize {
+    env::var("PHOENIX_GLINER_BI_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|&value| value > 0)
+        .unwrap_or_else(recommended_thread_count)
 }
 
 fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {

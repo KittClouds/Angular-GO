@@ -18,8 +18,6 @@ import {
 } from './notes/context-islands';
 import {
     deleteNoteEntityOccurrences,
-    scheduleLoadedNoteEntityOccurrenceRebuild,
-    syncNoteEntityOccurrences,
 } from './notes/entity-occurrence-index';
 import {
     PhoenixStoreService,
@@ -205,8 +203,6 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
     await store.upsertNote(PhoenixStoreService.fromDexieNote(fullNote));
     warmDexieNote({ ...fullNote, hasBody: true });
     await refreshNoteStructureProjection({ ...fullNote, hasBody: true });
-    await syncNoteEntityIndex({ ...fullNote, hasBody: true });
-    void scheduleLoadedNoteEntityOccurrenceRebuild();
     return id;
 }
 
@@ -234,11 +230,7 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<No
         updates.narrativeId !== undefined
     ) {
         await refreshNoteStructureProjection(note);
-        await syncNoteEntityIndex(note);
         schedulePriorGlobalContextRefresh(existing);
-    }
-    if (updates.title !== undefined) {
-        void scheduleLoadedNoteEntityOccurrenceRebuild();
     }
 
     return note;
@@ -267,7 +259,6 @@ export async function deleteNote(id: string): Promise<void> {
     db.notes.delete(id).catch(() => { });
     await clearNoteStructureProjection(id);
     await deleteNoteEntityOccurrences(id);
-    void scheduleLoadedNoteEntityOccurrenceRebuild();
     schedulePriorGlobalContextRefresh(existing || undefined);
 }
 
@@ -702,7 +693,6 @@ export async function moveNoteToFolder(noteId: string, targetFolderId: string, t
     await store.upsertNote(movedNote);
     warmDexieNote(storeNoteToNote(movedNote));
     await refreshNoteStructureProjection(storeNoteToNote(movedNote));
-    await syncNoteEntityIndex(storeNoteToNote(movedNote));
     schedulePriorGlobalContextRefresh(note);
 
     const allOrders = [...siblings.map(n => n.order), newOrder].sort((a, b) => a - b);
@@ -729,14 +719,6 @@ async function clearNoteStructureProjection(noteId: string): Promise<void> {
         await deleteNoteStructureProjection(noteId);
     } catch (error) {
         console.warn('[Operations] Note structure projection cleanup failed:', error);
-    }
-}
-
-async function syncNoteEntityIndex(note: Note): Promise<void> {
-    try {
-        await syncNoteEntityOccurrences(note as any);
-    } catch (error) {
-        console.warn('[Operations] Entity occurrence projection failed:', error);
     }
 }
 

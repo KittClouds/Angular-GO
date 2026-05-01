@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { HeaderComponent } from '../../header/header.component';
@@ -6,6 +6,7 @@ import { HubFooterComponent } from '../../blueprint-hub/hub-footer/hub-footer.co
 import { BlueprintHubComponent } from '../../blueprint-hub/blueprint-hub.component';
 import { SidebarComponent } from '../../sidebar/sidebar.component';
 import { RightSidebarComponent } from '../../right-sidebar/right-sidebar.component';
+import { BlueprintHubService } from '../../blueprint-hub/blueprint-hub.service';
 
 @Component({
     selector: 'app-main-layout',
@@ -15,5 +16,6 @@ import { RightSidebarComponent } from '../../right-sidebar/right-sidebar.compone
     styleUrls: ['./main-layout.component.css']
 })
 export class MainLayoutComponent {
+    readonly hubService = inject(BlueprintHubService);
 }
 

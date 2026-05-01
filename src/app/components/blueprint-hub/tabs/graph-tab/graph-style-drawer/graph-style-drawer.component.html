@@ -93,6 +93,59 @@
         </section>
 
         <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <h4 class="text-sm font-semibold text-white">Graph provenance</h4>
+                    <p class="mt-1 text-xs text-zinc-400">Source colors become badges and node rings.</p>
+                </div>
+                <button type="button"
+                    class="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:border-zinc-700 hover:text-white"
+                    (click)="resetSelectedSource()">
+                    Reset {{ sourceLabels[selectedSource()] }}
+                </button>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+                @for (source of sourceOptions; track source) {
+                <button type="button"
+                    class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition"
+                    [ngClass]="selectedSource() === source ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-100' : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'"
+                    (click)="selectSource(source)">
+                    <span class="h-2.5 w-2.5 rounded-full ring-1 ring-black/20" [style.backgroundColor]="getHexSourceColor(source)"></span>
+                    {{ sourceLabels[source] }}
+                </button>
+                }
+            </div>
+
+            <div class="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <h4 class="text-sm font-semibold text-white">{{ sourceLabels[selectedSource()] }}</h4>
+                        <p class="mt-1 text-xs text-zinc-400">Secondary source accent</p>
+                    </div>
+                    <span class="rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                        [style.color]="getHexSourceColor(selectedSource())"
+                        [style.borderColor]="getHexSourceColor(selectedSource())"
+                        [style.backgroundColor]="'color-mix(in srgb, ' + getHexSourceColor(selectedSource()) + ' 14%, transparent)'">
+                        {{ sourceLabels[selectedSource()] }}
+                    </span>
+                </div>
+                <div class="mt-4 flex items-center gap-3">
+                    <label class="relative block h-12 w-12 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/10"
+                        [style.backgroundColor]="getHexSourceColor(selectedSource())">
+                        <input type="color" class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                            [value]="getHexSourceColor(selectedSource())"
+                            (input)="updateSourceColor(selectedSource(), $any($event.target).value)" />
+                    </label>
+                    <input type="text"
+                        class="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm font-mono text-zinc-100 outline-none transition focus:border-cyan-400/40"
+                        [value]="getHexSourceColor(selectedSource())"
+                        (change)="updateSourceColor(selectedSource(), $any($event.target).value)" />
+                </div>
+            </div>
+        </section>
+
+        <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
             <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Preview</p>
             <div class="mt-4 grid gap-4 sm:grid-cols-3">
                 <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-center">

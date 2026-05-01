@@ -88,13 +88,15 @@ impl Args {
             }
         }
         if docs.is_empty() {
-            docs.extend([
-                "Document: The refuge tore open while the room lost its certainty.",
-                "Document: Kai and Aella braced as the hidden structure began to fail.",
-                "Document: A recipe note describes lemon bread and quiet kitchen work.",
-            ]
-            .into_iter()
-            .map(str::to_owned));
+            docs.extend(
+                [
+                    "Document: The refuge tore open while the room lost its certainty.",
+                    "Document: Kai and Aella braced as the hidden structure began to fail.",
+                    "Document: A recipe note describes lemon bread and quiet kitchen work.",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            );
         }
         let mut texts = Vec::with_capacity(docs.len() + 1);
         texts.push(query);

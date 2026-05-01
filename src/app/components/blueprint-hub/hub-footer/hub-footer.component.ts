@@ -208,6 +208,8 @@ export class HubFooterComponent implements OnInit, OnDestroy {
         const mb = (snapshot.backingPixels * 4 / 1024 / 1024).toFixed(1);
         return [
             `Graph canvases: ${snapshot.activeCanvases}`,
+            `Active surfaces: ${snapshot.activeSurfaces}`,
+            `GPU: ${snapshot.webglContexts > 0 ? 'on' : 'off'} (${snapshot.webglContexts} WebGL context${snapshot.webglContexts === 1 ? '' : 's'})`,
             `RAF: ${snapshot.rafActive} active / ${snapshot.rafSleeping} sleeping`,
             `Compiler: ${snapshot.compilerSource}`,
             `Scene: ${snapshot.nodes} nodes / ${snapshot.links} links`,

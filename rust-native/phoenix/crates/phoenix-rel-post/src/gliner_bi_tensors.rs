@@ -149,10 +149,12 @@ pub(super) fn build_label_set(
         let encoding = tokenizer
             .encode(label.as_str(), false)
             .map_err(|error| GlinerBiError::Inference(format!("tokenize label failed: {error}")))?;
-        
+
         let ids = encoding.get_ids();
         let mask = encoding.get_attention_mask();
-        let actual_ids: Vec<u32> = ids.iter().zip(mask.iter())
+        let actual_ids: Vec<u32> = ids
+            .iter()
+            .zip(mask.iter())
             .filter(|(_, &m)| m == 1)
             .map(|(&id, _)| id)
             .collect();
@@ -239,12 +241,17 @@ pub(super) fn decode_predictions(
     }
 
     let mut predictions = Vec::new();
+    let threshold_logit = logit_threshold(threshold);
     for start_idx in 0..num_words {
         let actual_max_width = max_width.min(num_words - start_idx);
         for width in 0..actual_max_width {
             for label_idx in 0..num_labels {
                 let offset = (start_idx * max_width + width) * num_labels + label_idx;
-                let score = sigmoid(logits[offset]);
+                let logit = logits[offset];
+                if logit < threshold_logit {
+                    continue;
+                }
+                let score = sigmoid(logit);
                 if score < threshold {
                     continue;
                 }
@@ -312,6 +319,16 @@ fn span_len(row: &GlinerBiPrediction) -> usize {
 
 fn sigmoid(value: f32) -> f32 {
     1.0 / (1.0 + (-value).exp())
+}
+
+fn logit_threshold(threshold: f32) -> f32 {
+    if threshold <= 0.0 {
+        f32::NEG_INFINITY
+    } else if threshold >= 1.0 {
+        f32::INFINITY
+    } else {
+        (threshold / (1.0 - threshold)).ln()
+    }
 }
 
 #[cfg(test)]

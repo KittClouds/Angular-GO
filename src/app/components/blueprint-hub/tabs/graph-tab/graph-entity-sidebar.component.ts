@@ -3,7 +3,6 @@ import { ScrollingModule } from '@angular/cdk/scrolling';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, computed, signal } from '@angular/core';
 import {
     BookOpen,
-    Brain,
     Calendar,
     Check,
     ChevronDown,
@@ -16,19 +15,16 @@ import {
     Pencil,
     Plus,
     Search,
-    Settings,
     Shield,
     Sparkles,
     Trash2,
     User,
     Users,
-    Wand2,
     X,
-    Zap,
 } from 'lucide-angular';
 import { LucideAngularModule } from 'lucide-angular';
 
-import type { RegisteredEntity } from '../../../../lib/registry';
+import { entitySourceLabel, entitySourceSystem, type RegisteredEntity } from '../../../../lib/registry';
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 import { entityColorStore } from '../../../../lib/store/entityColorStore';
 import type { NerSuggestion } from '../../../../services/ner.service';
@@ -70,10 +66,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     @Input() selectedEntity: RegisteredEntity | null = null;
     @Input() linkCount = 0;
     @Input() lensMode: GraphLensMode = 'narrative';
-    @Input() isExtracting = false;
-    @Input() extractionProgress: { current: number; total: number } = { current: 0, total: 0 };
     @Input() isScanning = false;
-    @Input() activeProvider: EntitySuggestionProviderId | null = null;
     @Input() scanError: string | null = null;
     @Input() contextId = 'global';
     @Input() searchText = '';
@@ -82,10 +75,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     @Output() editEntityRequested = new EventEmitter<RegisteredEntity>();
     @Output() deleteEntityRequested = new EventEmitter<RegisteredEntity>();
     @Output() addEntityRequested = new EventEmitter<void>();
-    @Output() extractRequested = new EventEmitter<void>();
-    @Output() settingsRequested = new EventEmitter<void>();
     @Output() flushRequested = new EventEmitter<void>();
-    @Output() scanRequested = new EventEmitter<EntitySuggestionProviderId>();
     @Output() acceptSuggestionRequested = new EventEmitter<string>();
     @Output() rejectSuggestionRequested = new EventEmitter<string>();
     @Output() styleRequested = new EventEmitter<void>();
@@ -111,7 +101,6 @@ export class GraphEntitySidebarComponent implements OnChanges {
     ];
 
     readonly BookIcon = BookOpen;
-    readonly BrainIcon = Brain;
     readonly CheckIcon = Check;
     readonly ChevronDownIcon = ChevronDown;
     readonly ChevronRightIcon = ChevronRight;
@@ -120,12 +109,9 @@ export class GraphEntitySidebarComponent implements OnChanges {
     readonly PencilIcon = Pencil;
     readonly PlusIcon = Plus;
     readonly SearchIcon = Search;
-    readonly SettingsIcon = Settings;
     readonly SparklesIcon = Sparkles;
     readonly TrashIcon = Trash2;
-    readonly WandIcon = Wand2;
     readonly XIcon = X;
-    readonly ZapIcon = Zap;
 
     ngOnChanges(changes: SimpleChanges): void {
         if (changes['entities']) {
@@ -176,6 +162,22 @@ export class GraphEntitySidebarComponent implements OnChanges {
         return entityColorStore.getEntityColor(kind);
     }
 
+    getSourceColor(entity: RegisteredEntity): string {
+        return entityColorStore.getSourceColor(entitySourceSystem(entity));
+    }
+
+    getSourceBgColor(entity: RegisteredEntity): string {
+        return entityColorStore.getSourceBgColor(entitySourceSystem(entity), 0.13);
+    }
+
+    getSourceBorderColor(entity: RegisteredEntity): string {
+        return entityColorStore.getSourceBgColor(entitySourceSystem(entity), 0.34);
+    }
+
+    getEntitySourceLabel(entity: RegisteredEntity): string {
+        return entitySourceLabel(entity);
+    }
+
     trackRow(_index: number, row: EntitySidebarRow): string {
         if (row.type === 'suggestion-group') return 'suggestion-group';
         if (row.type === 'suggestion') return `suggestion:${row.suggestion.id}`;
@@ -207,6 +209,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     }
 
     sourceLabel(source: EntitySuggestionProviderId): string {
+        if (source === 'dynamic_ner') return 'Dynamic NER';
         if (source === 'lfm_local_experiment') return 'LFM';
         if (source === 'gliner_local') return 'GLiNER';
         return 'Phoenix';

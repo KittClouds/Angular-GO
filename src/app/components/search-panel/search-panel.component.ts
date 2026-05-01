@@ -1,7 +1,6 @@
 import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -28,12 +27,20 @@ import { EmbeddingEngine } from '../../lib/embeddings/EmbeddingEngine';
 import * as ops from '../../lib/operations';
 import { type RetrievalLane } from '../../services/retrieval-workbench-state.service';
 import { PhoenixMachineControlService } from '../../services/phoenix-machine-control.service';
+import { NerService } from '../../services/ner.service';
+import { parseContentToPlainText } from '../../lib/analytics';
+import type { EntitySuggestionScanRequest } from '../../lib/entity-suggestions/entity-suggestion.types';
+import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import {
+  ATLAS_GRAPH_TARGETS,
+  ATLAS_PRESETS,
   EMBEDDING_MODELS,
   RETRIEVAL_LANE_OPTIONS,
   TRUNCATE_DIMS,
   buildGraphPreview,
   buildSearchSnippet,
+  type AtlasGraphTargetId,
+  type AtlasPresetId,
   type ModelId,
   type SearchMode,
   type SearchPanelNote,
@@ -72,10 +79,11 @@ import { SemanticWorkshopComponent } from './semantic-workshop/semantic-workshop
 })
 export class SearchPanelComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
-  private readonly router = inject(Router);
   private readonly notesService = inject(NotesService);
   private readonly noteStore = inject(NoteEditorStore);
   private readonly machine = inject(PhoenixMachineControlService);
+  private readonly nerService = inject(NerService);
+  private readonly hubService = inject(BlueprintHubService);
 
   readonly query = this.machine.query;
   readonly indexScope = this.machine.scope;
@@ -89,15 +97,25 @@ export class SearchPanelComponent implements OnInit {
   readonly vectorStatus = this.machine.vectorStatus;
   readonly graphStatus = this.machine.graphStatus;
   readonly graphAudit = this.machine.graphAudit;
+  readonly machineStages = this.machine.stages;
+  readonly activeSignals = this.machine.activeSignals;
+  readonly activeJob = this.machine.activeJob;
+  readonly lastSummary = this.machine.lastSummary;
+  readonly nerStatus = this.nerService.providerStatuses;
+  readonly isDynamicScanning = this.nerService.isAnalyzing;
 
   readonly selectedModel = signal<ModelId>('mongodb-leaf');
   readonly truncateDim = signal<TruncateDim>('full');
+  readonly selectedPreset = signal<AtlasPresetId>('fastScan');
+  readonly selectedGraphTargetId = signal<AtlasGraphTargetId>('evidence');
   readonly folders = signal<Array<{ id: string; name: string }>>([]);
   readonly notes = signal<SearchPanelNote[]>([]);
 
   readonly laneOptions = RETRIEVAL_LANE_OPTIONS;
   readonly models = EMBEDDING_MODELS;
   readonly truncateDims = TRUNCATE_DIMS;
+  readonly graphTargets = ATLAS_GRAPH_TARGETS;
+  readonly atlasPresets = ATLAS_PRESETS;
 
   readonly scopedNotes = computed(() => {
     const scope = this.indexScope();
@@ -138,6 +156,41 @@ export class SearchPanelComponent implements OnInit {
   readonly vectorRouteLabel = computed(() =>
     this.embeddingsReady() ? 'Embeddings ready for semantic sidecar' : 'Phoenix line fallback'
   );
+  readonly selectedGraphTarget = computed(() =>
+    this.graphTargets.find((target) => target.id === this.selectedGraphTargetId()) || this.graphTargets[1]
+  );
+  readonly selectedPresetDefinition = computed(() =>
+    this.atlasPresets.find((preset) => preset.id === this.selectedPreset()) || this.atlasPresets[0]
+  );
+  readonly pipelineStateLabel = computed(() => {
+    if (this.activeJob()) return 'running';
+    if (this.error()) return 'error';
+    const statuses = Object.values(this.machineStages()).map((stage) => stage.status);
+    if (statuses.includes('error')) return 'error';
+    if (statuses.includes('running')) return 'running';
+    if (statuses.includes('queued')) return 'queued';
+    if (statuses.includes('dirty')) return 'dirty';
+    if (statuses.includes('ready') || this.graphStatus() === 'ready') return 'ready';
+    return 'idle';
+  });
+  readonly machineStageRows = computed(() => [
+    this.stageRow('signals', 'Signals'),
+    this.stageRow('surface', 'Surface'),
+    this.stageRow('evidenceGraph', 'Evidence'),
+    this.stageRow('embeddings', 'Embeddings'),
+    this.stageRow('overgraph', 'OverGraph'),
+  ]);
+  readonly commandSubtitle = computed(() => {
+    const target = this.selectedGraphTarget();
+    return `${target.label} · ${target.cost} · ${target.subsystems} subsystems`;
+  });
+  readonly dynamicNerLabel = computed(() => {
+    const status = this.nerStatus().dynamic_ner;
+    if (this.isDynamicScanning()) return 'running';
+    if (status.loading) return 'warming';
+    if (status.error) return 'error';
+    return status.ready ? 'ready' : 'cold';
+  });
   ngOnInit(): void {
     this.notesService.getAllNotes$()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -232,12 +285,68 @@ export class SearchPanelComponent implements OnInit {
     await this.runGraphIndex('dirty-only', 'updated');
   }
 
+  selectPreset(id: AtlasPresetId): void {
+    const preset = this.atlasPresets.find((entry) => entry.id === id);
+    if (!preset) return;
+    this.selectedPreset.set(id);
+    this.selectedGraphTargetId.set(preset.target);
+  }
+
+  selectGraphTarget(id: AtlasGraphTargetId): void {
+    this.selectedGraphTargetId.set(id);
+  }
+
+  async runAtlasPipeline(): Promise<void> {
+    const preset = this.selectedPresetDefinition();
+    if (preset.id === 'visualizationOnly') {
+      this.openGraphLens();
+      this.machine.setNotice('Loaded current graph snapshot for visualization. No backend mutation was run.');
+      return;
+    }
+
+    try {
+      if (preset.id === 'fastScan') {
+        await this.runDynamicScan();
+        await this.runGraphIndex('dirty-only', 'updated');
+        return;
+      }
+
+      if (preset.id === 'semanticAtlas') {
+        await this.runGraphIndex('dirty-only', 'updated');
+        if (this.vectorStatus() === 'idle') {
+          await this.loadVectorModel();
+        }
+        await this.indexVectorNotes();
+        return;
+      }
+
+      await this.runGraphIndex(preset.policy === 'force' ? 'force' : 'dirty-only', preset.policy === 'force' ? 'rebuilt' : 'updated');
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
+  async runDynamicScan(): Promise<void> {
+    const request = this.buildActiveNoteScanRequest();
+    if (!request) {
+      this.error.set('Open a note with rendered text before running Dynamic NER.');
+      return;
+    }
+    try {
+      await this.nerService.runDynamicScan(request);
+      const count = this.nerService.suggestions().length;
+      this.notice.set(`Dynamic NER scan complete. ${count} candidate${count === 1 ? '' : 's'} available for review.`);
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
   openGraphLens(): void {
     this.machine.requestGraphFocus({
       query: this.query().trim(),
       scope: this.indexScope(),
     });
-    void this.router.navigate(['/graph']);
+    this.hubService.openPage('graph');
   }
 
   openResult(result: SearchResultView): void {
@@ -252,7 +361,7 @@ export class SearchPanelComponent implements OnInit {
       noteId: result.noteId,
       title: result.title,
     });
-    void this.router.navigate(['/graph']);
+    this.hubService.openPage('graph');
   }
 
   formatScore(score: number): string {
@@ -266,6 +375,14 @@ export class SearchPanelComponent implements OnInit {
 
   laneIcon(lane: RetrievalLane): string {
     return this.laneOptions.find((option) => option.id === lane)?.icon || 'lucideSparkles';
+  }
+
+  stageTone(status: string): string {
+    if (status === 'running') return 'stage-running';
+    if (status === 'ready') return 'stage-ready';
+    if (status === 'dirty' || status === 'queued') return 'stage-dirty';
+    if (status === 'error') return 'stage-error';
+    return 'stage-idle';
   }
 
   vectorStatusLabel(): string {
@@ -318,6 +435,27 @@ export class SearchPanelComponent implements OnInit {
     }
     const rawResults = await this.machine.search(this.query(), 60, this.buildScope());
     this.results.set(await this.mapGoResults(rawResults, this.resultSource(), enabled));
+  }
+
+  private stageRow(stage: 'signals' | 'surface' | 'evidenceGraph' | 'embeddings' | 'overgraph', label: string): { label: string; status: string; reason?: string } {
+    const snapshot = this.machineStages()[stage];
+    return {
+      label,
+      status: snapshot?.status || 'idle',
+      reason: snapshot?.reason,
+    };
+  }
+
+  private buildActiveNoteScanRequest(): EntitySuggestionScanRequest | null {
+    const currentNote = this.noteStore.currentNote();
+    if (!currentNote) return null;
+    const plainText = parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
+    if (!plainText.trim()) return null;
+    return {
+      noteId: currentNote.id,
+      noteTitle: currentNote.title || 'Untitled Note',
+      plainText,
+    };
   }
 
   private async runGraphIndex(policy: 'dirty-only' | 'force', verb: 'updated' | 'rebuilt'): Promise<void> {

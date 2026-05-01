@@ -15,6 +15,7 @@ import { EditorService } from '../../services/editor.service';
 import { SidebarService } from '../../lib/services/sidebar.service';
 import { RightSidebarService } from '../../lib/services/right-sidebar.service';
 import { ThemeService } from '../../lib/services/theme.service';
+import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 
 import { EditorTabsComponent } from './editor-tabs/editor-tabs.component';
 
@@ -38,6 +39,7 @@ export class HeaderComponent {
     sidebarService = inject(SidebarService);
     rightSidebarService = inject(RightSidebarService);
     themeService = inject(ThemeService);
+    hubService = inject(BlueprintHubService);
 
     constructor(private editorService: EditorService) { }
 

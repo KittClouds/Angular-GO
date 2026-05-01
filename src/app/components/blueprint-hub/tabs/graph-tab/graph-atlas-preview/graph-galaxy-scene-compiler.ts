@@ -20,7 +20,10 @@ export async function compileGalaxyScene(
     settings: GalaxyRenderSettings,
 ): Promise<GalaxyScene> {
     const hasGalaxyMetadata = entities.some((entity) => Boolean(entity.metadata?.galaxyId));
-    if (backend.target !== 'native' || hasGalaxyMetadata) {
+    const hasAtlasLayout = entities.some((entity) =>
+        Number.isFinite(entity.atlasX) && Number.isFinite(entity.atlasY) && Number.isFinite(entity.atlasZ),
+    );
+    if (backend.target !== 'native' || hasGalaxyMetadata || hasAtlasLayout || settings.layoutMode !== 'single') {
         graphGalaxyRuntimeMeter.recordCompilerSource('local');
         return buildGalaxyScene(entities, edges, settings);
     }
@@ -57,6 +60,8 @@ export async function compileGalaxyScene(
             };
             }),
             links: scene.links.map((link) => ({ ...link })),
+            layoutMode: 'single',
+            groups: [],
         };
     } catch (error) {
         if (!warnedNativeFallback) {

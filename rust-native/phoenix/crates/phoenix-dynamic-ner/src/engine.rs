@@ -127,7 +127,6 @@ impl PhoenixNerEngine {
         input: &SurfaceNerInput<'_>,
     ) -> Result<SurfaceNerOutput, NerError> {
         let mut diagnostics = Vec::new();
-        let mut workspace = MentionWorkspace::new(input.document_id, 0);
 
         // === Lane 1: Known Surface ===
         let known_candidates = if let Some(lexicon) = input.lexicon {
@@ -147,6 +146,7 @@ impl PhoenixNerEngine {
             &known_ranges,
             native_id_base,
         );
+        let workspace_id_base = native_id_base + native_candidates.len() as u64;
 
         // === Router: plan routes ===
         let needs = self.router.build_need_vectors(
@@ -164,13 +164,12 @@ impl PhoenixNerEngine {
         );
 
         // Ingest deterministic lanes into workspace.
+        let mut workspace = MentionWorkspace::new(input.document_id, workspace_id_base);
         workspace.add_known(known_candidates);
         workspace.add_native(native_candidates);
 
         // === Lane 3 + 4: Model + Adjudication (optional) ===
-        println!("Engine has model? {}", self.model_ner.is_some());
         for route in routes {
-            println!("Engine route: {:?}", route);
             match route {
                 NerRoute::DeterministicOnly | NerRoute::NativeDiscovery => {}
 
@@ -180,24 +179,19 @@ impl PhoenixNerEngine {
                     label_pack,
                 } => {
                     if let Some(model) = self.model_ner.as_ref() {
-                        let window_text = Self::extract_window_text(
+                        let (window_text, window_start_offset) = Self::extract_window_text(
                             input.text,
                             input.sentences,
                             window_start_sentence,
                             window_end_sentence,
                         );
                         let window = ModelNerWindow {
-                            text: &window_text,
+                            text: window_text,
                             window_start_sentence,
                             window_end_sentence,
                         };
                         match model.discover(&window, &label_pack) {
                             Ok(spans) => {
-                                let window_start_offset = input
-                                    .sentences
-                                    .get(window_start_sentence as usize)
-                                    .map(|s| s.range.start)
-                                    .unwrap_or(0);
                                 for span in spans {
                                     let doc_start =
                                         window_start_offset + span.window_relative_range.start;
@@ -327,21 +321,21 @@ impl PhoenixNerEngine {
         })
     }
 
-    fn extract_window_text(
-        text: &str,
+    fn extract_window_text<'a>(
+        text: &'a str,
         sentences: &[SentenceSpan],
         start_sent: u32,
         end_sent: u32,
-    ) -> String {
+    ) -> (&'a str, u32) {
         let first = sentences.get(start_sent as usize);
         let last = sentences.get((end_sent as usize).saturating_sub(1));
         match (first, last) {
             (Some(f), Some(l)) => {
                 let s = f.range.start as usize;
                 let e = l.range.end as usize;
-                text.get(s..e).unwrap_or("").to_owned()
+                (text.get(s..e).unwrap_or(""), f.range.start)
             }
-            _ => String::new(),
+            _ => ("", 0),
         }
     }
 }

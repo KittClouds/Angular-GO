@@ -2619,6 +2619,7 @@ dependencies = [
  "phoenix-types",
  "rustc-hash 1.1.0",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror 1.0.69",
  "tokio",
@@ -2662,6 +2663,21 @@ dependencies = [
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "phoenix-evidence-graph"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "memchr",
+ "phoenix-dynamic-ner",
+ "phoenix-machine",
+ "phoenix-types",
+ "rustc-hash 1.1.0",
+ "serde",
+ "smallvec",
  "thiserror 1.0.69",
 ]
 

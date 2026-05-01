@@ -65,14 +65,11 @@ import {
                 [sourceLabel]="lensedGraph().sourceLabel"
                 [lensMode]="lens().mode"
                 [atlasSearch]="atlasSearch"
-                [isExtracting]="isExtracting"
-                [extractionProgress]="extractionProgress"
                 [isScanning]="isScanning"
                 [activeProvider]="activeProvider"
                 (entitySelected)="entitySelected.emit($event)"
                 (addEntityRequested)="addEntityRequested.emit()"
-                (extractRequested)="extractRequested.emit()"
-                (scanRequested)="scanRequested.emit($event)"
+                (scanRequested)="scanRequested.emit()"
                 (styleRequested)="styleRequested.emit()"
                 (atlasSearchChange)="atlasSearchChange.emit($event)"
                 (lensModeChange)="setLensMode($event)">
@@ -104,15 +101,12 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     }
 
     @Input() atlasSearch = '';
-    @Input() isExtracting = false;
-    @Input() extractionProgress: { current: number; total: number } = { current: 0, total: 0 };
     @Input() isScanning = false;
     @Input() activeProvider: EntitySuggestionProviderId | null = null;
 
     @Output() entitySelected = new EventEmitter<RegisteredEntity>();
     @Output() addEntityRequested = new EventEmitter<void>();
-    @Output() extractRequested = new EventEmitter<void>();
-    @Output() scanRequested = new EventEmitter<EntitySuggestionProviderId>();
+    @Output() scanRequested = new EventEmitter<void>();
     @Output() styleRequested = new EventEmitter<void>();
     @Output() lensModeChange = new EventEmitter<GraphLensMode>();
     @Output() atlasSearchChange = new EventEmitter<string>();

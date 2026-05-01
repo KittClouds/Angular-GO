@@ -513,6 +513,7 @@ export class PhoenixUiApiService {
     async knowledgeGraphDelta(
         scope?: SearchScope,
         changedDocuments: readonly string[] = [],
+        includeCandidateGraph = false,
     ): Promise<PhoenixGraphDeltaBinaryResult> {
         await this.loadRuntime();
         const sessionId = await this.ensureMainSession();
@@ -522,7 +523,7 @@ export class PhoenixUiApiService {
             changedDocuments: Array.from(new Set(changedDocuments.filter(Boolean))),
             limit: null,
             sinceCommit: null,
-            includeCandidateGraph: false,
+            includeCandidateGraph,
         });
     }
 

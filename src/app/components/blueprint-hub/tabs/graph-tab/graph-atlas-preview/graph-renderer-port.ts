@@ -23,8 +23,8 @@ export interface GraphRendererPort {
     resetCamera(): void;
     fitToGraph(): void;
     focusNode(id: string): void;
-    beginNodeDrag(id: string): boolean;
-    dragNode(deltaX: number, deltaY: number): boolean;
+    beginNodeDrag(id: string, pointer: GraphRendererPointer): boolean;
+    dragNode(pointer: GraphRendererPointer): boolean;
     endNodeDrag(): boolean;
     tickForces(): boolean;
     hasActiveForces(): boolean;

@@ -3,6 +3,28 @@
     /* Allow fixed positioning to work relative to viewport */
 }
 
+.blueprint-hub-shell {
+    min-height: 0;
+}
+
+.blueprint-hub-shell--overlay {
+    position: absolute;
+    right: 0;
+    bottom: 2rem;
+    left: 0;
+    z-index: 40;
+    border-top: 1px solid hsl(var(--hub-border));
+    box-shadow: 0 -5px 10px rgb(0 0 0 / 0.1);
+    transition: transform 300ms ease-in-out;
+}
+
+.blueprint-hub-shell--page {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    border-top: 1px solid hsl(var(--hub-border));
+}
+
 /* 
  * CRITICAL: Prevent flash on page load
  * The hub starts with translate-y-full (off-screen) by default.

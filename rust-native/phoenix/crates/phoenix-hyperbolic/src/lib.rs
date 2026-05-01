@@ -1,12 +1,14 @@
-//! Hyperbolic HNSW with DiskANN-style mmap persistence
+//! Phoenix hyperbolic, hypersphere, and hybrid ANN geometry.
 //!
-//! This module adapts HNSW layered graph architecture into a DiskANN-style
-//! single-file `mmap` structure. It is designed specifically for hyperbolic
-//! vectors (Poincaré ball) using `f32`.
+//! The search core is metric-agnostic for ANN use: indexes can be built with
+//! Poincare, Lorentz, hypersphere, Euclidean tangent, or hybrid-interior metrics.
 
-//! The disk/search core is now metric-agnostic for ANN use: persisted indexes can
-//! be reopened with either Poincare or hypersphere metrics via `AnnMetric`.
+//! Hybrid graph geometry stays storage-agnostic; durable truth belongs in the
+//! OverGraph patch layer.
 pub mod ann_metric;
+pub mod graph_adapter;
+pub mod graph_hardening;
+pub mod hybrid_space;
 pub mod poincare;
 pub mod shard;
 pub mod sphere;

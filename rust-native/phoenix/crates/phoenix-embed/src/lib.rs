@@ -133,7 +133,8 @@ impl OrtTextEmbedder {
                 }
             }
         }
-        let session = session.ok_or_else(|| OrtTextEmbedError::ModelLoad(format!("session: {session_error}")))?;
+        let session = session
+            .ok_or_else(|| OrtTextEmbedError::ModelLoad(format!("session: {session_error}")))?;
         let need_token_type_ids = session
             .inputs
             .iter()
@@ -355,12 +356,18 @@ pub fn default_ort_dylib_path(workspace_root: &Path) -> Option<PathBuf> {
 }
 
 fn find_existing_path(root: &Path, candidates: &[&str]) -> Result<PathBuf, OrtTextEmbedError> {
-    find_existing_paths(root, candidates)?.into_iter().next().ok_or_else(|| {
-        OrtTextEmbedError::ModelLoad(format!("missing required asset under {}", root.display()))
-    })
+    find_existing_paths(root, candidates)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            OrtTextEmbedError::ModelLoad(format!("missing required asset under {}", root.display()))
+        })
 }
 
-fn find_existing_paths(root: &Path, candidates: &[&str]) -> Result<Vec<PathBuf>, OrtTextEmbedError> {
+fn find_existing_paths(
+    root: &Path,
+    candidates: &[&str],
+) -> Result<Vec<PathBuf>, OrtTextEmbedError> {
     let mut paths = Vec::new();
     for candidate in candidates {
         let path = root.join(candidate);

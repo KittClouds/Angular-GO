@@ -1,6 +1,5 @@
 import { CommonModule } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -19,6 +18,7 @@ import { GraphAuditService } from '../../../services/graph-audit.service';
 import { PhoenixUiApiService, type SearchScope } from '../../../services/phoenix-ui-api.service';
 import { RetrievalWorkbenchStateService } from '../../../services/retrieval-workbench-state.service';
 import { buildSearchSnippet } from '../search-panel.model';
+import { BlueprintHubService } from '../../blueprint-hub/blueprint-hub.service';
 
 type SemanticToolId = 'similar-selection' | 'related-passages' | 'graph-seeds' | 'support-probe';
 
@@ -93,8 +93,8 @@ export class SemanticWorkshopComponent {
     private readonly noteStore = inject(NoteEditorStore);
     private readonly notesService = inject(NotesService);
     private readonly phoenixUiApi = inject(PhoenixUiApiService);
-    private readonly router = inject(Router);
     private readonly workbench = inject(RetrievalWorkbenchStateService);
+    private readonly hubService = inject(BlueprintHubService);
 
     readonly tools = TOOLS;
     readonly activeTool = signal<SemanticToolId>('similar-selection');
@@ -166,7 +166,7 @@ export class SemanticWorkshopComponent {
             noteId: result.noteId,
             title: result.title,
         });
-        void this.router.navigate(['/graph']);
+        this.hubService.openPage('graph');
     }
 
     formatScore(score: number): string {

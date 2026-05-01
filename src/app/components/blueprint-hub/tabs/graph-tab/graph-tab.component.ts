@@ -11,8 +11,6 @@ import { GraphEntitySidebarComponent } from './graph-entity-sidebar.component';
 import { GraphLensWorkspaceComponent } from './graph-lens-workspace.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
 import { ScopeService } from '../../../../lib/services/scope.service';
-import { LlmEntityExtractorService } from '../../../../lib/services/llm-entity-extractor.service';
-import { LlmBatchService, BATCH_GOOGLE_MODELS, BATCH_OPENROUTER_MODELS } from '../../../../lib/services/llm-batch.service';
 import { NoteEditorStore } from '../../../../lib/store/note-editor.store';
 import { parseContentToPlainText } from '../../../../lib/analytics';
 import { NerService } from '../../../../services/ner.service';
@@ -20,7 +18,7 @@ import { FooterStatsService } from '../../../../services/footer-stats.service';
 import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
 import { PhoenixMachineControlService } from '../../../../services/phoenix-machine-control.service';
 import { EntitySelectionService } from '../../../../lib/services/entity-selection.service';
-import type { EntitySuggestionProviderId, EntitySuggestionScanRequest } from '../../../../lib/entity-suggestions/entity-suggestion.types';
+import type { EntitySuggestionScanRequest } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 
 @Component({
     selector: 'app-graph-tab',
@@ -39,18 +37,12 @@ import type { EntitySuggestionProviderId, EntitySuggestionScanRequest } from '..
 })
 export class GraphTabComponent {
     private scopeService = inject(ScopeService);
-    private llmExtractor = inject(LlmEntityExtractorService);
     private nerService = inject(NerService);
     private noteStore = inject(NoteEditorStore);
     private footerStatsService = inject(FooterStatsService);
     private projection = inject(PhoenixProjectionService);
     private machine = inject(PhoenixMachineControlService);
     private entitySelection = inject(EntitySelectionService);
-    llmBatch = inject(LlmBatchService); // Public for template
-
-    // Model lists for settings
-    googleModels = BATCH_GOOGLE_MODELS;
-    openRouterModels = BATCH_OPENROUTER_MODELS;
 
     // State — entities now derived from ScopeService signal
     entities = computed(() => this.scopeService.scopedEntities());
@@ -65,23 +57,10 @@ export class GraphTabComponent {
     scopeLabel = this.scopeService.scopeLabel;
     activeScope = this.scopeService.activeScope;
 
-    // LLM Extraction state
-    isExtracting = this.llmExtractor.isExtracting;
-    extractionProgress = this.llmExtractor.extractionProgress;
     suggestions = this.nerService.suggestions;
     isScanningSuggestions = this.nerService.isAnalyzing;
     activeSuggestionProvider = this.nerService.activeProvider;
     suggestionError = this.nerService.errorMessage;
-    lfmStatus = () => this.nerService.getProviderStatus('lfm_local_experiment');
-    glinerStatus = () => this.nerService.getProviderStatus('gliner_local');
-
-    // LLM Settings dialog state
-    showLlmSettings = signal(false);
-    llmSettingsProvider = signal<'google' | 'openrouter'>('openrouter');
-    llmSettingsGoogleKey = signal('');
-    llmSettingsGoogleModel = signal('gemini-2.0-flash');
-    llmSettingsOrKey = signal('');
-    llmSettingsOrModel = signal('google/gemini-2.0-flash-001');
 
     totalEntities = this.scopeService.scopedEntityCount;
     activeEntity = computed(() => {
@@ -230,13 +209,13 @@ export class GraphTabComponent {
         }
     }
 
-    async runSuggestionScan(providerId: EntitySuggestionProviderId) {
+    async runSuggestionScan() {
         const request = this.buildScanRequest();
         if (!request) {
             alert('Open a note with rendered text before scanning.');
             return;
         }
-        await this.nerService.runManualScan(providerId, request);
+        await this.nerService.runDynamicScan(request);
     }
 
     async acceptSuggestion(id: string) {
@@ -250,32 +229,6 @@ export class GraphTabComponent {
     getColor(kind: string): string {
         // Use entityColorStore for color parity across the app
         return entityColorStore.getEntityColor(kind);
-    }
-
-    // =========================================================================
-    // LLM Settings
-    // =========================================================================
-
-    openLlmSettings() {
-        // Load current config into form
-        const cfg = this.llmBatch.getConfig();
-        this.llmSettingsProvider.set(cfg.provider);
-        this.llmSettingsGoogleKey.set(cfg.googleApiKey);
-        this.llmSettingsGoogleModel.set(cfg.googleModel);
-        this.llmSettingsOrKey.set(cfg.openRouterApiKey);
-        this.llmSettingsOrModel.set(cfg.openRouterModel);
-        this.showLlmSettings.set(true);
-    }
-
-    saveLlmSettings() {
-        this.llmBatch.updateConfig({
-            provider: this.llmSettingsProvider(),
-            googleApiKey: this.llmSettingsGoogleKey(),
-            googleModel: this.llmSettingsGoogleModel(),
-            openRouterApiKey: this.llmSettingsOrKey(),
-            openRouterModel: this.llmSettingsOrModel()
-        });
-        this.showLlmSettings.set(false);
     }
 
     private buildScanRequest(): EntitySuggestionScanRequest | null {
@@ -310,76 +263,4 @@ export class GraphTabComponent {
         };
     }
 
-    // =========================================================================
-    // LLM Entity Extraction
-    // =========================================================================
-
-    /**
-     * Extract entities from all notes in current narrative using LLM
-     */
-    async extractAllFromNarrative() {
-        const scope = this.activeScope();
-
-        // Must be in a narrative or folder scope
-        if (scope.id === 'vault:global') {
-            alert('Please select a narrative or folder scope first.');
-            return;
-        }
-
-        // Check if LLM is configured
-        if (!this.llmExtractor.isConfigured()) {
-            const configure = confirm(
-                'LLM not configured for entity extraction.\n\n' +
-                'This feature uses its OWN API settings (separate from AI Chat).\n\n' +
-                'Click OK to configure now.'
-            );
-            if (configure) {
-                this.openLlmSettings();
-            }
-            return;
-        }
-
-        const narrativeId = scope.narrativeId || scope.id;
-        const info = this.llmExtractor.getProviderInfo();
-
-        // Confirm action with provider info
-        if (!confirm(
-            `Extract entities from all notes in "${this.scopeLabel()}"?\n\n` +
-            `Using: ${info.provider} / ${info.model}\n\n` +
-            `(Click the gear icon to change LLM settings)`
-        )) {
-            return;
-        }
-
-        try {
-            const result = await this.llmExtractor.extractFromNarrative(narrativeId);
-
-            if (result.entities.length === 0) {
-                alert(`No new entities found in ${result.notesProcessed} notes.`);
-                return;
-            }
-
-            const proceed = confirm(
-                `Found ${result.entities.length} entities in ${result.notesProcessed} notes.\n\n` +
-                `Click OK to add them to the registry.\n` +
-                `(Already registered entities will be skipped.)`
-            );
-
-            if (!proceed) return;
-
-            const commitResult = await this.llmExtractor.commitToRegistry(result.entities);
-
-            alert(
-                `✅ Extraction complete!\n\n` +
-                `• ${commitResult.created} new entities added\n` +
-                `• ${commitResult.skipped} already registered (skipped)`
-            );
-
-            // Entities auto-refresh via computed signal
-
-        } catch (err) {
-            console.error('[GraphTab] Extraction failed:', err);
-            alert(`Extraction failed: ${err}`);
-        }
-    }
 }

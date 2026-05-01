@@ -6,6 +6,36 @@ export type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
 export type GraphIndexStatus = 'idle' | 'building' | 'ready' | 'searching' | 'error';
 export type ModelId = 'mongodb-leaf' | 'bge-small-en' | 'jina-v5-nano-retrieval';
 export type TruncateDim = 'full' | '256' | '128' | '64';
+export type AtlasGraphTargetId =
+    | 'mention'
+    | 'evidence'
+    | 'surface'
+    | 'kernel'
+    | 'relation'
+    | 'temporal'
+    | 'eventIdentity'
+    | 'memoryState'
+    | 'causal'
+    | 'semanticCandidate'
+    | 'galaxy';
+export type AtlasPresetId = 'fastScan' | 'fullAtlas' | 'semanticAtlas' | 'deepReasoning' | 'visualizationOnly';
+
+export interface AtlasGraphTarget {
+    id: AtlasGraphTargetId;
+    label: string;
+    cost: 'Very low' | 'Low' | 'Low-Med' | 'Medium' | 'Med-High' | 'High' | 'Very high' | 'Render';
+    subsystems: number;
+    desc: string;
+}
+
+export interface AtlasPreset {
+    id: AtlasPresetId;
+    label: string;
+    desc: string;
+    target: AtlasGraphTargetId;
+    policy: 'dirty-only' | 'force' | 'read-only';
+    stages: string[];
+}
 
 export interface SearchPanelNote {
     id: string;
@@ -66,6 +96,63 @@ export const EMBEDDING_MODELS: Array<{ id: ModelId; label: string; dims: number;
 ];
 
 export const TRUNCATE_DIMS: TruncateDim[] = ['full', '256', '128', '64'];
+
+export const ATLAS_GRAPH_TARGETS: AtlasGraphTarget[] = [
+    { id: 'mention', label: 'Mention Graph', cost: 'Very low', subsystems: 2, desc: 'Dynamic NER packets and local mention edges.' },
+    { id: 'evidence', label: 'Evidence Graph', cost: 'Low', subsystems: 3, desc: 'Mention candidates, fusion decisions, and graph patch ops.' },
+    { id: 'surface', label: 'Surface Graph', cost: 'Low-Med', subsystems: 4, desc: 'Document, chunk, entity, and mention topology.' },
+    { id: 'kernel', label: 'Asserted Kernel', cost: 'Medium', subsystems: 6, desc: 'Committed graph layer for entities, claims, states, and events.' },
+    { id: 'relation', label: 'Relation Graph', cost: 'Medium', subsystems: 6, desc: 'Entity-to-entity relation extraction and review lanes.' },
+    { id: 'temporal', label: 'Temporal Graph', cost: 'Med-High', subsystems: 7, desc: 'Anchors, intervals, timeline edges, gaps, and conflicts.' },
+    { id: 'eventIdentity', label: 'Event Identity', cost: 'Med-High', subsystems: 7, desc: 'Event mentions resolved into canonical event memberships.' },
+    { id: 'memoryState', label: 'Memory / State', cost: 'High', subsystems: 8, desc: 'Durable states, deltas, conflicts, continuity, and ledgers.' },
+    { id: 'causal', label: 'Causal Graph', cost: 'High', subsystems: 9, desc: 'Cause/effect chains, invalidations, and causal memory cards.' },
+    { id: 'semanticCandidate', label: 'Semantic Candidate', cost: 'Very high', subsystems: 10, desc: 'Embeddings, ANN/hybrid space, candidate semantic edges, and NLI.' },
+    { id: 'galaxy', label: 'Galaxy View', cost: 'Render', subsystems: 4, desc: 'Projection/render graph from the current kernel snapshot.' },
+];
+
+export const ATLAS_PRESETS: AtlasPreset[] = [
+    {
+        id: 'fastScan',
+        label: 'Fast Scan',
+        desc: 'Dynamic NER into mention/evidence graph updates.',
+        target: 'evidence',
+        policy: 'dirty-only',
+        stages: ['Dynamic NER', 'Mention graph', 'Evidence graph'],
+    },
+    {
+        id: 'fullAtlas',
+        label: 'Full Atlas',
+        desc: 'Update dirty notes through the committed graph lane.',
+        target: 'kernel',
+        policy: 'dirty-only',
+        stages: ['Dynamic NER', 'Evidence graph', 'Asserted kernel', 'OverGraph commit'],
+    },
+    {
+        id: 'semanticAtlas',
+        label: 'Semantic Atlas',
+        desc: 'Update graph and refresh semantic sidecar vectors.',
+        target: 'semanticCandidate',
+        policy: 'dirty-only',
+        stages: ['Graph update', 'Embeddings', 'ANN/hybrid space', 'Candidate graph'],
+    },
+    {
+        id: 'deepReasoning',
+        label: 'Deep Reasoning',
+        desc: 'Force rebuild for richer temporal, memory, and causal passes.',
+        target: 'causal',
+        policy: 'force',
+        stages: ['Full rebuild', 'Temporal', 'Event identity', 'Memory/state', 'Causal review'],
+    },
+    {
+        id: 'visualizationOnly',
+        label: 'Visualization Only',
+        desc: 'Open the graph view without mutating backend state.',
+        target: 'galaxy',
+        policy: 'read-only',
+        stages: ['Load snapshot', 'Compile galaxy scene'],
+    },
+];
 
 export function buildGraphPreview(snapshot: GraphAuditSnapshot | null): RetrievalGraphPreview {
     if (!snapshot?.sampleNodes.length) {

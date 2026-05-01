@@ -3,7 +3,7 @@
     <!-- Left: Hub Trigger -->
     <div class="flex items-center gap-4">
         <!-- Hub Toggle -->
-        <button (click)="hubService.toggle()"
+        <button (click)="hubService.toggleDock()"
             class="flex items-center gap-2 pl-2 pr-3 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 group focus:outline-none">
 
             <!-- Icon Circle -->
@@ -24,7 +24,16 @@
 
             <!-- Arrow -->
             <i class="pi text-[8px] text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300 transition-colors ml-1"
-                [class.pi-chevron-up]="!hubService.isHubOpen()" [class.pi-chevron-down]="hubService.isHubOpen()"></i>
+                [class.pi-chevron-up]="!hubService.isHubOpen() && !hubService.isPageMode()"
+                [class.pi-chevron-down]="hubService.isHubOpen() && !hubService.isPageMode()"
+                [class.pi-window-minimize]="hubService.isPageMode()"></i>
+        </button>
+
+        <button type="button" (click)="hubService.togglePageMode()"
+            class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 text-slate-500 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 hover:border-teal-400/40 dark:hover:border-teal-300/35 transition-all focus:outline-none"
+            [title]="hubService.isPageMode() ? 'Return Hub to dock' : 'Open Hub as page'">
+            <i class="pi text-[9px]" [class.pi-window-maximize]="!hubService.isPageMode()"
+                [class.pi-window-minimize]="hubService.isPageMode()"></i>
         </button>
 
         <div class="h-3 w-[1px] bg-border"></div>
@@ -73,6 +82,9 @@
             <span class="graph-meter__dot" [class.is-active]="meter.rafActive > 0"></span>
             <span>{{ meter.compilerSource }}</span>
             <span>{{ meter.rafActive }}/{{ meter.activeCanvases }} raf</span>
+            <span [class.text-emerald-400]="meter.webglContexts === 0" [class.text-amber-300]="meter.webglContexts > 0">
+                GPU {{ meter.webglContexts > 0 ? 'on' : 'off' }}
+            </span>
             <span>{{ meter.nodes }}n</span>
         </button>
         }

@@ -352,6 +352,26 @@
     border-radius: 999px;
 }
 
+.entity-source-ring {
+    border: 2px solid transparent;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 12px color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.entity-source-badge {
+    display: inline-flex;
+    max-width: 76px;
+    flex-shrink: 0;
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.10em;
+    line-height: 1.25;
+    text-transform: uppercase;
+}
+
 .suggestion-dot {
     background: rgb(252 211 77);
     box-shadow: 0 0 12px rgba(252, 211, 77, 0.42);

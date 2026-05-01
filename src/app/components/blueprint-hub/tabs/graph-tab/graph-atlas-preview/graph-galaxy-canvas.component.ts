@@ -5,7 +5,7 @@ import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 import { compileGalaxyScene } from './graph-galaxy-scene-compiler';
 import { graphGalaxyRuntimeMeter } from './graph-galaxy-runtime-meter';
 import { budgetGalaxySurface } from './graph-galaxy-surface-budget';
-import { galaxySceneToV2, type GalaxySceneV2 } from './graph-galaxy-scene-v2';
+import { galaxySceneToV2, type GalaxySceneSourceMode, type GalaxySceneV2 } from './graph-galaxy-scene-v2';
 import { mergeGalaxySettings, type GalaxyInputEdge, type GalaxyQueryFocus, type GalaxyRenderableNode, type GalaxyRenderSettings } from './graph-galaxy-engine';
 import { ThreeGalaxyRenderer } from './three-galaxy-renderer';
 
@@ -15,7 +15,7 @@ import { ThreeGalaxyRenderer } from './three-galaxy-renderer';
     template: `
         <canvas
             #canvas
-            class="block h-full min-h-[360px] w-full touch-none select-none rounded-none cursor-grab active:cursor-grabbing"
+            class="block h-full min-h-[360px] w-full touch-none select-none rounded-none bg-[#02040a] cursor-grab active:cursor-grabbing"
             (pointerdown)="onPointerDown($event)"
             (pointermove)="onPointerMove($event)"
             (pointerup)="onPointerUp()"
@@ -26,6 +26,13 @@ import { ThreeGalaxyRenderer } from './three-galaxy-renderer';
             (click)="onClick($event)"
         ></canvas>
     `,
+    styles: [`
+        :host {
+            display: block;
+            height: 100%;
+            background: #02040a;
+        }
+    `],
 })
 export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnDestroy {
     private readonly phoenix = inject(PhoenixBackendService);
@@ -35,6 +42,8 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     @Input() selectedEntityId: string | null = null;
     @Input() queryFocus: GalaxyQueryFocus | null = null;
     @Input() viewMode: '3d' | 'map' = '3d';
+    @Input() sourceMode: GalaxySceneSourceMode = 'entities';
+    @Input() surfaceActive = true;
     @Output() entitySelected = new EventEmitter<GalaxyRenderableNode>();
     @Output() entityHovered = new EventEmitter<GalaxyRenderableNode | null>();
     @ViewChild('canvas', { static: true }) private canvasRef!: ElementRef<HTMLCanvasElement>;
@@ -59,6 +68,7 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     private sceneBuildPromise: Promise<void> | null = null;
     private layoutVersion = 0;
     private destroyed = false;
+    private viewReady = false;
     private unsubscribeColors?: () => void;
     private readonly meterId = graphGalaxyRuntimeMeter.nextCanvasId();
     private readonly onVisibilityChange = () => {
@@ -68,7 +78,7 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
 
     ngAfterViewInit(): void {
         const canvas = this.canvasRef.nativeElement;
-        this.renderer.mount(canvas);
+        this.viewReady = true;
         this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
         this.resizeObserver.observe(canvas);
         graphGalaxyRuntimeMeter.registerCanvas(this.meterId);
@@ -81,7 +91,6 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         this.intersectionObserver.observe(canvas);
         document.addEventListener('visibilitychange', this.onVisibilityChange);
         this.unsubscribeColors = entityColorStore.subscribe(() => this.markLayoutDirty());
-        this.renderer.setSettings(this.settings);
         this.resizeCanvas();
         this.requestSceneBuild();
         this.syncSurface();
@@ -91,12 +100,15 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         if (changes['settings']) {
             const previous = mergeGalaxySettings(changes['settings'].previousValue);
             const current = mergeGalaxySettings(this.settings);
-            this.renderer.setSettings(this.settings);
+            if (this.renderer.hasContext()) this.renderer.setSettings(this.settings);
             if (previous.clickFocus && !current.clickFocus) this.clearCameraFocus();
+            if (previous.layoutMode !== current.layoutMode) this.markLayoutDirty();
+            if (this.viewReady) this.syncSurface();
         }
-        if (changes['entities'] || changes['edges'] || changes['settings']) this.markLayoutDirty();
-        if (changes['selectedEntityId']) this.renderer.selectNode(this.selectedEntityId);
-        if (changes['viewMode']) this.renderer.setMode(this.viewMode === 'map' ? '2d' : '3d');
+        if (changes['entities'] || changes['edges'] || changes['sourceMode']) this.markLayoutDirty();
+        if (changes['selectedEntityId'] && this.renderer.hasContext()) this.renderer.selectNode(this.selectedEntityId);
+        if (changes['viewMode'] && this.renderer.hasContext()) this.renderer.setMode(this.viewMode === 'map' ? '2d' : '3d');
+        if (changes['surfaceActive'] && this.viewReady) this.syncSurface();
     }
 
     ngOnDestroy(): void {
@@ -113,21 +125,25 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     }
 
     resetCamera(): void {
+        if (!this.renderer.hasContext()) return;
         this.renderer.resetCamera();
         this.draw();
     }
 
     fitToGraph(): void {
+        if (!this.renderer.hasContext()) return;
         this.renderer.fitToGraph();
         this.draw();
     }
 
     focusEntity(entityId: string): void {
+        if (!this.renderer.hasContext()) return;
         this.renderer.focusNode(entityId);
         this.draw();
     }
 
     clearCameraFocus(): void {
+        if (!this.renderer.hasContext()) return;
         this.renderer.clearFocus();
         this.draw();
     }
@@ -137,7 +153,10 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         const settings = mergeGalaxySettings(this.settings);
         const picked = this.pick(event);
         this.dragging = true;
-        this.nodeDragging = Boolean(picked && settings.nodeDragMode !== 'camera' && !event.shiftKey && event.button === 0 && this.renderer.beginNodeDrag(picked));
+        this.nodeDragging = Boolean(
+            picked && settings.nodeDragMode !== 'camera' && !event.shiftKey && event.button === 0 &&
+            this.renderer.beginNodeDrag(picked, this.pointerFromEvent(event)),
+        );
         this.panning = !this.nodeDragging && (event.shiftKey || event.button === 1 || event.button === 2);
         this.pointerMoved = false;
         this.lastPointerX = event.clientX;
@@ -157,7 +176,7 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         this.lastPointerX = event.clientX;
         this.lastPointerY = event.clientY;
         this.pointerMoved ||= Math.abs(dx) + Math.abs(dy) > 3;
-        if (this.nodeDragging) this.renderer.dragNode(dx, dy);
+        if (this.nodeDragging) this.renderer.dragNode(this.pointerFromEvent(event));
         else this.panning ? this.renderer.pan(dx, dy) : this.renderer.rotate(dx, dy);
         this.draw();
     }
@@ -226,10 +245,12 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     }
 
     private syncSurface(): void {
+        graphGalaxyRuntimeMeter.recordSurface(this.meterId, this.canHoldSurface());
         if (!this.canHoldSurface()) {
             this.releaseSurface();
             return;
         }
+        this.ensureRendererMounted();
         this.resizeCanvas();
         this.requestSceneBuild();
         this.shouldAnimate() ? this.start() : (this.stop(), this.draw());
@@ -237,11 +258,11 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
 
     private shouldAnimate(): boolean {
         const settings = mergeGalaxySettings(this.settings);
-        return this.canHoldSurface() && (this.dragging || this.renderer.hasActiveForces() || settings.autoRotate || settings.particleFlow || Boolean(this.queryFocus));
+        return this.canHoldSurface() && (this.dragging || this.renderer.hasActiveForces() || settings.autoRotate || settings.particleFlow);
     }
 
     private canHoldSurface(): boolean {
-        return !this.destroyed && this.documentVisible && this.isVisible;
+        return !this.destroyed && this.documentVisible;
     }
 
     private resizeCanvas(): void {
@@ -254,9 +275,24 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
 
     private releaseSurface(): void {
         this.stop();
+        this.renderer.releaseContext();
+        graphGalaxyRuntimeMeter.recordContext(this.meterId, false);
         const canvas = this.canvasRef?.nativeElement;
         if (canvas) { canvas.width = 0; canvas.height = 0; }
         graphGalaxyRuntimeMeter.recordDraw(this.meterId, 0, 0, 1, performance.now(), 0);
+    }
+
+    private ensureRendererMounted(): void {
+        const canvas = this.canvasRef.nativeElement;
+        const created = this.renderer.mount(canvas);
+        if (!created) return;
+        graphGalaxyRuntimeMeter.recordContext(this.meterId, true);
+        this.renderer.setSettings(this.settings);
+        this.renderer.setMode(this.viewMode === 'map' ? '2d' : '3d');
+        if (this.scene) {
+            this.renderer.setScene(this.scene);
+            this.renderer.selectNode(this.selectedEntityId);
+        }
     }
 
     private draw(): void {
@@ -273,13 +309,14 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     }
 
     private requestSceneBuild(): void {
-        if (this.destroyed || !this.needsLayout || this.sceneBuildPromise) return;
+        if (this.destroyed || !this.needsLayout || this.sceneBuildPromise || !this.canHoldSurface()) return;
         this.needsLayout = false;
         const version = this.layoutVersion;
         this.sceneBuildPromise = compileGalaxyScene(this.phoenix, this.entities, this.edges, mergeGalaxySettings(this.settings))
             .then((scene) => {
                 if (this.destroyed || this.layoutVersion !== version) return;
-                this.scene = galaxySceneToV2(scene);
+                this.scene = galaxySceneToV2(scene, this.sourceMode);
+                if (!this.renderer.hasContext()) this.ensureRendererMounted();
                 this.renderer.setScene(this.scene);
                 this.renderer.setSettings(this.settings);
                 this.renderer.setMode(this.viewMode === 'map' ? '2d' : '3d');
@@ -307,7 +344,11 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
     }
 
     private pick(event: MouseEvent): string | null {
+        return this.renderer.pick(this.pointerFromEvent(event));
+    }
+
+    private pointerFromEvent(event: MouseEvent): { x: number; y: number; width: number; height: number } {
         const rect = this.canvasRef.nativeElement.getBoundingClientRect();
-        return this.renderer.pick({ x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height });
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
     }
 }

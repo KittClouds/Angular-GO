@@ -1,6 +1,6 @@
 import type { EntityKind } from '../types/entity';
 
-export type EntitySuggestionProviderId = 'fst' | 'lfm_local_experiment' | 'gliner_local';
+export type EntitySuggestionProviderId = 'dynamic_ner' | 'fst' | 'lfm_local_experiment' | 'gliner_local';
 
 export type EntitySuggestionDevice = 'webgpu' | 'wasm';
 

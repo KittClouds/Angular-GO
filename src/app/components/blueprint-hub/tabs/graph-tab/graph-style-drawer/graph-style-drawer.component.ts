@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnDestroy, Output, signal } from '@angular/core';
 import type { EntityKind } from '../../../../../lib/Scanner/types';
-import { DEFAULT_ENTITY_COLORS, DEFAULT_ENTITY_TEXT_COLORS, entityColorStore } from '../../../../../lib/store/entityColorStore';
+import { DEFAULT_ENTITY_COLORS, DEFAULT_ENTITY_SOURCE_COLORS, DEFAULT_ENTITY_TEXT_COLORS, entityColorStore } from '../../../../../lib/store/entityColorStore';
+import { ENTITY_SOURCE_LABELS, type EntitySourceSystem } from '../../../../../lib/registry';
 import {
     DEFAULT_HIGHLIGHT_SETTINGS,
     HIGHLIGHT_MODE_DESCRIPTIONS,
@@ -25,6 +26,8 @@ const ENTITY_CATEGORIES: EntityCategory[] = [
 ];
 
 const MODE_ORDER: HighlightMode[] = ['vivid', 'gradient', 'subtle', 'clean', 'focus', 'off'];
+
+const ENTITY_SOURCE_OPTIONS: EntitySourceSystem[] = ['user', 'dynamic_ner', 'graph_pipeline', 'ingestion', 'auto', 'import', 'legacy'];
 
 function hslToHex(hslString: string): string {
     try {
@@ -111,11 +114,14 @@ export class GraphStyleDrawerComponent implements OnDestroy {
 
     readonly categories = ENTITY_CATEGORIES;
     readonly entityColorStore = entityColorStore;
+    readonly sourceOptions = ENTITY_SOURCE_OPTIONS;
+    readonly sourceLabels = ENTITY_SOURCE_LABELS;
     readonly modeLabels = HIGHLIGHT_MODE_LABELS;
     readonly modeDescriptions = HIGHLIGHT_MODE_DESCRIPTIONS;
     readonly modeOrder = MODE_ORDER;
 
     readonly selectedKind = signal<EntityKind>('CHARACTER');
+    readonly selectedSource = signal<EntitySourceSystem>('dynamic_ner');
     readonly mode = signal<HighlightMode>(highlightingStore.getSnapshot().mode);
     readonly focusKinds = signal<EntityKind[]>(highlightingStore.getSnapshot().focusEntityKinds);
 
@@ -133,6 +139,10 @@ export class GraphStyleDrawerComponent implements OnDestroy {
 
     selectKind(kind: EntityKind): void {
         this.selectedKind.set(kind);
+    }
+
+    selectSource(source: EntitySourceSystem): void {
+        this.selectedSource.set(source);
     }
 
     selectMode(mode: HighlightMode): void {
@@ -155,6 +165,10 @@ export class GraphStyleDrawerComponent implements OnDestroy {
         return hslToHex(entityColorStore.getRawTextHsl(kind) || DEFAULT_ENTITY_TEXT_COLORS[kind]);
     }
 
+    getHexSourceColor(source: EntitySourceSystem): string {
+        return hslToHex(entityColorStore.getRawSourceHsl(source) || DEFAULT_ENTITY_SOURCE_COLORS[source]);
+    }
+
     updateColor(kind: EntityKind, hexColor: string): void {
         entityColorStore.setColor(kind, hexToHsl(hexColor));
     }
@@ -163,10 +177,22 @@ export class GraphStyleDrawerComponent implements OnDestroy {
         entityColorStore.setTextColor(kind, hexToHsl(hexColor));
     }
 
+    updateSourceColor(source: EntitySourceSystem, hexColor: string): void {
+        entityColorStore.setSourceColor(source, hexToHsl(hexColor));
+    }
+
     resetSelected(): void {
         const kind = this.selectedKind();
         entityColorStore.setColor(kind, DEFAULT_ENTITY_COLORS[kind]);
         entityColorStore.setTextColor(kind, DEFAULT_ENTITY_TEXT_COLORS[kind]);
+    }
+
+    resetSource(source: EntitySourceSystem): void {
+        entityColorStore.resetSourceColor(source);
+    }
+
+    resetSelectedSource(): void {
+        this.resetSource(this.selectedSource());
     }
 
     resetAll(): void {

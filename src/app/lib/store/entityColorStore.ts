@@ -4,6 +4,7 @@
 // Supports both PILL colors (background/border) and TEXT colors (foreground)
 
 import type { EntityKind } from '../Scanner/types';
+import type { EntitySourceSystem } from '../registry';
 
 // ============================================
 // DEFAULT COLORS (HSL VALUES)
@@ -59,6 +60,16 @@ export const DEFAULT_ENTITY_TEXT_COLORS: Record<EntityKind, string> = {
     CREATURE: '140 70% 50%',       // Green
 };
 
+export const DEFAULT_ENTITY_SOURCE_COLORS: Record<EntitySourceSystem, string> = {
+    user: '175 65% 45%',
+    dynamic_ner: '280 70% 60%',
+    graph_pipeline: '190 70% 50%',
+    ingestion: '200 75% 55%',
+    auto: '220 10% 50%',
+    import: '45 90% 50%',
+    legacy: '0 0% 50%',
+};
+
 // ============================================
 // STORE CLASS - PURE RUNTIME REGISTRY
 // No localStorage persistence - CSS variables are the source of truth
@@ -67,17 +78,21 @@ export const DEFAULT_ENTITY_TEXT_COLORS: Record<EntityKind, string> = {
 class EntityColorStore {
     private colors: Record<EntityKind, string>;
     private textColors: Record<EntityKind, string>;
+    private sourceColors: Record<EntitySourceSystem, string>;
     private listeners: Set<() => void> = new Set();
     private initialized = false;
     // Cached snapshots for useSyncExternalStore - same reference until data changes
     private snapshot: Record<EntityKind, string>;
     private textSnapshot: Record<EntityKind, string>;
+    private sourceSnapshot: Record<EntitySourceSystem, string>;
 
     constructor() {
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
+        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
         this.snapshot = this.colors;
         this.textSnapshot = this.textColors;
+        this.sourceSnapshot = this.sourceColors;
     }
 
     /**
@@ -91,14 +106,16 @@ class EntityColorStore {
         // Always start with defaults - no stale state
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
+        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
         this.snapshot = { ...this.colors };
         this.textSnapshot = { ...this.textColors };
+        this.sourceSnapshot = { ...this.sourceColors };
 
         // Sync all colors to CSS variables
         this.syncAllToCssVars();
 
         this.initialized = true;
-        console.log('[EntityColorStore] Initialized with', Object.keys(this.colors).length, 'pill colors and text colors');
+        console.log('[EntityColorStore] Initialized with', Object.keys(this.colors).length, 'pill colors, text colors, and source colors');
     }
 
     // ============================================
@@ -132,6 +149,16 @@ class EntityColorStore {
         return `hsl(var(${varName}) / ${opacity})`;
     }
 
+    getSourceColor(source: EntitySourceSystem | string): string {
+        const varName = this.getSourceCssVarName(source);
+        return `hsl(var(${varName}))`;
+    }
+
+    getSourceBgColor(source: EntitySourceSystem | string, opacity = 0.16): string {
+        const varName = this.getSourceCssVarName(source);
+        return `hsl(var(${varName}) / ${opacity})`;
+    }
+
     /**
      * Get CSS variable name for pill color
      * Returns: '--entity-character'
@@ -154,6 +181,14 @@ class EntityColorStore {
         return '--entity-unknown-text';
     }
 
+    getSourceCssVarName(source: EntitySourceSystem | string): string {
+        const normalized = source.toLowerCase();
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_SOURCE_COLORS, normalized)) {
+            return `--entity-source-${normalized.replace(/_/g, '-')}`;
+        }
+        return '--entity-source-legacy';
+    }
+
     /**
      * Get raw HSL value for pill color (without hsl() wrapper)
      * Returns: '280 70% 60%'
@@ -170,6 +205,10 @@ class EntityColorStore {
         return this.textColors[kind] || '220 10% 50%'; // Gray fallback
     }
 
+    getRawSourceHsl(source: EntitySourceSystem | string): string {
+        return this.sourceColors[source as EntitySourceSystem] || DEFAULT_ENTITY_SOURCE_COLORS.legacy;
+    }
+
     /**
      * Get snapshot of all pill colors - returns STABLE reference for useSyncExternalStore
      */
@@ -184,6 +223,10 @@ class EntityColorStore {
         return this.textSnapshot;
     }
 
+    getSourceSnapshot(): Record<EntitySourceSystem, string> {
+        return this.sourceSnapshot;
+    }
+
     /**
      * Get all pill colors (creates new object - use getSnapshot for React hooks)
      */
@@ -196,6 +239,10 @@ class EntityColorStore {
      */
     getAllTextColors(): Record<EntityKind, string> {
         return { ...this.textColors };
+    }
+
+    getAllSourceColors(): Record<EntitySourceSystem, string> {
+        return { ...this.sourceColors };
     }
 
     // ============================================
@@ -219,6 +266,12 @@ class EntityColorStore {
     setTextColor(kind: EntityKind, hslValue: string): void {
         this.textColors[kind] = hslValue;
         this.setTextCssVar(kind, hslValue);
+        this.notify();
+    }
+
+    setSourceColor(source: EntitySourceSystem, hslValue: string): void {
+        this.sourceColors[source] = hslValue;
+        this.setSourceCssVar(source, hslValue);
         this.notify();
     }
 
@@ -254,8 +307,13 @@ class EntityColorStore {
     reset(): void {
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
+        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
         this.syncAllToCssVars();
         this.notify();
+    }
+
+    resetSourceColor(source: EntitySourceSystem): void {
+        this.setSourceColor(source, DEFAULT_ENTITY_SOURCE_COLORS[source]);
     }
 
     // ============================================
@@ -278,12 +336,22 @@ class EntityColorStore {
         }
     }
 
+    private setSourceCssVar(source: EntitySourceSystem | string, hslValue: string): void {
+        const varName = this.getSourceCssVarName(source);
+        if (typeof document !== 'undefined') {
+            document.documentElement.style.setProperty(varName, hslValue);
+        }
+    }
+
     private syncAllToCssVars(): void {
         for (const [kind, hsl] of Object.entries(this.colors)) {
             this.setCssVar(kind, hsl);
         }
         for (const [kind, hsl] of Object.entries(this.textColors)) {
             this.setTextCssVar(kind, hsl);
+        }
+        for (const [source, hsl] of Object.entries(this.sourceColors)) {
+            this.setSourceCssVar(source, hsl);
         }
     }
 
@@ -300,6 +368,7 @@ class EntityColorStore {
         // Create new snapshot references so useSyncExternalStore detects change
         this.snapshot = { ...this.colors };
         this.textSnapshot = { ...this.textColors };
+        this.sourceSnapshot = { ...this.sourceColors };
         this.listeners.forEach(fn => fn());
     }
 }
@@ -342,6 +411,16 @@ export function getEntityTextColor(kind: EntityKind | string | undefined): strin
 export function getEntityBgColor(kind: EntityKind | string | undefined, opacity = 0.2): string {
     if (!kind) return `hsl(var(--entity-unknown) / ${opacity})`;
     return entityColorStore.getEntityBgColor(kind, opacity);
+}
+
+export function getEntitySourceColor(source: EntitySourceSystem | string | undefined): string {
+    if (!source) return 'hsl(var(--entity-source-legacy))';
+    return entityColorStore.getSourceColor(source);
+}
+
+export function getEntitySourceBgColor(source: EntitySourceSystem | string | undefined, opacity = 0.16): string {
+    if (!source) return `hsl(var(--entity-source-legacy) / ${opacity})`;
+    return entityColorStore.getSourceBgColor(source, opacity);
 }
 
 /**

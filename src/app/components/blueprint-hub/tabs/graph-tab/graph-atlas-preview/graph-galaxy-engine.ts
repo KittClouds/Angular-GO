@@ -2,10 +2,11 @@ import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
 export type GalaxyLabelMode = 'hover' | 'selected' | 'important' | 'always' | 'off';
 export type GalaxyEdgeMode = 'curved' | 'straight' | 'hidden';
-export type GalaxyEdgeColorMode = 'cyan' | 'entityBlend' | 'confidence' | 'muted';
+export type GalaxyEdgeColorMode = 'aqua' | 'orchid' | 'gold' | 'entityBlend' | 'confidence' | 'muted' | 'cyan';
 export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
-export type GalaxyNodeDragMode = 'stretch' | 'force' | 'camera';
-export type GalaxyNodeShapeMode = 'halo' | 'sphere';
+export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
+export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
+export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace';
 
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
@@ -28,6 +29,9 @@ export interface GalaxyRenderSettings {
     clickFocus: boolean;
     labelLimit: number;
     selectedPulse: boolean;
+    layoutMode: GalaxyLayoutMode;
+    hybridShellVisible: boolean;
+    hybridShellOpacity: number;
 }
 
 export interface GalaxyInputEdge {
@@ -57,6 +61,10 @@ export interface GalaxyRenderableNode {
     colorHsl?: string;
     metadata?: Record<string, unknown> & {
         sourceEntityId?: string;
+        sourceId?: string;
+        sourceTitle?: string;
+        sourceType?: string;
+        noteId?: string;
         galaxyId?: string;
         galaxyRole?: 'primary' | 'context';
         galaxyOffset?: { x: number; y: number; z: number };
@@ -83,6 +91,7 @@ export interface GalaxyNode extends Rgb {
     sy: number;
     depth: number;
     galaxyOpacity: number;
+    groupId?: string;
 }
 
 export interface GalaxyEdge {
@@ -94,22 +103,35 @@ export interface GalaxyEdge {
     alpha: number;
     curve: number;
     flowOffset: number;
+    interGalaxy?: boolean;
+}
+
+export interface GalaxyGroup extends Rgb {
+    id: string;
+    label: string;
+    kind: 'note' | 'folder' | 'narrative' | 'semantic-cluster' | 'entity-cluster' | 'query' | 'other';
+    center: { x: number; y: number; z: number };
+    radius: number;
+    nodeIds: string[];
+    importance: number;
 }
 
 export interface GalaxyScene {
     nodes: GalaxyNode[];
     links: GalaxyEdge[];
+    layoutMode: GalaxyLayoutMode;
+    groups: GalaxyGroup[];
 }
 
 export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
     labelMode: 'hover',
     edgeMode: 'curved',
-    edgeColorMode: 'cyan',
+    edgeColorMode: 'entityBlend',
     glow: 1,
-    edgeOpacity: 0.58,
-    edgeWidth: 0.62,
+    edgeOpacity: 0.34,
+    edgeWidth: 0.45,
     edgeLength: 1,
-    edgeCurveStrength: 1.4,
+    edgeCurveStrength: 0.55,
     nodeDistance: 1,
     particleFlow: false,
     particleSize: 1,
@@ -118,14 +140,22 @@ export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
     autoRotate: false,
     backgroundMode: 'nebula',
     nodeDragMode: 'stretch',
-    nodeShape: 'halo',
+    nodeShape: 'atom',
     clickFocus: true,
     labelLimit: 14,
     selectedPulse: true,
+    layoutMode: 'single',
+    hybridShellVisible: true,
+    hybridShellOpacity: 1,
 };
 
 export function mergeGalaxySettings(settings?: Partial<GalaxyRenderSettings> | null): GalaxyRenderSettings {
-    return { ...DEFAULT_GALAXY_SETTINGS, ...settings };
+    const merged = { ...DEFAULT_GALAXY_SETTINGS, ...settings };
+    if (merged.edgeColorMode === 'cyan') merged.edgeColorMode = 'aqua';
+    merged.edgeCurveStrength = Math.min(1.2, Math.max(0.25, merged.edgeCurveStrength));
+    merged.edgeWidth = Math.min(1.1, Math.max(0.15, merged.edgeWidth));
+    merged.hybridShellOpacity = Math.min(1, Math.max(0, merged.hybridShellOpacity));
+    return merged;
 }
 
 export function buildGalaxyScene(
@@ -134,6 +164,7 @@ export function buildGalaxyScene(
     settings: GalaxyRenderSettings,
 ): GalaxyScene {
     const entities = prioritizeEntities(entitiesInput);
+    const preserveAtlasLayout = shouldPreserveAtlasLayout(entities);
     const idToIndex = new Map<string, number>();
     const nodes = entities.map((entity, index) => {
         idToIndex.set(entity.id, index);
@@ -164,13 +195,32 @@ export function buildGalaxyScene(
     });
 
     const links = buildLinks(edges, idToIndex);
-    relaxNodes(nodes, links, settings);
+    if (settings.layoutMode === 'hybridSpace') {
+        applyGalaxyMetadata(nodes);
+        applyHybridSpaceLayout(nodes, links);
+        return { nodes, links, layoutMode: 'hybridSpace', groups: [] };
+    }
+
+    const groupPlan = settings.layoutMode === 'multiGalaxy' ? buildGroupPlan(nodes) : [];
+    if (groupPlan.length > 1) {
+        applyGalaxyMetadata(nodes);
+        const groups = applyMultiGalaxyLayout(nodes, links, groupPlan);
+        return { nodes, links, layoutMode: 'multiGalaxy', groups };
+    }
+
+    if (!preserveAtlasLayout) {
+        relaxNodes(nodes, links, settings);
+    }
     applyGalaxyMetadata(nodes);
-    return { nodes, links };
+    return { nodes, links, layoutMode: 'single', groups: [] };
 }
 
 function hasAtlasSeed(entity: GalaxyRenderableNode): boolean {
     return Number.isFinite(entity.atlasX) && Number.isFinite(entity.atlasY) && Number.isFinite(entity.atlasZ);
+}
+
+function shouldPreserveAtlasLayout(entities: GalaxyRenderableNode[]): boolean {
+    return entities.length > 0 && entities.every(hasAtlasSeed);
 }
 
 export function stableUnit(value: string): number {
@@ -299,6 +349,218 @@ function applyGalaxyMetadata(nodes: GalaxyNode[]): void {
             node.radius *= 0.82;
         }
     }
+}
+
+interface GalaxyGroupPlan {
+    id: string;
+    label: string;
+    kind: GalaxyGroup['kind'];
+    indexes: number[];
+}
+
+function buildGroupPlan(nodes: GalaxyNode[]): GalaxyGroupPlan[] {
+    const groups = new Map<string, GalaxyGroupPlan>();
+    for (let index = 0; index < nodes.length; index++) {
+        const info = groupInfoForNode(nodes[index].entity);
+        let group = groups.get(info.id);
+        if (!group) {
+            group = { ...info, indexes: [] };
+            groups.set(info.id, group);
+        }
+        group.indexes.push(index);
+    }
+
+    const ordered = [...groups.values()]
+        .sort((left, right) => right.indexes.length - left.indexes.length || left.label.localeCompare(right.label));
+    const keep = ordered.slice(0, 24);
+    const overflow = ordered.slice(24);
+    if (overflow.length) {
+        keep.push({
+            id: 'group:other-sources',
+            label: 'Other Sources',
+            kind: 'other',
+            indexes: overflow.flatMap((group) => group.indexes),
+        });
+    }
+    return keep.filter((group) => group.indexes.length > 0);
+}
+
+function groupInfoForNode(entity: GalaxyRenderableNode): Pick<GalaxyGroupPlan, 'id' | 'label' | 'kind'> {
+    const metadata = entity.metadata || {};
+    const sourceType = String(metadata.sourceType || '').toLowerCase();
+    if (sourceType === 'query') {
+        return { id: 'group:query', label: 'Query Trace', kind: 'query' };
+    }
+
+    const noteId = stringValue(metadata.noteId) || (sourceType === 'doc' ? stringValue(metadata.sourceId) : '');
+    if (noteId) {
+        const title = stringValue(metadata.sourceTitle) || sourceTitleFromLabel(entity.label) || `Note ${noteId.slice(0, 6)}`;
+        return { id: `note:${noteId}`, label: title, kind: 'note' };
+    }
+
+    if (sourceType === 'entity') {
+        return { id: 'group:registry-anchors', label: 'Registry Anchors', kind: 'entity-cluster' };
+    }
+
+    if (sourceType) {
+        return { id: `source:${sourceType}`, label: titleCase(sourceType), kind: 'semantic-cluster' };
+    }
+
+    return { id: `kind:${entity.kind || 'unknown'}`, label: titleCase(entity.kind || 'Other'), kind: 'other' };
+}
+
+function applyMultiGalaxyLayout(nodes: GalaxyNode[], links: GalaxyEdge[], plans: GalaxyGroupPlan[]): GalaxyGroup[] {
+    const groupByNode = new Map<number, GalaxyGroupPlan>();
+    for (const group of plans) {
+        for (const index of group.indexes) groupByNode.set(index, group);
+    }
+
+    const count = plans.length;
+    const centerRadius = clamp(2.16 + Math.sqrt(count) * 0.22, 2.35, 3.35);
+    const groups: GalaxyGroup[] = plans.map((group, index) => {
+        const center = fibonacciSpherePoint(index, count, centerRadius, stableUnit(group.id));
+        const radius = clamp(0.46 + Math.sqrt(group.indexes.length) * 0.035, 0.5, 0.86);
+        const color = groupColor(group.id, index);
+        return {
+            id: group.id,
+            label: group.label,
+            kind: group.kind,
+            center,
+            radius,
+            nodeIds: group.indexes.map((nodeIndex) => nodes[nodeIndex].entity.id),
+            importance: group.indexes.length,
+            ...color,
+        };
+    });
+    const groupMeta = new Map(groups.map((group) => [group.id, group]));
+
+    for (const [index, node] of nodes.entries()) {
+        const plan = groupByNode.get(index);
+        const group = plan ? groupMeta.get(plan.id) : undefined;
+        if (!group) continue;
+        node.groupId = group.id;
+        const norm = Math.hypot(node.x, node.y, node.z);
+        const fallback = stableVector(node.entity.id);
+        const localScale = group.radius / Math.max(1.35, norm || 1.35);
+        const lx = norm > 0.001 ? node.x * localScale : fallback.x * group.radius * 0.32;
+        const ly = norm > 0.001 ? node.y * localScale : fallback.y * group.radius * 0.32;
+        const lz = norm > 0.001 ? node.z * localScale : fallback.z * group.radius * 0.32;
+        node.x = group.center.x + lx;
+        node.y = group.center.y + ly;
+        node.z = group.center.z + lz;
+        node.baseX = node.x;
+        node.baseY = node.y;
+        node.baseZ = node.z;
+        node.radius *= plan?.kind === 'query' ? 1.05 : 0.86;
+    }
+
+    for (const link of links) {
+        const sourceGroup = nodes[link.source]?.groupId;
+        const targetGroup = nodes[link.target]?.groupId;
+        link.interGalaxy = Boolean(sourceGroup && targetGroup && sourceGroup !== targetGroup);
+        if (link.interGalaxy) {
+            link.alpha = Math.min(0.42, link.alpha * 1.28 + 0.035);
+            link.curve *= 1.3;
+        }
+    }
+
+    return groups;
+}
+
+const HYBRID_SHELL_RADIUS = 2.32;
+
+function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void {
+    for (const node of nodes) {
+        const direction = normalizedDirection(node);
+        const radius = hybridRadius(node);
+        node.x = direction.x * radius * HYBRID_SHELL_RADIUS;
+        node.y = direction.y * radius * HYBRID_SHELL_RADIUS;
+        node.z = direction.z * radius * HYBRID_SHELL_RADIUS;
+        node.baseX = node.x;
+        node.baseY = node.y;
+        node.baseZ = node.z;
+        node.depth = radius;
+        node.radius *= hybridNodeScale(node, radius);
+    }
+
+    for (const link of links) {
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        const radialDelta = Math.abs((source?.depth || 0.68) - (target?.depth || 0.68));
+        link.alpha = Math.min(0.38, link.alpha * (1.08 + radialDelta * 0.35));
+        link.curve *= 0.78 + radialDelta * 0.9;
+    }
+}
+
+function normalizedDirection(node: GalaxyNode): { x: number; y: number; z: number } {
+    const x = Number.isFinite(node.entity.atlasX) ? Number(node.entity.atlasX) : node.x;
+    const y = Number.isFinite(node.entity.atlasY) ? Number(node.entity.atlasY) : node.y;
+    const z = Number.isFinite(node.entity.atlasZ) ? Number(node.entity.atlasZ) : node.z;
+    const norm = Math.hypot(x, y, z);
+    if (norm > 0.0001) return { x: x / norm, y: y / norm, z: z / norm };
+    return stableVector(node.entity.id);
+}
+
+function hybridRadius(node: GalaxyNode): number {
+    const metadata = node.entity.metadata || {};
+    const sourceType = String(metadata.sourceType || '').toLowerCase();
+    const tokenCount = Number(metadata['tokenCount'] || 0);
+    const mentions = Math.max(1, Number(node.entity.totalMentions || 1));
+
+    if (sourceType === 'query') return 1.015;
+    if (sourceType === 'leaf') return clamp(0.982 + Math.min(0.018, Math.log1p(Math.max(1, tokenCount)) * 0.002), 0.982, 1.0);
+    if (sourceType === 'doc') return clamp(0.974 + Math.min(0.026, Math.log1p(Math.max(1, tokenCount)) * 0.0025), 0.974, 1.0);
+    if (sourceType === 'entity') return clamp(0.58 + Math.min(0.24, Math.log1p(mentions) * 0.075), 0.58, 0.82);
+    if (node.entity.kind?.toLowerCase().includes('folder')) return 0.38;
+    if (node.entity.kind?.toLowerCase().includes('narrative')) return 0.28;
+    return 0.94;
+}
+
+function hybridNodeScale(node: GalaxyNode, radius: number): number {
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (sourceType === 'query') return 1.18;
+    if (sourceType === 'entity') return 0.98;
+    return 0.78 + radius * 0.18;
+}
+
+function stringValue(value: unknown): string {
+    return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function sourceTitleFromLabel(label: string): string {
+    const [first] = label.split(/[>/:]/).map((part) => part.trim()).filter(Boolean);
+    return first || label;
+}
+
+function titleCase(value: string): string {
+    return value
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function fibonacciSpherePoint(index: number, total: number, radius: number, phase: number): { x: number; y: number; z: number } {
+    if (total <= 1) return { x: 0, y: 0, z: 0 };
+    const y = 1 - (index / Math.max(1, total - 1)) * 2;
+    const radial = Math.sqrt(Math.max(0, 1 - y * y));
+    const angle = (index + phase * 0.37) * 2.399963229728653;
+    return {
+        x: Math.cos(angle) * radial * radius,
+        y: y * radius * 0.58,
+        z: Math.sin(angle) * radial * radius,
+    };
+}
+
+function stableVector(id: string): { x: number; y: number; z: number } {
+    const a = stableUnit(`${id}:a`) * Math.PI * 2;
+    const y = stableUnit(`${id}:y`) * 2 - 1;
+    const radial = Math.sqrt(Math.max(0, 1 - y * y));
+    return { x: Math.cos(a) * radial, y, z: Math.sin(a) * radial };
+}
+
+function groupColor(id: string, index: number): Rgb {
+    const palette = [184, 198, 262, 172, 288, 42, 216, 326];
+    const hue = palette[index % palette.length] + (stableUnit(id) - 0.5) * 18;
+    return hslToRgb(`${hue} 76% 58%`);
 }
 
 function prioritizeEntities(entities: GalaxyRenderableNode[]): GalaxyRenderableNode[] {

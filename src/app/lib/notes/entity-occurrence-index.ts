@@ -35,9 +35,7 @@ type TextExtraction = {
     }>;
 };
 
-let rebuildPromise: Promise<void> | null = null;
-
-export async function syncNoteEntityOccurrences(
+async function syncNoteEntityOccurrences(
     note: Note,
     scanner?: EntityMentionScanner,
 ): Promise<void> {
@@ -112,30 +110,6 @@ export async function deleteNoteEntityOccurrences(noteId: string): Promise<void>
     });
 }
 
-export function scheduleLoadedNoteEntityOccurrenceRebuild(): Promise<void> {
-    if (!canUseEntityOccurrenceTables()) {
-        return Promise.resolve();
-    }
-    if (rebuildPromise) {
-        return rebuildPromise;
-    }
-    rebuildPromise = rebuildLoadedNoteEntityOccurrences()
-        .catch(error => {
-            console.warn('[EntityOccurrences] Loaded-note rebuild skipped:', error);
-        })
-        .finally(() => {
-            rebuildPromise = null;
-        });
-    return rebuildPromise;
-}
-
-async function rebuildLoadedNoteEntityOccurrences(): Promise<void> {
-    const notes = await db.notes.toArray();
-    for (const note of notes) {
-        await syncNoteEntityOccurrences(note as Note);
-    }
-}
-
 async function scanMachineOccurrences(
     note: Note,
     text: string,
@@ -144,12 +118,11 @@ async function scanMachineOccurrences(
     now: number,
     scanner?: EntityMentionScanner,
 ): Promise<EntityOccurrence[]> {
-    const activeScanner = scanner || await resolveEntityMentionScanner();
-    if (!activeScanner) {
+    if (!scanner) {
         return [];
     }
 
-    const spans = await activeScanner.scanEntityMentionsAsync(text, {
+    const spans = await scanner.scanEntityMentionsAsync(text, {
         worldId: note.worldId,
         narrativeId: note.narrativeId,
         folderId: note.folderId,
@@ -455,16 +428,6 @@ function toEntityLike(entity?: DexieEntity | null): EntityLike | null {
     };
 }
 
-async function resolveEntityMentionScanner(): Promise<EntityMentionScanner | null> {
-    const win = globalThis as typeof globalThis & { window?: any };
-    const injector = win.window?.__angularInjector;
-    if (!injector) {
-        return null;
-    }
-    const { PhoenixUiApiService } = await import('../../services/phoenix-ui-api.service');
-    return injector.get(PhoenixUiApiService) as EntityMentionScanner;
-}
-
 function buildExcerpt(text: string, from: number, to: number): string {
     const start = Math.max(0, from - EXCERPT_RADIUS);
     const end = Math.min(text.length, to + EXCERPT_RADIUS);
@@ -501,7 +464,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 function canUseEntityOccurrenceTables(): boolean {
     return typeof db.entityOccurrences?.where === 'function'
         && typeof db.entityNoteIndex?.where === 'function'
-        && typeof db.notes?.toArray === 'function'
         && typeof db.entities?.toArray === 'function';
 }
 

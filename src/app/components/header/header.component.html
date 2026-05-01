@@ -9,9 +9,25 @@
         </button>
     </div>
 
-    <!-- Center: Editor Tabs -->
+    <!-- Center: Editor Tabs / Hub Page Tabs -->
     <div class="flex-1 overflow-hidden h-full mx-2 flex items-end">
+        @if (hubService.isPageMode()) {
+        <div class="h-full w-full flex items-end overflow-hidden">
+            @for (tab of hubService.tabs; track tab.id) {
+            <button type="button"
+                class="flex items-center gap-2 h-full px-4 border-b-2 text-xs font-semibold whitespace-nowrap transition-colors focus:outline-none"
+                [ngClass]="hubService.activeTab() === tab.id
+                    ? 'border-primary text-white'
+                    : 'border-transparent text-white/55 hover:text-white hover:bg-white/5'"
+                (click)="hubService.setActiveTab(tab.id)">
+                <i [class]="tab.icon"></i>
+                {{ tab.label }}
+            </button>
+            }
+        </div>
+        } @else {
         <app-editor-tabs></app-editor-tabs>
+        }
     </div>
 
     <!-- Right Actions -->

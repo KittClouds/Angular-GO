@@ -10,11 +10,17 @@
 
         <!-- Editor / Router Outlet -->
         <main class="flex-1 overflow-hidden relative">
+            @if (hubService.isPageMode()) {
+            <app-blueprint-hub mode="page"></app-blueprint-hub>
+            } @else {
             <ng-content></ng-content>
+            }
         </main>
 
         <!-- Blueprint Hub (Overlay) -->
-        <app-blueprint-hub></app-blueprint-hub>
+        @if (!hubService.isPageMode()) {
+        <app-blueprint-hub mode="overlay"></app-blueprint-hub>
+        }
 
         <!-- Footer -->
         <app-hub-footer class="shrink-0"></app-hub-footer>

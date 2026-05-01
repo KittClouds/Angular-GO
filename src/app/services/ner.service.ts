@@ -30,7 +30,7 @@ import {
 } from '../lib/entity-learning/entity-feedback';
 
 class PhoenixScanEntitySuggestionProvider implements EntitySuggestionProviderApi {
-    readonly id = 'fst' as const;
+    readonly id = 'dynamic_ner' as const;
 
     constructor(private readonly phoenixUiApi: PhoenixUiApiService) {}
 
@@ -246,6 +246,7 @@ export class NerService {
     readonly errorMessage = signal<string | null>(null);
 
     readonly providerStatuses = computed(() => ({
+        dynamic_ner: this.fstStatus(),
         fst: this.fstStatus(),
         lfm_local_experiment: this.lfmLocalProvider.status(),
         gliner_local: this.glinerLocalProvider.status(),
@@ -255,11 +256,15 @@ export class NerService {
 
     async analyzeNote(text: string) {
         const currentNote = this.noteStore.currentNote();
-        await this.runManualScan('fst', {
+        await this.runDynamicScan({
             noteId: currentNote?.id || 'manual-scan',
             noteTitle: currentNote?.title || 'Untitled Note',
             plainText: text,
         });
+    }
+
+    async runDynamicScan(request: EntitySuggestionScanRequest): Promise<void> {
+        await this.runManualScan('dynamic_ner', request);
     }
 
     async runManualScan(providerId: EntitySuggestionProviderId, request: EntitySuggestionScanRequest): Promise<void> {
@@ -412,7 +417,7 @@ export class NerService {
         return providerSuggestions
             .filter((suggestion) => !smartGraphRegistry.isRegisteredEntity(suggestion.label))
             .filter((suggestion) => !isLikelyJunkEntityLabel(suggestion.label))
-            .filter((suggestion) => providerId !== 'fst' || isPlausiblePhoenixDiscoveryCandidate({
+            .filter((suggestion) => !isNativeScanProvider(providerId) || isPlausiblePhoenixDiscoveryCandidate({
                 key: suggestion.label,
                 token: suggestion.label,
                 kind: suggestion.kind,
@@ -428,11 +433,15 @@ export class NerService {
                     ? suggestion.rawScore
                     : mapConfidenceLevelToScore(suggestion.confidence),
                 context: suggestion.evidence || undefined,
-                llmEnhanced: providerId !== 'fst',
+                llmEnhanced: !isNativeScanProvider(providerId),
                 llmReasoning: suggestion.reasoning || undefined,
                 source: providerId,
             }));
     }
+}
+
+function isNativeScanProvider(providerId: EntitySuggestionProviderId): boolean {
+    return providerId === 'dynamic_ner' || providerId === 'fst';
 }
 
 let _globalFstEnabled = true;

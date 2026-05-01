@@ -3,6 +3,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { EmbeddingEngine } from '../lib/embeddings/EmbeddingEngine';
 import { SemanticSearchService } from '../lib/services/semantic-search.service';
 import { PhoenixGraphOrchestratorService, type PhoenixGraphIndexPolicy } from './phoenix-graph-orchestrator.service';
+import { PhoenixMachineControllerService } from './phoenix-machine-controller.service';
 import { PhoenixUiApiService, type SearchScope } from './phoenix-ui-api.service';
 import { GraphAuditService } from './graph-audit.service';
 import type { GraphAuditSnapshot } from './graph-audit.model';
@@ -40,6 +41,7 @@ export class PhoenixMachineControlService {
     private readonly semanticSearch = inject(SemanticSearchService);
     private readonly graphOrchestrator = inject(PhoenixGraphOrchestratorService);
     private readonly graphAuditService = inject(GraphAuditService);
+    private readonly machineController = inject(PhoenixMachineControllerService);
 
     readonly query = this.workbench.query;
     readonly scope = this.workbench.scope;
@@ -47,6 +49,8 @@ export class PhoenixMachineControlService {
     readonly activeLanes = this.workbench.activeLanes;
     readonly graphFocus = this.workbench.graphFocus;
     readonly graphLensMode = this.workbench.graphLensMode;
+    readonly stages = this.machineController.stages;
+    readonly activeSignals = this.machineController.activeSignals;
 
     readonly vectorStatus = signal<PhoenixMachineVectorStatus>(EmbeddingEngine.isReady() ? 'ready' : 'idle');
     readonly graphStatus = signal<PhoenixMachineGraphStatus>('idle');
@@ -111,6 +115,7 @@ export class PhoenixMachineControlService {
 
     async loadSemanticModel(modelId: PhoenixMachineModelId, label: string, dimensionLabel: string): Promise<void> {
         const startedAt = this.beginJob('semantic-load');
+        this.machineController.beginStage('embeddings', 'semantic-load');
         this.vectorStatus.set('loading');
         this.error.set(null);
 
@@ -118,10 +123,12 @@ export class PhoenixMachineControlService {
             await this.semanticSearch.initializeWorker();
             await EmbeddingEngine.initialize(modelId);
             this.vectorStatus.set('ready');
+            this.machineController.finishStage('embeddings', 'semantic-load');
             this.notice.set(`${label} loaded at ${dimensionLabel}. Semantic work stays explicit.`);
             this.finishJob('semantic-load', `${label} loaded`, startedAt, { modelId, dimensionLabel });
         } catch (err) {
             this.vectorStatus.set('error');
+            this.machineController.failStage('embeddings', 'semantic-load', err);
             this.failJob(err);
             throw err;
         }
@@ -129,18 +136,21 @@ export class PhoenixMachineControlService {
 
     async indexSemanticDocuments(documents: PhoenixMachineSemanticDocument[]): Promise<void> {
         const startedAt = this.beginJob('semantic-index');
+        this.machineController.beginStage('embeddings', 'semantic-index');
         this.vectorStatus.set('indexing');
         this.error.set(null);
 
         try {
             await this.semanticSearch.indexNotes(documents);
             this.vectorStatus.set('ready');
+            this.machineController.finishStage('embeddings', 'semantic-index');
             this.notice.set(`Queued ${documents.length} notes for embedding. Graph commits remain explicit.`);
             this.finishJob('semantic-index', `Queued ${documents.length} semantic documents`, startedAt, {
                 documentCount: documents.length,
             });
         } catch (err) {
             this.vectorStatus.set('error');
+            this.machineController.failStage('embeddings', 'semantic-index', err);
             this.failJob(err);
             throw err;
         }
@@ -149,6 +159,8 @@ export class PhoenixMachineControlService {
     async runGraphIndex(policy: PhoenixGraphIndexPolicy, reason: string): Promise<number> {
         const kind = policy === 'force' ? 'graph-rebuild' : 'graph-update';
         const startedAt = this.beginJob(kind);
+        this.machineController.beginStage('evidenceGraph', kind);
+        this.machineController.beginStage('overgraph', kind);
         this.graphStatus.set('building');
         this.error.set(null);
         this.notice.set(null);
@@ -161,6 +173,8 @@ export class PhoenixMachineControlService {
             this.phoenixUiApi.invalidateKnowledgeGraphCache();
             await this.refreshAuditSafe();
             this.graphStatus.set('ready');
+            this.machineController.finishStage('evidenceGraph', kind);
+            this.machineController.finishStage('overgraph', kind);
             this.notice.set(`Graph ${policy === 'force' ? 'rebuilt' : 'updated'} for ${result.processedNotes} notes.`);
             this.finishJob(kind, this.notice() || 'Graph index complete', startedAt, {
                 processedNotes: result.processedNotes,
@@ -170,6 +184,8 @@ export class PhoenixMachineControlService {
             return result.processedNotes;
         } catch (err) {
             this.graphStatus.set('error');
+            this.machineController.failStage('evidenceGraph', kind, err);
+            this.machineController.failStage('overgraph', kind, err);
             this.failJob(err);
             throw err;
         }

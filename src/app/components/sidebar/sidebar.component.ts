@@ -5,7 +5,7 @@ import { Component, inject, signal, computed, OnInit, OnDestroy, HostListener } 
 import { Router, NavigationEnd } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
-import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, MoveVertical, RefreshCw, Share2, Upload, Download, MessageCircle, History } from 'lucide-angular';
+import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, MoveVertical, RefreshCw, Upload, Download, MessageCircle, History } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { SidebarService } from '../../lib/services/sidebar.service';
@@ -116,7 +116,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
     readonly Moon = Moon;
     readonly MoveVertical = MoveVertical;
     readonly RefreshCw = RefreshCw;
-    readonly Share2 = Share2;
     readonly MessageCircle = MessageCircle;
     readonly HistoryIcon = History;
     readonly Download = Download;
@@ -600,10 +599,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     navigateToCalendar(): void {
         this.router.navigate(['/calendar']);
-    }
-
-    navigateToGraph(): void {
-        this.router.navigate(['/graph']);
     }
 
     navigateToChat(): void {

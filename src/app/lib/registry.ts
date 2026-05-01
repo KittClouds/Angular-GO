@@ -31,6 +31,57 @@ export interface RegisteredEntity {
     noteId?: string;
 }
 
+export type EntitySourceSystem =
+    | 'user'
+    | 'dynamic_ner'
+    | 'graph_pipeline'
+    | 'ingestion'
+    | 'auto'
+    | 'import'
+    | 'legacy';
+
+export interface EntitySourceAttributes {
+    sourceSystem?: EntitySourceSystem;
+    discoverySource?: string;
+    graphSource?: string;
+    sourceConfidence?: number;
+}
+
+export const ENTITY_SOURCE_LABELS: Record<EntitySourceSystem, string> = {
+    user: 'User',
+    dynamic_ner: 'NER',
+    graph_pipeline: 'Graph',
+    ingestion: 'Ingest',
+    auto: 'Auto',
+    import: 'Import',
+    legacy: 'Legacy',
+};
+
+export function entitySourceSystem(entity: RegisteredEntity): EntitySourceSystem {
+    const attributes = (entity.attributes || {}) as EntitySourceAttributes;
+    if (isEntitySourceSystem(attributes.sourceSystem)) return attributes.sourceSystem;
+
+    const discoverySource = String(attributes.discoverySource || '').toLowerCase();
+    if (discoverySource === 'dynamic_ner' || discoverySource === 'gliner_bi' || discoverySource === 'gliner') {
+        return 'dynamic_ner';
+    }
+    if (attributes.graphSource) return 'graph_pipeline';
+
+    switch (entity.createdBy) {
+        case 'extraction': return 'dynamic_ner';
+        case 'auto': return 'graph_pipeline';
+        default: return 'user';
+    }
+}
+
+export function entitySourceLabel(entity: RegisteredEntity): string {
+    return ENTITY_SOURCE_LABELS[entitySourceSystem(entity)];
+}
+
+function isEntitySourceSystem(value: unknown): value is EntitySourceSystem {
+    return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ENTITY_SOURCE_LABELS, value);
+}
+
 export interface EntityRegistrationResult {
     entity: RegisteredEntity;
     isNew: boolean;
@@ -656,13 +707,8 @@ export class CentralRegistry {
             await phoenixUiApi.hydrateWithEntities();
             console.log(`[CentralRegistry] ✅ Dictionary rebuild complete`);
 
-            // Dispatch event to trigger immediate rescan with updated dictionary
-            // SAFE: ScanCoordinator has guard to skip already-registered entities (line 98-100)
-            // preventing: dictionary-rebuilt → rescan → onEntityDecoration → registerEntity → notify → LOOP
+            // Dispatch a state event only. The machine controller owns explicit scans.
             window.dispatchEvent(new CustomEvent('dictionary-rebuilt'));
-            void import('./notes/entity-occurrence-index')
-                .then(module => module.scheduleLoadedNoteEntityOccurrenceRebuild())
-                .catch(error => console.warn('[CentralRegistry] Entity occurrence rebuild skipped:', error));
             console.log(`[CentralRegistry] 📢 Dispatched dictionary-rebuilt event`);
         } catch (err) {
             console.error('[CentralRegistry] Dictionary rebuild failed:', err);

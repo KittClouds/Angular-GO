@@ -21,6 +21,7 @@ vi.mock('../lib/services/semantic-search.service', () => ({
 import type { GraphAuditSnapshot } from './graph-audit.model';
 import { GraphAuditService } from './graph-audit.service';
 import { PhoenixGraphOrchestratorService } from './phoenix-graph-orchestrator.service';
+import { PhoenixMachineControllerService } from './phoenix-machine-controller.service';
 import { PhoenixMachineControlService } from './phoenix-machine-control.service';
 import { PhoenixUiApiService } from './phoenix-ui-api.service';
 import { RetrievalWorkbenchStateService } from './retrieval-workbench-state.service';
@@ -65,6 +66,11 @@ describe('PhoenixMachineControlService', () => {
         initializeWorker: ReturnType<typeof vi.fn>;
         indexNotes: ReturnType<typeof vi.fn>;
     };
+    let machineController: {
+        beginStage: ReturnType<typeof vi.fn>;
+        finishStage: ReturnType<typeof vi.fn>;
+        failStage: ReturnType<typeof vi.fn>;
+    };
 
     beforeEach(() => {
         graphAudit = { snapshot: vi.fn(async () => snapshot) };
@@ -80,6 +86,11 @@ describe('PhoenixMachineControlService', () => {
             initializeWorker: vi.fn(async () => undefined),
             indexNotes: vi.fn(async () => undefined),
         };
+        machineController = {
+            beginStage: vi.fn(),
+            finishStage: vi.fn(),
+            failStage: vi.fn(),
+        };
 
         vi.mocked(EmbeddingEngine.isReady).mockReturnValue(false);
         vi.mocked(EmbeddingEngine.initialize).mockResolvedValue(undefined);
@@ -91,6 +102,7 @@ describe('PhoenixMachineControlService', () => {
             { provide: PhoenixGraphOrchestratorService, useValue: graphOrchestrator },
             { provide: PhoenixUiApiService, useValue: uiApi },
             { provide: SemanticSearchService, useValue: semanticSearch },
+            { provide: PhoenixMachineControllerService, useValue: machineController },
         ], Injector.create({ providers: [] }));
         service = runInInjectionContext(injector, () => injector.get(PhoenixMachineControlService));
     });
