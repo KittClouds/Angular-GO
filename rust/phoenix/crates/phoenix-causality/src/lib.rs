@@ -5,8 +5,7 @@ use phoenix_semantics::SemanticBundle;
 use phoenix_time::TemporalBinding;
 use phoenix_types::{
     CausalBundle, CausalCandidate, CausalDiagnostic, CausalEvidenceKind, CausalKind, CausalLink,
-    Polarity, Proposition, ProvenanceRef, SemanticNodeRef, SemanticOrder, SourceRange,
-    TruthStatus,
+    Polarity, Proposition, ProvenanceRef, SemanticNodeRef, SemanticOrder, SourceRange, TruthStatus,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -169,9 +168,15 @@ fn proposition_nodes(
             claim.claim_id.as_ref(),
             proposition_by_id.get(&claim.proposition_id),
         ) {
-            nodes.entry(claim.proposition_id.clone()).or_insert_with(|| {
-                semantic_node_record(proposition, SemanticNodeRef::Claim(claim_id.clone()), claim.order)
-            });
+            nodes
+                .entry(claim.proposition_id.clone())
+                .or_insert_with(|| {
+                    semantic_node_record(
+                        proposition,
+                        SemanticNodeRef::Claim(claim_id.clone()),
+                        claim.order,
+                    )
+                });
         }
     }
     nodes
@@ -254,7 +259,10 @@ fn validate_candidate(
         confidence = confidence.saturating_sub(240);
         status = TruthStatus::Candidate;
     }
-    if matches!(frame.kind, CausalKind::Explains | CausalKind::Motivates | CausalKind::PurposeOf) {
+    if matches!(
+        frame.kind,
+        CausalKind::Explains | CausalKind::Motivates | CausalKind::PurposeOf
+    ) {
         confidence = confidence.saturating_sub(60);
     }
     (status, confidence.max(100), polarity, attributed_to)

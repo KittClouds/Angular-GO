@@ -41,7 +41,7 @@ export interface GraphLensView {
 }
 
 export const DEFAULT_GRAPH_LENS: GraphLensState = {
-    mode: 'narrative',
+    mode: 'global',
     primaryNoteId: null,
     selectedNoteIds: [],
 };
@@ -53,8 +53,8 @@ export function buildGraphLensView(input: GraphLensInput): GraphLensView {
             entities: input.globalEntities,
             edges: filterEdges(input.globalEdges, entityIdSet(input.globalEntities)),
             sourceLabel: 'global lens',
-            primaryNoteId: lens.primaryNoteId,
-            selectedNoteIds: lens.selectedNoteIds,
+            primaryNoteId: null,
+            selectedNoteIds: [],
         };
     }
     if (lens.mode === 'narrative') {
@@ -62,8 +62,8 @@ export function buildGraphLensView(input: GraphLensInput): GraphLensView {
             entities: input.narrativeEntities,
             edges: filterEdges(input.narrativeEdges, entityIdSet(input.narrativeEntities)),
             sourceLabel: 'narrative lens',
-            primaryNoteId: lens.primaryNoteId,
-            selectedNoteIds: lens.selectedNoteIds,
+            primaryNoteId: null,
+            selectedNoteIds: [],
         };
     }
 
@@ -98,6 +98,9 @@ export function buildGraphLensView(input: GraphLensInput): GraphLensView {
 export function normalizeLens(lens: GraphLensState, notes: GraphLensNote[]): GraphLensState {
     const noteIds = new Set(notes.map((note) => note.id));
     const selectedNoteIds = unique(lens.selectedNoteIds.filter((id) => noteIds.has(id)));
+    if (lens.mode === 'global' || lens.mode === 'narrative') {
+        return { ...lens, primaryNoteId: null, selectedNoteIds: [] };
+    }
     const fallbackPrimary = lens.primaryNoteId && noteIds.has(lens.primaryNoteId)
         ? lens.primaryNoteId
         : selectedNoteIds[0] ?? notes[0]?.id ?? null;
@@ -110,7 +113,7 @@ export function normalizeLens(lens: GraphLensState, notes: GraphLensNote[]): Gra
         const primary = fallbackPrimary && selected.includes(fallbackPrimary) ? fallbackPrimary : selected[0] ?? null;
         return { ...lens, primaryNoteId: primary, selectedNoteIds: selected };
     }
-    return { ...lens, primaryNoteId: fallbackPrimary, selectedNoteIds };
+    return { ...lens, primaryNoteId: null, selectedNoteIds: [] };
 }
 
 export function buildUniqueAtlasEdges(entities: RegisteredEntity[], edgeReader: (entityId: string) => AtlasPreviewEdge[]): AtlasPreviewEdge[] {

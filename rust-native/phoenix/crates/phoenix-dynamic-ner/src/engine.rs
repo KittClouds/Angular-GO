@@ -8,6 +8,7 @@ use phoenix_types::{Diagnostic, ScopeKey, SentenceSpan, TextRange, TokenSpan};
 use thiserror::Error;
 
 use crate::graph::{MentionGraph, MentionGraphBuilder};
+use crate::hints::{build_chunk_hints, ChunkHint};
 use crate::known_lane::KnownSurfaceLane;
 use crate::native_lane::NativeDiscoveryLane;
 use crate::router::SurfaceRouter;
@@ -35,6 +36,7 @@ pub struct SurfaceNerInput<'a> {
 pub struct SurfaceNerOutput {
     pub mentions: Vec<MentionPacket>,
     pub mention_graph: MentionGraph,
+    pub chunk_hints: Vec<ChunkHint>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -313,10 +315,18 @@ impl PhoenixNerEngine {
         // === Finalize ===
         let packets = workspace.finalize_packets();
         let mention_graph = MentionGraphBuilder::build(&packets);
+        let chunk_hints = build_chunk_hints(
+            input.text,
+            input.sentences,
+            &packets,
+            &mention_graph,
+            &needs,
+        );
 
         Ok(SurfaceNerOutput {
             mentions: packets,
             mention_graph,
+            chunk_hints,
             diagnostics,
         })
     }
@@ -343,6 +353,8 @@ impl PhoenixNerEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ChunkHintKind, MentionKind};
+    use phoenix_types::{PosTag, TokenClass, TokenSpan};
 
     #[test]
     fn engine_builds_with_defaults() {
@@ -358,6 +370,7 @@ mod tests {
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result.mentions.is_empty());
         assert_eq!(result.mention_graph.edge_count(), 0);
+        assert!(result.chunk_hints.is_empty());
     }
 
     #[test]
@@ -395,5 +408,224 @@ mod tests {
         let result = engine.extract_mentions(&input).unwrap();
         assert!(!result.mentions.is_empty());
         assert_eq!(result.mentions[0].surface.as_str(), "Kamaria");
+    }
+
+    #[test]
+    fn repeated_scan_produces_identical_hint_ids() {
+        let (lexicon, scope) = test_lexicon(&["Aella", "Kai"]);
+        let text = "Aella met Kai at the bridge.";
+        let sentences = one_sentence(text);
+        let engine = PhoenixNerEngineBuilder::new().build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text,
+            tokens: &[],
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        };
+        let left = engine.extract_mentions(&input).unwrap();
+        let right = engine.extract_mentions(&input).unwrap();
+        let left_ids = left
+            .chunk_hints
+            .iter()
+            .map(|hint| hint.id.clone())
+            .collect::<Vec<_>>();
+        let right_ids = right
+            .chunk_hints
+            .iter()
+            .map(|hint| hint.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(left_ids, right_ids);
+    }
+
+    #[test]
+    fn known_entity_pair_creates_entity_pair_hint() {
+        let (lexicon, scope) = test_lexicon(&["Aella", "Kai"]);
+        let text = "Aella met Kai at the bridge.";
+        let sentences = one_sentence(text);
+        let engine = PhoenixNerEngineBuilder::new().build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text,
+            tokens: &[],
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        };
+        let result = engine.extract_mentions(&input).unwrap();
+        assert!(result
+            .chunk_hints
+            .iter()
+            .any(|hint| hint.kind == ChunkHintKind::EntityPair));
+    }
+
+    #[test]
+    fn pronoun_or_nominal_ambiguity_creates_relationship_or_adjudication_hint() {
+        let (lexicon, scope) = test_lexicon(&["Aella"]);
+        let text = "Aella thanked the captain. She trusted the captain.";
+        let sentences = period_sentences(text);
+        let tokens = simple_tokens(text);
+        let engine = PhoenixNerEngineBuilder::new().build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text,
+            tokens: &tokens,
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        };
+        let result = engine.extract_mentions(&input).unwrap();
+        assert!(result
+            .mentions
+            .iter()
+            .any(|mention| mention.mention_kind == MentionKind::Nominal));
+        assert!(result.chunk_hints.iter().any(|hint| {
+            matches!(
+                hint.kind,
+                ChunkHintKind::Relationship | ChunkHintKind::Adjudication
+            )
+        }));
+    }
+
+    #[test]
+    fn unchanged_text_produces_no_duplicate_hint_ids() {
+        let (lexicon, scope) = test_lexicon(&["Aella", "Kai"]);
+        let text = "Aella met Kai. Aella warned Kai.";
+        let sentences = period_sentences(text);
+        let engine = PhoenixNerEngineBuilder::new().build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text,
+            tokens: &[],
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        };
+        let result = engine.extract_mentions(&input).unwrap();
+        let unique = result
+            .chunk_hints
+            .iter()
+            .map(|hint| hint.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), result.chunk_hints.len());
+    }
+
+    #[test]
+    fn deterministic_ner_path_stays_under_one_second_budget() {
+        let (lexicon, scope) = test_lexicon(&["Aella", "Kai"]);
+        let text = "Aella met Kai at the bridge. ".repeat(80);
+        let sentences = repeated_sentences(&text, "Aella met Kai at the bridge. ");
+        let engine = PhoenixNerEngineBuilder::new().build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text: &text,
+            tokens: &[],
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        };
+        let started = std::time::Instant::now();
+        let result = engine.extract_mentions(&input).unwrap();
+        assert!(!result.chunk_hints.is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    fn test_lexicon(names: &[&str]) -> (Lexicon, ScopeKey) {
+        use phoenix_types::{EntityId, EntityKind, GenderHint, LexiconEntry};
+
+        let scope = ScopeKey::default();
+        let entries = names
+            .iter()
+            .map(|name| LexiconEntry {
+                entity_id: EntityId(name.to_ascii_lowercase()),
+                label: (*name).to_owned(),
+                aliases: vec![],
+                kind: Some(EntityKind::Character),
+                gender: Some(GenderHint::Unknown),
+                number: None,
+                scope: scope.clone(),
+            })
+            .collect::<Vec<_>>();
+        (Lexicon::from_entries(&entries).unwrap(), scope)
+    }
+
+    fn one_sentence(text: &str) -> Vec<SentenceSpan> {
+        vec![SentenceSpan {
+            index: 0,
+            range: TextRange {
+                start: 0,
+                end: text.len() as u32,
+            },
+        }]
+    }
+
+    fn period_sentences(text: &str) -> Vec<SentenceSpan> {
+        let mut sentences = Vec::new();
+        let mut start = 0usize;
+        for (idx, ch) in text.char_indices() {
+            if ch == '.' {
+                sentences.push(SentenceSpan {
+                    index: sentences.len(),
+                    range: TextRange {
+                        start: start as u32,
+                        end: (idx + 1) as u32,
+                    },
+                });
+                start = idx + 1;
+                while start < text.len() && text.as_bytes()[start].is_ascii_whitespace() {
+                    start += 1;
+                }
+            }
+        }
+        sentences
+    }
+
+    fn repeated_sentences(text: &str, sentence: &str) -> Vec<SentenceSpan> {
+        let mut start = 0u32;
+        let mut sentences = Vec::new();
+        while (start as usize) < text.len() {
+            let end = (start as usize + sentence.trim_end().len()) as u32;
+            sentences.push(SentenceSpan {
+                index: sentences.len(),
+                range: TextRange { start, end },
+            });
+            start = (start as usize + sentence.len()) as u32;
+        }
+        sentences
+    }
+
+    fn simple_tokens(text: &str) -> Vec<TokenSpan> {
+        let mut tokens = Vec::new();
+        let mut start = None;
+        for (idx, ch) in text.char_indices() {
+            if ch.is_alphanumeric() || ch == '\'' || ch == '-' {
+                start.get_or_insert(idx);
+            } else if let Some(s) = start.take() {
+                tokens.push(token(text, s, idx));
+            }
+        }
+        if let Some(s) = start {
+            tokens.push(token(text, s, text.len()));
+        }
+        tokens
+    }
+
+    fn token(text: &str, start: usize, end: usize) -> TokenSpan {
+        let surface = &text[start..end];
+        TokenSpan {
+            range: TextRange {
+                start: start as u32,
+                end: end as u32,
+            },
+            capitalized: surface.starts_with(|ch: char| ch.is_uppercase()),
+            pos: matches!(
+                surface.to_ascii_lowercase().as_str(),
+                "she" | "he" | "they" | "her" | "him"
+            )
+            .then_some(PosTag::Pronoun),
+            token_class: Some(TokenClass::Word),
+            masked: false,
+        }
     }
 }

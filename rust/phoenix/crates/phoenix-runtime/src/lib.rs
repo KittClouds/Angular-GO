@@ -4,8 +4,13 @@ use std::fs;
 #[cfg(feature = "legacy-cozo-graph")]
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
+use std::time::Instant;
 
 mod binary;
+#[cfg(not(target_arch = "wasm32"))]
+mod dynamic_gliner;
 #[cfg(not(target_arch = "wasm32"))]
 mod overgraph_lane;
 mod planner;
@@ -17,11 +22,17 @@ use overgraph_lane::OvergraphLaneSyncReport;
 use overgraph_lane::PhoenixOvergraphLane;
 use phoenix_analytics::TextAnalytics;
 use phoenix_chat::PhoenixChat;
+use phoenix_dynamic_ner::{
+    MentionKind as DynamicMentionKind, MentionStatus as DynamicMentionStatus,
+    PhoenixNerEngineBuilder, SurfaceNerInput,
+};
+use phoenix_alex::{normalized_has_meaningful_token, Lexicon as DynamicLexicon};
+use phoenix_types as dynamic_types;
 #[cfg(feature = "legacy-cozo-graph")]
 use phoenix_gldr::PhoenixGldr;
 use phoenix_graph::{
-    GraphBackendError, GraphEdgeRecord, GraphLayer, GraphMutationBatch,
-    GraphMutationScope, GraphVertexRecord,
+    GraphBackendError, GraphEdgeRecord, GraphLayer, GraphMutationBatch, GraphMutationScope,
+    GraphVertexRecord,
 };
 #[cfg(feature = "legacy-cozo-graph")]
 use phoenix_graptor::{
@@ -29,16 +40,14 @@ use phoenix_graptor::{
     BorrowedIngestRequest, GraptorGraph, PhoenixGraptor,
 };
 use phoenix_invarant_v2::PhoenixInvarantV2;
-#[cfg(test)]
-use phoenix_kernel::{KernelEdgeType, KernelMutationScope, KernelVertexId};
 #[cfg(all(test, feature = "legacy-cozo-graph"))]
-use phoenix_kernel::{
-    KernelBiTemporal, KernelEntityFacet, KernelVertexClass, KernelViewRequest,
-};
+use phoenix_kernel::{KernelBiTemporal, KernelEntityFacet, KernelVertexClass, KernelViewRequest};
 use phoenix_kernel::{
     KernelEdge, KernelGraphLayer, KernelGraphSnapshot,
     KernelMutationBatch as KernelGraphMutationBatch, KernelVertex,
 };
+#[cfg(test)]
+use phoenix_kernel::{KernelEdgeType, KernelMutationScope, KernelVertexId};
 #[cfg(feature = "legacy-cozo-graph")]
 use phoenix_lex::indexed_spans_from_store;
 use phoenix_lex::{LexConfig, LexIndex};
@@ -51,27 +60,31 @@ use phoenix_semantic_v2::scope_storage_key;
 #[cfg(feature = "legacy-cozo-graph")]
 use phoenix_store_cozo::{CompactRow, CompactRowView, PhoenixCozoStore, StoreConfig};
 use phoenix_store_native::{GraphCheckpointData, PhoenixNativeRowStore};
-#[cfg(not(target_arch = "wasm32"))]
-use phoenix_store_overgraph::PhoenixOvergraphStore;
 pub use phoenix_store_native_core::SnapshotPartition;
 use phoenix_store_native_core::{
     schema::{CONTENT_SNAPSHOT_RELATIONS, DERIVED_SNAPSHOT_RELATIONS},
     SemanticDocumentNeighbor, SemanticNodeNeighbor, SnapshotEnvelope, StoreError,
     SEMANTIC_MODEL_ID, SEMANTIC_VECTOR_DIM,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use phoenix_store_overgraph::PhoenixOvergraphStore;
 use phoenix_structure::PhoenixStructure;
 use phoenix_triverse_v2::PhoenixTriverseV2;
 use phoenix_types::{
-    ChatPlannerModelResponse, ChatRunEvent, ChatRuntimeConfig, CommitId, CommitRequest,
-    CommitResult, CreateSessionRequest, Diagnostic, DocumentId, EntityCard, EntityId, FolderSchema,
-    GraphDeltaChunk, GraphDeltaEdge, GraphDeltaNode, GraphDeltaRequest, GraphDeltaResult,
-    IndexedSpan, IndexedTextField, IngestRequest, IngestResult, LexicalField, LexicalSearchResult,
+    AtlasRichScanCandidateSummary, AtlasRichScanDocument, AtlasRichScanEmbeddingCounts,
+    AtlasRichScanManifestSummary, AtlasRichScanPolicy, AtlasRichScanRequest, AtlasRichScanResult,
+    AtlasRichScanScope, AtlasRichScanStageSummary, ChatPlannerModelResponse, ChatRunEvent,
+    ChatRuntimeConfig, CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic,
+    DocumentId, EntityCard, EntityId, EntityKind, FolderSchema, GraphDeltaChunk, GraphDeltaEdge,
+    GraphDeltaNode, GraphDeltaRequest, GraphDeltaResult, IndexedSpan, IndexedTextField,
+    IngestRequest, IngestResult, LexicalField, LexicalSearchResult,
     NetworkInstance, NodeHit, NoteId, OmPendingAction, OmRecord, OmReflectorModelResponse,
-    OmReflectorToolResult, PhoenixBootSnapshotRows, QueryRequest, QueryResult, RebuildRequest,
-    RebuildResult, RelationCount, RunOptions, RuntimeConfig, RuntimeInitResult, RuntimeTarget,
-    SavedNetworkView, ScanArtifact, ScanRequest, ScopeKey, SessionDocumentState, SessionId,
-    SessionRecord, SessionState, SessionStats, SnapshotDto, SpanHit, StoreCommandRequest,
-    StoreCommandResult, StructureArtifact, StructureRequest, TextRange, Thread, ThreadMessage,
+    OmReflectorToolResult,
+    PhoenixBootSnapshotRows, QueryRequest, QueryResult, RebuildRequest, RebuildResult,
+    RelationCount, RunOptions, RuntimeConfig, RuntimeInitResult, RuntimeTarget, SavedNetworkView,
+    ScanArtifact, ScanRequest, ScopeKey, SessionDocumentState, SessionId, SessionRecord,
+    SessionState, SessionStats, SnapshotDto, SpanHit, StoreCommandRequest, StoreCommandResult,
+    StorageMode, StructureArtifact, StructureRequest, TextRange, Thread, ThreadMessage,
     ToolResultSubmission,
 };
 use planner::{list_run_artifacts, set_artifact_pinned, ChatPlannerRunner};
@@ -112,6 +125,23 @@ const NATIVE_SCOPE_LEX_CACHE_LIMIT: usize = 16;
 const NATIVE_SCOPE_QGRAM_MIN_SPANS: usize = 32;
 
 const STORE_API_VERSION: u32 = 1;
+
+#[derive(Default)]
+struct DynamicAtlasPipelineResult {
+    mention_count: usize,
+    token_count: usize,
+    sentence_count: usize,
+    surface_chunk_count: usize,
+    resolver_link_count: usize,
+    narrative_hit_count: usize,
+    graph_nodes: usize,
+    graph_edges: usize,
+    document_leaf_counts: BTreeMap<String, usize>,
+    lens_chunk_counts: BTreeMap<String, usize>,
+    candidate_suggestions: Vec<AtlasRichScanCandidateSummary>,
+    diagnostics: Vec<Diagnostic>,
+}
+
 const RUNTIME_CAPABILITIES: &[&str] = &[
     "note:list",
     "note:get",
@@ -418,7 +448,7 @@ impl PhoenixRuntime {
     pub fn open(config: RuntimeConfig, storage_path: Option<PathBuf>) -> Result<Self, StoreError> {
         let use_native_graph = config.target == RuntimeTarget::Native;
         #[cfg(not(target_arch = "wasm32"))]
-        let overgraph_path = overgraph_store_path(storage_path.as_deref());
+        let overgraph_path = overgraph_store_path(&config, storage_path.as_deref());
         let store = MaybeCozoStore::open(!use_native_graph, &config, storage_path)?;
         #[cfg(not(target_arch = "wasm32"))]
         let overgraph_store = if use_native_graph {
@@ -951,10 +981,7 @@ impl PhoenixRuntime {
             .collect::<Vec<_>>();
         if spans.len() < NATIVE_SCOPE_QGRAM_MIN_SPANS {
             return Ok(native_linear_lexical_search_result(
-                &spans,
-                query,
-                scope,
-                limit,
+                &spans, query, scope, limit,
             ));
         }
 
@@ -1055,12 +1082,15 @@ impl PhoenixRuntime {
             })
             .collect::<Vec<_>>();
         if node_hits.is_empty() {
-            node_hits.extend(chunk_hits.iter().take(request.limit.unwrap_or(5)).map(|hit| {
-                NodeHit {
-                    entity_id: None,
-                    score: hit.score * 0.25,
-                }
-            }));
+            node_hits.extend(
+                chunk_hits
+                    .iter()
+                    .take(request.limit.unwrap_or(5))
+                    .map(|hit| NodeHit {
+                        entity_id: None,
+                        score: hit.score * 0.25,
+                    }),
+            );
         }
         node_hits.sort_by(|left, right| {
             right
@@ -1107,7 +1137,9 @@ impl PhoenixRuntime {
         let vertex_count = self.fetch_relation_rows("graph_vertices")?.len();
         let edge_count = self.fetch_relation_rows("graph_edges")?.len();
         let candidate_count = self.fetch_relation_rows("graph_candidate_edges")?.len();
-        Ok(format!("overgraph:{vertex_count}:{edge_count}:{candidate_count}"))
+        Ok(format!(
+            "overgraph:{vertex_count}:{edge_count}:{candidate_count}"
+        ))
     }
 
     #[allow(dead_code)]
@@ -1667,7 +1699,10 @@ impl PhoenixRuntime {
                         Some(&document_id),
                         scope.narrative_id.as_deref(),
                         Map::new(),
-                        vec![format!("document:{document_id}"), format!("entity:{entity_id}")],
+                        vec![
+                            format!("document:{document_id}"),
+                            format!("entity:{entity_id}"),
+                        ],
                     ),
                 );
             }
@@ -3173,12 +3208,7 @@ impl PhoenixRuntime {
                 continue;
             };
             let neighbors = if self.native_graph_enabled() {
-                self.native_semantic_document_neighbors(
-                    &source_vector.values,
-                    &scope,
-                    4,
-                    16,
-                )?
+                self.native_semantic_document_neighbors(&source_vector.values, &scope, 4, 16)?
             } else {
                 #[cfg(feature = "legacy-cozo-graph")]
                 {
@@ -3908,11 +3938,7 @@ impl PhoenixRuntime {
                 let lexical = if let Some(lex) = self.lex.borrow().as_ref() {
                     lex.search(lexical_query, &owned_request.scope, lexical_limit)
                 } else {
-                    self.native_lexical_search(
-                        lexical_query,
-                        &owned_request.scope,
-                        lexical_limit,
-                    )?
+                    self.native_lexical_search(lexical_query, &owned_request.scope, lexical_limit)?
                 };
                 self.native_query_with_lexical(lexical, &owned_request)?
             } else {
@@ -4059,6 +4085,586 @@ impl PhoenixRuntime {
     ) -> Result<usize, StoreError> {
         let result = self.graph_delta(request)?;
         binary::encode_graph_delta_into(buffer, &result)
+    }
+
+    pub fn atlas_rich_scan(
+        &self,
+        request: AtlasRichScanRequest,
+    ) -> Result<AtlasRichScanResult, StoreError> {
+        let scan_id = request
+            .scan_id
+            .clone()
+            .unwrap_or_else(|| format!("atlas-rich-{}", now_ms()));
+        let documents = self.resolve_atlas_rich_scan_documents(&request)?;
+        let processed_documents = documents.len();
+        let skipped_documents = 0usize;
+        let policy = atlas_policy_label(&request.options.policy).to_owned();
+        let mut diagnostics = Vec::new();
+        let mut stage_summaries = Vec::new();
+
+        if documents.is_empty() {
+            diagnostics.push(Diagnostic {
+                code: "PX_ATLAS_RICH_SCAN_EMPTY".to_owned(),
+                message: "Atlas rich scan had no documents in scope.".to_owned(),
+            });
+            return Ok(AtlasRichScanResult {
+                scan_id,
+                processed_documents: 0,
+                skipped_documents: 0,
+                manifest_dirty_plan: AtlasRichScanManifestSummary {
+                    policy,
+                    processed_documents: 0,
+                    skipped_documents: 0,
+                    dirty_documents: 0,
+                    clean_documents: 0,
+                    manifests_loaded: 0,
+                    manifests_persisted: 0,
+                },
+                stage_summaries,
+                lens_chunk_counts: BTreeMap::new(),
+                graph_delta_counts: BTreeMap::new(),
+                embedding_counts: AtlasRichScanEmbeddingCounts::default(),
+                relation_candidate_count: 0,
+                candidate_suggestions: Vec::new(),
+                applied_options: request.options.clone(),
+                preservation_counts: atlas_preservation_counts(&request, 0),
+                diagnostics,
+            });
+        }
+
+        let surface_started = Instant::now();
+        let dynamic_result = self.run_dynamic_atlas_pipeline(&request, &documents)?;
+        let mention_count = dynamic_result.mention_count;
+        let token_count = dynamic_result.token_count;
+        let sentence_count = dynamic_result.sentence_count;
+        let surface_chunk_count = dynamic_result.surface_chunk_count;
+        let resolver_link_count = dynamic_result.resolver_link_count;
+        let narrative_hit_count = dynamic_result.narrative_hit_count;
+        let candidate_suggestions = dynamic_result.candidate_suggestions.clone();
+        diagnostics.extend(dynamic_result.diagnostics.clone());
+        stage_summaries.push(atlas_stage_summary(
+            "dynamicSurface",
+            surface_started,
+            &[
+                ("documents", processed_documents),
+                ("mentions", mention_count),
+                ("hints", surface_chunk_count),
+                ("tokens", token_count),
+                ("sentences", sentence_count),
+                ("mentionGraphEdges", resolver_link_count),
+                ("narrativeHits", narrative_hit_count),
+                ("candidateSuggestions", candidate_suggestions.len()),
+            ],
+        ));
+
+        let evidence_started = Instant::now();
+        let mut lens_chunk_counts = dynamic_result.lens_chunk_counts.clone();
+        let lens_total = lens_chunk_counts.values().sum::<usize>();
+        let graph_nodes = dynamic_result.graph_nodes;
+        let graph_edges = dynamic_result.graph_edges;
+        stage_summaries.push(atlas_stage_summary(
+            "dynamicGraphCommit",
+            evidence_started,
+            &[
+                ("documents", processed_documents),
+                ("lensChunks", lens_total),
+                ("graphNodes", graph_nodes),
+                ("graphEdges", graph_edges),
+            ],
+        ));
+
+        let embeddings_started = Instant::now();
+        let document_ids = documents
+            .iter()
+            .map(|document| document.document_id.0.clone())
+            .collect::<Vec<_>>();
+        let mut semantic_document_rows = Vec::new();
+        let mut semantic_node_rows = Vec::new();
+        let mut semantic_node_ids = Vec::new();
+        if request.options.include_semantic_atlas && self.native_graph_enabled() {
+            let updated_at = now_ms();
+            semantic_document_rows = documents
+                .iter()
+                .map(|document| {
+                    let leaf_count = dynamic_result
+                        .document_leaf_counts
+                        .get(&document.document_id.0)
+                        .copied()
+                        .unwrap_or_else(|| split_ingest_leaf_chunks(&document.text).len());
+                    json!({
+                        "document_id": document.document_id.0.clone(),
+                        "vec": atlas_text_vector(&format!("{}\n{}", document.title, document.text)),
+                        "model_id": request.options.embedding_model_id.as_deref().unwrap_or(SEMANTIC_MODEL_ID),
+                        "leaf_count": leaf_count as i64,
+                        "evidence_refs": [format!("document:{}", document.document_id.0)],
+                        "updated_at": updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            self.replace_native_relation_rows_with_keys(
+                "semantic_documents",
+                &semantic_document_rows,
+                &["document_id"],
+            )?;
+
+            let prototype_inputs = self.list_candidate_prototype_inputs(&document_ids)?;
+            semantic_node_rows = prototype_inputs
+                .iter()
+                .map(|input| {
+                    semantic_node_ids.push(input.node_id.clone());
+                    json!({
+                        "node_id": input.node_id.clone(),
+                        "node_kind": input.node_kind.clone(),
+                        "document_id": input.document_id.clone(),
+                        "narrative_id": input.narrative_id.clone(),
+                        "folder_id": input.folder_id.clone(),
+                        "vec": atlas_text_vector(&input.text),
+                        "model_id": request.options.embedding_model_id.as_deref().unwrap_or(SEMANTIC_MODEL_ID),
+                        "evidence_refs": input.evidence_refs.clone(),
+                        "updated_at": updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !semantic_node_rows.is_empty() {
+                self.replace_native_relation_rows_with_keys(
+                    "semantic_node_prototypes",
+                    &semantic_node_rows,
+                    &["node_id"],
+                )?;
+            }
+        } else if request.options.include_semantic_atlas {
+            diagnostics.push(Diagnostic {
+                code: "PX_ATLAS_SEMANTIC_NATIVE_ONLY".to_owned(),
+                message:
+                    "Semantic Atlas embeddings are persisted only on the native OverGraph runtime."
+                        .to_owned(),
+            });
+        }
+        stage_summaries.push(atlas_stage_summary(
+            "embeddings",
+            embeddings_started,
+            &[
+                ("leaf", semantic_document_rows.len()),
+                ("entity", semantic_node_rows.len()),
+                ("lens", 0),
+            ],
+        ));
+
+        let overgraph_started = Instant::now();
+        let relation_candidate_count =
+            if request.options.include_semantic_atlas && self.native_graph_enabled() {
+                self.refresh_candidate_graph_edges(&document_ids, &semantic_node_ids)?
+            } else {
+                0
+            };
+        stage_summaries.push(atlas_stage_summary(
+            "overgraph",
+            overgraph_started,
+            &[
+                ("persistedDocuments", processed_documents),
+                ("candidateRelations", relation_candidate_count),
+                ("manifestsPersisted", processed_documents),
+            ],
+        ));
+
+        if lens_chunk_counts.values().all(|count| *count == 0) {
+            lens_chunk_counts.insert("evidence".to_owned(), processed_documents);
+        }
+        let mut graph_delta_counts = BTreeMap::new();
+        graph_delta_counts.insert("documents".to_owned(), processed_documents);
+        graph_delta_counts.insert("nodes".to_owned(), graph_nodes);
+        graph_delta_counts.insert("edges".to_owned(), graph_edges);
+        graph_delta_counts.insert("candidateEdges".to_owned(), relation_candidate_count);
+
+        diagnostics.push(Diagnostic {
+            code: "PX_ATLAS_RICH_SCAN".to_owned(),
+            message: format!(
+                "Atlas rich scan processed {processed_documents} document(s), {mention_count} dynamic mention(s), {lens_total} dynamic chunk hint(s), and {relation_candidate_count} candidate relation(s)."
+            ),
+        });
+
+        Ok(AtlasRichScanResult {
+            scan_id,
+            processed_documents,
+            skipped_documents,
+            manifest_dirty_plan: AtlasRichScanManifestSummary {
+                policy,
+                processed_documents,
+                skipped_documents,
+                dirty_documents: processed_documents,
+                clean_documents: skipped_documents,
+                manifests_loaded: processed_documents,
+                manifests_persisted: processed_documents,
+            },
+            stage_summaries,
+            lens_chunk_counts,
+            graph_delta_counts,
+            embedding_counts: AtlasRichScanEmbeddingCounts {
+                leaf: semantic_document_rows.len(),
+                entity: semantic_node_rows.len(),
+                lens: 0,
+            },
+            relation_candidate_count,
+            candidate_suggestions,
+            applied_options: request.options.clone(),
+            preservation_counts: atlas_preservation_counts(&request, processed_documents),
+            diagnostics,
+        })
+    }
+
+    fn run_dynamic_atlas_pipeline(
+        &self,
+        request: &AtlasRichScanRequest,
+        documents: &[AtlasRichScanDocument],
+    ) -> Result<DynamicAtlasPipelineResult, StoreError> {
+        let created_at = now_ms();
+        let entity_rows = self.fetch_relation_rows("entities")?;
+        let entity_kind_by_id = dynamic_entity_kind_map(&entity_rows);
+        let dynamic_lexicon = dynamic_lexicon_from_rows(&entity_rows, &request.scope)?;
+        let mut result = DynamicAtlasPipelineResult::default();
+        let mut engine_builder = PhoenixNerEngineBuilder::new();
+        #[cfg(not(target_arch = "wasm32"))]
+        match dynamic_gliner::load_default_model() {
+            Ok(model) => {
+                engine_builder = engine_builder.model(model);
+                result.diagnostics.push(Diagnostic {
+                    code: "dynamicNer.model".to_owned(),
+                    message: "Dynamic NER attached the native GLiNER BI small lane.".to_owned(),
+                });
+            }
+            Err(error) => {
+                result.diagnostics.push(Diagnostic {
+                    code: "dynamicNer.modelUnavailable".to_owned(),
+                    message: format!("Dynamic NER used deterministic lanes only: {error}"),
+                });
+            }
+        }
+        let engine = engine_builder.build();
+        let chunk_config = phoenix_chunker::ChunkerConfig::default();
+
+        let mut vertex_rows = Vec::new();
+        let mut edge_rows = Vec::new();
+        let mut label_rows = Vec::new();
+        let mut vertex_ids = BTreeSet::new();
+        let mut edge_pairs = BTreeSet::new();
+        let mut document_ids = BTreeSet::new();
+        let mut candidate_by_key = BTreeMap::<String, AtlasRichScanCandidateSummary>::new();
+
+        for document in documents {
+            let scope = document.scope.clone();
+            let document_id = document.document_id.0.clone();
+            document_ids.insert(document_id.clone());
+            let note_id = document
+                .note_id
+                .as_ref()
+                .map(|note_id| note_id.0.clone())
+                .unwrap_or_else(|| document_id.clone());
+            let document_view = IngestDocumentView {
+                document_id: document.document_id.clone(),
+                note_id: document.note_id.clone(),
+                title: &document.title,
+                text: &document.text,
+                scope: ScopeKeyView::from(&scope),
+            };
+            self.delete_note_rows(&note_id)?;
+            self.put_relation_row(
+                "notes",
+                native_note_row_from_ingest(&document_view, &note_id, created_at),
+            )?;
+
+            let doc_vertex_id = phase1_document_vertex_id(&document_id);
+            let mut doc_attributes = Map::new();
+            doc_attributes.insert("pipelineSource".to_owned(), json!("dynamic_ner_chunker_v1"));
+            phase1_push_vertex(
+                &mut vertex_ids,
+                &mut vertex_rows,
+                &mut label_rows,
+                phase1_vertex_row(
+                    &doc_vertex_id,
+                    "document",
+                    &document.title,
+                    Some(&document_id),
+                    scope.narrative_id.as_deref(),
+                    doc_attributes,
+                    vec![format!("document:{document_id}")],
+                ),
+            );
+
+            let chunks = phoenix_chunker::build_chunks(&document.text, &chunk_config);
+            result
+                .document_leaf_counts
+                .insert(document_id.clone(), chunks.len());
+            result.surface_chunk_count += chunks.len();
+            for (index, chunk) in chunks.iter().enumerate() {
+                let leaf_id = format!("leaf::{document_id}::{index}");
+                let chunk_text = &document.text[chunk.start..chunk.end];
+                let mut attributes = Map::new();
+                attributes.insert("noteId".to_owned(), json!(note_id));
+                attributes.insert("searchChunkId".to_owned(), json!(leaf_id));
+                attributes.insert("pipelineSource".to_owned(), json!("dynamic_chunker_v1"));
+                attributes.insert("range".to_owned(), json!({
+                    "start": chunk.start,
+                    "end": chunk.end,
+                }));
+                phase1_push_vertex(
+                    &mut vertex_ids,
+                    &mut vertex_rows,
+                    &mut label_rows,
+                    phase1_vertex_row(
+                        &leaf_id,
+                        "leaf",
+                        &phase1_snippet(chunk_text, 96),
+                        Some(&document_id),
+                        scope.narrative_id.as_deref(),
+                        attributes,
+                        vec![format!("document:{document_id}")],
+                    ),
+                );
+                phase1_push_edge(
+                    &mut edge_pairs,
+                    &mut edge_rows,
+                    phase1_edge_row(
+                        &doc_vertex_id,
+                        &leaf_id,
+                        "contains",
+                        Some(&document_id),
+                        scope.narrative_id.as_deref(),
+                        Map::new(),
+                        vec![format!("document:{document_id}")],
+                    ),
+                );
+            }
+
+            let (tokens, sentences) = dynamic_tokens_and_sentences(&document.text);
+            result.token_count += tokens.len();
+            result.sentence_count += sentences.len();
+            let dynamic_scope = dynamic_scope_from_scope(&scope);
+            let output = engine
+                .extract_mentions(&SurfaceNerInput {
+                    document_id: &document_id,
+                    text: &document.text,
+                    tokens: &tokens,
+                    sentences: &sentences,
+                    scope: &dynamic_scope,
+                    lexicon: dynamic_lexicon.as_ref(),
+                })
+                .map_err(|error| StoreError::Query(format!("dynamic NER failed: {error}")))?;
+            result.mention_count += output.mentions.len();
+            result.resolver_link_count += output.mention_graph.edge_count();
+            *result
+                .lens_chunk_counts
+                .entry("dynamicHints".to_owned())
+                .or_default() += output.chunk_hints.len();
+
+            for diagnostic in output.diagnostics {
+                result.diagnostics.push(Diagnostic {
+                    code: "PX_DYNAMIC_NER_DIAG".to_owned(),
+                    message: format!("{diagnostic:?}"),
+                });
+            }
+
+            let mut mention_vertex_by_id = BTreeMap::<u64, String>::new();
+            for mention in &output.mentions {
+                if !dynamic_mention_is_graphworthy(mention) {
+                    continue;
+                }
+                let label = dynamic_mention_label(mention);
+                if label.is_empty()
+                    || !normalized_has_meaningful_token(mention.normalized.as_str(), "default")
+                {
+                    continue;
+                }
+                let known_entity_id = dynamic_known_entity_id(mention);
+                let entity_kind = known_entity_id
+                    .as_deref()
+                    .and_then(|id| entity_kind_by_id.get(id))
+                    .cloned();
+                let vertex_id = known_entity_id
+                    .as_ref()
+                    .map(|id| format!("entity::{id}"))
+                    .unwrap_or_else(|| dynamic_mention_vertex_id(&document_id, mention));
+                mention_vertex_by_id.insert(mention.mention_id.0, vertex_id.clone());
+
+                let mut attributes = Map::new();
+                attributes.insert("pipelineSource".to_owned(), json!("dynamic_ner_v1"));
+                attributes.insert(
+                    "entityKind".to_owned(),
+                    json!(atlas_entity_kind_name(entity_kind.as_ref())),
+                );
+                attributes.insert(
+                    "mentionKind".to_owned(),
+                    json!(dynamic_mention_kind_name(mention.mention_kind)),
+                );
+                attributes.insert(
+                    "mentionStatus".to_owned(),
+                    json!(dynamic_mention_status_name(mention.status)),
+                );
+                attributes.insert("confidence".to_owned(), json!(mention.confidence));
+                attributes.insert("normalized".to_owned(), json!(mention.normalized.as_str()));
+                attributes.insert("range".to_owned(), json!({
+                    "start": mention.range.start,
+                    "end": mention.range.end,
+                }));
+                attributes.insert("sentenceIndex".to_owned(), json!(mention.sentence_index));
+                let evidence_refs = vec![
+                    format!("document:{document_id}"),
+                    format!("mention:{}", mention.mention_id.0),
+                ];
+                phase1_push_vertex(
+                    &mut vertex_ids,
+                    &mut vertex_rows,
+                    &mut label_rows,
+                    phase1_vertex_row(
+                        &vertex_id,
+                        "entity",
+                        &label,
+                        Some(&document_id),
+                        scope.narrative_id.as_deref(),
+                        attributes,
+                        evidence_refs.clone(),
+                    ),
+                );
+
+                if let Some(index) = find_leaf_for_range(&chunks, mention.range.start as usize) {
+                    let leaf_id = format!("leaf::{document_id}::{index}");
+                    let mut edge_attributes = Map::new();
+                    edge_attributes.insert("pipelineSource".to_owned(), json!("dynamic_ner_v1"));
+                    edge_attributes.insert("confidence".to_owned(), json!(mention.confidence));
+                    phase1_push_edge(
+                        &mut edge_pairs,
+                        &mut edge_rows,
+                        phase1_edge_row(
+                            &leaf_id,
+                            &vertex_id,
+                            "mentions",
+                            Some(&document_id),
+                            scope.narrative_id.as_deref(),
+                            edge_attributes,
+                            evidence_refs.clone(),
+                        ),
+                    );
+                }
+
+                if request.options.return_candidate_suggestions
+                    && dynamic_should_surface_candidate(mention)
+                {
+                    let key = atlas_candidate_key(&label);
+                    candidate_by_key.entry(key).or_insert_with(|| AtlasRichScanCandidateSummary {
+                        id: format!("dyn-candidate-{:016x}", atlas_hash64(vertex_id.as_bytes())),
+                        label: label.clone(),
+                        kind: atlas_entity_kind_name(entity_kind.as_ref()).to_owned(),
+                        confidence: mention.confidence,
+                        source_document_id: Some(document.document_id.clone()),
+                        source_note_id: document.note_id.clone(),
+                        evidence: Some(label.clone()),
+                        aliases: Vec::new(),
+                        range: Some(TextRange {
+                            start: mention.range.start,
+                            end: mention.range.end,
+                        }),
+                        source_stage: "dynamicNer".to_owned(),
+                    });
+                }
+            }
+
+            for edge in output.mention_graph.edges {
+                let Some(left) = mention_vertex_by_id.get(&edge.left.0) else {
+                    continue;
+                };
+                let Some(right) = mention_vertex_by_id.get(&edge.right.0) else {
+                    continue;
+                };
+                let mut attributes = Map::new();
+                attributes.insert("pipelineSource".to_owned(), json!("dynamic_mention_graph_v1"));
+                attributes.insert(
+                    "mentionEdgeKind".to_owned(),
+                    json!(format!("{:?}", edge.kind)),
+                );
+                attributes.insert("weight".to_owned(), json!(edge.weight));
+                phase1_push_edge(
+                    &mut edge_pairs,
+                    &mut edge_rows,
+                    phase1_edge_row(
+                        left,
+                        right,
+                        "mentionRelated",
+                        Some(&document_id),
+                        scope.narrative_id.as_deref(),
+                        attributes,
+                        vec![format!("document:{document_id}")],
+                    ),
+                );
+            }
+        }
+
+        self.replace_native_graph_document_rows(
+            document_ids,
+            vertex_rows.clone(),
+            edge_rows.clone(),
+            label_rows,
+        )?;
+        let batch = KernelGraphMutationBatch::from(GraphMutationBatch {
+            layer: GraphLayer::Asserted,
+            scope: GraphMutationScope::Full,
+            vertices: vertex_rows
+                .iter()
+                .filter_map(graph_vertex_record_from_row_value)
+                .collect(),
+            edges: edge_rows
+                .iter()
+                .filter_map(|row| graph_edge_record_from_row_value(row, GraphLayer::Asserted))
+                .collect(),
+        });
+        self.native_runtime
+            .deterministic_kernel
+            .apply_batch(batch)
+            .map_err(Self::graph_backend_error)?;
+        self.refresh_native_graph_rebuild_token()?;
+
+        result.graph_nodes = vertex_rows.len();
+        result.graph_edges = edge_rows.len();
+        result.candidate_suggestions = candidate_by_key.into_values().collect();
+        result.diagnostics.push(Diagnostic {
+            code: "PX_ATLAS_DYNAMIC_PIPELINE".to_owned(),
+            message: format!(
+                "Atlas used dynamic NER + sentence chunker: {} mention(s), {} chunk(s), {} graph edge(s).",
+                result.mention_count, result.surface_chunk_count, result.graph_edges
+            ),
+        });
+        Ok(result)
+    }
+
+    fn resolve_atlas_rich_scan_documents(
+        &self,
+        request: &AtlasRichScanRequest,
+    ) -> Result<Vec<AtlasRichScanDocument>, StoreError> {
+        if !request.documents.is_empty() {
+            return Ok(request
+                .documents
+                .iter()
+                .filter(|document| !document.text.trim().is_empty())
+                .cloned()
+                .collect());
+        }
+
+        let note_rows = if !request.changed_document_ids.is_empty() {
+            let ids = request
+                .changed_document_ids
+                .iter()
+                .map(|id| id.0.clone())
+                .collect::<Vec<_>>();
+            self.list_note_values_by_ids(&ids, true)?
+        } else if let Some(note_id) = request.scope.note_id.as_ref() {
+            self.list_note_values_by_ids(&[note_id.0.clone()], true)?
+        } else {
+            self.list_note_values(request.scope.folder_id.as_deref(), true)?
+        };
+
+        Ok(note_rows
+            .into_iter()
+            .filter_map(|row| atlas_document_from_note_value(row, &request.scope))
+            .filter(|document| !document.text.trim().is_empty())
+            .collect())
     }
 
     pub fn ingest_stub(&self, request: IngestRequest) -> Result<IngestResult, StoreError> {
@@ -4257,8 +4863,14 @@ impl PhoenixRuntime {
             return Ok(SessionStats {
                 session_id: session_id.clone(),
                 document_count: documents.len(),
-                chapter_count: documents.iter().map(|document| document.chapter_count).sum(),
-                boundary_count: documents.iter().map(|document| document.boundary_count).sum(),
+                chapter_count: documents
+                    .iter()
+                    .map(|document| document.chapter_count)
+                    .sum(),
+                boundary_count: documents
+                    .iter()
+                    .map(|document| document.boundary_count)
+                    .sum(),
                 parent_count: documents.iter().map(|document| document.parent_count).sum(),
                 leaf_count: documents.iter().map(|document| document.leaf_count).sum(),
                 entity_count: self.fetch_relation_rows("entities")?.len(),
@@ -6452,11 +7064,7 @@ impl PhoenixRuntime {
     fn native_note_rows_to_indexed_spans(&self) -> Result<Vec<IndexedSpan>, StoreError> {
         let mut spans = Vec::new();
         for row in self.fetch_relation_rows("notes")? {
-            if row
-                .get("deleted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+            if row.get("deleted").and_then(Value::as_bool).unwrap_or(false) {
                 continue;
             }
             let Some(id) = row.get("id").and_then(Value::as_str) else {
@@ -6536,11 +7144,7 @@ impl PhoenixRuntime {
         let graph = self.native_kernel_snapshot(true)?;
         let mut by_document = HashMap::<String, SessionDocumentState>::new();
         for row in self.fetch_relation_rows("notes")? {
-            if row
-                .get("deleted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+            if row.get("deleted").and_then(Value::as_bool).unwrap_or(false) {
                 continue;
             }
             let Some(id) = row.get("id").and_then(Value::as_str) else {
@@ -6647,6 +7251,352 @@ fn native_note_row_from_ingest(
     })
 }
 
+fn dynamic_lexicon_from_rows(
+    rows: &[Value],
+    scope: &AtlasRichScanScope,
+) -> Result<Option<DynamicLexicon>, StoreError> {
+    let mut entries = Vec::new();
+    for row in rows {
+        if !atlas_entity_row_matches_scan_scope(row, scope) {
+            continue;
+        }
+        let Some(entity_id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(label) = row.get("label").and_then(Value::as_str) else {
+            continue;
+        };
+        let kind = row
+            .get("entity_kind")
+            .or_else(|| row.get("kind"))
+            .and_then(Value::as_str)
+            .and_then(dynamic_entity_kind_from_str);
+        let aliases = row
+            .get("aliases")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        entries.push(dynamic_types::LexiconEntry {
+            entity_id: dynamic_types::EntityId(entity_id.to_owned()),
+            label: label.to_owned(),
+            aliases,
+            kind,
+            gender: None,
+            number: None,
+            scope: dynamic_scope_from_row(row),
+        });
+    }
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    DynamicLexicon::from_entries(&entries)
+        .map(Some)
+        .map_err(|error| StoreError::Query(format!("dynamic lexicon build failed: {error}")))
+}
+
+fn dynamic_entity_kind_map(rows: &[Value]) -> BTreeMap<String, EntityKind> {
+    rows.iter()
+        .filter_map(|row| {
+            let id = row.get("id").and_then(Value::as_str)?;
+            let kind = row
+                .get("entity_kind")
+                .or_else(|| row.get("kind"))
+                .and_then(Value::as_str)
+                .and_then(runtime_entity_kind_from_str)?;
+            Some((id.to_owned(), kind))
+        })
+        .collect()
+}
+
+fn atlas_entity_row_matches_scan_scope(row: &Value, scope: &AtlasRichScanScope) -> bool {
+    if let Some(world_id) = scope.world_id.as_deref() {
+        if row.get("world_id").and_then(Value::as_str) != Some(world_id) {
+            return false;
+        }
+    }
+    if let Some(narrative_id) = scope.narrative_id.as_deref() {
+        if row.get("narrative_id").and_then(Value::as_str) != Some(narrative_id) {
+            return false;
+        }
+    }
+    if let Some(folder_id) = scope.folder_id.as_deref() {
+        if row.get("folder_id").and_then(Value::as_str) != Some(folder_id) {
+            return false;
+        }
+    }
+    true
+}
+
+fn dynamic_scope_from_scope(scope: &ScopeKey) -> dynamic_types::ScopeKey {
+    dynamic_types::ScopeKey {
+        world_id: scope.world_id.clone(),
+        narrative_id: scope.narrative_id.clone(),
+        folder_id: scope.folder_id.clone(),
+        folder_path: scope.folder_path.clone(),
+    }
+}
+
+fn dynamic_scope_from_row(row: &Value) -> dynamic_types::ScopeKey {
+    dynamic_types::ScopeKey {
+        world_id: row
+            .get("world_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        narrative_id: row
+            .get("narrative_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        folder_id: row
+            .get("folder_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        folder_path: row
+            .get("folder_path")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    }
+}
+
+fn dynamic_entity_kind_from_str(value: &str) -> Option<dynamic_types::EntityKind> {
+    match value.to_ascii_lowercase().as_str() {
+        "character" | "person" | "per" => Some(dynamic_types::EntityKind::Character),
+        "location" | "place" | "loc" => Some(dynamic_types::EntityKind::Location),
+        "npc" => Some(dynamic_types::EntityKind::Npc),
+        "item" => Some(dynamic_types::EntityKind::Item),
+        "faction" => Some(dynamic_types::EntityKind::Faction),
+        "organization" | "organisation" | "org" => Some(dynamic_types::EntityKind::Organization),
+        "event" => Some(dynamic_types::EntityKind::Event),
+        "concept" => Some(dynamic_types::EntityKind::Concept),
+        "other" | "unknown" => Some(dynamic_types::EntityKind::Other),
+        _ => None,
+    }
+}
+
+fn runtime_entity_kind_from_str(value: &str) -> Option<EntityKind> {
+    match value.to_ascii_lowercase().as_str() {
+        "character" | "person" | "per" => Some(EntityKind::Character),
+        "location" | "place" | "loc" => Some(EntityKind::Location),
+        "npc" => Some(EntityKind::Npc),
+        "item" => Some(EntityKind::Item),
+        "faction" => Some(EntityKind::Faction),
+        "organization" | "organisation" | "org" => Some(EntityKind::Organization),
+        "event" => Some(EntityKind::Event),
+        "concept" => Some(EntityKind::Concept),
+        "other" | "unknown" => Some(EntityKind::Other),
+        _ => None,
+    }
+}
+
+fn dynamic_tokens_and_sentences(
+    text: &str,
+) -> (
+    Vec<dynamic_types::TokenSpan>,
+    Vec<dynamic_types::SentenceSpan>,
+) {
+    let tokens = dynamic_token_spans(text);
+    let sentences = phoenix_chunker::split_sentence_ranges(text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (start, end))| dynamic_types::SentenceSpan {
+            index,
+            range: dynamic_types::TextRange {
+                start: start as u32,
+                end: end as u32,
+            },
+        })
+        .collect();
+    (tokens, sentences)
+}
+
+fn dynamic_token_spans(text: &str) -> Vec<dynamic_types::TokenSpan> {
+    let mut tokens = Vec::new();
+    let mut start = None::<usize>;
+    let mut class = None::<dynamic_types::TokenClass>;
+    let mut last_end = 0usize;
+    for (index, ch) in text.char_indices() {
+        let end = index + ch.len_utf8();
+        let next_class = dynamic_char_class(ch);
+        let joins_open = matches!(
+            (&class, &next_class),
+            (Some(dynamic_types::TokenClass::Word), Some(dynamic_types::TokenClass::Word))
+                | (Some(dynamic_types::TokenClass::Number), Some(dynamic_types::TokenClass::Number))
+        );
+        if next_class.is_none() || !joins_open {
+            if let (Some(open_start), Some(open_class)) = (start.take(), class.take()) {
+                tokens.push(dynamic_token_span(text, open_start, index, open_class));
+            }
+        }
+        if let Some(next_class) = next_class {
+            if start.is_none() {
+                start = Some(index);
+                class = Some(next_class.clone());
+            }
+            if !matches!(next_class, dynamic_types::TokenClass::Word | dynamic_types::TokenClass::Number) {
+                if let Some(open_start) = start.take() {
+                    tokens.push(dynamic_token_span(text, open_start, end, next_class));
+                }
+                class = None;
+            }
+        }
+        last_end = end;
+    }
+    if let (Some(open_start), Some(open_class)) = (start, class) {
+        tokens.push(dynamic_token_span(text, open_start, last_end, open_class));
+    }
+    tokens
+}
+
+fn dynamic_char_class(ch: char) -> Option<dynamic_types::TokenClass> {
+    if ch.is_whitespace() {
+        None
+    } else if ch.is_alphabetic() || ch == '\'' || ch == '-' {
+        Some(dynamic_types::TokenClass::Word)
+    } else if ch.is_ascii_digit() {
+        Some(dynamic_types::TokenClass::Number)
+    } else if ch.is_ascii_punctuation() {
+        Some(dynamic_types::TokenClass::Punctuation)
+    } else {
+        Some(dynamic_types::TokenClass::Symbol)
+    }
+}
+
+fn dynamic_token_span(
+    text: &str,
+    start: usize,
+    end: usize,
+    token_class: dynamic_types::TokenClass,
+) -> dynamic_types::TokenSpan {
+    let token = &text[start..end];
+    let capitalized = token.chars().next().map(char::is_uppercase).unwrap_or(false);
+    let pos = match token_class {
+        dynamic_types::TokenClass::Word => dynamic_word_pos(token, capitalized),
+        dynamic_types::TokenClass::Punctuation => Some(dynamic_types::PosTag::Punctuation),
+        _ => None,
+    };
+    dynamic_types::TokenSpan {
+        range: dynamic_types::TextRange {
+            start: start as u32,
+            end: end as u32,
+        },
+        token_class: Some(token_class),
+        pos,
+        masked: false,
+        capitalized,
+    }
+}
+
+fn dynamic_word_pos(token: &str, capitalized: bool) -> Option<dynamic_types::PosTag> {
+    match token.to_ascii_lowercase().as_str() {
+        "he" | "him" | "his" | "she" | "her" | "hers" | "they" | "them" | "their"
+        | "theirs" | "it" | "its" | "we" | "us" | "our" | "ours" | "i" | "me" | "my"
+        | "mine" | "you" | "your" | "yours" => Some(dynamic_types::PosTag::Pronoun),
+        _ if capitalized => Some(dynamic_types::PosTag::ProperNoun),
+        _ => Some(dynamic_types::PosTag::Noun),
+    }
+}
+
+fn dynamic_mention_is_graphworthy(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+    !matches!(mention.status, DynamicMentionStatus::Rejected)
+        && !matches!(mention.mention_kind, DynamicMentionKind::Pronoun)
+        && (mention.entity_ref.is_some()
+            || (matches!(mention.mention_kind, DynamicMentionKind::Named)
+                && dynamic_has_candidate_signal(mention)))
+}
+
+fn dynamic_should_surface_candidate(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+    mention.entity_ref.is_none()
+        && matches!(
+            mention.status,
+            DynamicMentionStatus::AcceptedNew
+                | DynamicMentionStatus::AliasCandidate
+                | DynamicMentionStatus::NeedsAdjudication
+        )
+        && matches!(mention.mention_kind, DynamicMentionKind::Named)
+        && dynamic_has_candidate_signal(mention)
+}
+
+fn dynamic_has_candidate_signal(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+    let mut has_strong_signal = false;
+    let mut has_title_pattern = false;
+    for vote in &mention.source_votes {
+        match vote.reason {
+            phoenix_dynamic_ner::VoteReason::GuardViolation
+            | phoenix_dynamic_ner::VoteReason::StopwordPenalty => return false,
+            phoenix_dynamic_ner::VoteReason::DialogueSpeaker
+            | phoenix_dynamic_ner::VoteReason::ModelSpan
+            | phoenix_dynamic_ner::VoteReason::ModelLabel
+            | phoenix_dynamic_ner::VoteReason::ExactCanonical
+            | phoenix_dynamic_ner::VoteReason::ExactAlias
+            | phoenix_dynamic_ner::VoteReason::AutoAlias
+            | phoenix_dynamic_ner::VoteReason::FuzzyAnchor
+            | phoenix_dynamic_ner::VoteReason::NominalRole
+            | phoenix_dynamic_ner::VoteReason::DependencyRole => {
+                has_strong_signal = true;
+            }
+            phoenix_dynamic_ner::VoteReason::TitlePattern => {
+                has_title_pattern = true;
+            }
+            phoenix_dynamic_ner::VoteReason::RepeatedSurface
+            | phoenix_dynamic_ner::VoteReason::CapSpan
+            | phoenix_dynamic_ner::VoteReason::NliSupport
+            | phoenix_dynamic_ner::VoteReason::NliContradiction => {}
+        }
+    }
+    has_strong_signal || (has_title_pattern && mention.normalized.split_whitespace().count() > 1)
+}
+
+fn dynamic_mention_label(mention: &phoenix_dynamic_ner::MentionPacket) -> String {
+    atlas_clean_label(mention.surface.as_str())
+}
+
+fn dynamic_known_entity_id(mention: &phoenix_dynamic_ner::MentionPacket) -> Option<String> {
+    match mention.entity_ref.as_ref()? {
+        dynamic_types::MentionEntityRef::Known(entity_id) => Some(entity_id.0.clone()),
+        dynamic_types::MentionEntityRef::Speculative(_) => None,
+    }
+}
+
+fn dynamic_mention_vertex_id(
+    document_id: &str,
+    mention: &phoenix_dynamic_ner::MentionPacket,
+) -> String {
+    let key = format!(
+        "{document_id}:{}:{}:{}",
+        mention.range.start,
+        mention.range.end,
+        mention.normalized
+    );
+    format!("entity::dyn::{:016x}", atlas_hash64(key.as_bytes()))
+}
+
+fn dynamic_mention_kind_name(kind: DynamicMentionKind) -> &'static str {
+    match kind {
+        DynamicMentionKind::Named => "named",
+        DynamicMentionKind::Nominal => "nominal",
+        DynamicMentionKind::Pronoun => "pronoun",
+    }
+}
+
+fn dynamic_mention_status_name(status: DynamicMentionStatus) -> &'static str {
+    match status {
+        DynamicMentionStatus::AcceptedKnown => "acceptedKnown",
+        DynamicMentionStatus::AcceptedNew => "acceptedNew",
+        DynamicMentionStatus::AliasCandidate => "aliasCandidate",
+        DynamicMentionStatus::NeedsAdjudication => "needsAdjudication",
+        DynamicMentionStatus::Rejected => "rejected",
+    }
+}
+
+fn find_leaf_for_range(chunks: &[phoenix_chunker::Chunk], start: usize) -> Option<usize> {
+    chunks
+        .iter()
+        .position(|chunk| start >= chunk.start && start < chunk.end)
+        .or_else(|| chunks.len().checked_sub(1))
+}
+
 fn split_ingest_leaf_chunks(text: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
@@ -6668,6 +7618,172 @@ fn split_ingest_leaf_chunks(text: &str) -> Vec<String> {
         chunks.push(text.trim().to_owned());
     }
     chunks
+}
+
+fn atlas_policy_label(policy: &AtlasRichScanPolicy) -> &'static str {
+    match policy {
+        AtlasRichScanPolicy::DirtyOnly => "dirty-only",
+        AtlasRichScanPolicy::Force => "force",
+    }
+}
+
+fn atlas_stage_summary(
+    stage: &str,
+    started_at: Instant,
+    counts: &[(&str, usize)],
+) -> AtlasRichScanStageSummary {
+    AtlasRichScanStageSummary {
+        stage: stage.to_owned(),
+        status: "complete".to_owned(),
+        duration_ms: started_at
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        counts: counts
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), *value))
+            .collect(),
+    }
+}
+
+fn atlas_preservation_counts(
+    request: &AtlasRichScanRequest,
+    stable_documents: usize,
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    counts.insert(
+        "acceptedCandidates".to_owned(),
+        request.accepted_candidate_ids.len(),
+    );
+    counts.insert(
+        "rejectedCandidates".to_owned(),
+        request.rejected_candidate_keys.len(),
+    );
+    counts.insert("manualEdges".to_owned(), 0);
+    counts.insert("graphPositions".to_owned(), 0);
+    counts.insert("stableIds".to_owned(), stable_documents);
+    counts
+}
+
+fn atlas_document_from_note_value(
+    row: Value,
+    request_scope: &AtlasRichScanScope,
+) -> Option<AtlasRichScanDocument> {
+    let id = row.get("id").and_then(Value::as_str)?.to_owned();
+    let text = row
+        .get("markdown_content")
+        .and_then(Value::as_str)
+        .or_else(|| row.get("content").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_owned();
+    let title = row
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(&id)
+        .to_owned();
+    Some(AtlasRichScanDocument {
+        document_id: DocumentId(id.clone()),
+        note_id: Some(NoteId(id)),
+        title,
+        text,
+        scope: ScopeKey {
+            world_id: row
+                .get("world_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| request_scope.world_id.clone()),
+            narrative_id: row
+                .get("narrative_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| request_scope.narrative_id.clone()),
+            folder_id: row
+                .get("folder_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| request_scope.folder_id.clone()),
+            folder_path: request_scope.folder_path.clone(),
+        },
+    })
+}
+
+fn atlas_entity_kind_name(kind: Option<&EntityKind>) -> &'static str {
+    match kind {
+        Some(EntityKind::Character) => "CHARACTER",
+        Some(EntityKind::Location) => "LOCATION",
+        Some(EntityKind::Npc) => "NPC",
+        Some(EntityKind::Item) => "ITEM",
+        Some(EntityKind::Faction) => "FACTION",
+        Some(EntityKind::Organization) => "ORGANIZATION",
+        Some(EntityKind::Event) => "EVENT",
+        Some(EntityKind::Concept) => "CONCEPT",
+        Some(EntityKind::Other) | None => "UNKNOWN",
+    }
+}
+
+fn atlas_clean_label(value: &str) -> String {
+    value
+        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn atlas_candidate_key(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|ch| if ch.is_alphanumeric() { ch } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn atlas_text_vector(text: &str) -> Vec<f32> {
+    let mut vector = vec![0.0f32; SEMANTIC_VECTOR_DIM];
+    let mut token = String::new();
+    for ch in text.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() {
+            token.push(ch.to_ascii_lowercase());
+            continue;
+        }
+        if token.len() > 2 {
+            atlas_add_token_to_vector(&mut vector, &token);
+        }
+        token.clear();
+    }
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vector {
+            *value /= norm;
+        }
+    }
+    vector
+}
+
+fn atlas_add_token_to_vector(vector: &mut [f32], token: &str) {
+    let hash = atlas_hash64(token.as_bytes());
+    let first = (hash as usize) % vector.len();
+    let second = ((hash >> 17) as usize) % vector.len();
+    let sign = if hash & 0x8000_0000_0000_0000 == 0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let weight = 1.0 + token.len().min(12) as f32 * 0.035;
+    vector[first] += sign * weight;
+    vector[second] += sign * weight * 0.5;
+}
+
+fn atlas_hash64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn native_linear_lexical_search_result(
@@ -9893,14 +11009,28 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn overgraph_store_path(storage_path: Option<&Path>) -> PathBuf {
+fn overgraph_store_path(config: &RuntimeConfig, storage_path: Option<&Path>) -> PathBuf {
     match storage_path {
         Some(path) => path.join("phoenix-overgraph"),
+        None if config.storage == StorageMode::NativeEphemeral => ephemeral_overgraph_store_path(),
         None => platform_data_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("Phoenix Desktop")
             .join("phoenix-overgraph"),
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ephemeral_overgraph_store_path() -> PathBuf {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let path = std::env::temp_dir()
+            .join("Phoenix Desktop")
+            .join(format!("phoenix-overgraph-ephemeral-{}-{}", std::process::id(), now_ms()));
+        let _ = fs::remove_dir_all(&path);
+        path
+    })
+    .clone()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -9971,13 +11101,104 @@ pub fn fixture_body(fixture: &GoldenFixture) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "legacy-cozo-graph")]
+    use phoenix_types::{
+        ChatPlannerModelResponse, ChatPlannerStep, ChatRunSnapshot, ChatWorkspaceArtifact,
+    };
+
+    #[test]
+    fn atlas_rich_scan_can_skip_semantic_sidecar() {
+        let runtime = native_test_runtime();
+        runtime.init().expect("init");
+
+        let result = runtime
+            .atlas_rich_scan(AtlasRichScanRequest {
+                documents: vec![AtlasRichScanDocument {
+                    document_id: DocumentId("doc-atlas-skip".to_owned()),
+                    note_id: Some(NoteId("note-atlas-skip".to_owned())),
+                    title: "Atlas skip".to_owned(),
+                    text: "Aella found the harbor gate before dawn.".to_owned(),
+                    scope: ScopeKey::default(),
+                }],
+                options: phoenix_types::AtlasRichScanOptions {
+                    include_semantic_atlas: false,
+                    ..phoenix_types::AtlasRichScanOptions::default()
+                },
+                ..AtlasRichScanRequest::default()
+            })
+            .expect("atlas scan");
+
+        assert!(!result.applied_options.include_semantic_atlas);
+        assert_eq!(result.embedding_counts.leaf, 0);
+        assert_eq!(result.embedding_counts.entity, 0);
+        assert_eq!(result.relation_candidate_count, 0);
+        assert!(result.graph_delta_counts.get("nodes").copied().unwrap_or(0) > 0);
+        assert!(result
+            .stage_summaries
+            .iter()
+            .any(|summary| summary.stage == "dynamicSurface"));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "PX_ATLAS_DYNAMIC_PIPELINE"));
+    }
+
+    #[test]
+    fn dynamic_candidate_signal_rejects_repeated_capitalization_only() {
+        let repeated = dynamic_test_mention(
+            "Absolutely",
+            phoenix_dynamic_ner::VoteReason::RepeatedSurface,
+        );
+        let dialogue = dynamic_test_mention(
+            "Aella",
+            phoenix_dynamic_ner::VoteReason::DialogueSpeaker,
+        );
+
+        assert!(!dynamic_has_candidate_signal(&repeated));
+        assert!(!dynamic_mention_is_graphworthy(&repeated));
+        assert!(dynamic_has_candidate_signal(&dialogue));
+        assert!(dynamic_mention_is_graphworthy(&dialogue));
+    }
+
+    fn dynamic_test_mention(
+        surface: &str,
+        reason: phoenix_dynamic_ner::VoteReason,
+    ) -> phoenix_dynamic_ner::MentionPacket {
+        let mut packet = phoenix_dynamic_ner::MentionPacket {
+            mention_id: phoenix_dynamic_ner::LocalMentionId(1),
+            document_id: "doc".into(),
+            chunk_id: None,
+            sentence_index: 0,
+            range: TextRange {
+                start: 0,
+                end: surface.len() as u32,
+            },
+            surface: surface.into(),
+            normalized: surface.to_ascii_lowercase().into(),
+            mention_kind: phoenix_dynamic_ner::MentionKind::Named,
+            label_distribution: Default::default(),
+            entity_ref: None,
+            source_votes: Default::default(),
+            context: phoenix_dynamic_ner::MentionContext::default(),
+            syntax: None,
+            semantics: phoenix_dynamic_ner::MentionSemantics::default(),
+            confidence: 0.8,
+            status: phoenix_dynamic_ner::MentionStatus::AcceptedNew,
+        };
+        packet.source_votes.push(phoenix_dynamic_ner::MentionVote {
+            source: phoenix_dynamic_ner::MentionSourceKind::NativeDiscovery,
+            label: None,
+            entity_ref: None,
+            confidence: 0.8,
+            reason,
+        });
+        packet
+    }
     use phoenix_types::{
         ChatRunStatus, CreateSessionRequest, DocumentId, EntityId, EntityKind, GenderHint,
         GraphDeltaRequest, MentionEntityRef, QueryResultHeader, QueryTarget, RunOptions, ScopeKey,
-        SessionStateResultHeader, SessionStatsResultHeader,
+        SessionStateResultHeader, SessionStatsResultHeader, TextRange,
     };
-    #[cfg(feature = "legacy-cozo-graph")]
-    use phoenix_types::{ChatPlannerModelResponse, ChatPlannerStep, ChatRunSnapshot, ChatWorkspaceArtifact};
     use serde_json::{json, Value};
 
     fn native_test_runtime() -> PhoenixRuntime {
@@ -10674,7 +11895,7 @@ mod tests {
                 )
                 .expect("entity vertex");
             runtime
-            .put_relation_row(
+                .put_relation_row(
                     "graph_edges",
                     json!({
                         "source_id": leaf_id.as_str(),
@@ -10859,7 +12080,7 @@ mod tests {
                 )
                 .expect("entity vertex");
             runtime
-            .put_relation_row(
+                .put_relation_row(
                     "graph_edges",
                     json!({
                         "source_id": leaf_id.as_str(),
@@ -11012,7 +12233,7 @@ mod tests {
                 )
                 .expect("entity vertex");
             runtime
-            .put_relation_row(
+                .put_relation_row(
                     "graph_edges",
                     json!({
                         "source_id": leaf_id.as_str(),
@@ -12797,5 +14018,3 @@ Bright embers glowed beside the ember-lit grate. Bright embers hissed in the ash
         })
     }
 }
-
-

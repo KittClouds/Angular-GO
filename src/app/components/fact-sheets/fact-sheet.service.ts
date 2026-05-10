@@ -261,7 +261,7 @@ export class FactSheetService {
     // =========================================================================
 
     /**
-     * Sync default schema cards to GoKitt backend.
+     * Sync default schema cards to Phoenix native backend.
      * Must be called AFTER WASM is loaded and store is initialized.
      * No spin-loop — caller guarantees readiness.
      */

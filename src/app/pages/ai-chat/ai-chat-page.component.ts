@@ -860,7 +860,7 @@ export class AiChatPageComponent implements OnInit, OnDestroy, AfterViewInit {
     }
 
     // ---- Go Chat Service ----
-    private async initGoChatService(): Promise<void> {
+    private async initPhoenixChatService(): Promise<void> {
         await this.chatUi.init();
     }
 

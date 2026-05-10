@@ -1,7 +1,7 @@
 use compact_str::CompactString;
 use phoenix_types::{
-    ClaimRecord, ConceptRecord, EventId, EventRecord, Proposition, SemanticOrder, SemanticRelation,
-    StateId, StateRecord, TruthStatus, ValueRecord, ClaimId,
+    ClaimId, ClaimRecord, ConceptRecord, EventId, EventRecord, Proposition, SemanticOrder,
+    SemanticRelation, StateId, StateRecord, TruthStatus, ValueRecord,
 };
 use rustc_hash::FxHashMap;
 
@@ -74,13 +74,11 @@ impl SemanticLowerer {
                     edge_type: CompactString::from("about"),
                     source_id: CompactString::from(format!(
                         "{}:{}",
-                        proposition.proposition_id,
-                        proposition.arguments[0].role
+                        proposition.proposition_id, proposition.arguments[0].role
                     )),
                     target_id: CompactString::from(format!(
                         "{}:{}",
-                        proposition.proposition_id,
-                        proposition.arguments[1].role
+                        proposition.proposition_id, proposition.arguments[1].role
                     )),
                     status: TruthStatus::Asserted,
                 });
@@ -98,8 +96,21 @@ fn is_event_proposition(proposition: &Proposition) -> bool {
 fn is_state_proposition(proposition: &Proposition) -> bool {
     matches!(
         proposition.predicate.predicate.as_str(),
-        "be" | "is" | "are" | "was" | "were" | "remain" | "remains" | "remained" | "become"
-            | "becomes" | "became" | "seem" | "seems" | "seemed" | "feel" | "feels"
+        "be" | "is"
+            | "are"
+            | "was"
+            | "were"
+            | "remain"
+            | "remains"
+            | "remained"
+            | "become"
+            | "becomes"
+            | "became"
+            | "seem"
+            | "seems"
+            | "seemed"
+            | "feel"
+            | "feels"
             | "felt"
     ) || proposition.predicate.relation_type.contains("state")
 }

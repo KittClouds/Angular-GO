@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 compact_str.workspace = true
 memchr.workspace = true
+phoenix-chunker = { path = "../phoenix-chunker" }
 phoenix-dynamic-ner = { path = "../phoenix-dynamic-ner" }
 phoenix-machine = { path = "../phoenix-machine" }
 phoenix-types = { path = "../phoenix-types" }

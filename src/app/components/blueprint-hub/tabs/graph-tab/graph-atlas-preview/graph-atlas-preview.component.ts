@@ -1,18 +1,20 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output, ViewChild, computed, effect, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Plus, Search, Zap } from 'lucide-angular';
+import { Plus, Search, SlidersHorizontal, Zap } from 'lucide-angular';
 import { LucideAngularModule } from 'lucide-angular';
 
 import { entitySourceSystem, type RegisteredEntity } from '../../../../../lib/registry';
 import type { EntitySuggestionProviderId } from '../../../../../lib/entity-suggestions/entity-suggestion.types';
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
-import { ScopeService, type ResolvedScope } from '../../../../../lib/services/scope.service';
-import { PhoenixUiApiService, type SearchScope } from '../../../../../services/phoenix-ui-api.service';
+import { PhoenixUiApiService } from '../../../../../services/phoenix-ui-api.service';
 import type { PhoenixGraphDeltaBinaryResult } from '../../../../../services/phoenix-wasm.service';
+import { PhoenixMachineControlService } from '../../../../../services/phoenix-machine-control.service';
+import type { AtlasManifoldMode } from '../../../../../services/manifold-atlas.types';
+import { buildAtlasCountReconciliation } from '../../../../../services/atlas-count-ledger.model';
 import { BlueprintHubService } from '../../../blueprint-hub.service';
-import { loadEmbeddingAtlasForScope } from './graph-embedding-atlas-loader';
-import { buildEmbeddingQueryTrace, type EmbeddingAtlasData, type EmbeddingQueryTrace, type EmbeddingSourcePreview } from './graph-embedding-atlas';
+import { type EmbeddingAtlasData, type EmbeddingQueryTrace, type EmbeddingSourcePreview } from './graph-embedding-atlas';
+import { manifoldAdapter } from './graph-manifold-atlas';
 import { GraphGalaxyCanvasComponent } from './graph-galaxy-canvas.component';
 import {
     DEFAULT_GALAXY_SETTINGS,
@@ -27,7 +29,8 @@ import {
     type GalaxyRenderableNode,
     type GalaxyRenderSettings,
 } from './graph-galaxy-engine';
-import type { GraphLensMode } from '../graph-lens';
+import type { GraphLensMode, GraphLensState } from '../graph-lens';
+import { buildGraphAtlasReadContext, graphLensState, type GraphAtlasReadContext } from './graph-atlas-read-context';
 
 export interface AtlasPreviewEdge extends GalaxyInputEdge {}
 
@@ -43,7 +46,7 @@ interface ActiveAtlasGraph {
     graphEdges: AtlasPreviewEdge[];
 }
 
-type AtlasMode = 'entities' | 'graph' | 'embeddings';
+export type AtlasMode = 'entities' | 'graph' | 'embeddings';
 
 interface GraphInventory {
     nodes: GalaxyRenderableNode[];
@@ -62,6 +65,15 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
         <section class="atlas-preview-surface relative h-full min-h-[520px] overflow-hidden rounded-none border border-white/5 bg-[#02040a] shadow-[0_24px_80px_rgba(0,0,0,0.24)]" [attr.data-backdrop]="settings.backgroundMode">
             <div class="relative z-10 flex h-full min-h-[520px] flex-col p-px">
                 <div class="pointer-events-none absolute left-5 right-5 top-5 z-30 flex items-start justify-between gap-3">
+                    <div class="flex min-w-0 items-start gap-2">
+                        <button type="button"
+                            class="canvas-chrome-toggle"
+                            [class.canvas-chrome-toggle-active]="controlsCollapsed"
+                            [attr.aria-label]="controlsCollapsed ? 'Show atlas controls' : 'Hide atlas controls'"
+                            (click)="toggleControlsCollapsed()">
+                            <lucide-icon [img]="SlidersIcon" class="h-4 w-4"></lucide-icon>
+                        </button>
+                    @if (!controlsCollapsed) {
                     <div class="canvas-control-rail flex min-w-0 flex-wrap items-center gap-2 rounded-2xl px-2 py-1.5">
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
@@ -74,8 +86,12 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                                 [class.bg-cyan-500/15]="atlasMode === 'embeddings'" [class.text-cyan-100]="atlasMode === 'embeddings'"
                                 [class.text-zinc-500]="atlasMode !== 'embeddings'" (click)="setAtlasMode('embeddings')">Embeddings</button>
                         </div>
-                        <span class="rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">{{ activeNodeCount() }} nodes</span>
-                        <span class="rounded-full border border-violet-400/15 bg-violet-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-100">{{ activeEdgeCount() }} links</span>
+                        <span class="rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">{{ primaryCountLabel() }} {{ activeNodeCount() }}</span>
+                        <span class="rounded-full border border-violet-400/15 bg-violet-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-100">{{ secondaryCountLabel() }} {{ activeEdgeCount() }}</span>
+                        <span class="rounded-full border border-amber-300/15 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100">Source: {{ dataSourceLabel() }}</span>
+                        @if (atlasMode === 'embeddings') {
+                        <span class="rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">Input graph: {{ semanticGraphAvailabilityLabel() }}</span>
+                        }
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
                                 [class.bg-cyan-500/15]="viewMode === '3d'" [class.text-cyan-100]="viewMode === '3d'"
@@ -87,12 +103,35 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                         @if (atlasMode === 'embeddings') {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
-                                [class.bg-violet-500/20]="settings.layoutMode === 'hybridSpace'" [class.text-violet-100]="settings.layoutMode === 'hybridSpace'"
-                                [class.text-zinc-500]="settings.layoutMode !== 'hybridSpace'" (click)="setLayoutMode('hybridSpace')">Hybrid</button>
+                                [class.bg-violet-500/20]="manifoldMode() === 'hybrid'" [class.text-violet-100]="manifoldMode() === 'hybrid'"
+                                [class.text-zinc-500]="manifoldMode() !== 'hybrid'" (click)="setManifoldMode('hybrid')">Hybrid</button>
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
-                                [class.bg-violet-500/20]="settings.layoutMode === 'multiGalaxy'" [class.text-violet-100]="settings.layoutMode === 'multiGalaxy'"
+                                [class.bg-violet-500/20]="manifoldMode() === 'hopf'" [class.text-violet-100]="manifoldMode() === 'hopf'"
+                                [class.text-zinc-500]="manifoldMode() !== 'hopf'" (click)="setManifoldMode('hopf')">Hopf</button>
+                            <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
+                                [class.bg-violet-500/20]="manifoldMode() === 'lorentz'" [class.text-violet-100]="manifoldMode() === 'lorentz'"
+                                [class.text-zinc-500]="manifoldMode() !== 'lorentz'" (click)="setManifoldMode('lorentz')">Lorentz</button>
+                        </div>
+                        @if (manifoldMode() === 'hybrid') {
+                        <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
+                            <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
+                                [class.bg-cyan-500/15]="settings.layoutMode === 'hybridSpace'" [class.text-cyan-100]="settings.layoutMode === 'hybridSpace'"
+                                [class.text-zinc-500]="settings.layoutMode !== 'hybridSpace'" (click)="setLayoutMode('hybridSpace')">Shell</button>
+                            <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
+                                [class.bg-cyan-500/15]="settings.layoutMode === 'multiGalaxy'" [class.text-cyan-100]="settings.layoutMode === 'multiGalaxy'"
                                 [class.text-zinc-500]="settings.layoutMode !== 'multiGalaxy'" (click)="setLayoutMode('multiGalaxy')">Multi</button>
                         </div>
+                        } @else if (manifoldMode() === 'hopf') {
+                        <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
+                            <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
+                                (click)="setLayoutMode('hopfProjection')">Projection</button>
+                        </div>
+                        } @else {
+                        <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
+                            <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
+                                (click)="setLayoutMode('lorentzTree')">Tree</button>
+                        </div>
+                        }
                         }
                         <div class="flex shrink-0 items-center gap-2">
                             <button type="button" class="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-cyan-400/20 hover:bg-cyan-500/10"
@@ -100,6 +139,8 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                             <button type="button" class="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-cyan-400/20 hover:bg-cyan-500/10"
                                 (click)="fitCamera()">Fit</button>
                         </div>
+                    </div>
+                    }
                     </div>
 
                     <div class="flex shrink-0 items-start gap-2">
@@ -142,31 +183,38 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                         [queryFocus]="canvasQueryFocus()" [viewMode]="viewMode" [sourceMode]="atlasMode" [surfaceActive]="isAtlasSurfaceActive()"
                         (entitySelected)="onCanvasEntitySelected($event)" (entityHovered)="hoveredEntity = $event"></app-graph-galaxy-canvas>
                     @if (atlasMode === 'graph') {
-                    <div class="absolute left-4 top-20 flex max-w-[min(760px,calc(100%-220px))] flex-wrap items-center gap-2 rounded-2xl border border-cyan-400/15 bg-black/55 p-2 shadow-2xl backdrop-blur">
-                        <button type="button" class="graph-kind-chip" [class.graph-kind-chip-active]="graphKindFilter() === 'all'" (click)="setGraphKindFilter('all')">
-                            All <span>{{ graphInventory().nodes.length }}</span>
-                        </button>
-                        @for (kind of graphKindCounts(); track kind.kind) {
-                        <button type="button" class="graph-kind-chip" [class.graph-kind-chip-active]="graphKindFilter() === kind.kind" (click)="setGraphKindFilter(kind.kind)">
-                            {{ kind.kind }} <span>{{ kind.count }}</span>
-                        </button>
+                    <div class="absolute bottom-4 right-4 z-30 flex max-w-[calc(100%-32px)] flex-col items-end gap-2">
+                        <!-- Filter buttons (the 4 important buttons) -->
+                        <div class="flex flex-wrap items-center justify-end gap-1 rounded-full border border-white/10 bg-black/50 p-1 shadow-xl backdrop-blur-md">
+                            <button type="button" class="graph-kind-chip" [class.graph-kind-chip-active]="graphKindFilter() === 'all'" (click)="setGraphKindFilter('all')">
+                                All <span>{{ graphInventory().nodes.length }}</span>
+                            </button>
+                            @for (kind of graphKindCounts(); track kind.kind) {
+                            <button type="button" class="graph-kind-chip" [class.graph-kind-chip-active]="graphKindFilter() === kind.kind" (click)="setGraphKindFilter(kind.kind)">
+                                {{ kind.kind }} <span>{{ kind.count }}</span>
+                            </button>
+                            }
+                        </div>
+                        
+                        <!-- Reconcile counts -->
+                        @if (graphCountReconciliation(); as counts) {
+                        <div class="flex items-center gap-4 rounded-full border border-cyan-400/20 bg-black/60 px-4 py-2 text-[10px] shadow-2xl backdrop-blur-md">
+                            <div class="flex items-center gap-1.5">
+                                <span class="uppercase tracking-[0.16em] text-zinc-500">Committed</span>
+                                <span class="font-bold text-zinc-200">{{ counts.committed.vertices ?? '?' }}v</span>
+                                <span class="font-bold text-zinc-200">{{ counts.committed.evidenceEdges ?? '?' }}e</span>
+                            </div>
+                            <div class="h-3 w-px bg-white/15"></div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="uppercase tracking-[0.16em] text-zinc-500">Rendered</span>
+                                <span class="font-bold text-cyan-200">{{ counts.rendered.vertices }}v</span>
+                                <span class="font-bold text-cyan-200">{{ counts.rendered.links }}e</span>
+                            </div>
+                        </div>
                         }
                     </div>
                     }
                     @if (atlasMode === 'embeddings') {
-                    <form class="absolute left-4 top-20 flex max-w-[min(620px,calc(100%-220px))] items-center gap-2 rounded-2xl border border-cyan-400/15 bg-black/55 p-1.5 shadow-2xl backdrop-blur"
-                        (submit)="runAtlasQuery(); $event.preventDefault()">
-                        <input type="text" class="h-9 min-w-[260px] flex-1 bg-transparent px-3 text-sm text-cyan-50 outline-none placeholder:text-zinc-500"
-                            placeholder="Ask the atlas where an idea lives..." [value]="queryText()"
-                            (input)="queryText.set($any($event.target).value)" />
-                        <button type="submit" class="h-9 rounded-xl bg-cyan-500/15 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-cyan-500/25">
-                            Trace
-                        </button>
-                        @if (queryTrace()) {
-                        <button type="button" class="h-9 rounded-xl border border-white/10 px-3 text-xs font-semibold text-zinc-300 transition hover:bg-white/[0.06]"
-                            (click)="clearAtlasQuery()">Clear</button>
-                        }
-                    </form>
                     @if (activePreview(); as preview) {
                     <div class="absolute bottom-4 right-4 max-w-[360px] rounded-2xl border border-white/10 bg-black/60 p-3 text-xs shadow-2xl backdrop-blur">
                         <div class="flex items-center justify-between gap-3">
@@ -178,6 +226,34 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                     </div>
                     }
                     }
+                    @if (atlasMode === 'embeddings') {
+                    <form class="atlas-bottom-shelf absolute bottom-4 left-4 z-30 flex max-w-[min(900px,calc(100%-32px))] items-center gap-2"
+                        (submit)="runAtlasQuery(); $event.preventDefault()">
+                        <label class="atlas-canvas-search atlas-trace-search">
+                            <lucide-icon [img]="SearchIcon" class="h-4 w-4 text-zinc-500"></lucide-icon>
+                            <input type="text" placeholder="Ask the atlas where an idea lives..." [value]="queryText()"
+                                (input)="queryText.set($any($event.target).value)" />
+                        </label>
+                        <div class="atlas-canvas-actions">
+                            <button type="submit" class="atlas-canvas-action trace-action">
+                                {{ traceButtonLabel() }}
+                            </button>
+                            @if (queryTrace()) {
+                            <button type="button" class="atlas-canvas-action" (click)="clearAtlasQuery()">Clear</button>
+                            }
+                            <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
+                                <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
+                            </button>
+                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning || isRefreshingProjections" (click)="runSemanticAtlasAction()" [title]="semanticAtlasActionTitle()">
+                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning || isRefreshingProjections"></lucide-icon>
+                                <span class="scan-action-copy">
+                                    <span class="scan-action-kicker">{{ semanticAtlasActionKicker() }}</span>
+                                    <span class="scan-action-main">{{ semanticAtlasActionLabel() }}</span>
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+                    } @else {
                     <div class="atlas-bottom-shelf absolute bottom-4 left-4 z-30 flex max-w-[min(760px,calc(100%-32px))] items-center gap-2">
                         <label class="atlas-canvas-search">
                             <lucide-icon [img]="SearchIcon" class="h-4 w-4 text-zinc-500"></lucide-icon>
@@ -188,12 +264,9 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                             <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
                                 <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
                             </button>
-                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning" (click)="scanRequested.emit()">
-                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning"></lucide-icon>
-                                {{ isScanning ? 'Scanning' : 'Scan' }}
-                            </button>
                         </div>
                     </div>
+                    }
                     @if (settingsOpen) {
                     <div class="settings-float absolute right-4 top-14 w-[320px] rounded-2xl border border-white/10 p-3 text-xs text-zinc-300">
                         <div class="grid grid-cols-2 gap-2">
@@ -202,18 +275,36 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                           <button type="button" class="galaxy-control-button" (click)="cycleEdgeColorMode()">Palette<span>{{ edgeColorLabel() }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="toggleParticles()">Flow<span>{{ settings.particleFlow ? 'on' : 'off' }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleNodeDragMode()">Drag<span>{{ settings.nodeDragMode }}</span></button>
-                            <button type="button" class="galaxy-control-button" (click)="toggleClickFocus()">Focus<span>{{ settings.clickFocus ? 'on' : 'off' }}</span></button>
+                            <button type="button" class="galaxy-control-button" (click)="toggleClickFocus()">Dbl Focus<span>{{ settings.clickFocus ? 'on' : 'off' }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleNodeShape()">Shape<span>{{ settings.nodeShape }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="toggleAutoRotate()">Rotate<span>{{ settings.autoRotate ? 'on' : 'off' }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleBackgroundMode()">Backdrop<span>{{ backgroundLabel() }}</span></button>
                             @if (settings.layoutMode === 'hybridSpace') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHybridShell()">Shell<span>{{ settings.hybridShellVisible ? 'on' : 'off' }}</span></button>
                             }
+                            @if (settings.layoutMode === 'hopfProjection') {
+                            <button type="button" class="galaxy-control-button" (click)="toggleHopfSpace()">Hopf Space<span>{{ settings.hopfSpaceVisible ? 'on' : 'off' }}</span></button>
+                            }
+                            @if (settings.layoutMode === 'lorentzTree') {
+                            <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Lorentz Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
+                            }
                         </div>
                         @if (settings.layoutMode === 'hybridSpace' && settings.hybridShellVisible) {
                         <label class="mt-3 block">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Shell opacity</span><span>{{ settings.hybridShellOpacity | number:'1.2-2' }}</span></span>
                             <input type="range" min="0" max="1" step="0.02" [value]="settings.hybridShellOpacity" class="galaxy-slider" (input)="setHybridShellOpacity($any($event.target).value)" />
+                        </label>
+                        }
+                        @if (settings.layoutMode === 'hopfProjection' && settings.hopfSpaceVisible) {
+                        <label class="mt-3 block">
+                            <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.hopfSpaceIntensity | number:'1.1-1' }}</span></span>
+                            <input type="range" min="0" max="1.4" step="0.05" [value]="settings.hopfSpaceIntensity" class="galaxy-slider" (input)="setHopfSpaceIntensity($any($event.target).value)" />
+                        </label>
+                        }
+                        @if (settings.layoutMode === 'lorentzTree' && settings.lorentzSpaceVisible) {
+                        <label class="mt-3 block">
+                            <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.lorentzSpaceIntensity | number:'1.1-1' }}</span></span>
+                            <input type="range" min="0" max="1.4" step="0.05" [value]="settings.lorentzSpaceIntensity" class="galaxy-slider" (input)="setLorentzSpaceIntensity($any($event.target).value)" />
                         </label>
                         }
                         <label class="mt-3 block">
@@ -271,7 +362,7 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
 
         .atlas-canvas-surface {
             background:
-                radial-gradient(circle at 50% 48%, rgba(34, 211, 238, 0.04), transparent 44%),
+                radial-gradient(circle at 50% 48%, rgba(var(--ui-accent-rgb), 0.04), transparent 44%),
                 #02040a;
         }
 
@@ -296,26 +387,50 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
         }
 
         .galaxy-control-button:hover {
-            border-color: rgba(34, 211, 238, 0.28);
-            background: rgba(34, 211, 238, 0.10);
+            border-color: rgba(var(--ui-accent-rgb), 0.28);
+            background: rgba(var(--ui-accent-rgb), 0.10);
         }
 
         .galaxy-control-button span {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            color: rgb(165 243 252);
+            color: var(--ui-accent-bright);
             letter-spacing: 0;
             text-transform: none;
         }
 
         .galaxy-slider {
             width: 100%;
-            accent-color: rgb(34 211 238);
+            accent-color: var(--ui-accent);
         }
 
         .canvas-control-rail { pointer-events: none; background: transparent; box-shadow: none; }
-        .canvas-control-rail button, .canvas-glass-button, .settings-float button, .settings-float input, .atlas-bottom-shelf, .atlas-bottom-shelf * { pointer-events: auto; }
+        .canvas-control-rail button, .canvas-chrome-toggle, .canvas-glass-button, .settings-float button, .settings-float input, .atlas-bottom-shelf, .atlas-bottom-shelf * { pointer-events: auto; }
+
+        .canvas-chrome-toggle {
+            display: inline-flex;
+            height: 34px;
+            width: 34px;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            border: 1px solid rgba(var(--ui-accent-rgb), 0.18);
+            background: rgba(3, 8, 13, 0.68);
+            color: var(--ui-accent-bright);
+            box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
+            backdrop-filter: blur(12px);
+            transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, color 140ms ease;
+        }
+
+        .canvas-chrome-toggle:hover,
+        .canvas-chrome-toggle-active {
+            border-color: rgba(168, 85, 247, 0.34);
+            background: rgba(88, 28, 135, 0.28);
+            color: rgb(245 208 254);
+            transform: translateY(-1px);
+        }
 
         .canvas-glass-button {
             border: 1px solid rgba(255, 255, 255, 0.10);
@@ -329,9 +444,9 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
         .settings-float { pointer-events: none; background: transparent; box-shadow: none; }
 
         .canvas-glass-button:hover {
-            border-color: rgba(45, 212, 191, 0.24);
-            background: rgba(20, 184, 166, 0.10);
-            color: rgb(204 251 241);
+            border-color: rgba(var(--ui-accent-rgb), 0.24);
+            background: rgba(var(--ui-accent-rgb), 0.10);
+            color: var(--ui-accent-bright);
         }
 
         .lens-menu-button {
@@ -351,37 +466,38 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
 
         .lens-menu-button:hover,
         .lens-menu-button-active {
-            background: rgba(20, 184, 166, 0.12);
-            color: rgb(153 246 228);
+            background: rgba(var(--ui-accent-rgb), 0.12);
+            color: var(--ui-accent-bright);
         }
+
 
         .graph-kind-chip {
             display: inline-flex;
-            min-height: 28px;
+            min-height: 24px;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 999px;
             background: rgba(255, 255, 255, 0.035);
-            padding: 0 9px;
+            padding: 0 8px;
             color: rgb(161 161 170);
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 900;
-            letter-spacing: 0.10em;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
             transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
         }
 
         .graph-kind-chip span {
-            color: rgb(103 232 249);
+            color: var(--ui-accent-bright);
             letter-spacing: 0;
         }
 
         .graph-kind-chip:hover,
         .graph-kind-chip-active {
-            border-color: rgba(45, 212, 191, 0.28);
-            background: rgba(20, 184, 166, 0.12);
-            color: rgb(204 251 241);
+            border-color: rgba(var(--ui-accent-rgb), 0.28);
+            background: rgba(var(--ui-accent-rgb), 0.12);
+            color: var(--ui-accent-bright);
         }
 
         .atlas-bottom-shelf {
@@ -394,11 +510,15 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
             min-width: min(360px, 42vw);
             align-items: center;
             gap: 9px;
-            border: 1px solid rgba(45, 212, 191, 0.16);
+            border: 1px solid rgba(var(--ui-accent-rgb), 0.16);
             border-radius: 999px;
             background: rgba(3, 8, 13, 0.72);
             padding: 0 13px;
             backdrop-filter: blur(12px);
+        }
+
+        .atlas-trace-search {
+            min-width: min(500px, 48vw);
         }
 
         .atlas-canvas-search input {
@@ -418,7 +538,7 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
             display: flex;
             align-items: center;
             gap: 6px;
-            border: 1px solid rgba(45, 212, 191, 0.13);
+            border: 1px solid rgba(var(--ui-accent-rgb), 0.13);
             border-radius: 999px;
             background: rgba(3, 8, 13, 0.68);
             padding: 4px;
@@ -433,15 +553,15 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
             gap: 5px;
             border-radius: 999px;
             padding: 0 10px;
-            color: rgb(207 250 254);
+            color: var(--ui-accent-bright);
             font-size: 11px;
             font-weight: 800;
             transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
         }
 
         .atlas-canvas-action:hover {
-            background: rgba(20, 184, 166, 0.13);
-            color: rgb(240 253 250);
+            background: rgba(var(--ui-accent-rgb), 0.13);
+            color: var(--ui-accent-bright);
         }
 
         .atlas-canvas-action:disabled {
@@ -456,12 +576,49 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
             box-shadow: 0 0 22px rgba(168, 85, 247, 0.13);
         }
 
+        .scan-action-copy {
+            display: inline-flex;
+            min-width: 0;
+            flex-direction: column;
+            align-items: flex-start;
+            line-height: 1.05;
+        }
+
+        .scan-action-kicker {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: rgba(216, 180, 254, 0.74);
+            font-size: 8px;
+            font-weight: 900;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .scan-action-main {
+            max-width: 170px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .atlas-canvas-action.trace-action {
+            border: 1px solid rgba(var(--ui-accent-rgb), 0.28);
+            background: rgba(var(--ui-accent-rgb), 0.22);
+            color: var(--ui-accent-bright);
+        }
+
         .atlas-canvas-action.scan-action:hover {
             background: rgba(147, 51, 234, 0.34);
             color: rgb(250 245 255);
         }
 
         @media (max-width: 900px) {
+            .graph-reconcile-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
             .atlas-bottom-shelf {
                 right: 4px;
                 flex-wrap: wrap;
@@ -474,24 +631,44 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
     `],
 })
 export class GraphAtlasPreviewComponent {
-    private readonly scopeService = inject(ScopeService);
     private readonly phoenixUiApi = inject(PhoenixUiApiService);
+    private readonly machine = inject(PhoenixMachineControlService);
     private readonly hubService = inject(BlueprintHubService);
-    private atlasLoadToken = 0;
     private graphLoadToken = 0;
+    private readonly atlasLoadedKeys = new Map<AtlasManifoldMode, string>();
+    private readonly atlasLoadingKeys = new Map<AtlasManifoldMode, string>();
     private activeGraphCache: ActiveAtlasGraph | null = null;
+    private _lensMode: GraphLensMode = 'global';
+    private _primaryNoteId: string | null = null;
+    private _selectedNoteIds: string[] = [];
+    private readonly readContextEpoch = signal(0);
 
     @Input() entities: GalaxyRenderableNode[] = [];
     @Input() edges: AtlasPreviewEdge[] = [];
     @Input() sourceLabel = 'registry graph';
-    @Input() lensMode: GraphLensMode = 'narrative';
+    @Input() set lensMode(value: GraphLensMode | null | undefined) {
+        this._lensMode = value || 'global';
+        this.bumpReadContext();
+    }
+    get lensMode(): GraphLensMode {
+        return this._lensMode;
+    }
+    @Input() set primaryNoteId(value: string | null | undefined) {
+        this._primaryNoteId = value || null;
+        this.bumpReadContext();
+    }
+    @Input() set selectedNoteIds(value: string[] | null | undefined) {
+        this._selectedNoteIds = Array.isArray(value) ? [...value] : [];
+        this.bumpReadContext();
+    }
     @Input() atlasSearch = '';
     @Input() isScanning = false;
     @Input() activeProvider: EntitySuggestionProviderId | null = null;
     @Output() entitySelected = new EventEmitter<RegisteredEntity>();
     @Output() addEntityRequested = new EventEmitter<void>();
-    @Output() scanRequested = new EventEmitter<void>();
+    @Output() scanRequested = new EventEmitter<GraphLensState>();
     @Output() styleRequested = new EventEmitter<void>();
+    @Output() atlasModeChange = new EventEmitter<AtlasMode>();
     @Output() lensModeChange = new EventEmitter<GraphLensMode>();
     @Output() atlasSearchChange = new EventEmitter<string>();
     @ViewChild('galaxyCanvas') private galaxyCanvas?: GraphGalaxyCanvasComponent;
@@ -501,16 +678,35 @@ export class GraphAtlasPreviewComponent {
     settings: GalaxyRenderSettings = { ...DEFAULT_GALAXY_SETTINGS };
     settingsOpen = false;
     lensMenuOpen = false;
+    controlsCollapsed = false;
+    isRefreshingProjections = false;
     selectedEntityId: string | null = null;
     hoveredEntity: GalaxyRenderableNode | null = null;
     queryText = signal('');
     queryTrace = signal<EmbeddingQueryTrace | null>(null);
-    embeddingAtlas = signal<EmbeddingAtlasData>({ nodes: [], edges: [], sourceLabel: 'doc vectors', searchIndex: [] });
+    readonly manifoldMode = this.machine.manifoldMode;
+    readonly manifoldStatus = this.machine.manifoldStatus;
+    private readonly embeddingAtlasByMode = signal<Record<AtlasManifoldMode, EmbeddingAtlasData>>({
+        hybrid: emptyEmbeddingAtlas('hybrid atlas not loaded'),
+        hopf: emptyEmbeddingAtlas('hopf atlas not loaded'),
+        lorentz: emptyEmbeddingAtlas('lorentz forest not loaded'),
+    });
+    readonly embeddingAtlas = computed(() => this.embeddingAtlasByMode()[this.manifoldMode()]);
     graphInventory = signal<GraphInventory>(EMPTY_GRAPH_INVENTORY);
     graphKindFilter = signal('all');
-    graphKindCounts = computed(() => this.graphInventory().kindCounts.slice(0, 10));
+    graphKindCounts = computed(() => this.graphInventory().kindCounts.slice(0, 4));
+    graphCountReconciliation = computed(() => buildAtlasCountReconciliation({
+        committedVertices: this.machine.graphNodes(),
+        committedEvidenceEdges: this.machine.graphEdges(),
+        committedLeaves: graphLeavesFromAudit(this.machine.graphAudit()),
+        renderedVertices: this.graphInventory().nodes.length,
+        renderedLinks: this.graphInventory().edges.length,
+        renderedKinds: this.graphInventory().kindCounts,
+        sourceLabel: 'Committed Graph Delta',
+    }));
     readonly PlusIcon = Plus;
     readonly SearchIcon = Search;
+    readonly SlidersIcon = SlidersHorizontal;
     readonly ZapIcon = Zap;
     readonly lensModes: { id: GraphLensMode; label: string }[] = [
         { id: 'global', label: 'Global' },
@@ -521,9 +717,22 @@ export class GraphAtlasPreviewComponent {
 
     constructor() {
         effect(() => {
-            const scope = this.scopeService.resolvedScope();
-            void this.refreshEmbeddingAtlas(scope);
-            void this.refreshGraphInventory(scope);
+            this.readContextEpoch();
+            const manifold = this.manifoldMode();
+            const context = this.currentReadContext();
+            untracked(() => {
+                void this.refreshEmbeddingAtlas(context, manifold);
+                void this.refreshGraphInventory(context);
+            });
+        });
+        effect(() => {
+            const summary = this.machine.lastSummary();
+            this.readContextEpoch();
+            const context = this.currentReadContext();
+            if (summary?.kind !== 'atlas-rich-scan' || !scanSummaryHasEmbeddings(summary)) return;
+            untracked(() => {
+                void this.refreshProjectionViews(context);
+            });
         });
     }
 
@@ -532,13 +741,18 @@ export class GraphAtlasPreviewComponent {
     }
 
     setAtlasMode(mode: AtlasMode): void {
+        const changed = this.atlasMode !== mode;
         this.atlasMode = mode;
+        if (changed) this.atlasModeChange.emit(mode);
         this.selectedEntityId = null;
         this.hoveredEntity = null;
         if (mode !== 'embeddings' && this.settings.layoutMode !== 'single') {
             this.updateSettings({ layoutMode: 'single' });
-        } else if (mode === 'embeddings' && this.settings.layoutMode === 'single') {
-            this.updateSettings({ layoutMode: 'hybridSpace' });
+        } else if (mode === 'embeddings') {
+            const layoutMode = this.layoutForManifold(this.manifoldMode());
+            if (this.settings.layoutMode === 'single' || this.settings.layoutMode !== layoutMode && this.manifoldMode() !== 'hybrid') {
+                this.updateSettings({ layoutMode });
+            }
         }
     }
 
@@ -550,12 +764,32 @@ export class GraphAtlasPreviewComponent {
 
     setLayoutMode(mode: GalaxyLayoutMode): void {
         if (mode !== 'single' && this.atlasMode !== 'embeddings') return;
+        if ((mode === 'hybridSpace' || mode === 'multiGalaxy') && this.manifoldMode() !== 'hybrid') {
+            this.machine.setManifoldMode('hybrid');
+        } else if (mode === 'hopfProjection' && this.manifoldMode() !== 'hopf') {
+            this.machine.setManifoldMode('hopf');
+        } else if (mode === 'lorentzTree' && this.manifoldMode() !== 'lorentz') {
+            this.machine.setManifoldMode('lorentz');
+        }
         this.updateSettings({ layoutMode: mode });
+    }
+
+    setManifoldMode(mode: AtlasManifoldMode): void {
+        this.machine.setManifoldMode(mode);
+        if (this.atlasMode !== 'embeddings') this.setAtlasMode('embeddings');
+        const layoutMode = this.layoutForManifold(mode);
+        if (this.settings.layoutMode !== layoutMode) this.updateSettings({ layoutMode });
+        this.queryTrace.set(null);
+        this.selectedEntityId = null;
     }
 
     toggleSettings(): void {
         this.settingsOpen = !this.settingsOpen;
         if (this.settingsOpen) this.lensMenuOpen = false;
+    }
+
+    toggleControlsCollapsed(): void {
+        this.controlsCollapsed = !this.controlsCollapsed;
     }
 
     toggleLensMenu(): void {
@@ -572,18 +806,66 @@ export class GraphAtlasPreviewComponent {
         return this.lensModes.find((mode) => mode.id === this.lensMode)?.label ?? 'Narrative';
     }
 
+    traceButtonLabel(): string {
+        return manifoldAdapter(this.manifoldMode()).traceLabel;
+    }
+
+    semanticAtlasActionLabel(): string {
+        if (this.isScanning) return 'Indexing Semantic Atlas';
+        if (this.isRefreshingProjections) return 'Refreshing Projections';
+        return this.semanticAtlasIsCurrent() ? 'Refresh Projections' : 'Index Semantic Atlas';
+    }
+
+    semanticAtlasActionKicker(): string {
+        if (this.semanticAtlasIsCurrent()) return 'Hybrid / Hopf / Lorentz';
+        return 'from rendered graph';
+    }
+
+    semanticAtlasActionTitle(): string {
+        if (this.semanticAtlasIsCurrent()) {
+            return 'Reload existing Semantic Atlas rows into the Hybrid, Hopf, and Lorentz projection views without running embeddings.';
+        }
+        return 'Committed graph leaves, documents, entities, and context lanes -> semantic vectors -> candidate links -> manifold projections.';
+    }
+
+    semanticGraphAvailabilityLabel(): string {
+        const inventory = this.graphInventory();
+        if (!inventory.nodes.length) return 'unavailable';
+        return `${this.graphKindTotal('leaf', 'chunk')} leaves / ${this.graphKindTotal('document')} documents / ${this.graphKindTotal('entity')} entities`;
+    }
+
+    runSemanticAtlasAction(): void {
+        if (this.semanticAtlasIsCurrent()) {
+            void this.refreshProjectionViews(this.currentReadContext());
+            return;
+        }
+        this.scanRequested.emit(this.currentLensState());
+    }
+
+    manifoldGeometryLabel(): string {
+        return this.embeddingAtlas().manifold?.geometryVersion || (
+            this.manifoldMode() === 'hopf'
+                ? 'hopf_ico_r5_v1'
+                : this.manifoldMode() === 'lorentz'
+                    ? 'lorentz_h4_forest_v1'
+                    : 'hybrid_semantic_v1'
+        );
+    }
+
+    projectionSourceLabel(): string {
+        const source = String(this.embeddingAtlas().manifold?.projectionSource || 'semantic_atlas_rows');
+        return source.replace(/_/g, ' ');
+    }
+
     onCanvasEntitySelected(node: GalaxyRenderableNode): void {
         this.selectedEntityId = this.selectedEntityId === node.id ? null : node.id;
     }
 
     runAtlasQuery(): void {
         this.atlasMode = 'embeddings';
-        const trace = buildEmbeddingQueryTrace(this.queryText(), this.embeddingAtlas());
+        const trace = manifoldAdapter(this.manifoldMode()).trace(this.queryText(), this.embeddingAtlas());
         this.queryTrace.set(trace);
         this.selectedEntityId = trace?.queryNode.id ?? null;
-        if (trace) {
-            setTimeout(() => this.galaxyCanvas?.focusEntity(trace.queryNode.id), 40);
-        }
     }
 
     clearAtlasQuery(): void {
@@ -640,7 +922,6 @@ export class GraphAtlasPreviewComponent {
     toggleClickFocus(): void {
         const clickFocus = !this.settings.clickFocus;
         this.updateSettings({ clickFocus });
-        if (!clickFocus) this.galaxyCanvas?.clearCameraFocus();
     }
 
     cycleNodeShape(): void {
@@ -654,6 +935,14 @@ export class GraphAtlasPreviewComponent {
 
     toggleHybridShell(): void {
         this.updateSettings({ hybridShellVisible: !this.settings.hybridShellVisible });
+    }
+
+    toggleHopfSpace(): void {
+        this.updateSettings({ hopfSpaceVisible: !this.settings.hopfSpaceVisible });
+    }
+
+    toggleLorentzSpace(): void {
+        this.updateSettings({ lorentzSpaceVisible: !this.settings.lorentzSpaceVisible });
     }
 
     cycleBackgroundMode(): void {
@@ -677,6 +966,14 @@ export class GraphAtlasPreviewComponent {
 
     setHybridShellOpacity(value: string): void {
         this.updateSettings({ hybridShellOpacity: Number(value) });
+    }
+
+    setHopfSpaceIntensity(value: string): void {
+        this.updateSettings({ hopfSpaceIntensity: Number(value) });
+    }
+
+    setLorentzSpaceIntensity(value: string): void {
+        this.updateSettings({ lorentzSpaceIntensity: Number(value) });
     }
 
     setNodeDistance(value: string): void {
@@ -723,6 +1020,26 @@ export class GraphAtlasPreviewComponent {
         return this.activeEdges().length;
     }
 
+    primaryCountLabel(): string {
+        if (this.atlasMode === 'entities') return 'registry entities';
+        if (this.atlasMode === 'graph') return 'rendered vertices';
+        return this.manifoldMode() === 'lorentz' ? 'forest nodes' : 'semantic vectors';
+    }
+
+    secondaryCountLabel(): string {
+        if (this.atlasMode === 'entities') return 'registry links';
+        if (this.atlasMode === 'graph') return 'rendered links';
+        return this.manifoldMode() === 'lorentz' ? 'tree links' : 'candidate links';
+    }
+
+    dataSourceLabel(): string {
+        if (this.atlasMode === 'entities') return 'Registry';
+        if (this.atlasMode === 'graph') return 'Committed Graph Delta';
+        if (this.manifoldMode() === 'lorentz') return 'Lorentz Forest Sidecar';
+        if (this.manifoldMode() === 'hopf') return 'Semantic Atlas -> Hopf Projection';
+        return 'Semantic Atlas -> Hybrid Space';
+    }
+
     isAtlasSurfaceActive(): boolean {
         return this.activeNodeCount() > 0
             && this.hubService.activeTab() === 'graph'
@@ -731,14 +1048,18 @@ export class GraphAtlasPreviewComponent {
 
     emptyTitle(): string {
         if (this.atlasMode === 'graph') return 'No graph inventory yet';
-        return this.atlasMode === 'entities' ? 'No entities yet' : 'No embedding source yet';
+        if (this.atlasMode === 'entities') return 'No entities yet';
+        if (this.manifoldMode() === 'hopf') return 'No Hopf manifold yet';
+        if (this.manifoldMode() === 'lorentz') return 'No Lorentz forest yet';
+        return 'No Semantic Atlas embeddings yet';
     }
 
     emptyMessage(): string {
         if (this.atlasMode === 'graph') return 'Run Atlas Command or rebuild the graph lane, then this view will show leaves, mentions, entities, and graph edges.';
-        return this.atlasMode === 'entities'
-            ? 'Add or extract entities and the atlas will start drawing the scope.'
-            : 'Open a narrative with notes and the doc atlas will project its semantic shape.';
+        if (this.atlasMode === 'entities') return 'Add or extract entities and the atlas will start drawing the scope.';
+        if (this.manifoldMode() === 'hopf') return 'Index the Semantic Atlas from the rendered graph, then project the existing vectors into Hopf space.';
+        if (this.manifoldMode() === 'lorentz') return 'Index the Semantic Atlas from the rendered graph, then refresh the Lorentz forest sidecar only when the native cache exists.';
+        return 'Index the Semantic Atlas from rendered leaves, documents, entities, and context lanes. A local preview is shown only when native vectors are unavailable.';
     }
 
     canvasQueryFocus() {
@@ -764,6 +1085,57 @@ export class GraphAtlasPreviewComponent {
 
     private updateSettings(patch: Partial<GalaxyRenderSettings>): void {
         this.settings = { ...this.settings, ...patch };
+    }
+
+    private setEmbeddingAtlasForMode(mode: AtlasManifoldMode, atlas: EmbeddingAtlasData): void {
+        this.embeddingAtlasByMode.update((atlases) => ({ ...atlases, [mode]: atlas }));
+    }
+
+    private bumpReadContext(): void {
+        this.readContextEpoch.update((value) => value + 1);
+        this.activeGraphCache = null;
+    }
+
+    private currentLensState(): GraphLensState {
+        return graphLensState(this._lensMode, this._primaryNoteId, this._selectedNoteIds);
+    }
+
+    private currentReadContext(): GraphAtlasReadContext {
+        return buildGraphAtlasReadContext(this.currentLensState());
+    }
+
+    private graphKindTotal(...kinds: string[]): number {
+        const accepted = new Set(kinds.map((kind) => normalizeGraphKind(kind)));
+        return this.graphInventory().kindCounts
+            .filter((bucket) => accepted.has(normalizeGraphKind(bucket.kind)))
+            .reduce((sum, bucket) => sum + bucket.count, 0);
+    }
+
+    private semanticAtlasIsCurrent(): boolean {
+        const atlas = this.embeddingAtlas();
+        if (!atlas.nodes.length) return false;
+        const source = `${atlas.sourceLabel || ''} ${atlas.manifold?.projectionSource || ''}`.toLowerCase();
+        return !/preview|fallback|synthetic|not loaded|unavailable/.test(source);
+    }
+
+    private async refreshProjectionViews(context: GraphAtlasReadContext): Promise<void> {
+        if (this.isRefreshingProjections) return;
+        this.isRefreshingProjections = true;
+        try {
+            const modes: AtlasManifoldMode[] = ['hybrid', 'hopf', 'lorentz'];
+            for (const mode of modes) {
+                this.atlasLoadedKeys.delete(mode);
+                await this.refreshEmbeddingAtlas(context, mode, true);
+            }
+        } finally {
+            this.isRefreshingProjections = false;
+        }
+    }
+
+    private layoutForManifold(mode: AtlasManifoldMode): GalaxyLayoutMode {
+        if (mode === 'hopf') return 'hopfProjection';
+        if (mode === 'lorentz') return 'lorentzTree';
+        return 'hybridSpace';
     }
 
     private activeGraph(): ActiveAtlasGraph {
@@ -905,12 +1277,15 @@ export class GraphAtlasPreviewComponent {
         return [...atlas.edges, ...anchorEdges];
     }
 
-    private async refreshGraphInventory(scope: ResolvedScope): Promise<void> {
+    private async refreshGraphInventory(context: GraphAtlasReadContext): Promise<void> {
         const token = ++this.graphLoadToken;
         try {
-            const delta = await this.phoenixUiApi.knowledgeGraphDelta(this.toSearchScope(scope));
+            const delta = await this.phoenixUiApi.knowledgeGraphDelta(context.searchScope);
             if (token === this.graphLoadToken) {
-                this.graphInventory.set(graphInventoryFromDelta(delta));
+                this.graphInventory.set(filterGraphInventoryForNotes(
+                    graphInventoryFromDelta(delta),
+                    context.noteIds,
+                ));
             }
         } catch (error) {
             console.warn('[GraphAtlasPreview] Failed to load graph inventory', error);
@@ -918,23 +1293,58 @@ export class GraphAtlasPreviewComponent {
         }
     }
 
-    private toSearchScope(scope: ResolvedScope): SearchScope {
-        if (scope.type === 'note' || scope.selectedNoteId) return { noteId: scope.selectedNoteId || scope.id };
-        if (scope.narrativeId) return { narrativeId: scope.narrativeId };
-        if (scope.type === 'folder' || scope.scopeFolderId !== 'vault:global') {
-            return { folderId: scope.scopeFolderId, folderPath: scope.label };
-        }
-        return {};
-    }
+    private async refreshEmbeddingAtlas(context: GraphAtlasReadContext, manifold: AtlasManifoldMode, force = false): Promise<void> {
+        const requestKey = `${manifold}:${context.key}`;
+        if (this.atlasLoadingKeys.get(manifold) === requestKey) return;
+        if (!force && this.atlasLoadedKeys.get(manifold) === requestKey && this.machine.manifoldStatuses()[manifold] === 'ready') return;
 
-    private async refreshEmbeddingAtlas(scope: ResolvedScope): Promise<void> {
-        const token = ++this.atlasLoadToken;
-        const atlas = await loadEmbeddingAtlasForScope(scope);
-        if (token === this.atlasLoadToken) {
-            this.embeddingAtlas.set(atlas);
-            this.queryTrace.set(buildEmbeddingQueryTrace(this.queryText(), atlas));
+        this.atlasLoadingKeys.set(manifold, requestKey);
+        const load = this.machine.beginManifoldLoad(manifold);
+        try {
+            const adapter = manifoldAdapter(manifold);
+            const atlas = await adapter.load(this.phoenixUiApi, context.searchScope);
+            if (this.machine.isCurrentManifoldLoad(load)) {
+                this.setEmbeddingAtlasForMode(manifold, atlas);
+                this.atlasLoadedKeys.set(manifold, requestKey);
+                if (this.manifoldMode() === manifold) {
+                    this.queryTrace.set(adapter.trace(this.queryText(), atlas));
+                }
+                this.machine.finishManifoldLoad(load, `${adapter.label} manifold ready`, {
+                    nodes: atlas.nodes.length,
+                    edges: atlas.edges.length,
+                    sourceLabel: atlas.sourceLabel,
+                });
+            }
+        } catch (error) {
+            console.warn('[GraphAtlasPreview] Failed to load manifold atlas', error);
+            if (this.machine.isCurrentManifoldLoad(load)) {
+                this.setEmbeddingAtlasForMode(manifold, emptyEmbeddingAtlas(`${manifold} manifold unavailable`));
+                this.atlasLoadedKeys.set(manifold, requestKey);
+                if (this.manifoldMode() === manifold) {
+                    this.queryTrace.set(null);
+                }
+                this.machine.failManifoldLoad(load, error);
+            }
+        } finally {
+            if (this.atlasLoadingKeys.get(manifold) === requestKey) {
+                this.atlasLoadingKeys.delete(manifold);
+            }
         }
     }
+}
+
+function emptyEmbeddingAtlas(sourceLabel: string): EmbeddingAtlasData {
+    return { nodes: [], edges: [], sourceLabel, searchIndex: [] };
+}
+
+function graphLeavesFromAudit(audit: { nodeKinds: Array<{ key: string; count: number }> } | null): number | null {
+    return audit?.nodeKinds.find((bucket) => ['leaf', 'chunk'].includes(bucket.key))?.count ?? null;
+}
+
+function scanSummaryHasEmbeddings(summary: { details?: Record<string, unknown> } | null): boolean {
+    const counts = summary?.details?.['embeddingCounts'];
+    if (!counts || typeof counts !== 'object') return false;
+    return Object.values(counts as Record<string, unknown>).some((value) => Number(value) > 0);
 }
 
 function graphInventoryFromDelta(delta: PhoenixGraphDeltaBinaryResult): GraphInventory {
@@ -1008,6 +1418,24 @@ function graphInventoryFromDelta(delta: PhoenixGraphDeltaBinaryResult): GraphInv
         edges,
         kindCounts: graphKindCounts(nodes),
         sourceLabel: 'backend graph delta',
+    };
+}
+
+function filterGraphInventoryForNotes(inventory: GraphInventory, noteIds: readonly string[]): GraphInventory {
+    if (!noteIds.length) return inventory;
+    const allowedNotes = new Set(noteIds);
+    const nodes = inventory.nodes.filter((node) => {
+        const metadata = node.metadata ?? {};
+        const noteId = String(metadata['noteId'] || metadata['documentId'] || '');
+        return allowedNotes.has(noteId);
+    });
+    const ids = new Set(nodes.map((node) => node.id));
+    const edges = inventory.edges.filter((edge) => ids.has(edge.sourceId) && ids.has(edge.targetId));
+    return {
+        ...inventory,
+        nodes,
+        edges,
+        kindCounts: graphKindCounts(nodes),
     };
 }
 

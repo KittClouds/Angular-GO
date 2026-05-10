@@ -336,7 +336,7 @@ export const prettyTextPlugin = $prose(() => {
                 });
             };
 
-            const handleGoKittReady = () => {
+            const handlePhoenixReady = () => {
                 prettyTextApi.scheduleImplicitRefresh(editorView.state.doc, {
                     immediate: true,
                     force: true,
@@ -354,7 +354,7 @@ export const prettyTextPlugin = $prose(() => {
 
             const unsubscribe = prettyTextApi.subscribe(() => syncFromApi(editorView));
 
-            window.addEventListener('gokitt-ready', handleGoKittReady);
+            window.addEventListener('phoenix-ready', handlePhoenixReady);
             window.addEventListener('dictionary-rebuilt', handleDictionaryRebuilt);
 
             setTimeout(() => {
@@ -376,7 +376,7 @@ export const prettyTextPlugin = $prose(() => {
 
                 destroy() {
                     unsubscribe();
-                    window.removeEventListener('gokitt-ready', handleGoKittReady);
+                    window.removeEventListener('phoenix-ready', handlePhoenixReady);
                     window.removeEventListener('dictionary-rebuilt', handleDictionaryRebuilt);
                 },
             };

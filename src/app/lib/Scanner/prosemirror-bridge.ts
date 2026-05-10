@@ -1,6 +1,6 @@
 /**
  * ProseMirrorBridge — Pure functions for converting between ProseMirror docs and flat text.
- * No GoKitt dependency. No async. No side effects.
+ * No backend dependency. No async. No side effects.
  */
 import type { DecorationSpan } from './types';
 import { createSelector } from './anchor-utils';

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use compact_str::CompactString;
 use phoenix_alex::Lexicon;
+use phoenix_dynamic_ner::SurfaceRouter;
 use phoenix_dynamic_ner::{
     DiscoveredSpan, DynamicNerModel, DynamicSchemaBuilder, EntityLabel, LabelPack, LocalMentionId,
     MentionPacket, MentionVote, ModelNerWindow, NerModelError, PhoenixNerEngineBuilder,
@@ -239,6 +240,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let summary_only = env::var("PHOENIX_DYN_NER_SUMMARY_ONLY")
         .ok()
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    let max_model_windows = env::var("PHOENIX_DYN_NER_MAX_MODEL_WINDOWS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|&value| value > 0);
 
     let text = fs::read_to_string(&path)?;
     let (tokens, sentences) = naive_tokenize(&text);
@@ -252,10 +257,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_labels,
         ..Default::default()
     };
-    let engine = PhoenixNerEngineBuilder::new()
+    let mut builder = PhoenixNerEngineBuilder::new()
         .schema(schema)
-        .model(Box::new(model))
-        .build();
+        .model(Box::new(model));
+    if let Some(max_model_windows) = max_model_windows {
+        builder = builder.router(SurfaceRouter { max_model_windows });
+    }
+    let engine = builder.build();
 
     let input = SurfaceNerInput {
         document_id: "shortrun",
@@ -312,6 +320,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("THRESHOLD {threshold:.2}");
     println!("OVERLAP_POLICY {overlap_policy:?}");
     println!("MAX_LABELS {max_labels}");
+    if let Some(max_model_windows) = max_model_windows {
+        println!("MAX_MODEL_WINDOWS {max_model_windows}");
+    }
     println!("BYTES {}", text.len());
     println!("CHARS {}", text.chars().count());
     println!("TOKENS {}", tokens.len());

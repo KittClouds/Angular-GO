@@ -1,13 +1,27 @@
 pub mod api;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod lens;
 mod normalize;
 mod sentence;
+mod structural;
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use lens::{
+    build_graph_delta_for_lens, build_lens_chunks, ChunkLens, GraphBuildContext, GraphDelta,
+    LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind, LensChunkHintSource,
+    LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge, LensMentionEdgeKind,
+    LensMentionGraph, LensMentionKind, LensVoteReason,
+};
 pub use normalize::{is_sentence_guard, normalize_raw};
 pub use sentence::split_sentence_ranges;
+pub use structural::{
+    build_structural_substrate, BaseChunk, ChapterSpan, DialogueBoundaryHint, ParagraphSpan,
+    SentenceQuality, SentenceSpan, StructuralSubstrate,
+};
 
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]

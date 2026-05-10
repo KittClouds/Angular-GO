@@ -10,6 +10,8 @@ use thiserror::Error;
 pub enum HyperbolicError {
     #[error("Invalid curvature: {0}")]
     InvalidCurvature(f32),
+    #[error("Invalid point: non-finite coordinate")]
+    InvalidPoint,
     #[error("Empty collection")]
     EmptyCollection,
     #[error("Dimension mismatch: expected {expected}, got {got}")]
@@ -64,6 +66,132 @@ impl PoincareConfig {
     #[inline]
     pub fn max_norm(&self) -> f32 {
         (1.0 / self.curvature.sqrt()) - self.eps
+    }
+}
+
+/// Checked facade for Poincare ball operations.
+///
+/// Free functions below remain allocation-light kernels used by ANN/tangent code.
+/// This facade enforces dimension/curvature/finite-input invariants at API
+/// boundaries so hybrid-space code can fail loudly instead of silently truncating
+/// mismatched vectors.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PoincareBall {
+    pub curvature: f32,
+    pub eps: f32,
+}
+
+impl Default for PoincareBall {
+    fn default() -> Self {
+        Self {
+            curvature: DEFAULT_CURVATURE,
+            eps: EPS,
+        }
+    }
+}
+
+impl PoincareBall {
+    pub fn new(curvature: f32) -> HyperbolicResult<Self> {
+        Self::with_eps(curvature, EPS)
+    }
+
+    pub fn with_eps(curvature: f32, eps: f32) -> HyperbolicResult<Self> {
+        if !curvature.is_finite() || curvature <= 0.0 {
+            return Err(HyperbolicError::InvalidCurvature(curvature));
+        }
+        Ok(Self {
+            curvature,
+            eps: eps.abs().max(f32::EPSILON),
+        })
+    }
+
+    #[inline]
+    pub fn max_norm(&self) -> f32 {
+        (1.0 / self.curvature.sqrt()) - self.eps
+    }
+
+    pub fn project(&self, x: &mut [f32]) -> HyperbolicResult<()> {
+        ensure_finite(x)?;
+        project_to_ball_inplace(x, self.curvature, self.eps);
+        Ok(())
+    }
+
+    pub fn distance(&self, x: &[f32], y: &[f32]) -> HyperbolicResult<f32> {
+        ensure_same_dim(x, y)?;
+        ensure_finite(x)?;
+        ensure_finite(y)?;
+        Ok(poincare_distance(x, y, self.curvature))
+    }
+
+    pub fn mobius_add(&self, x: &[f32], y: &[f32]) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(x, y)?;
+        ensure_finite(x)?;
+        ensure_finite(y)?;
+        Ok(mobius_add(x, y, self.curvature))
+    }
+
+    pub fn mobius_sub(&self, x: &[f32], y: &[f32]) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(x, y)?;
+        ensure_finite(x)?;
+        ensure_finite(y)?;
+        Ok(mobius_sub(x, y, self.curvature))
+    }
+
+    pub fn exp_map(&self, x: &[f32], v: &[f32]) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(x, v)?;
+        ensure_finite(x)?;
+        ensure_finite(v)?;
+        Ok(exp_map(v, x, self.curvature))
+    }
+
+    pub fn log_map(&self, x: &[f32], y: &[f32]) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(x, y)?;
+        ensure_finite(x)?;
+        ensure_finite(y)?;
+        Ok(log_map(y, x, self.curvature))
+    }
+
+    pub fn gyration(&self, a: &[f32], b: &[f32], v: &[f32]) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(a, b)?;
+        ensure_same_dim(a, v)?;
+        ensure_finite(a)?;
+        ensure_finite(b)?;
+        ensure_finite(v)?;
+        Ok(gyration(a, b, v, self.curvature))
+    }
+
+    pub fn parallel_transport(
+        &self,
+        x: &[f32],
+        y: &[f32],
+        v: &[f32],
+    ) -> HyperbolicResult<Vec<f32>> {
+        ensure_same_dim(x, y)?;
+        ensure_same_dim(x, v)?;
+        ensure_finite(x)?;
+        ensure_finite(y)?;
+        ensure_finite(v)?;
+        Ok(parallel_transport(v, x, y, self.curvature))
+    }
+}
+
+#[inline]
+fn ensure_same_dim(x: &[f32], y: &[f32]) -> HyperbolicResult<()> {
+    if x.len() != y.len() {
+        return Err(HyperbolicError::DimensionMismatch {
+            expected: x.len(),
+            got: y.len(),
+        });
+    }
+    Ok(())
+}
+
+#[inline]
+fn ensure_finite(x: &[f32]) -> HyperbolicResult<()> {
+    if x.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(HyperbolicError::InvalidPoint)
     }
 }
 
@@ -348,6 +476,18 @@ pub fn mobius_add_inplace(x: &mut [f32], y: &[f32], c: f32) {
     project_to_ball_inplace(x, c, EPS);
 }
 
+/// Möbius negation. In the Poincare ball this is ordinary Euclidean negation.
+#[inline]
+pub fn mobius_neg(x: &[f32]) -> Vec<f32> {
+    x.iter().map(|&xi| -xi).collect()
+}
+
+/// Möbius subtraction: x ⊖ y = x ⊕ (-y).
+#[inline]
+pub fn mobius_sub(x: &[f32], y: &[f32], c: f32) -> Vec<f32> {
+    mobius_add(x, &mobius_neg(y), c)
+}
+
 /// Möbius scalar multiplication
 pub fn mobius_scalar_mult(r: f32, x: &[f32], c: f32) -> Vec<f32> {
     let c = c.abs().max(EPS);
@@ -416,6 +556,17 @@ pub fn log_map(y: &[f32], p: &[f32], c: f32) -> Vec<f32> {
 /// Logarithmic map at a shard centroid for tangent space coordinates
 pub fn log_map_at_centroid(x: &[f32], centroid: &[f32], c: f32) -> Vec<f32> {
     log_map(x, centroid, c)
+}
+
+/// Gyration operator gyr[a,b](v), the correction term that accounts for
+/// non-associativity of Möbius addition.
+///
+/// gyr[a,b](v) = -(a ⊕ b) ⊕ (a ⊕ (b ⊕ v))
+pub fn gyration(a: &[f32], b: &[f32], v: &[f32], c: f32) -> Vec<f32> {
+    let ab = mobius_add(a, b, c);
+    let bv = mobius_add(b, v, c);
+    let a_bv = mobius_add(a, &bv, c);
+    mobius_add(&mobius_neg(&ab), &a_bv, c)
 }
 
 // ============================================================================
@@ -506,13 +657,46 @@ pub fn parallel_transport(v: &[f32], p: &[f32], q: &[f32], c: f32) -> Vec<f32> {
     let lambda_p = conformal_factor(p, c);
     let lambda_q = conformal_factor(q, c);
     let scale = lambda_p / lambda_q;
+    let neg_p = mobius_neg(p);
+    let gyr = gyration(q, &neg_p, v, c);
 
-    v.iter().map(|&vi| scale * vi).collect()
+    gyr.iter().map(|&vi| scale * vi).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TOL: f32 = 1e-4;
+    const LOOSE_TOL: f32 = 1e-3;
+
+    fn assert_close(left: f32, right: f32, tol: f32) {
+        assert!(
+            (left - right).abs() <= tol,
+            "expected {left} ~= {right} within {tol}, diff={}",
+            (left - right).abs()
+        );
+    }
+
+    fn assert_vec_close(left: &[f32], right: &[f32], tol: f32) {
+        assert_eq!(left.len(), right.len());
+        for (index, (l, r)) in left.iter().zip(right).enumerate() {
+            assert!(
+                (l - r).abs() <= tol,
+                "index {index}: expected {l} ~= {r} within {tol}, diff={}",
+                (l - r).abs()
+            );
+        }
+    }
+
+    fn scaled_point(c: f32, values: &[f32]) -> Vec<f32> {
+        let radius = c.sqrt().recip();
+        values.iter().map(|value| value * radius).collect()
+    }
+
+    fn riemannian_norm(x: &[f32], v: &[f32], c: f32) -> f32 {
+        conformal_factor(x, c) * norm(v)
+    }
 
     #[test]
     fn test_project_to_ball() {
@@ -533,6 +717,94 @@ mod tests {
     }
 
     #[test]
+    fn test_checked_facade_rejects_dimension_mismatch() {
+        let ball = PoincareBall::new(1.0).unwrap();
+        let x = vec![0.1, 0.2];
+        let y = vec![0.1, 0.2, 0.3];
+
+        assert!(matches!(
+            ball.distance(&x, &y),
+            Err(HyperbolicError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            })
+        ));
+        assert!(matches!(
+            ball.mobius_add(&x, &y),
+            Err(HyperbolicError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            })
+        ));
+        assert!(matches!(
+            ball.exp_map(&x, &y),
+            Err(HyperbolicError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn test_checked_facade_rejects_non_finite_points() {
+        let ball = PoincareBall::new(1.0).unwrap();
+        assert!(matches!(
+            ball.project(&mut [f32::NAN, 0.1]),
+            Err(HyperbolicError::InvalidPoint)
+        ));
+    }
+
+    #[test]
+    fn test_projection_is_idempotent_and_inside_ball() {
+        for c in [0.25, 1.0, 4.0] {
+            let ball = PoincareBall::new(c).unwrap();
+            let mut x = scaled_point(c, &[2.0, -0.4, 0.8]);
+            ball.project(&mut x).unwrap();
+            assert!(norm(&x) <= ball.max_norm() + TOL);
+            let once = x.clone();
+            ball.project(&mut x).unwrap();
+            assert_vec_close(&x, &once, TOL);
+        }
+    }
+
+    #[test]
+    fn test_mobius_inverse_returns_zero() {
+        for c in [0.25, 1.0, 4.0] {
+            let x = scaled_point(c, &[0.10, -0.05, 0.03]);
+            let zero = vec![0.0; x.len()];
+            let result = mobius_add(&x, &mobius_neg(&x), c);
+            assert_vec_close(&result, &zero, TOL);
+
+            let sub_result = mobius_sub(&x, &x, c);
+            assert_vec_close(&sub_result, &zero, TOL);
+        }
+    }
+
+    #[test]
+    fn test_distance_closed_form_matches_mobius_formula() {
+        for c in [0.25, 1.0, 4.0] {
+            let x = scaled_point(c, &[0.12, -0.04, 0.02]);
+            let y = scaled_point(c, &[-0.03, 0.11, 0.04]);
+            let closed_form = poincare_distance(&x, &y, c);
+            let diff = mobius_sub(&y, &x, c);
+            let diff_norm = norm(&diff);
+            let mobius_form = 2.0 / c.sqrt() * (c.sqrt() * diff_norm).min(1.0 - EPS).atanh();
+            assert_close(closed_form, mobius_form, LOOSE_TOL);
+        }
+    }
+
+    #[test]
+    fn test_distance_radial_origin_identity() {
+        for c in [0.25, 1.0, 4.0] {
+            let origin = vec![0.0, 0.0, 0.0];
+            let x = scaled_point(c, &[0.18, 0.0, 0.0]);
+            let d = poincare_distance(&origin, &x, c);
+            let expected = 2.0 / c.sqrt() * (c.sqrt() * norm(&x)).atanh();
+            assert_close(d, expected, TOL);
+        }
+    }
+
+    #[test]
     fn test_exp_log_inverse() {
         let p = vec![0.1, 0.2, 0.1];
         let v = vec![0.1, -0.1, 0.05];
@@ -542,6 +814,81 @@ mod tests {
 
         for (a, b) in v.iter().zip(v_recovered.iter()) {
             assert!((a - b).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_exp_log_roundtrip_across_curvatures() {
+        for c in [0.25, 1.0, 4.0] {
+            let ball = PoincareBall::new(c).unwrap();
+            let x = scaled_point(c, &[0.10, -0.05, 0.04]);
+            let v = scaled_point(c, &[0.03, 0.02, -0.01]);
+
+            let y = ball.exp_map(&x, &v).unwrap();
+            let recovered = ball.log_map(&x, &y).unwrap();
+            assert_vec_close(&recovered, &v, LOOSE_TOL);
+
+            let y_recovered = ball.exp_map(&x, &recovered).unwrap();
+            assert_vec_close(&y_recovered, &y, LOOSE_TOL);
+        }
+    }
+
+    #[test]
+    fn test_distance_matches_log_map_riemannian_norm() {
+        for c in [0.25, 1.0, 4.0] {
+            let ball = PoincareBall::new(c).unwrap();
+            let x = scaled_point(c, &[0.08, -0.03, 0.04]);
+            let y = scaled_point(c, &[-0.06, 0.05, 0.02]);
+            let log_xy = ball.log_map(&x, &y).unwrap();
+            let d = ball.distance(&x, &y).unwrap();
+            assert_close(d, riemannian_norm(&x, &log_xy, c), LOOSE_TOL);
+        }
+    }
+
+    #[test]
+    fn test_gyration_identity_and_inverse() {
+        let zero = vec![0.0, 0.0, 0.0];
+        for c in [0.25, 1.0, 4.0] {
+            let a = scaled_point(c, &[0.09, -0.04, 0.02]);
+            let b = scaled_point(c, &[-0.05, 0.07, 0.03]);
+            let v = scaled_point(c, &[0.02, 0.03, -0.01]);
+
+            assert_vec_close(&gyration(&zero, &a, &v, c), &v, LOOSE_TOL);
+            assert_vec_close(&gyration(&a, &zero, &v, c), &v, LOOSE_TOL);
+
+            let roundtrip = gyration(&b, &a, &gyration(&a, &b, &v, c), c);
+            assert_vec_close(&roundtrip, &v, 2.0 * LOOSE_TOL);
+        }
+    }
+
+    #[test]
+    fn test_parallel_transport_preserves_riemannian_norm() {
+        for c in [0.25, 1.0, 4.0] {
+            let ball = PoincareBall::new(c).unwrap();
+            let x = scaled_point(c, &[0.08, -0.04, 0.02]);
+            let y = scaled_point(c, &[-0.05, 0.09, 0.01]);
+            let v = scaled_point(c, &[0.03, 0.01, -0.02]);
+
+            let transported = ball.parallel_transport(&x, &y, &v).unwrap();
+            assert_close(
+                riemannian_norm(&x, &v, c),
+                riemannian_norm(&y, &transported, c),
+                2.0 * LOOSE_TOL,
+            );
+        }
+    }
+
+    #[test]
+    fn test_parallel_transport_roundtrip_is_identity() {
+        for c in [0.25, 1.0, 4.0] {
+            let ball = PoincareBall::new(c).unwrap();
+            let x = scaled_point(c, &[0.07, 0.02, -0.04]);
+            let y = scaled_point(c, &[-0.03, 0.08, 0.02]);
+            let v = scaled_point(c, &[0.02, -0.01, 0.03]);
+
+            let xy = ball.parallel_transport(&x, &y, &v).unwrap();
+            let yx = ball.parallel_transport(&y, &x, &xy).unwrap();
+            assert_vec_close(&yx, &v, 3.0 * LOOSE_TOL);
         }
     }
 

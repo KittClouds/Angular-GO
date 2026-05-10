@@ -406,7 +406,10 @@ pub fn render_markdown(report: &PerfSuiteReport) -> String {
         ));
         if !corpus.steady_state.is_empty() {
             lines.push(String::new());
-            lines.push("| Benchmark | Iter | Min ms | P50 ms | P95 ms | Max ms | Peak delta MiB |".to_owned());
+            lines.push(
+                "| Benchmark | Iter | Min ms | P50 ms | P95 ms | Max ms | Peak delta MiB |"
+                    .to_owned(),
+            );
             lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |".to_owned());
             for benchmark in &corpus.steady_state {
                 lines.push(format!(
@@ -671,7 +674,9 @@ fn run_corpus_suite(
         &selected_queries,
     )?;
 
-    let relation_counts = runtime.relation_counts().map_err(|error| error.to_string())?;
+    let relation_counts = runtime
+        .relation_counts()
+        .map_err(|error| error.to_string())?;
     let session_stats = CorpusStatsSnapshot {
         document_count: stats.document_count,
         chapter_count: stats.chapter_count,
@@ -824,7 +829,14 @@ fn run_steady_state_benchmarks(
     benchmarks.push(run_benchmark(
         "lexical_query_steady",
         benchmark_config,
-        || run_query_workload(runtime, session_id, &selected_queries.lexical, &lexical_targets),
+        || {
+            run_query_workload(
+                runtime,
+                session_id,
+                &selected_queries.lexical,
+                &lexical_targets,
+            )
+        },
     )?);
 
     benchmarks.push(run_benchmark(
@@ -929,7 +941,10 @@ fn summarize_benchmark(config: &BenchmarkConfig, samples: &[BenchmarkSample]) ->
     if samples.is_empty() {
         return BenchmarkSummary::default();
     }
-    let mut walls = samples.iter().map(|sample| sample.wall_ms).collect::<Vec<_>>();
+    let mut walls = samples
+        .iter()
+        .map(|sample| sample.wall_ms)
+        .collect::<Vec<_>>();
     walls.sort_unstable();
     let total_wall = walls.iter().copied().sum::<u64>();
     BenchmarkSummary {
@@ -1230,10 +1245,7 @@ fn measure_phase<T>(
             bytes_to_mib(phase.heap_peak_delta_bytes)
         );
     }
-    Ok((
-        value,
-        phase,
-    ))
+    Ok((value, phase))
 }
 
 fn excerpt_text(text: &str, target_bytes: usize) -> String {
@@ -1451,6 +1463,10 @@ mod tests {
             .iter()
             .find(|corpus| corpus.corpus_id == "perfect_run")
             .expect("perfect_run corpus");
-        assert!(corpus.budget_check.passed, "{:?}", corpus.budget_check.failures);
+        assert!(
+            corpus.budget_check.passed,
+            "{:?}",
+            corpus.budget_check.failures
+        );
     }
 }

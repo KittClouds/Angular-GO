@@ -6,6 +6,7 @@ members = [
     "crates/phoenix-chat",
     "crates/phoenix-causality",
     "crates/phoenix-chunker",
+    "crates/phoenix-dynamic-ner",
     "crates/phoenix-graph",
     "crates/phoenix-graph-kernel",
     "crates/phoenix-gldr",
@@ -23,10 +24,9 @@ members = [
     "crates/phoenix-proposition",
     "crates/phoenix-qgram",
     "crates/phoenix-query",
-    "crates/phoenix-reference",
+    "crates/phoenix-rel-post",
     "crates/phoenix-runtime",
     "crates/phoenix-runtime-native",
-    "crates/phoenix-runtime-wasm",
     "crates/phoenix-scanner",
     "crates/phoenix-semantics",
     "crates/phoenix-store-cozo",
@@ -42,7 +42,6 @@ members = [
     "crates/phoenix-types",
     "crates/phoenix-index",
     "crates/phoenix-kernel",
-    "crates/phoenix-wasm",
 ]
 resolver = "2"
 

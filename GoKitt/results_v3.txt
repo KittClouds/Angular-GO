@@ -1,2 +1,0 @@
-﻿FAIL	github.com/kittclouds/gokitt/pkg/hybrid [build failed]
-FAIL

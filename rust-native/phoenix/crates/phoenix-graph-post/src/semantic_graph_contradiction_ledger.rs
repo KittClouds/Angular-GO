@@ -4,7 +4,7 @@ use phoenix_semantic_v2::{
 };
 
 use crate::semantic_graph_support::{truth_planes_compatible, Prototype};
-use crate::semantic_graph_workspace::embedding_distance;
+use crate::semantic_graph_workspace::{embedding_distance, EmbeddingRows};
 
 pub(super) fn collect_relationship_ledger_edges(
     edges: &mut Vec<SemanticGraphEdgeCandidate>,
@@ -12,7 +12,7 @@ pub(super) fn collect_relationship_ledger_edges(
     memory_sidecar: Option<&MemoryScopeSidecar>,
     prototype_by_id: &HashMap<&str, &Prototype>,
     prototypes: &[Prototype],
-    embeddings: &[Vec<f32>],
+    embeddings: EmbeddingRows<'_>,
     min_score_millis: u32,
 ) {
     let Some(memory_sidecar) = memory_sidecar else {
@@ -20,8 +20,12 @@ pub(super) fn collect_relationship_ledger_edges(
     };
     let embedding_by_id = prototypes
         .iter()
-        .zip(embeddings.iter())
-        .map(|(prototype, embedding)| (prototype.node_id.as_str(), embedding.as_slice()))
+        .enumerate()
+        .filter_map(|(index, prototype)| {
+            embeddings
+                .row(index)
+                .map(|embedding| (prototype.node_id.as_str(), embedding))
+        })
         .collect::<HashMap<_, _>>();
     for ledger in &memory_sidecar.relationship_ledgers {
         if ledger.supporting_claim_ids.is_empty() || ledger.contradicting_claim_ids.is_empty() {
@@ -172,6 +176,7 @@ mod tests {
 
     use super::collect_relationship_ledger_edges;
     use crate::semantic_graph_support::{Prototype, CLAIM_KIND};
+    use crate::semantic_graph_workspace::EmbeddingRows;
 
     fn claim(node_id: &str, claim_id: &str) -> Prototype {
         Prototype {
@@ -210,7 +215,8 @@ mod tests {
             claim("graph::claim::support", "support"),
             claim("graph::claim::contradiction", "contradiction"),
         ];
-        let embeddings = vec![vec![0.1, 0.2, 0.3], vec![0.11, 0.2, 0.29]];
+        let embeddings = vec![0.1, 0.2, 0.3, 0.11, 0.2, 0.29];
+        let embedding_rows = EmbeddingRows::from_flat(&embeddings, 2, 3).expect("embedding rows");
         let prototype_by_id = prototypes
             .iter()
             .map(|prototype| (prototype.node_id.as_str(), prototype))
@@ -237,7 +243,7 @@ mod tests {
             Some(&memory_sidecar),
             &prototype_by_id,
             &prototypes,
-            &embeddings,
+            embedding_rows,
             500,
         );
 

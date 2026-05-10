@@ -12,3 +12,6 @@ serde = { workspace = true, features = ["derive"] }
 bincode = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = "1.14"
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
+roaring = { workspace = true }

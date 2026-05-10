@@ -2,8 +2,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::thread;
 
+use ort::execution_providers::{CUDAExecutionProvider, DirectMLExecutionProvider};
 use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
-use ort::session::builder::GraphOptimizationLevel;
+use ort::session::builder::{GraphOptimizationLevel, SessionBuilder};
 use ort::session::{Session, SessionInputValue};
 use ort::value::TensorRefMut;
 use thiserror::Error;
@@ -15,11 +16,19 @@ use tokenizers::{
 mod config;
 
 pub use config::{
-    OrtTextEmbedConfig, TextEmbeddingInputPrefix, TextEmbeddingPooling, TextEmbeddingProfile,
+    OrtExecutionProviderPreference, OrtTextEmbedConfig, TextEmbeddingInputPrefix,
+    TextEmbeddingPooling, TextEmbeddingProfile,
 };
 
 impl TextEmbeddingProfile {
+    #[cfg(test)]
     fn project(self, values: &[f32]) -> Result<Vec<f32>, OrtTextEmbedError> {
+        let mut out = Vec::with_capacity(self.target_dim());
+        self.project_into(values, &mut out)?;
+        Ok(out)
+    }
+
+    fn project_into(self, values: &[f32], out: &mut Vec<f32>) -> Result<(), OrtTextEmbedError> {
         match self {
             Self::Truncate256 => {
                 if values.len() < 256 {
@@ -29,7 +38,8 @@ impl TextEmbeddingProfile {
                         profile: self.label(),
                     });
                 }
-                Ok(normalize_embedding(&values[..256]))
+                normalize_embedding_into(&values[..256], out);
+                Ok(())
             }
             _ => {
                 if values.len() != self.target_dim() {
@@ -39,9 +49,63 @@ impl TextEmbeddingProfile {
                         profile: self.label(),
                     });
                 }
-                Ok(normalize_embedding(values))
+                normalize_embedding_into(values, out);
+                Ok(())
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextEmbeddingBatch {
+    values: Vec<f32>,
+    rows: usize,
+    dims: usize,
+}
+
+impl TextEmbeddingBatch {
+    fn with_capacity(rows: usize, dims: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(rows.saturating_mul(dims)),
+            rows: 0,
+            dims,
+        }
+    }
+
+    pub fn values(&self) -> &[f32] {
+        &self.values
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn dims(&self) -> usize {
+        self.dims
+    }
+
+    pub fn row(&self, index: usize) -> Option<&[f32]> {
+        if index >= self.rows || self.dims == 0 {
+            return None;
+        }
+        let start = index.checked_mul(self.dims)?;
+        let end = start.checked_add(self.dims)?;
+        self.values.get(start..end)
+    }
+
+    pub fn into_values(self) -> Vec<f32> {
+        self.values
+    }
+
+    pub fn into_rows(self) -> Vec<Vec<f32>> {
+        if self.dims == 0 {
+            return Vec::new();
+        }
+        self.values
+            .chunks_exact(self.dims)
+            .take(self.rows)
+            .map(|row| row.to_vec())
+            .collect()
     }
 }
 
@@ -77,6 +141,7 @@ struct TensorScratch {
     input_ids: Vec<i64>,
     attention_mask: Vec<i64>,
     token_type_ids: Vec<i64>,
+    pooled: Vec<f32>,
 }
 
 impl TensorScratch {
@@ -102,7 +167,7 @@ impl OrtTextEmbedder {
         configure_tokenizer(&mut tokenizer, config.max_length.max(16))
             .map_err(|error| OrtTextEmbedError::ModelLoad(format!("tokenizer config: {error}")))?;
         let available_threads = thread::available_parallelism()
-            .map(|value| value.get())
+            .map(|value| value.get().min(8))
             .unwrap_or(1);
         let model_paths = find_existing_paths(
             &config.model_root,
@@ -117,13 +182,8 @@ impl OrtTextEmbedder {
         let mut session_error = String::new();
         let mut session = None;
         for model_path in model_paths {
-            match Session::builder()
-                .and_then(|builder| builder.with_optimization_level(GraphOptimizationLevel::Level3))
-                .and_then(|builder| builder.with_parallel_execution(false))
-                .and_then(|builder| builder.with_inter_threads(1))
-                .and_then(|builder| builder.with_intra_threads(available_threads))
-                .and_then(|builder| builder.commit_from_file(&model_path))
-            {
+            let loaded = build_session(&model_path, available_threads, config.execution_provider);
+            match loaded {
                 Ok(loaded) => {
                     session = Some(loaded);
                     break;
@@ -171,11 +231,19 @@ impl OrtTextEmbedder {
         texts: &[S],
         batch_size: usize,
     ) -> Result<Vec<Vec<f32>>, OrtTextEmbedError> {
+        Ok(self.embed_batched_flat(texts, batch_size)?.into_rows())
+    }
+
+    pub fn embed_batched_flat<S: AsRef<str>>(
+        &self,
+        texts: &[S],
+        batch_size: usize,
+    ) -> Result<TextEmbeddingBatch, OrtTextEmbedError> {
         let batch_size = batch_size.max(1);
-        let mut rows = Vec::with_capacity(texts.len());
+        let mut rows = TextEmbeddingBatch::with_capacity(texts.len(), self.profile.target_dim());
         let mut scratch = TensorScratch::default();
         for chunk in texts.chunks(batch_size) {
-            rows.extend(self.embed_batch(chunk, &mut scratch)?);
+            self.embed_batch_into(chunk, &mut scratch, &mut rows)?;
         }
         Ok(rows)
     }
@@ -187,17 +255,32 @@ impl OrtTextEmbedder {
         self.embed_batched(texts, self.batch_size)
     }
 
+    pub fn embed_texts_flat<S: AsRef<str>>(
+        &self,
+        texts: &[S],
+    ) -> Result<TextEmbeddingBatch, OrtTextEmbedError> {
+        self.embed_batched_flat(texts, self.batch_size)
+    }
+
     pub fn embed_slices(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, OrtTextEmbedError> {
         self.embed_texts(texts)
     }
 
-    fn embed_batch<S: AsRef<str>>(
+    pub fn embed_slices_flat(
+        &self,
+        texts: &[&str],
+    ) -> Result<TextEmbeddingBatch, OrtTextEmbedError> {
+        self.embed_texts_flat(texts)
+    }
+
+    fn embed_batch_into<S: AsRef<str>>(
         &self,
         texts: &[S],
         scratch: &mut TensorScratch,
-    ) -> Result<Vec<Vec<f32>>, OrtTextEmbedError> {
+        rows: &mut TextEmbeddingBatch,
+    ) -> Result<(), OrtTextEmbedError> {
         if texts.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
 
         let prefix = self.input_prefix.text();
@@ -298,18 +381,111 @@ impl OrtTextEmbedder {
             OrtTextEmbedError::Inference("hidden state was non-contiguous".to_owned())
         })?;
 
-        let mut rows = Vec::with_capacity(batch_len);
         for row in 0..batch_len {
-            let token_index = match self.pooling {
-                TextEmbeddingPooling::Cls => 0,
-                TextEmbeddingPooling::LastToken => {
-                    last_non_padding_index(&scratch.attention_mask[row * max_len..][..max_len])
+            match self.pooling {
+                TextEmbeddingPooling::Cls => {
+                    let start = row * max_len * hidden_dim;
+                    self.profile
+                        .project_into(&values[start..start + hidden_dim], &mut rows.values)?;
                 }
-            };
-            let start = (row * max_len + token_index) * hidden_dim;
-            rows.push(self.profile.project(&values[start..start + hidden_dim])?);
+                TextEmbeddingPooling::Mean => {
+                    let attention = &scratch.attention_mask[row * max_len..][..max_len];
+                    mean_pool_row(
+                        values,
+                        row,
+                        max_len,
+                        hidden_dim,
+                        attention,
+                        &mut scratch.pooled,
+                    );
+                    self.profile
+                        .project_into(&scratch.pooled, &mut rows.values)?;
+                }
+                TextEmbeddingPooling::LastToken => {
+                    let token_index =
+                        last_non_padding_index(&scratch.attention_mask[row * max_len..][..max_len]);
+                    let start = (row * max_len + token_index) * hidden_dim;
+                    self.profile
+                        .project_into(&values[start..start + hidden_dim], &mut rows.values)?;
+                }
+            }
+            rows.rows += 1;
         }
-        Ok(rows)
+        Ok(())
+    }
+}
+
+fn build_session(
+    model_path: &Path,
+    available_threads: usize,
+    provider: OrtExecutionProviderPreference,
+) -> Result<Session, ort::Error> {
+    let mut builder = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_parallel_execution(false)?
+        .with_inter_threads(1)?
+        .with_intra_threads(available_threads)?;
+    if matches!(provider, OrtExecutionProviderPreference::DirectMl) {
+        builder = builder.with_memory_pattern(false)?;
+    }
+    builder = apply_execution_provider_preference(builder, provider)?;
+    builder.commit_from_file(model_path)
+}
+
+fn apply_execution_provider_preference(
+    builder: SessionBuilder,
+    provider: OrtExecutionProviderPreference,
+) -> Result<SessionBuilder, ort::Error> {
+    let strict = env_flag("PHOENIX_EMBED_ORT_EP_STRICT", true);
+    let provider = match provider {
+        OrtExecutionProviderPreference::Cpu => return Ok(builder),
+        OrtExecutionProviderPreference::DirectMl => DirectMLExecutionProvider::default().build(),
+        OrtExecutionProviderPreference::Cuda => CUDAExecutionProvider::default().build(),
+    };
+    let provider = if strict {
+        provider.error_on_failure()
+    } else {
+        provider.fail_silently()
+    };
+    builder.with_execution_providers([provider])
+}
+
+fn env_flag(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim(),
+                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn mean_pool_row(
+    values: &[f32],
+    row: usize,
+    max_len: usize,
+    hidden_dim: usize,
+    attention: &[i64],
+    out: &mut Vec<f32>,
+) {
+    out.clear();
+    out.resize(hidden_dim, 0.0);
+    let mut count = 0usize;
+    for token_index in 0..max_len {
+        if attention.get(token_index).copied().unwrap_or_default() == 0 {
+            continue;
+        }
+        let start = (row * max_len + token_index) * hidden_dim;
+        for dim in 0..hidden_dim {
+            out[dim] += values[start + dim];
+        }
+        count += 1;
+    }
+    let denom = count.max(1) as f32;
+    for value in out.iter_mut() {
+        *value /= denom;
     }
 }
 
@@ -385,14 +561,15 @@ fn find_existing_paths(
     }
 }
 
-fn normalize_embedding(values: &[f32]) -> Vec<f32> {
+fn normalize_embedding_into(values: &[f32], out: &mut Vec<f32>) {
     let norm = values
         .iter()
         .map(|value| value * value)
         .sum::<f32>()
         .sqrt()
         .max(1e-12);
-    values.iter().map(|value| *value / norm).collect()
+    out.reserve(values.len());
+    out.extend(values.iter().map(|value| *value / norm));
 }
 
 fn configure_tokenizer(

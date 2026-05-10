@@ -1,4 +1,5 @@
 pub mod api;
+mod lens_consumer;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -15,6 +16,8 @@ use phoenix_store_native_core::{PhoenixArchiveStoreV2, PhoenixErPatchStore, Stor
 use phoenix_types::{EntityId, EntityKind, MentionSpan, ScopeKey, SessionId, TextRange};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+
+pub use lens_consumer::EntityLensChunkConsumer;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -635,6 +638,7 @@ impl ErEmbeddingModel {
             prefix_passage: false,
             pooling: Default::default(),
             input_prefix: Default::default(),
+            execution_provider: Default::default(),
         })
         .map_err(|error| error.to_string())?;
         Ok(Self { embedder })

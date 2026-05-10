@@ -191,9 +191,9 @@ describe('SqliteOpfsAdapter Phoenix persistence debug', () => {
     });
 
     it('reports legacy sqlite.db artifacts separately from active Phoenix state', async () => {
-        const gokitt = await root.getDirectoryHandle('gokitt', { create: true });
-        await writeBytes(await gokitt.getFileHandle('sqlite.db', { create: true }), new Uint8Array([9]));
-        await writeBytes(await gokitt.getFileHandle('sqlite.db.bak', { create: true }), new Uint8Array([8]));
+        const phoenix = await root.getDirectoryHandle('phoenix', { create: true });
+        await writeBytes(await phoenix.getFileHandle('sqlite.db', { create: true }), new Uint8Array([9]));
+        await writeBytes(await phoenix.getFileHandle('sqlite.db.bak', { create: true }), new Uint8Array([8]));
 
         const debug = await adapter.inspectPhoenixPersistenceDebug();
 
@@ -204,9 +204,9 @@ describe('SqliteOpfsAdapter Phoenix persistence debug', () => {
         expect(debug.hasLegacyArtifactsOnly).toBe(true);
     });
 
-    it('clearAll removes the gokitt root and verifies the empty post-state', async () => {
-        const gokitt = await root.getDirectoryHandle('gokitt', { create: true });
-        await writeBytes(await gokitt.getFileHandle('sqlite.db', { create: true }), new Uint8Array([7]));
+    it('clearAll removes the phoenix root and verifies the empty post-state', async () => {
+        const phoenix = await root.getDirectoryHandle('phoenix', { create: true });
+        await writeBytes(await phoenix.getFileHandle('sqlite.db', { create: true }), new Uint8Array([7]));
 
         const result = await adapter.clearAll();
 

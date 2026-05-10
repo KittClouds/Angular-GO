@@ -1,3 +1,6 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::graph_galaxy::{compile_scene, DesktopGalaxyScene, DesktopGalaxySceneRequest};
@@ -6,15 +9,20 @@ use crate::tts::{
     NativeTtsSpeakRequest, NativeTtsStatus, NativeTtsSynthResult,
 };
 use phoenix_native::{runtime_banner, PhoenixNativeHost, SnapshotPartition};
+use phoenix_hyperbolic::lorentz_tree::{
+    HyperboloidPoint, LorentzForest, LorentzForestIndex, LorentzNode, LorentzQueryMode,
+    LorentzScoreConfig, LorentzTree, LorentzTreeKind, LorentzTreeMembership, LorentzTreeQuery,
+    MmapLorentzForestIndex,
+};
 use phoenix_types::{
-    AnalyzeTextRequest, CommitRequest, CreateSessionRequest, GraphDeltaRequest, IngestRequest,
-    QueryRequest, RebuildRequest, RuntimeConfig, RuntimeInitRequest, RuntimeInitResult,
-    RuntimeTarget, ScanRequest, SessionStateRequest, SessionStatsRequest, SnapshotPolicy,
-    StorageMode, StoreCommandRequest,
+    AnalyzeTextRequest, AtlasRichScanRequest, CommitRequest, CreateSessionRequest,
+    GraphDeltaRequest, IngestRequest, QueryRequest, RebuildRequest, RuntimeConfig,
+    RuntimeInitRequest, RuntimeInitResult, RuntimeTarget, ScanRequest, SessionStateRequest,
+    SessionStatsRequest, SnapshotPolicy, StorageMode, StoreCommandRequest,
 };
 use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 #[derive(Default)]
 struct PhoenixDesktopState {
@@ -86,6 +94,369 @@ pub struct DesktopSnapshotImportResult {
     pub checksum: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldSnapshotRequest {
+    manifold: Option<String>,
+    scope: Option<Value>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestBuildRequest {
+    scope: Option<Value>,
+    limit: Option<usize>,
+    force: Option<bool>,
+    include_snapshot: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestQueryRequest {
+    scope: Option<Value>,
+    limit: Option<usize>,
+    force: Option<bool>,
+    query_vector: Option<Vec<f64>>,
+    query_node_id: Option<String>,
+    tree_kinds: Option<Vec<String>>,
+    tree_ids: Option<Vec<String>>,
+    target_level: Option<u32>,
+    mode: Option<String>,
+    top_k: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestCacheRequest {
+    scope: Option<Value>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldCapabilities {
+    ann: bool,
+    anchors: bool,
+    fibers: bool,
+    phase: bool,
+    cones: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldSnapshot {
+    manifold: &'static str,
+    geometry_version: &'static str,
+    source_label: &'static str,
+    capabilities: DesktopManifoldCapabilities,
+    payload: DesktopManifoldPayload,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldPayload {
+    nodes: Vec<DesktopManifoldNode>,
+    edges: Vec<DesktopManifoldEdge>,
+    source_label: &'static str,
+    projection_source: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cells: Vec<DesktopIcoCell>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    charts: Vec<DesktopIcoChart>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    seams: Vec<DesktopIcoSeam>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    neighbor_rings: Vec<DesktopIcoNeighborRings>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cone_traces: Vec<DesktopIcoConeTrace>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    anchor_projections: Vec<DesktopAnchorProjection>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    lorentz_trees: Vec<DesktopLorentzTreeRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    lorentz_memberships: Vec<DesktopLorentzMembershipRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lorentz_cache: Option<DesktopLorentzCacheStatus>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldNode {
+    id: String,
+    label: String,
+    source_type: String,
+    vector: Vec<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_vector: Option<[f64; 3]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cell_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    secondary_cell_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cell_distance: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    boundary_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fiber_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    geometry_version: Option<&'static str>,
+    document_id: Option<String>,
+    narrative_id: Option<String>,
+    folder_id: Option<String>,
+    preview: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopManifoldEdge {
+    id: String,
+    source_id: String,
+    target_id: String,
+    #[serde(rename = "type")]
+    edge_type: String,
+    confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzCacheStatus {
+    geometry_version: &'static str,
+    cache_key: String,
+    cache_path: String,
+    exists: bool,
+    byte_len: u64,
+    mmap: bool,
+    rebuilt: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzTreeRecord {
+    tree_id: String,
+    tree_kind: String,
+    label: String,
+    root_node_id: Option<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzMembershipRecord {
+    tree_id: String,
+    node_id: String,
+    parent_node_id: Option<String>,
+    level: u32,
+    local_rank: u32,
+    path_key: String,
+    branch_weight: f32,
+    confidence: f32,
+    source_count: u32,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestSnapshot {
+    nodes: Vec<DesktopManifoldNode>,
+    edges: Vec<DesktopManifoldEdge>,
+    trees: Vec<DesktopLorentzTreeRecord>,
+    memberships: Vec<DesktopLorentzMembershipRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestBuildResponse {
+    geometry_version: &'static str,
+    source_label: &'static str,
+    cache: DesktopLorentzCacheStatus,
+    node_count: usize,
+    tree_count: usize,
+    membership_count: usize,
+    snapshot: Option<DesktopLorentzForestSnapshot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzQueryHit {
+    candidate_id: String,
+    node_id: String,
+    label: String,
+    tree_id: Option<String>,
+    tree_kind: Option<String>,
+    path_key: Option<String>,
+    score: f32,
+    hyperbolic_distance: f32,
+    geometry_similarity: f32,
+    hierarchy_alignment: f32,
+    confidence: f32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLorentzForestQueryResponse {
+    geometry_version: &'static str,
+    cache: DesktopLorentzCacheStatus,
+    query_point: [f32; 5],
+    hits: Vec<DesktopLorentzQueryHit>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoCell {
+    cell_id: String,
+    resolution: u32,
+    parent_cell_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    children_cell_ids: Vec<String>,
+    center_vector: [f64; 3],
+    normal_vector: [f64; 3],
+    neighbor_cell_ids: Vec<String>,
+    area_weight: f64,
+    density: f64,
+    anchor_ids: Vec<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoChart {
+    chart_id: String,
+    center_cell_id: String,
+    member_cell_ids: Vec<String>,
+    resolution: u32,
+    dominant_contexts: Vec<String>,
+    anchor_count: u32,
+    density: f64,
+    boundary_cells: Vec<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoSeam {
+    from_cell: String,
+    to_cell: String,
+    shared_edge: Vec<String>,
+    normal_delta: f64,
+    chart_a: String,
+    chart_b: String,
+    seam_cost: f64,
+    compatibility_score: f64,
+    obstruction_count: u32,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoNeighborRings {
+    cell_id: String,
+    ring_1: Vec<String>,
+    ring_2: Vec<String>,
+    ring_3: Vec<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoConeTrace {
+    cone_id: String,
+    apex_cell: String,
+    axis_vector: [f64; 3],
+    aperture_cos: f64,
+    max_ring: u32,
+    accepted_cell_ids: Vec<String>,
+    rejected_cell_ids: Vec<String>,
+    steps: Vec<DesktopIcoConeTraceStep>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopIcoConeTraceStep {
+    cell_id: String,
+    neighbor_ring: u32,
+    axis_alignment: f64,
+    aperture_threshold: f64,
+    chart_stitch_score: f64,
+    accepted: bool,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopAnchorProjection {
+    anchor_id: String,
+    primary_cell_id: String,
+    secondary_cell_ids: Vec<String>,
+    cell_distance: f64,
+    boundary_score: f64,
+    projection_version: &'static str,
+    geometry_version: &'static str,
+}
+
+const HYBRID_GEOMETRY_VERSION: &str = "hybrid_semantic_v1";
+const HOPF_GEOMETRY_VERSION: &str = "hopf_ico_r5_v1";
+const HOPF_PROJECTION_VERSION: &str = "hopf_stereographic_v1";
+const LORENTZ_GEOMETRY_VERSION: &str = "lorentz_h4_forest_v1";
+const HOPF_ICO_RESOLUTION: u32 = 5;
+const HOPF_CHART_RESOLUTION: u32 = 3;
+const HOPF_CONE_APERTURE_COS: f64 = 0.573_576_436_351_046;
+const TAU_F64: f64 = std::f64::consts::PI * 2.0;
+
+#[derive(Clone, Debug)]
+struct IcoCellInternal {
+    cell_id: String,
+    resolution: u32,
+    face: usize,
+    local_index: usize,
+    center: [f64; 3],
+    vertex_keys: [String; 3],
+    edge_keys: [String; 3],
+    neighbor_cell_ids: Vec<String>,
+    area_weight: f64,
+}
+
+#[derive(Clone, Debug)]
+struct IcoTopology {
+    resolution: u32,
+    cells: Vec<IcoCellInternal>,
+    by_id: HashMap<String, usize>,
+}
+
+#[derive(Clone, Debug)]
+struct IcoProjection {
+    primary_cell_id: String,
+    secondary_cell_ids: Vec<String>,
+    center_vector: [f64; 3],
+    cell_distance: f64,
+    boundary_score: f64,
+}
+
+#[derive(Clone, Debug)]
+struct HopfAnchorAssignment {
+    anchor_id: String,
+    fiber_id: String,
+    fiber_kind: String,
+    cell_id: String,
+    chart_id: String,
+    secondary_cell_ids: Vec<String>,
+    center_vector: [f64; 3],
+    cell_distance: f64,
+    boundary_score: f64,
+    phase: f64,
+}
+
+#[derive(Default)]
+struct ChartAccumulator {
+    member_cell_ids: BTreeSet<String>,
+    anchor_ids: Vec<String>,
+    dominant_contexts: BTreeMap<String, u32>,
+}
+
 #[taurpc::procedures(path = "phoenix", export_to = "../src/app/generated/phoenix-taurpc.ts")]
 pub trait PhoenixApi {
     async fn runtime_info() -> DesktopRuntimeInfo;
@@ -101,6 +472,11 @@ pub trait PhoenixApi {
     async fn commit_json(request_json: String) -> Result<String, String>;
     async fn rebuild_json(request_json: String) -> Result<String, String>;
     async fn scan_json(request_json: String) -> Result<String, String>;
+    async fn atlas_rich_scan_json(request_json: String) -> Result<String, String>;
+    async fn manifold_snapshot_json(request_json: String) -> Result<String, String>;
+    async fn lorentz_forest_cache_json(request_json: String) -> Result<String, String>;
+    async fn lorentz_forest_build_json(request_json: String) -> Result<String, String>;
+    async fn lorentz_forest_query_json(request_json: String) -> Result<String, String>;
     async fn build_structure_json(request_json: String) -> Result<String, String>;
     async fn analyze_text_json(request_json: String) -> Result<String, String>;
     async fn graph_delta_json(request_json: String) -> Result<String, String>;
@@ -207,6 +583,40 @@ impl PhoenixApi for PhoenixApiImpl {
 
     async fn scan_json(self, request_json: String) -> Result<String, String> {
         self.with_host_json::<ScanRequest, _, _>(request_json, |host, request| host.scan(request))
+    }
+
+    async fn atlas_rich_scan_json(self, request_json: String) -> Result<String, String> {
+        self.with_host_json::<AtlasRichScanRequest, _, _>(request_json, |host, request| {
+            host.atlas_rich_scan(request)
+        })
+    }
+
+    async fn manifold_snapshot_json(self, request_json: String) -> Result<String, String> {
+        let request = parse_json::<DesktopManifoldSnapshotRequest>(&request_json)?;
+        let guard = self.lock_state()?;
+        let snapshot = build_manifold_snapshot(&guard.host, request)?;
+        serialize_json(&snapshot)
+    }
+
+    async fn lorentz_forest_cache_json(self, request_json: String) -> Result<String, String> {
+        let request = parse_json::<DesktopLorentzForestCacheRequest>(&request_json)?;
+        let guard = self.lock_state()?;
+        let cache = lorentz_cache_status(&guard.host, request.scope.as_ref(), request.limit)?;
+        serialize_json(&cache)
+    }
+
+    async fn lorentz_forest_build_json(self, request_json: String) -> Result<String, String> {
+        let request = parse_json::<DesktopLorentzForestBuildRequest>(&request_json)?;
+        let guard = self.lock_state()?;
+        let response = build_lorentz_forest_response(&guard.host, request)?;
+        serialize_json(&response)
+    }
+
+    async fn lorentz_forest_query_json(self, request_json: String) -> Result<String, String> {
+        let request = parse_json::<DesktopLorentzForestQueryRequest>(&request_json)?;
+        let guard = self.lock_state()?;
+        let response = query_lorentz_forest_response(&guard.host, request)?;
+        serialize_json(&response)
     }
 
     async fn build_structure_json(self, request_json: String) -> Result<String, String> {
@@ -365,7 +775,7 @@ fn build_init_request(request: &DesktopInitRequest) -> RuntimeInitRequest {
             if request.storage_path.is_some() {
                 StorageMode::NativeLocal
             } else {
-                StorageMode::NativeEphemeral
+                StorageMode::NativeLocal
             }
         });
 
@@ -447,7 +857,7 @@ fn desktop_runtime_info(
 fn default_runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         target: desktop_runtime_target(),
-        storage: StorageMode::NativeEphemeral,
+        storage: StorageMode::NativeLocal,
         snapshot_policy: SnapshotPolicy::Manual,
         feature_flags: phoenix_types::FeatureFlags {
             scanner: true,
@@ -473,10 +883,10 @@ fn runtime_target_name(target: RuntimeTarget) -> &'static str {
 
 fn parse_storage_mode(value: &str) -> Option<StorageMode> {
     match value {
-        "native" | "nativeEphemeral" | "native_ephemeral" | "mem" => {
-            Some(StorageMode::NativeEphemeral)
+        "nativeEphemeral" | "native_ephemeral" | "mem" => Some(StorageMode::NativeEphemeral),
+        "native" | "nativeLocal" | "native_local" | "local" | "sqlite" => {
+            Some(StorageMode::NativeLocal)
         }
-        "nativeLocal" | "native_local" | "local" | "sqlite" => Some(StorageMode::NativeLocal),
         _ => None,
     }
 }
@@ -502,6 +912,1848 @@ fn parse_snapshot_partition(value: &str) -> Result<SnapshotPartition, String> {
     }
 }
 
+fn build_manifold_snapshot(
+    host: &PhoenixNativeHost,
+    request: DesktopManifoldSnapshotRequest,
+) -> Result<DesktopManifoldSnapshot, String> {
+    let manifold = request.manifold.as_deref().unwrap_or("hybrid");
+    let is_hopf = manifold == "hopf";
+    let is_lorentz = manifold == "lorentz";
+    let scope = request.scope.as_ref();
+    let limit = request.limit.unwrap_or(360).max(1);
+    let document_rows = store_relation_rows(host, "semantic_documents")?;
+    let node_rows = store_relation_rows(host, "semantic_node_prototypes")?;
+    let candidate_rows = store_relation_rows(host, "graph_candidate_edges")?;
+    let payload = if is_hopf {
+        let semantic =
+            semantic_rows_to_payload(&document_rows, &node_rows, &candidate_rows, scope, limit);
+        semantic_payload_to_hopf_payload(&semantic)
+    } else if is_lorentz {
+        let build = ensure_lorentz_sidecar(host, scope, Some(limit), false)?;
+        lorentz_index_to_payload(build.mmap.index(), build.cache)
+    } else {
+        semantic_rows_to_payload(&document_rows, &node_rows, &candidate_rows, scope, limit)
+    };
+    Ok(DesktopManifoldSnapshot {
+        manifold: if is_hopf {
+            "hopf"
+        } else if is_lorentz {
+            "lorentz"
+        } else {
+            "hybrid"
+        },
+        geometry_version: if is_hopf {
+            HOPF_GEOMETRY_VERSION
+        } else if is_lorentz {
+            LORENTZ_GEOMETRY_VERSION
+        } else {
+            HYBRID_GEOMETRY_VERSION
+        },
+        source_label: if is_hopf {
+            "native hopf anchors + fibers"
+        } else if is_lorentz {
+            "native lorentz h4 forest sidecar"
+        } else {
+            "native hybrid semantic atlas"
+        },
+        capabilities: DesktopManifoldCapabilities {
+            ann: !is_lorentz,
+            anchors: is_hopf,
+            fibers: is_hopf,
+            phase: is_hopf,
+            cones: is_hopf || is_lorentz,
+        },
+        payload,
+    })
+}
+
+fn store_relation_rows(host: &PhoenixNativeHost, relation: &str) -> Result<Vec<Value>, String> {
+    let result = host
+        .store_command(StoreCommandRequest {
+            command: "relation:list".to_owned(),
+            payload: json!({ "relation": relation }),
+        })
+        .map_err(|error| error.to_string())?;
+    let value = serde_json::to_value(result)
+        .map_err(|error| format!("failed to encode relation rows: {error}"))?;
+    let success = value
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !success {
+        let error = value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("store command failed");
+        return Err(format!("failed to load relation {relation}: {error}"));
+    }
+    Ok(value
+        .get("payload")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn semantic_rows_to_payload(
+    document_rows: &[Value],
+    node_rows: &[Value],
+    candidate_rows: &[Value],
+    scope: Option<&Value>,
+    limit: usize,
+) -> DesktopManifoldPayload {
+    let note_filter = scope
+        .map(|scope| str_field(scope, "note_id", "noteId"))
+        .unwrap_or_default();
+    let mut seen = HashSet::<String>::with_capacity(limit.saturating_mul(2));
+    let mut nodes = Vec::<DesktopManifoldNode>::with_capacity(limit);
+    for row in document_rows {
+        if nodes.len() >= limit {
+            break;
+        }
+        let document_id = str_field(row, "document_id", "documentId");
+        if document_id.is_empty() || (!note_filter.is_empty() && document_id != note_filter) {
+            continue;
+        }
+        let vector = vector_field(row, "vec");
+        if vector.is_empty() {
+            continue;
+        }
+        let id = format!("doc::{document_id}");
+        seen.insert(id.clone());
+        nodes.push(DesktopManifoldNode {
+            id,
+            label: format!(
+                "Document {}",
+                document_id.chars().take(8).collect::<String>()
+            ),
+            source_type: "leaf".to_owned(),
+            vector,
+            base_vector: None,
+            cell_id: None,
+            secondary_cell_ids: Vec::new(),
+            cell_distance: None,
+            boundary_score: None,
+            phase: None,
+            fiber_kind: None,
+            geometry_version: None,
+            document_id: Some(document_id.to_owned()),
+            narrative_id: None,
+            folder_id: None,
+            preview: evidence_preview(row),
+            kind: "CONCEPT".to_owned(),
+        });
+    }
+    for row in node_rows {
+        if nodes.len() >= limit {
+            break;
+        }
+        let id = str_field(row, "node_id", "nodeId");
+        let document_id = str_field(row, "document_id", "documentId");
+        let narrative_id = str_field(row, "narrative_id", "narrativeId");
+        let folder_id = str_field(row, "folder_id", "folderId");
+        if id.is_empty()
+            || !semantic_node_matches_scope(&document_id, &narrative_id, &folder_id, scope)
+        {
+            continue;
+        }
+        let vector = vector_field(row, "vec");
+        if vector.is_empty() {
+            continue;
+        }
+        let node_kind = str_field(row, "node_kind", "nodeKind");
+        let node_kind = if node_kind.is_empty() {
+            "entity"
+        } else {
+            node_kind
+        };
+        let source_type = if node_kind.contains("lens") {
+            "lens"
+        } else if node_kind.contains("entity") {
+            "entity"
+        } else {
+            node_kind
+        };
+        seen.insert(id.to_owned());
+        nodes.push(DesktopManifoldNode {
+            id: id.to_owned(),
+            label: semantic_node_label(id),
+            source_type: source_type.to_owned(),
+            vector,
+            base_vector: None,
+            cell_id: None,
+            secondary_cell_ids: Vec::new(),
+            cell_distance: None,
+            boundary_score: None,
+            phase: None,
+            fiber_kind: None,
+            geometry_version: None,
+            document_id: optional_string(document_id),
+            narrative_id: optional_string(narrative_id),
+            folder_id: optional_string(folder_id),
+            preview: evidence_preview(row),
+            kind: if node_kind.contains("event") {
+                "EVENT"
+            } else {
+                "CONCEPT"
+            }
+            .to_owned(),
+        });
+    }
+    let mut edges = Vec::<DesktopManifoldEdge>::with_capacity(
+        candidate_rows.len().min(limit.saturating_mul(4)),
+    );
+    for row in candidate_rows {
+        let source_id = str_field(row, "source_id", "sourceId");
+        let target_id = str_field(row, "target_id", "targetId");
+        if source_id.is_empty()
+            || target_id.is_empty()
+            || !seen.contains(source_id)
+            || !seen.contains(target_id)
+        {
+            continue;
+        }
+        let edge_type = str_field(row, "edge_type", "edgeType");
+        let edge_type = if edge_type.is_empty() {
+            "candidate_relation"
+        } else {
+            edge_type
+        };
+        edges.push(DesktopManifoldEdge {
+            id: format!("{source_id}:{edge_type}:{target_id}"),
+            source_id: source_id.to_owned(),
+            target_id: target_id.to_owned(),
+            edge_type: edge_type.to_owned(),
+            confidence: candidate_confidence(row),
+        });
+    }
+    DesktopManifoldPayload {
+        nodes,
+        edges,
+        source_label: "native hybrid semantic atlas",
+        projection_source: "real_snapshot_vectors",
+        cells: Vec::new(),
+        charts: Vec::new(),
+        seams: Vec::new(),
+        neighbor_rings: Vec::new(),
+        cone_traces: Vec::new(),
+        anchor_projections: Vec::new(),
+        lorentz_trees: Vec::new(),
+        lorentz_memberships: Vec::new(),
+        lorentz_cache: None,
+    }
+}
+
+fn semantic_payload_to_hopf_payload(semantic: &DesktopManifoldPayload) -> DesktopManifoldPayload {
+    let mut nodes =
+        Vec::<DesktopManifoldNode>::with_capacity(semantic.nodes.len().saturating_mul(2));
+    let mut edges = Vec::<DesktopManifoldEdge>::with_capacity(
+        semantic.edges.len().saturating_add(semantic.nodes.len()),
+    );
+    let mut id_to_fiber = HashMap::<String, String>::with_capacity(semantic.nodes.len());
+    let topology = IcoTopology::new(HOPF_ICO_RESOLUTION);
+    let chart_topology = IcoTopology::new(HOPF_CHART_RESOLUTION);
+    let mut assignments = Vec::<HopfAnchorAssignment>::with_capacity(semantic.nodes.len());
+    for (index, node) in semantic.nodes.iter().enumerate() {
+        if node.id.is_empty() || node.vector.is_empty() {
+            continue;
+        }
+        let fiber_kind = infer_hopf_fiber_kind(node);
+        let anchor_id = format!("hopf:anchor:{}", node.id);
+        let fiber_id = format!("hopf:fiber:{}:{fiber_kind}", node.id);
+        let direction = project_vector_to_direction(&node.vector, &node.id);
+        let projection = topology.project(&direction);
+        let chart_projection = chart_topology.project(&direction);
+        let phase = hopf_phase_for_kind(fiber_kind, &node.id, index);
+        id_to_fiber.insert(node.id.clone(), fiber_id.clone());
+        let anchor_label = if node.label.is_empty() {
+            node.id.clone()
+        } else {
+            node.label.clone()
+        };
+        assignments.push(HopfAnchorAssignment {
+            anchor_id: anchor_id.clone(),
+            fiber_id: fiber_id.clone(),
+            fiber_kind: fiber_kind.to_owned(),
+            cell_id: projection.primary_cell_id.clone(),
+            chart_id: chart_projection.primary_cell_id.clone(),
+            secondary_cell_ids: projection.secondary_cell_ids.clone(),
+            center_vector: projection.center_vector,
+            cell_distance: projection.cell_distance,
+            boundary_score: projection.boundary_score,
+            phase,
+        });
+        nodes.push(DesktopManifoldNode {
+            id: anchor_id.clone(),
+            label: anchor_label.clone(),
+            source_type: "hopf_anchor".to_owned(),
+            vector: node.vector.clone(),
+            base_vector: Some(projection.center_vector),
+            cell_id: Some(projection.primary_cell_id.clone()),
+            secondary_cell_ids: projection.secondary_cell_ids.clone(),
+            cell_distance: Some(projection.cell_distance),
+            boundary_score: Some(projection.boundary_score),
+            phase: Some(0.0),
+            fiber_kind: None,
+            geometry_version: Some(HOPF_GEOMETRY_VERSION),
+            document_id: node.document_id.clone(),
+            narrative_id: node.narrative_id.clone(),
+            folder_id: node.folder_id.clone(),
+            preview: node.preview.clone(),
+            kind: "HOPF_ANCHOR".to_owned(),
+        });
+        nodes.push(DesktopManifoldNode {
+            id: fiber_id.clone(),
+            label: format!("{} / {}", anchor_label, fiber_kind.replace('_', " ")),
+            source_type: "hopf_fiber".to_owned(),
+            vector: fiber_vector(&node.vector, fiber_kind, index),
+            base_vector: Some(projection.center_vector),
+            cell_id: Some(projection.primary_cell_id),
+            secondary_cell_ids: projection.secondary_cell_ids,
+            cell_distance: Some(projection.cell_distance),
+            boundary_score: Some(projection.boundary_score),
+            phase: Some(phase),
+            fiber_kind: Some(fiber_kind.to_owned()),
+            geometry_version: Some(HOPF_GEOMETRY_VERSION),
+            document_id: node.document_id.clone(),
+            narrative_id: node.narrative_id.clone(),
+            folder_id: node.folder_id.clone(),
+            preview: format!("{fiber_kind} context fiber"),
+            kind: format!("HOPF_FIBER:{fiber_kind}"),
+        });
+        edges.push(DesktopManifoldEdge {
+            id: format!("hopf:anchor-fiber:{}", node.id),
+            source_id: anchor_id,
+            target_id: fiber_id,
+            edge_type: "hopf-anchor-fiber".to_owned(),
+            confidence: 1.25,
+        });
+    }
+    for edge in &semantic.edges {
+        let Some(source_fiber) = id_to_fiber.get(edge.source_id.as_str()) else {
+            continue;
+        };
+        let Some(target_fiber) = id_to_fiber.get(edge.target_id.as_str()) else {
+            continue;
+        };
+        if source_fiber == target_fiber {
+            continue;
+        }
+        let edge_type = if edge.edge_type.is_empty() {
+            "semantic"
+        } else {
+            edge.edge_type.as_str()
+        };
+        edges.push(DesktopManifoldEdge {
+            id: format!("hopf:fiber-edge:{}", edge.id),
+            source_id: source_fiber.clone(),
+            target_id: target_fiber.clone(),
+            edge_type: format!("hopf-fiber-edge:{edge_type}"),
+            confidence: edge.confidence,
+        });
+    }
+    DesktopManifoldPayload {
+        nodes,
+        edges,
+        source_label: "native hopf anchors + fibers",
+        projection_source: "real_snapshot_vectors",
+        cells: build_desktop_cells(&topology, &assignments),
+        charts: build_desktop_charts(&topology, &chart_topology, &assignments),
+        seams: build_desktop_seams(&topology, &assignments),
+        neighbor_rings: build_desktop_neighbor_rings(&topology, &assignments),
+        cone_traces: build_desktop_cone_traces(&topology, &assignments),
+        anchor_projections: assignments
+            .iter()
+            .map(|assignment| DesktopAnchorProjection {
+                anchor_id: assignment.anchor_id.clone(),
+                primary_cell_id: assignment.cell_id.clone(),
+                secondary_cell_ids: assignment.secondary_cell_ids.clone(),
+                cell_distance: assignment.cell_distance,
+                boundary_score: assignment.boundary_score,
+                projection_version: HOPF_PROJECTION_VERSION,
+                geometry_version: HOPF_GEOMETRY_VERSION,
+            })
+            .collect(),
+        lorentz_trees: Vec::new(),
+        lorentz_memberships: Vec::new(),
+        lorentz_cache: None,
+    }
+}
+
+struct LorentzSidecar {
+    mmap: MmapLorentzForestIndex,
+    cache: DesktopLorentzCacheStatus,
+}
+
+fn build_lorentz_forest_response(
+    host: &PhoenixNativeHost,
+    request: DesktopLorentzForestBuildRequest,
+) -> Result<DesktopLorentzForestBuildResponse, String> {
+    let sidecar = ensure_lorentz_sidecar(
+        host,
+        request.scope.as_ref(),
+        request.limit,
+        request.force.unwrap_or(false),
+    )?;
+    let index = sidecar.mmap.index();
+    let snapshot = if request.include_snapshot.unwrap_or(false) {
+        Some(lorentz_index_to_snapshot(index))
+    } else {
+        None
+    };
+    Ok(DesktopLorentzForestBuildResponse {
+        geometry_version: LORENTZ_GEOMETRY_VERSION,
+        source_label: "native lorentz h4 forest sidecar",
+        cache: sidecar.cache,
+        node_count: index.nodes.len(),
+        tree_count: index.trees.len(),
+        membership_count: index.memberships.len(),
+        snapshot,
+    })
+}
+
+fn query_lorentz_forest_response(
+    host: &PhoenixNativeHost,
+    request: DesktopLorentzForestQueryRequest,
+) -> Result<DesktopLorentzForestQueryResponse, String> {
+    let sidecar = ensure_lorentz_sidecar(
+        host,
+        request.scope.as_ref(),
+        request.limit,
+        request.force.unwrap_or(false),
+    )?;
+    let index = sidecar.mmap.index();
+    let query_point = lorentz_query_point(index, &request)?;
+    let mut query = LorentzTreeQuery::new(query_point).map_err(|error| error.to_string())?;
+    if let Some(tree_ids) = request.tree_ids {
+        query = query.with_tree_ids(tree_ids);
+    }
+    if let Some(tree_kinds) = request.tree_kinds {
+        query = query.with_tree_kinds(
+            tree_kinds
+                .iter()
+                .filter_map(|kind| parse_lorentz_tree_kind(kind))
+                .collect(),
+        );
+    }
+    if let Some(target_level) = request.target_level {
+        query = query.with_target_level(target_level);
+    }
+    if let Some(mode) = request.mode.as_deref().and_then(parse_lorentz_query_mode) {
+        query = query.with_mode(mode);
+    }
+    let top_k = request.top_k.unwrap_or(24).clamp(1, 512);
+    let hits = sidecar
+        .mmap
+        .rank(&query, LorentzScoreConfig::default())
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .take(top_k)
+        .map(|score| lorentz_score_to_hit(index, score))
+        .collect::<Vec<_>>();
+    Ok(DesktopLorentzForestQueryResponse {
+        geometry_version: LORENTZ_GEOMETRY_VERSION,
+        cache: sidecar.cache,
+        query_point: query_point.coords,
+        hits,
+    })
+}
+
+fn ensure_lorentz_sidecar(
+    host: &PhoenixNativeHost,
+    scope: Option<&Value>,
+    limit: Option<usize>,
+    force: bool,
+) -> Result<LorentzSidecar, String> {
+    let mut cache = lorentz_cache_status(host, scope, limit)?;
+    if force || !cache.exists {
+        let document_rows = store_relation_rows(host, "semantic_documents")?;
+        let node_rows = store_relation_rows(host, "semantic_node_prototypes")?;
+        let candidate_rows = store_relation_rows(host, "graph_candidate_edges")?;
+        let semantic = semantic_rows_to_payload(
+            &document_rows,
+            &node_rows,
+            &candidate_rows,
+            scope,
+            limit.unwrap_or(720).max(1),
+        );
+        let forest = semantic_payload_to_lorentz_forest(&semantic)?;
+        let index = LorentzForestIndex::from_forest(&forest).map_err(|error| error.to_string())?;
+        if let Some(parent) = PathBuf::from(&cache.cache_path).parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        MmapLorentzForestIndex::write_index_to_file(&index, &cache.cache_path)
+            .map_err(|error| error.to_string())?;
+        cache = lorentz_cache_status(host, scope, limit)?;
+        cache.rebuilt = true;
+    }
+    let mmap = MmapLorentzForestIndex::open(&cache.cache_path).map_err(|error| error.to_string())?;
+    cache.mmap = true;
+    Ok(LorentzSidecar { mmap, cache })
+}
+
+fn lorentz_cache_status(
+    host: &PhoenixNativeHost,
+    scope: Option<&Value>,
+    limit: Option<usize>,
+) -> Result<DesktopLorentzCacheStatus, String> {
+    let (cache_key, cache_path) = lorentz_cache_path(host, scope, limit)?;
+    let metadata = std::fs::metadata(&cache_path).ok();
+    Ok(DesktopLorentzCacheStatus {
+        geometry_version: LORENTZ_GEOMETRY_VERSION,
+        cache_key,
+        cache_path: cache_path.to_string_lossy().into_owned(),
+        exists: metadata.is_some(),
+        byte_len: metadata.map(|meta| meta.len()).unwrap_or_default(),
+        mmap: false,
+        rebuilt: false,
+    })
+}
+
+fn lorentz_cache_path(
+    host: &PhoenixNativeHost,
+    scope: Option<&Value>,
+    limit: Option<usize>,
+) -> Result<(String, PathBuf), String> {
+    let scope_json = scope
+        .map(|scope| scope.to_string())
+        .unwrap_or_else(|| "global".to_owned());
+    let effective_limit = limit.unwrap_or(720).max(1);
+    let cache_key = format!(
+        "scope-{:016x}-limit-{effective_limit}",
+        stable_hash64(&scope_json)
+    );
+    let base = host
+        .config()
+        .and_then(|config| config.storage_path.as_ref())
+        .cloned()
+        .unwrap_or_else(|| std::env::temp_dir().join("phoenix-desktop"));
+    Ok((
+        cache_key.clone(),
+        base.join("lorentz-forest")
+            .join(format!("{LORENTZ_GEOMETRY_VERSION}-{cache_key}.bin")),
+    ))
+}
+
+fn semantic_payload_to_lorentz_forest(
+    semantic: &DesktopManifoldPayload,
+) -> Result<LorentzForest, String> {
+    let mut forest = LorentzForest::new();
+    let mut semantic_ids = BTreeSet::<String>::new();
+    for node in &semantic.nodes {
+        if node.id.is_empty() || node.vector.is_empty() {
+            continue;
+        }
+        let mut lorentz_node = LorentzNode::new(
+            node.id.clone(),
+            if node.label.is_empty() {
+                node.id.clone()
+            } else {
+                node.label.clone()
+            },
+            lorentz_point_from_vector(&node.vector, &node.id)?,
+        )
+        .map_err(|error| error.to_string())?;
+        lorentz_node.point_ref = optional_string(node.preview.as_str());
+        forest
+            .add_node(lorentz_node)
+            .map_err(|error| error.to_string())?;
+        semantic_ids.insert(node.id.clone());
+    }
+
+    let parent_maps = build_lorentz_parent_maps(semantic, &semantic_ids);
+    for (tree_id, kind, label) in lorentz_tree_specs() {
+        let root_id = format!("lorentz:root:{tree_id}");
+        forest
+            .add_node(
+                LorentzNode::new(root_id.clone(), format!("{label} root"), HyperboloidPoint::origin())
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        forest
+            .add_tree(LorentzTree::new(tree_id, kind, label))
+            .map_err(|error| error.to_string())?;
+        forest
+            .attach_root(tree_id, root_id.as_str())
+            .map_err(|error| error.to_string())?;
+        attach_lorentz_tree_memberships(
+            &mut forest,
+            tree_id,
+            root_id.as_str(),
+            &semantic_ids,
+            parent_maps.get(&kind),
+        )?;
+    }
+    forest.rebuild_indexes();
+    Ok(forest)
+}
+
+fn build_lorentz_parent_maps(
+    semantic: &DesktopManifoldPayload,
+    semantic_ids: &BTreeSet<String>,
+) -> BTreeMap<LorentzTreeKind, BTreeMap<String, String>> {
+    let mut best = BTreeMap::<LorentzTreeKind, BTreeMap<String, (String, f64)>>::new();
+    for node in &semantic.nodes {
+        let Some(document_id) = node.document_id.as_ref() else {
+            continue;
+        };
+        let doc_node_id = format!("doc::{document_id}");
+        if semantic_ids.contains(&node.id) && semantic_ids.contains(&doc_node_id) && node.id != doc_node_id {
+            best.entry(LorentzTreeKind::DocumentStructure)
+                .or_default()
+                .insert(node.id.clone(), (doc_node_id, 1.0));
+        }
+    }
+    for edge in &semantic.edges {
+        if edge.source_id == edge.target_id
+            || !semantic_ids.contains(&edge.source_id)
+            || !semantic_ids.contains(&edge.target_id)
+        {
+            continue;
+        }
+        let Some(kind) = lorentz_kind_for_edge_type(&edge.edge_type) else {
+            continue;
+        };
+        let by_target = best.entry(kind).or_default();
+        let replace = by_target
+            .get(&edge.target_id)
+            .map(|(parent, confidence)| {
+                edge.confidence > *confidence
+                    || (edge.confidence == *confidence && edge.source_id < *parent)
+            })
+            .unwrap_or(true);
+        if replace {
+            by_target.insert(edge.target_id.clone(), (edge.source_id.clone(), edge.confidence));
+        }
+    }
+    best.into_iter()
+        .map(|(kind, map)| {
+            (
+                kind,
+                map.into_iter()
+                    .map(|(child, (parent, _))| (child, parent))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+fn attach_lorentz_tree_memberships(
+    forest: &mut LorentzForest,
+    tree_id: &str,
+    root_id: &str,
+    semantic_ids: &BTreeSet<String>,
+    parent_map: Option<&BTreeMap<String, String>>,
+) -> Result<(), String> {
+    let mut pending = semantic_ids.clone();
+    let mut attached = BTreeSet::<String>::from([root_id.to_owned()]);
+    while !pending.is_empty() {
+        let mut progress = false;
+        for node_id in pending.clone() {
+            let parent_id = parent_map
+                .and_then(|parents| parents.get(&node_id))
+                .filter(|parent| semantic_ids.contains(parent.as_str()))
+                .map(String::as_str)
+                .unwrap_or(root_id);
+            if parent_id == root_id || attached.contains(parent_id) {
+                let rank = attached.len().min(u32::MAX as usize) as u32;
+                forest
+                    .attach_child(tree_id, parent_id, node_id.as_str(), rank)
+                    .map_err(|error| error.to_string())?;
+                pending.remove(&node_id);
+                attached.insert(node_id);
+                progress = true;
+            }
+        }
+        if !progress {
+            for node_id in pending.clone() {
+                let rank = attached.len().min(u32::MAX as usize) as u32;
+                forest
+                    .attach_child(tree_id, root_id, node_id.as_str(), rank)
+                    .map_err(|error| error.to_string())?;
+                pending.remove(&node_id);
+                attached.insert(node_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn lorentz_index_to_payload(
+    index: &LorentzForestIndex,
+    cache: DesktopLorentzCacheStatus,
+) -> DesktopManifoldPayload {
+    let snapshot = lorentz_index_to_snapshot(index);
+    DesktopManifoldPayload {
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        source_label: "native lorentz h4 forest sidecar",
+        projection_source: "real_snapshot_vectors",
+        cells: Vec::new(),
+        charts: Vec::new(),
+        seams: Vec::new(),
+        neighbor_rings: Vec::new(),
+        cone_traces: Vec::new(),
+        anchor_projections: Vec::new(),
+        lorentz_trees: snapshot.trees,
+        lorentz_memberships: snapshot.memberships,
+        lorentz_cache: Some(cache),
+    }
+}
+
+fn lorentz_index_to_snapshot(index: &LorentzForestIndex) -> DesktopLorentzForestSnapshot {
+    let nodes = index.nodes.iter().map(lorentz_node_to_desktop).collect();
+    let trees = index.trees.iter().map(lorentz_tree_to_record).collect::<Vec<_>>();
+    let memberships = index
+        .memberships
+        .iter()
+        .map(lorentz_membership_to_record)
+        .collect::<Vec<_>>();
+    let tree_kind_by_id = index
+        .trees
+        .iter()
+        .map(|tree| (tree.tree_id.clone(), lorentz_kind_name(tree.tree_kind)))
+        .collect::<BTreeMap<_, _>>();
+    let edges = index
+        .memberships
+        .iter()
+        .filter_map(|membership| {
+            let parent_id = membership.parent_node_id.as_ref()?;
+            Some(DesktopManifoldEdge {
+                id: format!(
+                    "lorentz:{}:{}:{}",
+                    membership.tree_id, parent_id, membership.node_id
+                ),
+                source_id: parent_id.clone(),
+                target_id: membership.node_id.clone(),
+                edge_type: format!(
+                    "lorentz-tree:{}",
+                    tree_kind_by_id
+                        .get(&membership.tree_id)
+                        .copied()
+                        .unwrap_or("unknown")
+                ),
+                confidence: membership.confidence as f64,
+            })
+        })
+        .collect();
+    DesktopLorentzForestSnapshot {
+        nodes,
+        edges,
+        trees,
+        memberships,
+    }
+}
+
+fn lorentz_node_to_desktop(node: &LorentzNode) -> DesktopManifoldNode {
+    let is_root = node.node_id.starts_with("lorentz:root:");
+    DesktopManifoldNode {
+        id: node.node_id.clone(),
+        label: node.label.clone(),
+        source_type: if is_root {
+            "lorentz_root".to_owned()
+        } else {
+            "lorentz_node".to_owned()
+        },
+        vector: node.coords_f64(),
+        base_vector: None,
+        cell_id: None,
+        secondary_cell_ids: Vec::new(),
+        cell_distance: None,
+        boundary_score: None,
+        phase: None,
+        fiber_kind: None,
+        geometry_version: Some(LORENTZ_GEOMETRY_VERSION),
+        document_id: None,
+        narrative_id: None,
+        folder_id: None,
+        preview: node.point_ref.clone().unwrap_or_default(),
+        kind: if is_root {
+            "LORENTZ_ROOT".to_owned()
+        } else {
+            "LORENTZ_NODE".to_owned()
+        },
+    }
+}
+
+trait LorentzNodeDesktopExt {
+    fn coords_f64(&self) -> Vec<f64>;
+}
+
+impl LorentzNodeDesktopExt for LorentzNode {
+    fn coords_f64(&self) -> Vec<f64> {
+        self.point.coords.iter().map(|value| *value as f64).collect()
+    }
+}
+
+fn lorentz_tree_to_record(tree: &LorentzTree) -> DesktopLorentzTreeRecord {
+    DesktopLorentzTreeRecord {
+        tree_id: tree.tree_id.clone(),
+        tree_kind: lorentz_kind_name(tree.tree_kind).to_owned(),
+        label: tree.label.clone(),
+        root_node_id: tree.root_node_id.clone(),
+        geometry_version: LORENTZ_GEOMETRY_VERSION,
+    }
+}
+
+fn lorentz_membership_to_record(
+    membership: &LorentzTreeMembership,
+) -> DesktopLorentzMembershipRecord {
+    DesktopLorentzMembershipRecord {
+        tree_id: membership.tree_id.clone(),
+        node_id: membership.node_id.clone(),
+        parent_node_id: membership.parent_node_id.clone(),
+        level: membership.level,
+        local_rank: membership.local_rank,
+        path_key: membership.path_key.clone(),
+        branch_weight: membership.branch_weight,
+        confidence: membership.confidence,
+        source_count: membership.source_count,
+        geometry_version: LORENTZ_GEOMETRY_VERSION,
+    }
+}
+
+fn lorentz_score_to_hit(
+    index: &LorentzForestIndex,
+    score: phoenix_hyperbolic::lorentz_tree::LorentzCandidateScore<String>,
+) -> DesktopLorentzQueryHit {
+    let label = index
+        .nodes
+        .iter()
+        .find(|node| node.node_id == score.node_id)
+        .map(|node| node.label.clone())
+        .unwrap_or_else(|| score.node_id.clone());
+    let path_key = score.tree_id.as_ref().and_then(|tree_id| {
+        index
+            .memberships
+            .iter()
+            .find(|membership| membership.tree_id == *tree_id && membership.node_id == score.node_id)
+            .map(|membership| membership.path_key.clone())
+    });
+    DesktopLorentzQueryHit {
+        candidate_id: score.candidate_id,
+        node_id: score.node_id,
+        label,
+        tree_id: score.tree_id,
+        tree_kind: score.tree_kind.map(|kind| lorentz_kind_name(kind).to_owned()),
+        path_key,
+        score: score.score,
+        hyperbolic_distance: score.hyperbolic_distance,
+        geometry_similarity: score.geometry_similarity,
+        hierarchy_alignment: score.hierarchy_alignment,
+        confidence: score.confidence,
+    }
+}
+
+fn lorentz_query_point(
+    index: &LorentzForestIndex,
+    request: &DesktopLorentzForestQueryRequest,
+) -> Result<HyperboloidPoint, String> {
+    if let Some(vector) = &request.query_vector {
+        return lorentz_point_from_vector(vector, "query");
+    }
+    if let Some(node_id) = request.query_node_id.as_deref() {
+        if let Some(node) = index.nodes.iter().find(|node| node.node_id == node_id) {
+            return Ok(node.point);
+        }
+        return Err(format!("missing Lorentz query node id: {node_id}"));
+    }
+    Ok(HyperboloidPoint::origin())
+}
+
+fn lorentz_point_from_vector(vector: &[f64], salt: &str) -> Result<HyperboloidPoint, String> {
+    let mut tangent = [0.0f32; 4];
+    for (index, value) in vector.iter().enumerate() {
+        if value.is_finite() {
+            tangent[index % 4] += (*value as f32).clamp(-1.0, 1.0);
+        }
+    }
+    if tangent.iter().all(|value| value.abs() <= 1e-6) {
+        let hash = stable_hash64(salt);
+        for (index, slot) in tangent.iter_mut().enumerate() {
+            let byte = ((hash >> (index * 13)) & 0xff) as f32;
+            *slot = (byte / 255.0 - 0.5) * 0.1;
+        }
+    }
+    let norm = tangent.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 3.0 {
+        for value in &mut tangent {
+            *value = (*value / norm) * 3.0;
+        }
+    }
+    HyperboloidPoint::from_tangent(tangent, 0.8).map_err(|error| error.to_string())
+}
+
+fn lorentz_tree_specs() -> [(&'static str, LorentzTreeKind, &'static str); 5] {
+    [
+        ("identity", LorentzTreeKind::Identity, "Identity"),
+        (
+            "documentStructure",
+            LorentzTreeKind::DocumentStructure,
+            "Document Structure",
+        ),
+        ("causal", LorentzTreeKind::Causal, "Causal"),
+        ("temporal", LorentzTreeKind::Temporal, "Temporal"),
+        ("evidence", LorentzTreeKind::Evidence, "Evidence"),
+    ]
+}
+
+fn lorentz_kind_for_edge_type(edge_type: &str) -> Option<LorentzTreeKind> {
+    let normalized = edge_type.to_ascii_lowercase();
+    if normalized.contains("causal") || normalized.contains("cause") {
+        Some(LorentzTreeKind::Causal)
+    } else if normalized.contains("temporal")
+        || normalized.contains("before")
+        || normalized.contains("after")
+        || normalized.contains("sequence")
+    {
+        Some(LorentzTreeKind::Temporal)
+    } else if normalized.contains("evidence")
+        || normalized.contains("support")
+        || normalized.contains("provenance")
+        || normalized.contains("claim")
+    {
+        Some(LorentzTreeKind::Evidence)
+    } else {
+        None
+    }
+}
+
+fn parse_lorentz_tree_kind(value: &str) -> Option<LorentzTreeKind> {
+    match normalize_contract_token(value).as_str() {
+        "identity" => Some(LorentzTreeKind::Identity),
+        "relationship" => Some(LorentzTreeKind::Relationship),
+        "location" => Some(LorentzTreeKind::Location),
+        "event" => Some(LorentzTreeKind::Event),
+        "temporal" => Some(LorentzTreeKind::Temporal),
+        "causal" => Some(LorentzTreeKind::Causal),
+        "mechanical" => Some(LorentzTreeKind::Mechanical),
+        "emotional" => Some(LorentzTreeKind::Emotional),
+        "political" => Some(LorentzTreeKind::Political),
+        "evidence" => Some(LorentzTreeKind::Evidence),
+        "provenance" => Some(LorentzTreeKind::Provenance),
+        "contradiction" => Some(LorentzTreeKind::Contradiction),
+        "abstraction" => Some(LorentzTreeKind::Abstraction),
+        "species" => Some(LorentzTreeKind::Species),
+        "powersystem" => Some(LorentzTreeKind::PowerSystem),
+        "documentstructure" => Some(LorentzTreeKind::DocumentStructure),
+        _ => None,
+    }
+}
+
+fn parse_lorentz_query_mode(value: &str) -> Option<LorentzQueryMode> {
+    match normalize_contract_token(value).as_str() {
+        "anchorsearch" => Some(LorentzQueryMode::AnchorSearch),
+        "directlookup" => Some(LorentzQueryMode::DirectLookup),
+        "hierarchicalexpansion" => Some(LorentzQueryMode::HierarchicalExpansion),
+        "crosshierarchysynthesis" => Some(LorentzQueryMode::CrossHierarchySynthesis),
+        "contradiction" => Some(LorentzQueryMode::Contradiction),
+        _ => None,
+    }
+}
+
+fn lorentz_kind_name(kind: LorentzTreeKind) -> &'static str {
+    match kind {
+        LorentzTreeKind::Identity => "identity",
+        LorentzTreeKind::Relationship => "relationship",
+        LorentzTreeKind::Location => "location",
+        LorentzTreeKind::Event => "event",
+        LorentzTreeKind::Temporal => "temporal",
+        LorentzTreeKind::Causal => "causal",
+        LorentzTreeKind::Mechanical => "mechanical",
+        LorentzTreeKind::Emotional => "emotional",
+        LorentzTreeKind::Political => "political",
+        LorentzTreeKind::Evidence => "evidence",
+        LorentzTreeKind::Provenance => "provenance",
+        LorentzTreeKind::Contradiction => "contradiction",
+        LorentzTreeKind::Abstraction => "abstraction",
+        LorentzTreeKind::Species => "species",
+        LorentzTreeKind::PowerSystem => "powerSystem",
+        LorentzTreeKind::DocumentStructure => "documentStructure",
+    }
+}
+
+fn normalize_contract_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn stable_hash64<T: Hash + ?Sized>(value: &T) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+impl IcoTopology {
+    fn new(resolution: u32) -> Self {
+        let mut cells = generate_ico_cells(resolution);
+        let mut by_id = HashMap::<String, usize>::with_capacity(cells.len());
+        let mut edge_to_cells = HashMap::<String, Vec<usize>>::with_capacity(cells.len() * 3);
+        for (index, cell) in cells.iter().enumerate() {
+            by_id.insert(cell.cell_id.clone(), index);
+            for edge_key in &cell.edge_keys {
+                edge_to_cells
+                    .entry(edge_key.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
+        for indexes in edge_to_cells.values() {
+            for left in indexes {
+                for right in indexes {
+                    if left != right {
+                        let neighbor = cells[*right].cell_id.clone();
+                        cells[*left].neighbor_cell_ids.push(neighbor);
+                    }
+                }
+            }
+        }
+        for cell in &mut cells {
+            cell.neighbor_cell_ids.sort();
+            cell.neighbor_cell_ids.dedup();
+        }
+        Self {
+            resolution,
+            cells,
+            by_id,
+        }
+    }
+
+    fn cell(&self, cell_id: &str) -> Option<&IcoCellInternal> {
+        self.by_id
+            .get(cell_id)
+            .and_then(|index| self.cells.get(*index))
+    }
+
+    fn project(&self, direction: &[f64; 3]) -> IcoProjection {
+        let mut best_index = 0usize;
+        let mut best_dot = f64::NEG_INFINITY;
+        let mut second_index = 0usize;
+        let mut second_dot = f64::NEG_INFINITY;
+        for (index, cell) in self.cells.iter().enumerate() {
+            let score = dot3(direction, &cell.center);
+            if score > best_dot {
+                second_dot = best_dot;
+                second_index = best_index;
+                best_dot = score;
+                best_index = index;
+            } else if score > second_dot {
+                second_dot = score;
+                second_index = index;
+            }
+        }
+        let best = &self.cells[best_index];
+        let second = &self.cells[second_index];
+        let gap = (best_dot - second_dot).max(0.0);
+        let boundary_score = (1.0 - gap * 96.0).clamp(0.0, 1.0);
+        let secondary_cell_ids = if boundary_score > 0.55 {
+            vec![second.cell_id.clone()]
+        } else {
+            Vec::new()
+        };
+        IcoProjection {
+            primary_cell_id: best.cell_id.clone(),
+            secondary_cell_ids,
+            center_vector: best.center,
+            cell_distance: best_dot.clamp(-1.0, 1.0).acos(),
+            boundary_score,
+        }
+    }
+
+    fn neighbor_rings(&self, start: &str, max_ring: u32) -> Vec<Vec<String>> {
+        let mut rings = vec![Vec::<String>::new(); max_ring as usize];
+        let mut seen = HashSet::<String>::new();
+        let mut queue = VecDeque::<(String, u32)>::new();
+        seen.insert(start.to_owned());
+        queue.push_back((start.to_owned(), 0));
+        while let Some((cell_id, depth)) = queue.pop_front() {
+            if depth >= max_ring {
+                continue;
+            }
+            let Some(cell) = self.cell(&cell_id) else {
+                continue;
+            };
+            for neighbor in &cell.neighbor_cell_ids {
+                if !seen.insert(neighbor.clone()) {
+                    continue;
+                }
+                let next_depth = depth + 1;
+                rings[(next_depth - 1) as usize].push(neighbor.clone());
+                queue.push_back((neighbor.clone(), next_depth));
+            }
+        }
+        for ring in &mut rings {
+            ring.sort();
+        }
+        rings
+    }
+}
+
+fn generate_ico_cells(resolution: u32) -> Vec<IcoCellInternal> {
+    let vertices = ico_vertices();
+    let faces = ico_faces();
+    let subdivisions = 1usize << resolution;
+    let mut cells = Vec::<IcoCellInternal>::with_capacity(20 * subdivisions * subdivisions);
+    for (face_index, [a, b, c]) in faces.iter().copied().enumerate() {
+        let mut local_index = 0usize;
+        for i in 0..subdivisions {
+            for j in 0..(subdivisions - i) {
+                let p0 =
+                    subdivision_vertex(vertices[a], vertices[b], vertices[c], subdivisions, i, j);
+                let p1 = subdivision_vertex(
+                    vertices[a],
+                    vertices[b],
+                    vertices[c],
+                    subdivisions,
+                    i + 1,
+                    j,
+                );
+                let p2 = subdivision_vertex(
+                    vertices[a],
+                    vertices[b],
+                    vertices[c],
+                    subdivisions,
+                    i,
+                    j + 1,
+                );
+                cells.push(make_ico_cell(
+                    resolution,
+                    face_index,
+                    local_index,
+                    p0,
+                    p1,
+                    p2,
+                ));
+                local_index += 1;
+                if i + j + 1 < subdivisions {
+                    let p3 = subdivision_vertex(
+                        vertices[a],
+                        vertices[b],
+                        vertices[c],
+                        subdivisions,
+                        i + 1,
+                        j + 1,
+                    );
+                    cells.push(make_ico_cell(
+                        resolution,
+                        face_index,
+                        local_index,
+                        p1,
+                        p3,
+                        p2,
+                    ));
+                    local_index += 1;
+                }
+            }
+        }
+    }
+    cells
+}
+
+fn make_ico_cell(
+    resolution: u32,
+    face: usize,
+    local_index: usize,
+    a: [f64; 3],
+    b: [f64; 3],
+    c: [f64; 3],
+) -> IcoCellInternal {
+    let k0 = vertex_key(&a);
+    let k1 = vertex_key(&b);
+    let k2 = vertex_key(&c);
+    IcoCellInternal {
+        cell_id: format!("ico:{resolution}:{face}:{local_index}"),
+        resolution,
+        face,
+        local_index,
+        center: normalize3([a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]]),
+        vertex_keys: [k0.clone(), k1.clone(), k2.clone()],
+        edge_keys: [edge_key(&k0, &k1), edge_key(&k1, &k2), edge_key(&k2, &k0)],
+        neighbor_cell_ids: Vec::new(),
+        area_weight: triangle_area(a, b, c),
+    }
+}
+
+fn ico_vertices() -> Vec<[f64; 3]> {
+    let phi = (1.0 + 5.0_f64.sqrt()) * 0.5;
+    [
+        [-1.0, phi, 0.0],
+        [1.0, phi, 0.0],
+        [-1.0, -phi, 0.0],
+        [1.0, -phi, 0.0],
+        [0.0, -1.0, phi],
+        [0.0, 1.0, phi],
+        [0.0, -1.0, -phi],
+        [0.0, 1.0, -phi],
+        [phi, 0.0, -1.0],
+        [phi, 0.0, 1.0],
+        [-phi, 0.0, -1.0],
+        [-phi, 0.0, 1.0],
+    ]
+    .into_iter()
+    .map(normalize3)
+    .collect()
+}
+
+fn ico_faces() -> [[usize; 3]; 20] {
+    [
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ]
+}
+
+fn subdivision_vertex(
+    a: [f64; 3],
+    b: [f64; 3],
+    c: [f64; 3],
+    n: usize,
+    i: usize,
+    j: usize,
+) -> [f64; 3] {
+    let nf = n as f64;
+    let bi = i as f64 / nf;
+    let cj = j as f64 / nf;
+    let aw = 1.0 - bi - cj;
+    normalize3([
+        a[0] * aw + b[0] * bi + c[0] * cj,
+        a[1] * aw + b[1] * bi + c[1] * cj,
+        a[2] * aw + b[2] * bi + c[2] * cj,
+    ])
+}
+
+fn build_desktop_cells(
+    topology: &IcoTopology,
+    assignments: &[HopfAnchorAssignment],
+) -> Vec<DesktopIcoCell> {
+    let mut anchors_by_cell = BTreeMap::<String, Vec<String>>::new();
+    for assignment in assignments {
+        anchors_by_cell
+            .entry(assignment.cell_id.clone())
+            .or_default()
+            .push(assignment.anchor_id.clone());
+    }
+    anchors_by_cell
+        .into_iter()
+        .filter_map(|(cell_id, anchor_ids)| {
+            let cell = topology.cell(&cell_id)?;
+            Some(DesktopIcoCell {
+                cell_id: cell.cell_id.clone(),
+                resolution: cell.resolution,
+                parent_cell_id: parent_cell_id(cell),
+                children_cell_ids: Vec::new(),
+                center_vector: cell.center,
+                normal_vector: cell.center,
+                neighbor_cell_ids: cell.neighbor_cell_ids.clone(),
+                area_weight: cell.area_weight,
+                density: anchor_ids.len() as f64 / cell.area_weight.max(1e-9),
+                anchor_ids,
+                geometry_version: HOPF_GEOMETRY_VERSION,
+            })
+        })
+        .collect()
+}
+
+fn build_desktop_charts(
+    topology: &IcoTopology,
+    chart_topology: &IcoTopology,
+    assignments: &[HopfAnchorAssignment],
+) -> Vec<DesktopIcoChart> {
+    let mut accumulators = BTreeMap::<String, ChartAccumulator>::new();
+    for assignment in assignments {
+        let chart_id = chart_record_id(&assignment.chart_id);
+        let entry = accumulators.entry(chart_id).or_default();
+        entry.member_cell_ids.insert(assignment.cell_id.clone());
+        entry.anchor_ids.push(assignment.anchor_id.clone());
+        *entry
+            .dominant_contexts
+            .entry(assignment.fiber_kind.clone())
+            .or_default() += 1;
+    }
+    accumulators
+        .into_iter()
+        .map(|(chart_id, accumulator)| {
+            let center_cell_id = chart_id.trim_start_matches("chart:").to_owned();
+            let member_cell_ids = accumulator.member_cell_ids.into_iter().collect::<Vec<_>>();
+            let member_set = member_cell_ids.iter().cloned().collect::<HashSet<_>>();
+            let boundary_cells = member_cell_ids
+                .iter()
+                .filter(|cell_id| {
+                    topology
+                        .cell(cell_id)
+                        .map(|cell| {
+                            cell.neighbor_cell_ids
+                                .iter()
+                                .any(|neighbor| !member_set.contains(neighbor))
+                        })
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let dominant_contexts = sorted_contexts(accumulator.dominant_contexts);
+            let chart_area = chart_topology
+                .cell(&center_cell_id)
+                .map(|cell| cell.area_weight)
+                .unwrap_or(1.0);
+            DesktopIcoChart {
+                chart_id,
+                center_cell_id,
+                member_cell_ids,
+                resolution: HOPF_CHART_RESOLUTION,
+                dominant_contexts,
+                anchor_count: count_for_wire(accumulator.anchor_ids.len()),
+                density: accumulator.anchor_ids.len() as f64 / chart_area.max(1e-9),
+                boundary_cells,
+                geometry_version: HOPF_GEOMETRY_VERSION,
+            }
+        })
+        .collect()
+}
+
+fn build_desktop_seams(
+    topology: &IcoTopology,
+    assignments: &[HopfAnchorAssignment],
+) -> Vec<DesktopIcoSeam> {
+    let cell_to_chart = cell_to_chart_map(assignments);
+    let occupied = cell_to_chart.keys().cloned().collect::<BTreeSet<_>>();
+    let mut seams = Vec::<DesktopIcoSeam>::new();
+    for cell_id in &occupied {
+        let Some(cell) = topology.cell(cell_id) else {
+            continue;
+        };
+        for neighbor_id in &cell.neighbor_cell_ids {
+            if cell_id >= neighbor_id || !occupied.contains(neighbor_id) {
+                continue;
+            }
+            let Some(neighbor) = topology.cell(neighbor_id) else {
+                continue;
+            };
+            let chart_a = cell_to_chart.get(cell_id).cloned().unwrap_or_default();
+            let chart_b = cell_to_chart.get(neighbor_id).cloned().unwrap_or_default();
+            let normal_delta = (1.0 - dot3(&cell.center, &neighbor.center)).max(0.0);
+            let same_chart = chart_a == chart_b;
+            let seam_cost = if same_chart {
+                0.08
+            } else {
+                0.24 + normal_delta * 2.4
+            };
+            seams.push(DesktopIcoSeam {
+                from_cell: cell_id.clone(),
+                to_cell: neighbor_id.clone(),
+                shared_edge: shared_edge_vertices(cell, neighbor),
+                normal_delta,
+                chart_a,
+                chart_b,
+                seam_cost,
+                compatibility_score: (1.0 / (1.0 + seam_cost)).clamp(0.0, 1.0),
+                obstruction_count: 0,
+                geometry_version: HOPF_GEOMETRY_VERSION,
+            });
+        }
+    }
+    seams
+}
+
+fn build_desktop_neighbor_rings(
+    topology: &IcoTopology,
+    assignments: &[HopfAnchorAssignment],
+) -> Vec<DesktopIcoNeighborRings> {
+    assignments
+        .iter()
+        .map(|assignment| assignment.cell_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|cell_id| {
+            let rings = topology.neighbor_rings(&cell_id, 3);
+            DesktopIcoNeighborRings {
+                cell_id,
+                ring_1: rings.get(0).cloned().unwrap_or_default(),
+                ring_2: rings.get(1).cloned().unwrap_or_default(),
+                ring_3: rings.get(2).cloned().unwrap_or_default(),
+                geometry_version: HOPF_GEOMETRY_VERSION,
+            }
+        })
+        .collect()
+}
+
+fn build_desktop_cone_traces(
+    topology: &IcoTopology,
+    assignments: &[HopfAnchorAssignment],
+) -> Vec<DesktopIcoConeTrace> {
+    if assignments.is_empty() {
+        return Vec::new();
+    }
+    let cell_counts = cell_counts(assignments);
+    let Some(apex_cell) = cell_counts
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(cell_id, _)| cell_id.clone())
+    else {
+        return Vec::new();
+    };
+    let axis_vector = normalize3(assignments.iter().fold(
+        [0.0, 0.0, 0.0],
+        |mut acc, assignment| {
+            acc[0] += assignment.center_vector[0];
+            acc[1] += assignment.center_vector[1];
+            acc[2] += assignment.center_vector[2];
+            acc
+        },
+    ));
+    let Some(apex) = topology.cell(&apex_cell) else {
+        return Vec::new();
+    };
+    let cell_to_chart = cell_to_chart_map(assignments);
+    let rings = topology.neighbor_rings(&apex_cell, 3);
+    let occupied = cell_counts.keys().cloned().collect::<HashSet<_>>();
+    let mut ring_by_cell = HashMap::<String, u32>::new();
+    ring_by_cell.insert(apex_cell.clone(), 0);
+    for (index, ring) in rings.iter().enumerate() {
+        for cell_id in ring {
+            if occupied.contains(cell_id) {
+                ring_by_cell.insert(cell_id.clone(), (index + 1) as u32);
+            }
+        }
+    }
+    let apex_chart = cell_to_chart.get(&apex_cell).cloned().unwrap_or_default();
+    let mut steps = ring_by_cell
+        .into_iter()
+        .filter_map(|(cell_id, ring)| {
+            let cell = topology.cell(&cell_id)?;
+            let direction = if ring == 0 {
+                axis_vector
+            } else {
+                normalize3([
+                    cell.center[0] - apex.center[0],
+                    cell.center[1] - apex.center[1],
+                    cell.center[2] - apex.center[2],
+                ])
+            };
+            let axis_alignment = if ring == 0 {
+                1.0
+            } else {
+                dot3(&axis_vector, &direction)
+            };
+            let accepted = ring == 0 || axis_alignment >= HOPF_CONE_APERTURE_COS;
+            let chart = cell_to_chart.get(&cell_id).cloned().unwrap_or_default();
+            let chart_stitch_score = if chart == apex_chart { 1.0 } else { 0.62 };
+            Some(DesktopIcoConeTraceStep {
+                cell_id,
+                neighbor_ring: ring,
+                axis_alignment,
+                aperture_threshold: HOPF_CONE_APERTURE_COS,
+                chart_stitch_score,
+                accepted,
+                reason: if accepted {
+                    "inside aperture and ring budget".to_owned()
+                } else {
+                    "outside cone aperture".to_owned()
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    steps.sort_by(|left, right| {
+        left.neighbor_ring
+            .cmp(&right.neighbor_ring)
+            .then_with(|| left.cell_id.cmp(&right.cell_id))
+    });
+    let accepted_cell_ids = steps
+        .iter()
+        .filter(|step| step.accepted)
+        .map(|step| step.cell_id.clone())
+        .collect::<Vec<_>>();
+    let rejected_cell_ids = steps
+        .iter()
+        .filter(|step| !step.accepted)
+        .map(|step| step.cell_id.clone())
+        .collect::<Vec<_>>();
+    vec![DesktopIcoConeTrace {
+        cone_id: format!("cone:{HOPF_GEOMETRY_VERSION}:{apex_cell}"),
+        apex_cell,
+        axis_vector,
+        aperture_cos: HOPF_CONE_APERTURE_COS,
+        max_ring: 3,
+        accepted_cell_ids,
+        rejected_cell_ids,
+        steps,
+        geometry_version: HOPF_GEOMETRY_VERSION,
+    }]
+}
+
+fn cell_counts(assignments: &[HopfAnchorAssignment]) -> BTreeMap<String, u32> {
+    let mut counts = BTreeMap::<String, u32>::new();
+    for assignment in assignments {
+        *counts.entry(assignment.cell_id.clone()).or_default() += 1;
+    }
+    counts
+}
+
+fn cell_to_chart_map(assignments: &[HopfAnchorAssignment]) -> HashMap<String, String> {
+    assignments
+        .iter()
+        .map(|assignment| {
+            (
+                assignment.cell_id.clone(),
+                chart_record_id(&assignment.chart_id),
+            )
+        })
+        .collect()
+}
+
+fn chart_record_id(cell_id: &str) -> String {
+    format!("chart:{cell_id}")
+}
+
+fn sorted_contexts(contexts: BTreeMap<String, u32>) -> Vec<String> {
+    let mut items = contexts.into_iter().collect::<Vec<_>>();
+    items.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    items.into_iter().map(|(context, _)| context).collect()
+}
+
+fn parent_cell_id(cell: &IcoCellInternal) -> Option<String> {
+    (cell.resolution > 0).then(|| {
+        format!(
+            "ico:{}:{}:{}",
+            cell.resolution - 1,
+            cell.face,
+            cell.local_index / 4
+        )
+    })
+}
+
+fn shared_edge_vertices(left: &IcoCellInternal, right: &IcoCellInternal) -> Vec<String> {
+    let right_vertices = right.vertex_keys.iter().collect::<HashSet<_>>();
+    left.vertex_keys
+        .iter()
+        .filter(|key| right_vertices.contains(*key))
+        .cloned()
+        .collect()
+}
+
+fn project_vector_to_direction(vector: &[f64], seed_token: &str) -> [f64; 3] {
+    let phase = hash_unit(seed_token);
+    let mut raw = [0.0, 0.0, 0.0];
+    for (index, value) in vector.iter().copied().enumerate() {
+        if !value.is_finite() {
+            continue;
+        }
+        let n = (index + 1) as f64;
+        raw[0] += value * (n * 12.9898 + phase * TAU_F64).sin();
+        raw[1] += value * (n * 78.233 + phase * 3.883_222_077_450_933).cos();
+        raw[2] += value * (n * 37.719 + phase * 2.399_963_229_728_653).sin();
+    }
+    let normalized = normalize3(raw);
+    if norm3(&normalized) > 0.0 {
+        normalized
+    } else {
+        stable_direction(seed_token)
+    }
+}
+
+fn hopf_phase_for_kind(fiber_kind: &str, id: &str, index: usize) -> f64 {
+    let base = match fiber_kind {
+        "relationship" | "emotional" => 0.18,
+        "location" => 0.30,
+        "event" | "document_structure" => 0.41,
+        "temporal" => 0.53,
+        "causal" | "contradiction" => 0.64,
+        "evidence" | "provenance" => 0.75,
+        "political" => 0.84,
+        "mechanical" | "power_system" => 0.92,
+        _ => 0.08,
+    };
+    (base + (hash_unit(&format!("{fiber_kind}:{id}:{index}")) - 0.5) * 0.018).rem_euclid(1.0)
+}
+
+fn stable_direction(seed_token: &str) -> [f64; 3] {
+    let seed = hash_unit(seed_token);
+    let z = 1.0 - seed * 2.0;
+    let radial = (1.0 - z * z).max(0.0).sqrt();
+    let theta = seed * TAU_F64 * 1.618_033_988_75;
+    [theta.cos() * radial, z, theta.sin() * radial]
+}
+
+fn hash_unit(token: &str) -> f64 {
+    hash_u32(token) as f64 / u32::MAX as f64
+}
+
+fn hash_u32(token: &str) -> u32 {
+    let mut hash = 2_166_136_261_u32;
+    for byte in token.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash
+}
+
+fn vertex_key(vector: &[f64; 3]) -> String {
+    format!(
+        "{}:{}:{}",
+        (vector[0] * 1_000_000_000.0).round() as i64,
+        (vector[1] * 1_000_000_000.0).round() as i64,
+        (vector[2] * 1_000_000_000.0).round() as i64,
+    )
+}
+
+fn edge_key(left: &str, right: &str) -> String {
+    if left <= right {
+        format!("{left}|{right}")
+    } else {
+        format!("{right}|{left}")
+    }
+}
+
+fn triangle_area(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    norm3(&cross3(&ab, &ac)) * 0.5
+}
+
+fn cross3(left: &[f64; 3], right: &[f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn dot3(left: &[f64; 3], right: &[f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn norm3(vector: &[f64; 3]) -> f64 {
+    dot3(vector, vector).sqrt()
+}
+
+fn normalize3(vector: [f64; 3]) -> [f64; 3] {
+    let norm = norm3(&vector);
+    if !norm.is_finite() || norm <= 1e-12 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [vector[0] / norm, vector[1] / norm, vector[2] / norm]
+    }
+}
+
+fn semantic_node_matches_scope(
+    document_id: &str,
+    narrative_id: &str,
+    folder_id: &str,
+    scope: Option<&Value>,
+) -> bool {
+    let Some(scope) = scope else {
+        return true;
+    };
+    let note_id = str_field(scope, "note_id", "noteId");
+    if !note_id.is_empty() && document_id != note_id {
+        return false;
+    }
+    let narrative = str_field(scope, "narrative_id", "narrativeId");
+    if !narrative.is_empty() && narrative_id != narrative {
+        return false;
+    }
+    let folder = str_field(scope, "folder_id", "folderId");
+    if !folder.is_empty() && folder_id != folder {
+        return false;
+    }
+    true
+}
+
+fn str_field<'a>(row: &'a Value, snake: &str, camel: &str) -> &'a str {
+    row.get(snake)
+        .or_else(|| row.get(camel))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+fn optional_string(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn vector_field(row: &Value, key: &str) -> Vec<f64> {
+    row.get(key)
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default()
+}
+
+fn evidence_preview(row: &Value) -> String {
+    row.get("evidence_refs")
+        .or_else(|| row.get("evidenceRefs"))
+        .and_then(Value::as_array)
+        .map(|refs| {
+            refs.iter()
+                .take(3)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| value.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
+        .unwrap_or_default()
+}
+
+fn semantic_node_label(id: &str) -> String {
+    let mut label = id
+        .trim_start_matches("entity::")
+        .trim_start_matches("event::")
+        .trim_start_matches("doc::")
+        .trim_start_matches("atlas:")
+        .replace(['-', '_', ':'], " ")
+        .trim()
+        .to_owned();
+    if label.len() > 48 {
+        label.truncate(48);
+    }
+    if label.is_empty() {
+        id.to_owned()
+    } else {
+        label
+    }
+}
+
+fn candidate_confidence(row: &Value) -> f64 {
+    let attributes = row.get("attributes").and_then(Value::as_object);
+    let attr_score = attributes
+        .and_then(|attrs| attrs.get("score"))
+        .and_then(Value::as_f64);
+    let graph_score = attributes
+        .and_then(|attrs| attrs.get("graph"))
+        .and_then(Value::as_object)
+        .and_then(|graph| graph.get("confidence"))
+        .and_then(Value::as_f64);
+    attr_score
+        .or(graph_score)
+        .or_else(|| {
+            row.get("weight")
+                .and_then(Value::as_f64)
+                .map(|weight| weight / 1000.0)
+        })
+        .filter(|score| score.is_finite() && *score > 0.0)
+        .unwrap_or(0.35)
+}
+
+fn infer_hopf_fiber_kind(node: &DesktopManifoldNode) -> &'static str {
+    let kind = node.kind.as_str();
+    let source_type = node.source_type.as_str();
+    let label = node.label.as_str();
+    let preview = node.preview.as_str();
+    if contains_any_ci(
+        [kind, source_type, label, preview],
+        &["caus", "because", "effect", "echo"],
+    ) {
+        "causal"
+    } else if contains_any_ci(
+        [kind, source_type, label, preview],
+        &["time", "temporal", "timeline"],
+    ) {
+        "temporal"
+    } else if contains_any_ci(
+        [kind, source_type, label, preview],
+        &["evidence", "leaf", "document", "log"],
+    ) {
+        "evidence"
+    } else if contains_any_ci(
+        [kind, source_type, label, preview],
+        &["power", "veir", "domain"],
+    ) {
+        "power_system"
+    } else if contains_any_ci([kind, source_type, label, preview], &["politic", "halcyon"]) {
+        "political"
+    } else if contains_any_ci(
+        [kind, source_type, label, preview],
+        &["location", "city", "tower"],
+    ) {
+        "location"
+    } else {
+        "identity"
+    }
+}
+
+fn fiber_vector(values: &[f64], fiber_kind: &str, index: usize) -> Vec<f64> {
+    let seed = hash_unit_parts(fiber_kind, index);
+    let mut mixed = Vec::with_capacity(values.len());
+    for (dim, value) in values.iter().enumerate() {
+        let wobble = (((dim + 1) as f64) * 12.9898 + seed * std::f64::consts::TAU).sin() * 0.16;
+        mixed.push(value * 0.88 + wobble);
+    }
+    normalize_f64(&mut mixed);
+    mixed
+}
+
+fn contains_any_ci<const N: usize>(haystacks: [&str; N], needles: &[&str]) -> bool {
+    haystacks.iter().any(|haystack| {
+        needles
+            .iter()
+            .any(|needle| contains_ascii_case_insensitive(haystack, needle))
+    })
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn normalize_f64(values: &mut [f64]) {
+    let norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if !norm.is_finite() || norm <= 1e-8 {
+        values.fill(0.0);
+        if let Some(first) = values.first_mut() {
+            *first = 1.0;
+        }
+        return;
+    }
+    for value in values {
+        *value /= norm;
+    }
+}
+
+fn hash_unit_parts(kind: &str, index: usize) -> f64 {
+    let mut hash = 2166136261u32;
+    for byte in kind.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    for byte in index.to_le_bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    f64::from(hash) / f64::from(u32::MAX)
+}
+
+fn now_millis_for_snapshot() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 fn parse_json<T: DeserializeOwned>(json: &str) -> Result<T, String> {
     serde_json::from_str(json).map_err(|error| format!("invalid Phoenix JSON payload: {error}"))
 }
@@ -524,7 +2776,7 @@ mod tests {
         });
 
         assert_eq!(request.config.target, RuntimeTarget::Native);
-        assert_eq!(request.config.storage, StorageMode::NativeEphemeral);
+        assert_eq!(request.config.storage, StorageMode::NativeLocal);
         assert!(!request.config.feature_flags.graptor);
         assert!(!request.config.feature_flags.gldr);
         assert!(request.config.feature_flags.candidate_graph);
@@ -535,8 +2787,33 @@ mod tests {
         let info = desktop_runtime_info(None, None);
 
         assert_eq!(info.target, "native");
-        assert_eq!(info.storage, "nativeEphemeral");
+        assert_eq!(info.storage, "nativeLocal");
         assert!(!info.feature_flags.graptor);
         assert!(!info.feature_flags.gldr);
+    }
+
+    #[test]
+    fn hopf_ico_cell_ids_are_deterministic() {
+        let first = IcoTopology::new(2);
+        let second = IcoTopology::new(2);
+
+        assert_eq!(first.cells.len(), 320);
+        assert_eq!(first.cells.len(), second.cells.len());
+        for (left, right) in first.cells.iter().zip(second.cells.iter()) {
+            assert_eq!(left.cell_id, right.cell_id);
+            assert_eq!(left.neighbor_cell_ids, right.neighbor_cell_ids);
+        }
+    }
+
+    #[test]
+    fn hopf_ico_neighbor_graph_is_symmetric() {
+        let topology = IcoTopology::new(1);
+
+        for cell in &topology.cells {
+            for neighbor_id in &cell.neighbor_cell_ids {
+                let neighbor = topology.cell(neighbor_id).expect("neighbor exists");
+                assert!(neighbor.neighbor_cell_ids.contains(&cell.cell_id));
+            }
+        }
     }
 }

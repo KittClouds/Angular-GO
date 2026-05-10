@@ -10,6 +10,7 @@
 /node_modules
 npm-debug.log
 yarn-error.log
+*.log
 
 # IDEs and editors
 .idea/
@@ -31,6 +32,9 @@ yarn-error.log
 
 # Miscellaneous
 /.angular/cache
+/.tmp
+/.codex-run
+.agent/
 .sass-cache/
 /connect.lock
 /coverage
@@ -64,12 +68,60 @@ GoKitt/.gocache/
 *.zip
 *.exe
 *.bin
+*.wasm
+
+# Local model folders: keep tokenizer/config metadata trackable, but never
+# commit the multi-GB model weights. Hydrate weights locally for native runs.
+!/gliner-bi-small-onnx/
+!/gliner-bi-small-onnx/**/
+!/gliner-bi-small-onnx/*.json
+!/gliner-bi-small-onnx/**/*.json
+!/gliner-bi-small-onnx/*.txt
+!/gliner-bi-small-onnx/**/*.txt
+!/gliner-bi-small-onnx/*.model
+!/gliner-bi-small-onnx/**/*.model
+!/gliner-bi-onnx/
+!/gliner-bi-onnx/**/
+!/gliner-bi-onnx/*.json
+!/gliner-bi-onnx/**/*.json
+!/gliner-bi-onnx/*.txt
+!/gliner-bi-onnx/**/*.txt
+!/gliner-bi-onnx/*.model
+!/gliner-bi-onnx/**/*.model
+!/gliner-relex-onnx/
+!/gliner-relex-onnx/**/
+!/gliner-relex-onnx/*.json
+!/gliner-relex-onnx/**/*.json
+!/gliner-relex-onnx/*.txt
+!/gliner-relex-onnx/**/*.txt
+!/gliner-relex-onnx/*.model
+!/gliner-relex-onnx/**/*.model
+!/gliclass-instruct-onnx/
+!/gliclass-instruct-onnx/**/
+!/gliclass-instruct-onnx/*.json
+!/gliclass-instruct-onnx/**/*.json
+!/gliclass-instruct-onnx/*.txt
+!/gliclass-instruct-onnx/**/*.txt
+!/gliclass-instruct-onnx/*.model
+!/gliclass-instruct-onnx/**/*.model
+!/gliclass-instruct-onnx-v2/
+!/gliclass-instruct-onnx-v2/**/
+!/gliclass-instruct-onnx-v2/*.json
+!/gliclass-instruct-onnx-v2/**/*.json
+!/gliclass-instruct-onnx-v2/*.txt
+!/gliclass-instruct-onnx-v2/**/*.txt
+!/gliclass-instruct-onnx-v2/*.model
+!/gliclass-instruct-onnx-v2/**/*.model
 
 # Custom build targets & Cache
+.kilo/
+/.nx/
+/plans/
 .codex-target-*/
 target-codex-*/
 manifest.current
 manifest.prev
 **/.pip-cache-*/
 **/.pydeps-*/
+rust-native/phoenix/.tmp-gliclass/
 *.wal

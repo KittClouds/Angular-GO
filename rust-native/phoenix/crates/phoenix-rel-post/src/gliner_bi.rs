@@ -565,10 +565,14 @@ fn find_model_asset(root: &Path) -> Result<PathBuf, GlinerBiError> {
     find_existing_path(
         root,
         &[
-            "model.onnx",
-            "onnx/model.onnx",
+            "model_label_embeds_quantized.onnx",
+            "onnx/model_label_embeds_quantized.onnx",
+            "model_label_embeds.onnx",
+            "onnx/model_label_embeds.onnx",
             "model_quantized.onnx",
             "onnx/model_quantized.onnx",
+            "model.onnx",
+            "onnx/model.onnx",
         ],
     )
 }
@@ -630,5 +634,30 @@ mod tests {
             GlinerBiOverlapPolicy::parse("longest").unwrap(),
             GlinerBiOverlapPolicy::LongestThenScore
         );
+    }
+
+    #[test]
+    fn model_asset_prefers_precomputed_label_embeddings() {
+        let root = std::env::temp_dir().join(format!(
+            "phoenix-gliner-bi-asset-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("model.onnx"), b"slow-tokenized-model").unwrap();
+        std::fs::write(
+            root.join("model_label_embeds_quantized.onnx"),
+            b"fast-precomputed-labels-model",
+        )
+        .unwrap();
+        std::env::remove_var("PHOENIX_GLINER_BI_ONNX_FILE");
+
+        let selected = find_model_asset(&root).unwrap();
+
+        assert_eq!(
+            selected.file_name().and_then(|value| value.to_str()),
+            Some("model_label_embeds_quantized.onnx")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

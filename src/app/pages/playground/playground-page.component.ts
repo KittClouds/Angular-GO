@@ -1,47 +1,22 @@
 // src/app/pages/playground/playground-page.component.ts
-// Research Playground — modular eval shell for all Go subsystems.
+// Research Playground - native-safe experimental tools shell.
 
-import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Button } from 'primeng/button';
-import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabs';
 
-import { SelectModule } from 'primeng/select';
-import { FormsModule } from '@angular/forms';
-
-import { PlaygroundLogService, LogLevel, LogSource } from '../../services/playground-log.service';
+import { PlaygroundLogService, LogSource } from '../../services/playground-log.service';
 import { PlaygroundDataService } from '../../services/playground-data.service';
-import { RaptorModuleComponent } from '../../components/raptor-module/raptor-module.component';
-import { MemoryModuleComponent } from '../../components/memory-module/memory-module.component';
 import { NumerologyModuleComponent } from '../../components/numerology-module/numerology-module.component';
 
 const DOC_URL = '/docs/shortrun.md';
 
-const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
-  { label: 'All Sources', value: null },
-  { label: 'Numerology', value: 'numerology' },
-  { label: '🔵 RAPTOR', value: 'raptor' },
-  { label: '🟣 Memory/OM', value: 'memory' },
-  { label: '⚙️  System', value: 'system' },
-];
-
 @Component({
   selector: 'app-playground-page',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    Button,
-    Tabs, TabList, Tab, TabPanels, TabPanel,
-    SelectModule,
-    RaptorModuleComponent,
-    MemoryModuleComponent,
-    NumerologyModuleComponent,
-  ],
+  imports: [CommonModule, Button, NumerologyModuleComponent],
   template: `
     <div class="playground-root">
-
-      <!-- ===== HEADER ===== -->
       <header class="playground-header">
         <div class="header-brand">
           <div class="brand-icon">
@@ -49,12 +24,11 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
           </div>
           <div>
             <h1 class="brand-title">Research Playground</h1>
-            <p class="brand-sub">KittClouds · Go/WASM Eval Harness</p>
+            <p class="brand-sub">Phoenix native lab · Numerology</p>
           </div>
         </div>
 
         <div class="header-controls">
-          <!-- Document loader -->
           <div class="doc-status" [class.ready]="dataService.documentReady()">
             @if (dataService.documentReady()) {
               <i class="pi pi-check-circle"></i>
@@ -75,7 +49,7 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
           </p-button>
 
           <p-button
-            label="Clear All"
+            label="Clear"
             icon="pi pi-trash"
             (onClick)="clearAll()"
             size="small"
@@ -85,40 +59,20 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
         </div>
       </header>
 
-      <!-- ===== MODULE TABS ===== -->
-      <div class="playground-body">
-        <p-tabs [value]="activeTab()" (valueChange)="onTabChange($event)" styleClass="module-tabs">
-          <p-tablist>
-            <p-tab value="raptor">
-              <span class="tab-dot raptor-dot"></span>
-              RAPTOR
-            </p-tab>
-            <p-tab value="memory">
-              <span class="tab-dot memory-dot"></span>
-              Memory / OM
-            </p-tab>
-            <p-tab value="numerology">
-              <span class="tab-dot numerology-dot"></span>
-              Numerology
-            </p-tab>
-          </p-tablist>
+      <main class="playground-body">
+        <section class="module-card">
+          <div class="module-header">
+            <span class="tab-dot numerology-dot"></span>
+            <div>
+              <h2>Numerology</h2>
+              <p>Frontend tool for annotating text files. Rust numerology remains available in the native workspace but is not wired to Tauri yet.</p>
+            </div>
+          </div>
+          <app-numerology-module></app-numerology-module>
+        </section>
+      </main>
 
-          <p-tabpanels>
-            <p-tabpanel value="raptor">
-              <app-raptor-module></app-raptor-module>
-            </p-tabpanel>
-            <p-tabpanel value="memory">
-              <app-memory-module></app-memory-module>
-            </p-tabpanel>
-            <p-tabpanel value="numerology">
-              <app-numerology-module></app-numerology-module>
-            </p-tabpanel>
-          </p-tabpanels>
-        </p-tabs>
-      </div>
-
-      <!-- ===== LOG PANEL ===== -->
-      <div class="log-panel">
+      <section class="log-panel">
         <div class="log-header">
           <span class="log-title">
             <i class="pi pi-terminal"></i>
@@ -126,27 +80,14 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
             <span class="log-badge">{{ logService.visible().length }}</span>
           </span>
           <div class="log-actions">
-            <p-select
-              [options]="filterOptions"
-              [(ngModel)]="selectedFilter"
-              (ngModelChange)="onFilterChange($event)"
-              optionLabel="label"
-              optionValue="value"
-              [style]="{ height: '28px', fontSize: '0.75rem' }"
-              styleClass="log-filter-select">
-            </p-select>
-            <p-button
-              icon="pi pi-trash"
-              (onClick)="clearLog()"
-              size="small"
-              severity="secondary"
-              [text]="true"
-              pTooltip="Clear log">
-            </p-button>
+            <button type="button" class="filter-chip" [class.active]="selectedFilter === null" (click)="onFilterChange(null)">All</button>
+            <button type="button" class="filter-chip" [class.active]="selectedFilter === 'numerology'" (click)="onFilterChange('numerology')">Numerology</button>
+            <button type="button" class="filter-chip" [class.active]="selectedFilter === 'system'" (click)="onFilterChange('system')">System</button>
+            <p-button icon="pi pi-trash" (onClick)="clearLog()" size="small" severity="secondary" [text]="true"></p-button>
           </div>
         </div>
 
-        <div class="log-body" #logBody>
+        <div class="log-body">
           @for (entry of logService.visible(); track entry.id) {
             <div class="log-line">
               <span class="log-ts">{{ entry.timestamp | date:'HH:mm:ss' }}</span>
@@ -158,12 +99,10 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
             <div class="log-empty">No log entries yet.</div>
           }
         </div>
-      </div>
-
+      </section>
     </div>
   `,
   styles: [`
-    /* ======== Layout ======== */
     .playground-root {
       display: flex;
       flex-direction: column;
@@ -172,7 +111,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
       overflow: hidden;
     }
 
-    /* ======== Header ======== */
     .playground-header {
       display: flex;
       align-items: center;
@@ -197,7 +135,6 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     .brand-sub { font-size: 0.7rem; color: var(--text-color-secondary); margin: 0; letter-spacing: 0.04em; }
 
     .header-controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-
     .doc-status {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.8rem; color: var(--text-color-secondary);
@@ -206,27 +143,38 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     }
     .doc-status.ready { color: var(--green-400); border-color: var(--green-800); }
 
-    /* ======== Body ======== */
     .playground-body {
       flex: 1;
       overflow-y: auto;
-      padding: 0 1.5rem;
+      padding: 1.5rem;
     }
 
-    /* module tab dots */
+    .module-card {
+      border: 1px solid var(--surface-border);
+      border-radius: 14px;
+      background: var(--surface-card);
+      padding: 1rem 1.25rem 1.25rem;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+    }
+
+    .module-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--surface-border);
+      padding-bottom: 0.85rem;
+      margin-bottom: 0.25rem;
+    }
+    .module-header h2 { margin: 0; font-size: 1rem; color: var(--text-color); }
+    .module-header p { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--text-color-secondary); }
+
     .tab-dot {
-      display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-top: 0.35rem;
     }
-    .raptor-dot  { background: #60a5fa; }
-    .memory-dot  { background: #c084fc; }
-    .numerology-dot { background: #22d3ee; }
+    .numerology-dot { background: #22d3ee; box-shadow: 0 0 16px rgba(34, 211, 238, 0.45); }
 
-    /* Shared stat pill (used in all modules via global) */
-    :host ::ng-deep .module-stats .stat-pill {
-      background: var(--surface-card) !important;
-    }
+    :host ::ng-deep .module-stats .stat-pill { background: var(--surface-ground) !important; }
 
-    /* ======== Log Panel ======== */
     .log-panel {
       flex-shrink: 0;
       height: 180px;
@@ -237,6 +185,7 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     .log-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 0.35rem 1rem; border-bottom: 1px solid var(--surface-border); flex-shrink: 0;
+      gap: 1rem;
     }
     .log-title {
       display: flex; align-items: center; gap: 0.5rem;
@@ -248,6 +197,16 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
       border-radius: 10px; padding: 0 0.4rem; font-size: 0.7rem; font-weight: 700;
     }
     .log-actions { display: flex; align-items: center; gap: 0.25rem; }
+    .filter-chip {
+      border: 1px solid var(--surface-border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-color-secondary);
+      cursor: pointer;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.55rem;
+    }
+    .filter-chip.active { border-color: #22d3ee; color: #22d3ee; background: rgba(34, 211, 238, 0.08); }
     .log-body {
       flex: 1; overflow-y: auto; padding: 0.25rem 0.75rem;
       font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -257,33 +216,26 @@ const FILTER_OPTIONS: { label: string; value: LogSource | null }[] = [
     .log-ts { color: var(--surface-400); white-space: nowrap; flex-shrink: 0; }
     .log-src {
       font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
-      text-transform: uppercase; white-space: nowrap; flex-shrink: 0; min-width: 52px;
+      text-transform: uppercase; white-space: nowrap; flex-shrink: 0; min-width: 70px;
     }
-    .src-raptor  { color: #60a5fa; }
-    .src-memory  { color: #c084fc; }
     .src-numerology { color: #22d3ee; }
-    .src-rlm     { color: #fb923c; }
-    .src-system  { color: #94a3b8; }
+    .src-system { color: #94a3b8; }
     .log-msg { flex: 1; }
-    .lvl-info    { color: var(--text-color); }
+    .lvl-info { color: var(--text-color); }
     .lvl-success { color: var(--green-400); }
-    .lvl-warn    { color: var(--yellow-400); }
-    .lvl-error   { color: var(--red-400); }
-    .log-empty   { color: var(--surface-400); font-size: 0.75rem; padding: 0.5rem; }
-
-    :host ::ng-deep .log-filter-select .p-select-label { padding: 2px 6px !important; }
+    .lvl-warn { color: var(--yellow-400); }
+    .lvl-error { color: var(--red-400); }
+    .log-empty { color: var(--surface-400); font-size: 0.75rem; padding: 0.5rem; }
   `],
 })
 export class PlaygroundPageComponent implements OnInit {
   protected readonly logService = inject(PlaygroundLogService);
   protected readonly dataService = inject(PlaygroundDataService);
 
-  readonly activeTab = signal<string>('raptor');
-  readonly filterOptions = FILTER_OPTIONS;
   selectedFilter: LogSource | null = null;
 
   ngOnInit(): void {
-    this.logService.info('system', 'Research Playground ready 🚀');
+    this.logService.info('system', 'Research Playground ready');
   }
 
   async loadDocument(): Promise<void> {
@@ -300,11 +252,8 @@ export class PlaygroundPageComponent implements OnInit {
     this.logService.clear(this.selectedFilter ?? undefined);
   }
 
-  onTabChange(value: string | number | undefined): void {
-    if (typeof value === 'string') this.activeTab.set(value);
-  }
-
   onFilterChange(value: LogSource | null): void {
+    this.selectedFilter = value;
     this.logService.filter.set(value);
   }
 }

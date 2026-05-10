@@ -19,7 +19,10 @@ legacy-cozo-graph = [
 
 [dependencies]
 phoenix-analytics = { path = "../phoenix-analytics" }
+phoenix-alex = { path = "../phoenix-alex" }
 phoenix-chat = { path = "../phoenix-chat" }
+phoenix-chunker = { path = "../phoenix-chunker" }
+phoenix-dynamic-ner = { path = "../phoenix-dynamic-ner" }
 phoenix-graph = { path = "../phoenix-graph" }
 phoenix-gldr = { path = "../phoenix-gldr", optional = true }
 phoenix-graptor = { path = "../phoenix-graptor", optional = true }
@@ -45,6 +48,7 @@ serde_json.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 overgraph.workspace = true
+phoenix-rel-post = { path = "../phoenix-rel-post" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

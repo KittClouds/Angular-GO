@@ -1,7 +1,7 @@
 /**
- * DiscoveryScanner — Calls GoKittService.scanDiscovery(), filters against Registry,
+ * DiscoveryScanner - calls Phoenix native discovery, filters against Registry,
  * and returns new discovery candidates.
- * Replaces NerService.analyzeNote() for the Go pipeline path.
+ * Replaces NerService.analyzeNote() for the native pipeline path.
  */
 import type { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import type { DiscoveryCandidate } from '../store/discoveryStore';
@@ -26,7 +26,7 @@ export class DiscoveryScanner {
 
     /**
      * Run the discovery (unsupervised NER) pipeline.
-     * 1. Calls GoKitt.scanDiscovery() on the worker
+     * 1. Calls Phoenix native scanDiscovery()
      * 2. Hard-filters against the registry to reject known entities
      * 3. Returns only truly unknown candidates
      */

@@ -12,9 +12,7 @@ use phoenix_types::{
     RelationCount, ScopeKey, SnapshotDto, StorageMode,
 };
 use rustc_hash::FxHashMap;
-use schema::{
-    PhoenixColumnSpec, PhoenixColumnType, PhoenixRelationSpec, ALL_RELATIONS,
-};
+use schema::{PhoenixColumnSpec, PhoenixColumnType, PhoenixRelationSpec, ALL_RELATIONS};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use smallvec::SmallVec;

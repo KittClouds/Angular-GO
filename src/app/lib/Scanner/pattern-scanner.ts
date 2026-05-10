@@ -70,7 +70,7 @@ export async function scanForPatterns(text: string, noteId?: string): Promise<De
     });
 
     // NOTE: Pattern scanner should NOT persist entities to avoid phantom entities.
-    // Entity persistence should ONLY happen via GoKitt scan + persistGraph().
+    // Entity persistence should ONLY happen via Phoenix native scan + persistGraph().
     // This function only creates decoration spans for UI rendering.
 
 

@@ -4,6 +4,7 @@ import {
     type PhoenixDiscoveryCandidate,
 } from '../lib/phoenix/phoenix-discovery';
 import { PhoenixUiApiService } from './phoenix-ui-api.service';
+import type { AtlasRichScanCandidateSummary } from './phoenix-ui-api.service';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { smartGraphRegistry } from '../lib/registry';
 import { getSetting, setSetting } from '../lib/dexie/settings.service';
@@ -246,6 +247,7 @@ export class NerService {
     readonly errorMessage = signal<string | null>(null);
 
     readonly providerStatuses = computed(() => ({
+        atlas_surface: this.fstStatus(),
         dynamic_ner: this.fstStatus(),
         fst: this.fstStatus(),
         lfm_local_experiment: this.lfmLocalProvider.status(),
@@ -265,6 +267,49 @@ export class NerService {
 
     async runDynamicScan(request: EntitySuggestionScanRequest): Promise<void> {
         await this.runManualScan('dynamic_ner', request);
+    }
+
+    async loadAtlasSurfaceSuggestions(candidates: AtlasRichScanCandidateSummary[]): Promise<void> {
+        const mapped = (candidates || [])
+            .map((candidate) => {
+                const label = cleanPhoenixCandidateLabel(candidate.label || '');
+                const candidateText = [candidate.evidence, label].filter(Boolean).join(' ');
+                const kind = resolvePhoenixScanKind({
+                    key: label,
+                    token: label,
+                    kind: candidate.kind,
+                    score: typeof candidate.confidence === 'number' ? candidate.confidence : 0.5,
+                    count: 1,
+                    status: 0,
+                }, candidateText);
+                return {
+                    id: candidate.id || uuidv4(),
+                    label: label || 'Unknown',
+                    kind,
+                    confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0.5,
+                    context: candidate.evidence || undefined,
+                    llmEnhanced: false,
+                    llmReasoning: undefined,
+                    source: 'atlas_surface' as const,
+                };
+            })
+            .filter((suggestion) => !smartGraphRegistry.isRegisteredEntity(suggestion.label))
+            .filter((suggestion) => !isLikelyJunkEntityLabel(suggestion.label))
+            .filter((suggestion) => suggestion.kind !== 'UNKNOWN')
+            .filter((suggestion) => isPlausiblePhoenixDiscoveryCandidate({
+                key: suggestion.label,
+                token: suggestion.label,
+                kind: suggestion.kind,
+                score: suggestion.confidence,
+                count: 1,
+                status: 0,
+            }, suggestion.context || suggestion.label));
+        const filtered = await filterRejectedSuggestions(mapped, 'atlas_surface');
+        this.suggestions.set(filtered);
+        this.lastSuggestionSource.set('atlas_surface');
+        this.activeProvider.set(null);
+        this.errorMessage.set(null);
+        this.isAnalyzing.set(false);
     }
 
     async runManualScan(providerId: EntitySuggestionProviderId, request: EntitySuggestionScanRequest): Promise<void> {
@@ -391,6 +436,18 @@ export class NerService {
         return this.fstStatus();
     }
 
+    async warmProvider(providerId: EntitySuggestionProviderId): Promise<void> {
+        if (providerId === 'gliner_local') {
+            await this.glinerLocalProvider.warm();
+            return;
+        }
+        if (providerId === 'lfm_local_experiment') {
+            await this.lfmLocalProvider.getStatus();
+            return;
+        }
+        this.setProviderStatus(providerId, { ready: true, loading: false, device: null });
+    }
+
     private getProvider(providerId: EntitySuggestionProviderId): EntitySuggestionProviderApi {
         if (providerId === 'lfm_local_experiment') {
             return this.lfmLocalProvider;
@@ -441,7 +498,7 @@ export class NerService {
 }
 
 function isNativeScanProvider(providerId: EntitySuggestionProviderId): boolean {
-    return providerId === 'dynamic_ner' || providerId === 'fst';
+    return providerId === 'atlas_surface' || providerId === 'dynamic_ner' || providerId === 'fst';
 }
 
 let _globalFstEnabled = true;

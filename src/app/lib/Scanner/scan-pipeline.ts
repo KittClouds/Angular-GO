@@ -7,7 +7,7 @@
  * Absorbs the entity-event batching and delta logic from the old ScanCoordinator.
  */
 import type { DecorationSpan } from './types';
-import type { ProvenanceContext } from '../../services/gokitt.service';
+import type { ProvenanceContext } from '../../services/phoenix-ui-api.service';
 import type { DiscoveryCandidate } from '../store/discoveryStore';
 import { HighlightScanner } from './highlight-scanner';
 import { DiscoveryScanner, type DiscoveryResult } from './discovery-scanner';

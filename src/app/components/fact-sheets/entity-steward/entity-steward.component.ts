@@ -2,7 +2,6 @@ import { CommonModule } from '@angular/common';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
-  Brain,
   CalendarClock,
   CheckCircle2,
   GitBranch,
@@ -16,17 +15,10 @@ import { LucideAngularModule } from 'lucide-angular';
 
 import { db } from '../../../lib/dexie/db';
 import { smartGraphRegistry, type RegisteredEntity } from '../../../lib/registry';
-import { parseContentToPlainText } from '../../../lib/analytics';
 import {
   ScopedTimelineEventRecord,
   ScopedTimelineEventStoreService,
 } from '../../../lib/services/scoped-timeline-event-store.service';
-import { NliWorkerService } from '../../../lib/services/nli-worker.service';
-import { SemanticSearchService } from '../../../lib/services/semantic-search.service';
-import type { EntitySuggestionProviderId } from '../../../lib/entity-suggestions/entity-suggestion.types';
-import { NoteEditorStore } from '../../../lib/store/note-editor.store';
-import { FooterStatsService } from '../../../services/footer-stats.service';
-import { NerService } from '../../../services/ner.service';
 import { FactSheetService } from '../fact-sheet.service';
 import type { ParsedEntity } from '../fact-sheet-container/fact-sheet-container.component';
 import type { EntityKind } from '../../../lib/Scanner/types';
@@ -41,19 +33,6 @@ interface StewardRelation {
 }
 
 const RELATION_KEY = 'stewardRelations';
-const DIRECTIVE_KEY = 'stewardMachineDirectives';
-const NLI_MODEL_ID = 'onnx-community/ModernBERT-base-nli-ONNX';
-type DirectiveKey = 'cooccurrence' | 'ner' | 'nli' | 'semantic';
-type ModelLaneTone = 'idle' | 'ready' | 'busy' | 'error';
-
-interface StewardModelLane {
-  key: DirectiveKey;
-  label: string;
-  value: string;
-  detail: string;
-  tone: ModelLaneTone;
-  disabled: boolean;
-}
 
 @Component({
   selector: 'app-entity-steward',
@@ -63,7 +42,7 @@ interface StewardModelLane {
     @if (entity(); as ent) {
     <div class="steward-shell">
       <header class="steward-hero">
-        <div><span class="kicker">Human in the loop</span><h3>{{ ent.label }}</h3><p>Curate graph truth, timeline placement, and model-facing evidence.</p></div>
+        <div><span class="kicker">Human in the loop</span><h3>{{ ent.label }}</h3><p>Curate graph truth, timeline placement, and evidence notes.</p></div>
         <lucide-icon [img]="SparklesIcon" class="hero-icon"></lucide-icon>
       </header>
 
@@ -129,25 +108,6 @@ interface StewardModelLane {
       </section>
       }
 
-      <section class="model-surface">
-        <div class="panel-head"><lucide-icon [img]="BrainIcon" class="panel-icon"></lucide-icon><div><h4>Model Review Lanes</h4><p>Human-approved work orders for extraction, evidence, and adjudication.</p></div></div>
-        <div class="model-lane-grid">
-          @for (lane of modelLanes(); track lane.key) {
-          <button
-            type="button"
-            class="model-lane"
-            [class.status-idle]="lane.tone === 'idle'"
-            [class.status-ready]="lane.tone === 'ready'"
-            [class.status-busy]="lane.tone === 'busy'"
-            [class.status-error]="lane.tone === 'error'"
-            [disabled]="lane.disabled"
-            (click)="runModelLane(lane.key)"
-          >
-            <span>{{ lane.label }}</span><strong>{{ lane.value }}</strong><small>{{ lane.detail }}</small>
-          </button>
-          } 
-        </div>
-      </section>
       @if (notice()) { <div class="notice">{{ notice() }}</div> }
     </div>
     }
@@ -174,17 +134,12 @@ interface StewardModelLane {
     .compact-list{display:flex;flex-direction:column;gap:6px}.list-row,.empty-row{border:1px solid rgba(148,163,184,.18);border-radius:7px;background:rgba(0,0,0,.24);padding:8px 9px;text-align:left}
     .list-row{display:grid;grid-template-columns:minmax(54px,auto) minmax(0,1fr);gap:5px 9px}.list-row span{color:#5eead4;font-size:10px;font-weight:900;text-transform:uppercase}.list-row strong{min-width:0;overflow:hidden;color:#f4f4f5;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
     .list-row small{grid-column:1/-1;overflow:hidden;color:#94a3b8;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.locked{cursor:default}.empty-row{color:#94a3b8;font-size:12px}
-    .model-lane-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.model-lane{position:relative;min-width:0;border:1px solid rgba(148,163,184,.24);border-radius:7px;background:rgba(0,0,0,.24);padding:9px 10px;text-align:left}.model-lane:after{content:"";position:absolute;right:9px;top:9px;width:7px;height:7px;border-radius:999px;background:#ef4444;box-shadow:0 0 10px rgba(239,68,68,.65)}.model-lane.status-ready:after{background:#2dd4bf;box-shadow:0 0 10px rgba(45,212,191,.72)}.model-lane.status-busy:after{background:#facc15;box-shadow:0 0 10px rgba(250,204,21,.65)}.model-lane.status-error:after{background:#fb7185;box-shadow:0 0 10px rgba(251,113,133,.74)}.model-lane span{display:block;color:#5eead4;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase}.model-lane strong{display:block;margin-top:5px;color:#f4f4f5;font-size:13px}.model-lane small{display:block;overflow:hidden;color:#94a3b8;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.model-lane:disabled{cursor:wait;opacity:.72}.notice{padding:9px 10px;color:#99f6e4;font-size:12px}
+    .notice{padding:9px 10px;color:#99f6e4;font-size:12px}
   `],
 })
 export class EntityStewardComponent {
   private readonly factSheets = inject(FactSheetService);
   private readonly timeline = inject(ScopedTimelineEventStoreService);
-  private readonly ner = inject(NerService);
-  private readonly noteStore = inject(NoteEditorStore);
-  private readonly footerStats = inject(FooterStatsService);
-  private readonly nli = inject(NliWorkerService);
-  private readonly semantic = inject(SemanticSearchService);
 
   readonly entity = input<ParsedEntity | null>(null);
   readonly contextId = input<string>('global');
@@ -201,13 +156,6 @@ export class EntityStewardComponent {
   readonly eventTitle = signal('');
   readonly eventDescription = signal('');
   readonly eventTime = signal('');
-  readonly activeModelLane = signal<DirectiveKey | null>(null);
-  readonly directiveState = signal<Record<DirectiveKey, boolean>>({
-    cooccurrence: true,
-    ner: true,
-    nli: false,
-    semantic: false,
-  });
 
   readonly events = this.timeline.events;
   readonly entityEvents = computed(() => {
@@ -238,48 +186,13 @@ export class EntityStewardComponent {
       detail: 'human curated',
       icon: GitBranch,
     },
-    {
-      label: 'Models',
-      value: 'review',
-      detail: 'NER, NLI, co-occurrence',
-      icon: Brain,
-    },
   ]);
-  readonly modelLanes = computed<StewardModelLane[]>(() => {
-    const active = this.activeModelLane();
-    const statuses = this.ner.providerStatuses();
-    const fst = statuses.fst;
-    const gliner = statuses.gliner_local;
-    const semanticBusy = this.semantic.isIndexing() || active === 'semantic';
-    const nliBusy = this.nli.isProcessing() || active === 'nli';
-    return [
-      this.providerLane('cooccurrence', 'Co-occur', fst, 'Phoenix scanner', active),
-      this.providerLane('ner', 'NER', gliner, 'GLiNER local', active),
-      {
-        key: 'nli',
-        label: 'NLI',
-        value: nliBusy ? 'running' : this.nli.isInitialized() ? 'ready' : 'idle',
-        detail: this.nli.modelId() || 'GLiNER class instruct',
-        tone: nliBusy ? 'busy' : this.nli.isInitialized() ? 'ready' : 'idle',
-        disabled: active !== null,
-      },
-      {
-        key: 'semantic',
-        label: 'Semantic',
-        value: semanticBusy ? 'indexing' : this.semantic.isModelLoaded() ? 'ready' : 'idle',
-        detail: `${this.semantic.modelDimension() || 0}d embeddings`,
-        tone: semanticBusy ? 'busy' : this.semantic.isModelLoaded() ? 'ready' : 'idle',
-        disabled: active !== null,
-      },
-    ];
-  });
 
   readonly PencilIcon = Pencil;
   readonly PlusIcon = Plus;
   readonly NetworkIcon = Network;
   readonly SparklesIcon = Sparkles;
   readonly CheckIcon = CheckCircle2;
-  readonly BrainIcon = Brain;
 
   constructor() {
     effect(() => {
@@ -357,31 +270,8 @@ export class EntityStewardComponent {
     await this.saveRelations(this.relations().filter(relation => relation.id !== id));
   }
 
-  async runModelLane(key: DirectiveKey): Promise<void> {
-    if (this.activeModelLane()) return;
-    this.activeModelLane.set(key);
-    try {
-      if (key === 'cooccurrence') {
-        await this.runProviderScan('fst', 'Co-occurrence scan completed.');
-      } else if (key === 'ner') {
-        await this.runProviderScan('gliner_local', 'GLiNER NER scan completed.');
-      } else if (key === 'semantic') {
-        await this.runSemanticLane();
-      } else {
-        await this.nli.initialize(NLI_MODEL_ID);
-        this.notice.set('NLI classifier is warm and ready for adjudication jobs.');
-      }
-      await this.saveDirectivePulse(key);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Model lane failed.';
-      this.notice.set(message);
-    } finally {
-      this.activeModelLane.set(null);
-    }
-  }
-
   private async refreshCuration(): Promise<void> {
-    await Promise.all([this.refreshEntities(), this.refreshRelations(), this.refreshDirectives()]);
+    await Promise.all([this.refreshEntities(), this.refreshRelations()]);
   }
 
   private async refreshEntities(): Promise<void> {
@@ -421,96 +311,6 @@ export class EntityStewardComponent {
     if (!entity) return;
     this.relations.set(relations);
     await this.factSheets.setAttribute(entity.id, RELATION_KEY, relations, this.contextId());
-  }
-
-  private async refreshDirectives(): Promise<void> {
-    const entity = this.entity();
-    if (!entity) return;
-    const attrs = await this.factSheets.loadAttributes(entity.id, this.contextId());
-    const saved = attrs[DIRECTIVE_KEY] as Partial<Record<DirectiveKey, boolean>> | undefined;
-    if (!saved || typeof saved !== 'object') return;
-    this.directiveState.update(current => ({
-      ...current,
-      cooccurrence: typeof saved.cooccurrence === 'boolean' ? saved.cooccurrence : current.cooccurrence,
-      ner: typeof saved.ner === 'boolean' ? saved.ner : current.ner,
-      nli: typeof saved.nli === 'boolean' ? saved.nli : current.nli,
-      semantic: typeof saved.semantic === 'boolean' ? saved.semantic : current.semantic,
-    }));
-  }
-
-  private async runProviderScan(providerId: EntitySuggestionProviderId, message: string): Promise<void> {
-    const request = this.buildScanRequest();
-    if (!request) {
-      this.notice.set('Open a note with rendered text before running this lane.');
-      return;
-    }
-    await this.ner.runManualScan(providerId, request);
-    this.notice.set(message);
-  }
-
-  private async runSemanticLane(): Promise<void> {
-    const request = this.buildScanRequest();
-    const currentNote = this.noteStore.currentNote();
-    if (!request || !currentNote) {
-      this.notice.set('Open a note with rendered text before warming semantic support.');
-      return;
-    }
-    await this.semantic.indexNotes([{
-      id: request.noteId,
-      narrativeId: currentNote.narrativeId || 'global',
-      title: request.noteTitle || 'Untitled Note',
-      content: request.plainText,
-    }]);
-    this.notice.set('Semantic embedding lane queued for the active note.');
-  }
-
-  private buildScanRequest() {
-    const currentNote = this.noteStore.currentNote();
-    if (!currentNote) return null;
-    const plainText =
-      this.footerStats.plainText() ||
-      parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
-    if (!plainText.trim()) return null;
-    return {
-      noteId: currentNote.id,
-      noteTitle: currentNote.title || 'Untitled Note',
-      plainText,
-    };
-  }
-
-  private async saveDirectivePulse(key: DirectiveKey): Promise<void> {
-    const entity = this.entity();
-    if (!entity) return;
-    const next = { ...this.directiveState(), [key]: true };
-    this.directiveState.set(next);
-    await this.factSheets.setAttribute(entity.id, DIRECTIVE_KEY, next, this.contextId());
-  }
-
-  private providerLane(
-    key: DirectiveKey,
-    label: string,
-    status: { ready: boolean; loading: boolean; device: string | null; error?: string },
-    fallbackDetail: string,
-    active: DirectiveKey | null,
-  ): StewardModelLane {
-    const tone = this.providerTone(status, active === key);
-    return {
-      key,
-      label,
-      value: active === key ? 'running' : status.loading ? 'loading' : status.ready ? 'ready' : status.error ? 'error' : 'idle',
-      detail: status.error || status.device || fallbackDetail,
-      tone,
-      disabled: active !== null,
-    };
-  }
-
-  private providerTone(
-    status: { ready: boolean; loading: boolean; error?: string },
-    active: boolean,
-  ): ModelLaneTone {
-    if (active || status.loading) return 'busy';
-    if (status.error) return 'error';
-    return status.ready ? 'ready' : 'idle';
   }
 
   private isRelation(value: unknown): value is StewardRelation {

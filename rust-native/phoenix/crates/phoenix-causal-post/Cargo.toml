@@ -11,6 +11,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 rustc-hash.workspace = true
 smallvec.workspace = true
+phoenix-chunker = { path = "../phoenix-chunker" }
 phoenix-semantic-v2 = { path = "../phoenix-semantic-v2" }
 phoenix-scope-analysis = { path = "../phoenix-scope-analysis" }
 phoenix-store-native-core = { path = "../phoenix-store-native-core" }

@@ -17,7 +17,6 @@
         (deleteEntityRequested)="deleteEntityFromSidebar($event)"
         (addEntityRequested)="openCreator()"
         (flushRequested)="flushRegistry()"
-        (scanRequested)="runSuggestionScan()"
         (acceptSuggestionRequested)="acceptSuggestion($event)"
         (rejectSuggestionRequested)="rejectSuggestion($event)"
         (styleRequested)="toggleStyleDrawer()"
@@ -60,8 +59,9 @@
                     [activeProvider]="activeSuggestionProvider()"
                     (entitySelected)="selectEntity($event)"
                     (addEntityRequested)="openCreator()"
-                    (scanRequested)="runSuggestionScan()"
+                    (scanRequested)="runSuggestionScan('canvas', $event)"
                     (styleRequested)="toggleStyleDrawer()"
+                    (atlasModeChange)="atlasMode.set($event)"
                     (atlasSearchChange)="atlasSearch.set($event)"
                     (lensModeChange)="graphLensMode.set($event)"></app-graph-lens-workspace>
             </div>

@@ -1375,7 +1375,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
         }
 
         // Initialize Phoenix chat service
-        this.initGoChatService();
+        this.initPhoenixChatService();
 
         // Load saved system prompt
         const savedPrompt = getSetting<string | null>('chat:systemPrompt', null);
@@ -1391,7 +1391,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
      * Initialize Phoenix chat service with OpenRouter config.
      * This enables persistence + memory extraction.
      */
-    private async initGoChatService(): Promise<void> {
+    private async initPhoenixChatService(): Promise<void> {
         if (this.goChatInitialized) return;
         // init() reads openrouter:config from Dexie internally when no arg provided
 
@@ -1434,7 +1434,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
             };
             setSetting('openrouter:config', orConfig);
 
-            // Hot-reload Go backend with new credentials
+            // Hot-reload Phoenix native backend with new credentials
             this.goChatService.updateConfig({
                 apiKey: orConfig.apiKey,
                 model: orConfig.model,
@@ -1555,7 +1555,7 @@ export class AiChatPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     private loadSessions(): void {
-        // Get thread list from Go WASM
+        // Get thread list from Phoenix native chat state
         const threads = this.goChatService.threads();
 
         // Build session info from threads

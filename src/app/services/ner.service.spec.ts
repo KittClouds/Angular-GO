@@ -101,7 +101,7 @@ describe('NerService provider orchestration', () => {
         label: 'Kai',
         kind: 'CHARACTER',
         confidence: 0.91,
-        source: 'fst',
+        source: 'dynamic_ner',
       }),
     ]);
   });
@@ -266,6 +266,45 @@ describe('NerService provider orchestration', () => {
         label: 'Kai',
         kind: 'CHARACTER',
         source: 'fst',
+      }),
+    ]);
+  });
+
+  it('applies the same Phoenix gate to Atlas surface suggestions', async () => {
+    const service = makeService();
+
+    await service.loadAtlasSurfaceSuggestions([
+      {
+        id: 'bad-1',
+        label: 'Absolutely',
+        kind: 'CHARACTER',
+        confidence: 0.78,
+        evidence: 'Absolutely not.',
+        sourceStage: 'dynamicNer',
+      },
+      {
+        id: 'bad-2',
+        label: 'All of',
+        kind: 'CHARACTER',
+        confidence: 0.78,
+        evidence: 'All of them stayed quiet.',
+        sourceStage: 'dynamicNer',
+      },
+      {
+        id: 'good-1',
+        label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 0.91,
+        evidence: 'Kai watched. Kai laughed.',
+        sourceStage: 'dynamicNer',
+      },
+    ] as any);
+
+    expect(service.suggestions()).toEqual([
+      expect.objectContaining({
+        label: 'Kai',
+        kind: 'CHARACTER',
+        source: 'atlas_surface',
       }),
     ]);
   });

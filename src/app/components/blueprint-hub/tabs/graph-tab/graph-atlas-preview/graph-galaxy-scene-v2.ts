@@ -1,4 +1,4 @@
-import type { GalaxyGroup, GalaxyLayoutMode, GalaxyNode, GalaxyScene } from './graph-galaxy-engine';
+import type { GalaxyGroup, GalaxyHopfRibbon, GalaxyLayoutMode, GalaxyLorentzGuide, GalaxyNode, GalaxyScene } from './graph-galaxy-engine';
 
 export type GalaxySceneSourceMode = 'entities' | 'graph' | 'embeddings';
 
@@ -13,6 +13,31 @@ export interface GalaxySceneGroupView {
     importance: number;
 }
 
+export interface GalaxyHopfRibbonView {
+    id: string;
+    nodeIds: string[];
+    positions3d: Float32Array;
+    positions2d: Float32Array;
+    color: { r: number; g: number; b: number };
+    importance: number;
+    guideKind: GalaxyHopfRibbon['guideKind'];
+    guideWeight: number;
+}
+
+export interface GalaxyLorentzGuideView {
+    id: string;
+    nodeIds: string[];
+    positions3d: Float32Array;
+    positions2d: Float32Array;
+    color: { r: number; g: number; b: number };
+    importance: number;
+    treeId: string;
+    treeKind: string;
+    level: number;
+    guideKind: GalaxyLorentzGuide['guideKind'];
+    guideWeight: number;
+}
+
 export interface GalaxySceneV2 {
     sourceMode: GalaxySceneSourceMode;
     layoutMode: GalaxyLayoutMode;
@@ -21,6 +46,8 @@ export interface GalaxySceneV2 {
     kinds: string[];
     groupIds: string[];
     groups: GalaxySceneGroupView[];
+    hopfRibbons: GalaxyHopfRibbonView[];
+    lorentzGuides: GalaxyLorentzGuideView[];
     positions3d: Float32Array;
     positions2d: Float32Array;
     radii: Float32Array;
@@ -78,6 +105,8 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         kinds,
         groupIds,
         groups: scene.groups.map(groupView),
+        hopfRibbons: (scene.hopfRibbons ?? []).map(hopfRibbonView),
+        lorentzGuides: (scene.lorentzGuides ?? []).map(lorentzGuideView),
         positions3d,
         positions2d,
         radii,
@@ -99,6 +128,39 @@ function groupView(group: GalaxyGroup): GalaxySceneGroupView {
         color: { r: group.r / 255, g: group.g / 255, b: group.b / 255 },
         nodeIds: group.nodeIds,
         importance: group.importance,
+    };
+}
+
+function hopfRibbonView(ribbon: GalaxyHopfRibbon): GalaxyHopfRibbonView {
+    const positions2d = ribbon.positions3d.slice();
+    for (let index = 2; index < positions2d.length; index += 3) positions2d[index] = 0;
+    return {
+        id: ribbon.id,
+        nodeIds: ribbon.nodeIds,
+        positions3d: ribbon.positions3d,
+        positions2d,
+        color: { r: ribbon.r / 255, g: ribbon.g / 255, b: ribbon.b / 255 },
+        importance: ribbon.importance,
+        guideKind: ribbon.guideKind,
+        guideWeight: ribbon.guideWeight,
+    };
+}
+
+function lorentzGuideView(guide: GalaxyLorentzGuide): GalaxyLorentzGuideView {
+    const positions2d = guide.positions3d.slice();
+    for (let index = 2; index < positions2d.length; index += 3) positions2d[index] = 0;
+    return {
+        id: guide.id,
+        nodeIds: guide.nodeIds,
+        positions3d: guide.positions3d,
+        positions2d,
+        color: { r: guide.r / 255, g: guide.g / 255, b: guide.b / 255 },
+        importance: guide.importance,
+        treeId: guide.treeId,
+        treeKind: guide.treeKind,
+        level: guide.level,
+        guideKind: guide.guideKind,
+        guideWeight: guide.guideWeight,
     };
 }
 

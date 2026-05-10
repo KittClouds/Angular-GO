@@ -100,6 +100,26 @@ class PhoenixTaurpcBridge implements PhoenixNativeBridge {
         return this.callJson('scan_json', request);
     }
 
+    async atlasRichScan(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('atlas_rich_scan_json', request);
+    }
+
+    async manifoldSnapshot(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('manifold_snapshot_json', request);
+    }
+
+    async lorentzForestCache(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('lorentz_forest_cache_json', request);
+    }
+
+    async lorentzForestBuild(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('lorentz_forest_build_json', request);
+    }
+
+    async lorentzForestQuery(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('lorentz_forest_query_json', request);
+    }
+
     async buildStructure(request: Record<string, unknown>): Promise<any> {
         return this.callJson('build_structure_json', request);
     }

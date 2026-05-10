@@ -1,5 +1,5 @@
 /**
- * GraphScanner — Calls GoKittService.scan() to build the narrative graph.
+ * GraphScanner - calls Phoenix native scan() to build the narrative graph.
  * Extracts edges and pushes them to the Registry.
  * No ProseMirror dependency. No highlighting logic.
  */

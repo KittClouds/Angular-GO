@@ -28,7 +28,7 @@
 }
 
 .atlas-kicker {
-    color: rgb(94 234 212);
+    color: var(--ui-accent-bright);
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.18em;
@@ -36,11 +36,11 @@
 }
 
 .atlas-pill {
-    border: 1px solid rgba(45, 212, 191, 0.18);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.72);
     border-radius: 999px;
-    background: rgba(20, 184, 166, 0.08);
+    background: rgba(var(--ui-accent-rgb), 0.48);
     padding: 2px 7px;
-    color: rgb(153 246 228);
+    color: var(--ui-accent-bright);
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.10em;
@@ -113,7 +113,7 @@
 .atlas-header-pill {
     flex-shrink: 0;
     padding: 5px 7px;
-    color: rgb(153 246 228);
+    color: var(--ui-accent-bright);
 }
 
 .lens-grid,
@@ -131,9 +131,9 @@
 }
 
 .lens-button-active {
-    border-color: rgba(45, 212, 191, 0.28);
-    background: rgba(20, 184, 166, 0.12);
-    color: rgb(153 246 228);
+    border-color: rgba(var(--ui-accent-rgb), 0.78);
+    background: rgba(var(--ui-accent-rgb), 0.46);
+    color: var(--ui-accent-bright);
 }
 
 .atlas-action-trigger,
@@ -147,7 +147,7 @@
 
 .atlas-action-trigger {
     width: 100%;
-    color: rgb(207 250 254);
+    color: var(--ui-accent-bright);
 }
 
 .atlas-action-grid {
@@ -181,7 +181,7 @@
 .atlas-control-actions {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px;
-    border: 1px solid rgba(94, 234, 212, 0.16);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.72);
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.22);
     padding: 5px;
@@ -197,9 +197,9 @@
 }
 
 .atlas-control-actions .atlas-action-button:hover {
-    border-color: rgba(45, 212, 191, 0.24);
-    background: rgba(20, 184, 166, 0.12);
-    color: rgb(204 251 241);
+    border-color: rgba(var(--ui-accent-rgb), 0.86);
+    background: rgba(var(--ui-accent-rgb), 0.5);
+    color: var(--ui-accent-bright);
 }
 
 .atlas-control-actions .scan-action {
@@ -340,8 +340,8 @@
 
 .atlas-entity-row:hover,
 .atlas-entity-selected {
-    border-color: rgba(45, 212, 191, 0.22);
-    background: rgba(20, 184, 166, 0.08);
+    border-color: rgba(var(--ui-accent-rgb), 0.78);
+    background: rgba(var(--ui-accent-rgb), 0.42);
 }
 
 .entity-dot,

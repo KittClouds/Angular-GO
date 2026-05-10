@@ -47,6 +47,7 @@ pub fn semantic_embedder(
         prefix_passage: true,
         pooling: Default::default(),
         input_prefix: Default::default(),
+        execution_provider: Default::default(),
     })?)
 }
 

@@ -1,4 +1,5 @@
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
+import { applyLorentzTreeLayout } from './graph-galaxy-lorentz-layout';
 
 export type GalaxyLabelMode = 'hover' | 'selected' | 'important' | 'always' | 'off';
 export type GalaxyEdgeMode = 'curved' | 'straight' | 'hidden';
@@ -6,7 +7,7 @@ export type GalaxyEdgeColorMode = 'aqua' | 'orchid' | 'gold' | 'entityBlend' | '
 export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
 export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
 export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
-export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace';
+export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree';
 
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
@@ -32,6 +33,10 @@ export interface GalaxyRenderSettings {
     layoutMode: GalaxyLayoutMode;
     hybridShellVisible: boolean;
     hybridShellOpacity: number;
+    hopfSpaceVisible: boolean;
+    hopfSpaceIntensity: number;
+    lorentzSpaceVisible: boolean;
+    lorentzSpaceIntensity: number;
 }
 
 export interface GalaxyInputEdge {
@@ -116,11 +121,34 @@ export interface GalaxyGroup extends Rgb {
     importance: number;
 }
 
+export interface GalaxyHopfRibbon extends Rgb {
+    id: string;
+    nodeIds: string[];
+    positions3d: Float32Array;
+    importance: number;
+    guideKind: 'dataFiber' | 'spaceFiber' | 'torusBand' | 'axis';
+    guideWeight: number;
+}
+
+export interface GalaxyLorentzGuide extends Rgb {
+    id: string;
+    nodeIds: string[];
+    positions3d: Float32Array;
+    importance: number;
+    treeId: string;
+    treeKind: string;
+    level: number;
+    guideKind: 'membership' | 'rootLane' | 'levelShell' | 'wAxis';
+    guideWeight: number;
+}
+
 export interface GalaxyScene {
     nodes: GalaxyNode[];
     links: GalaxyEdge[];
     layoutMode: GalaxyLayoutMode;
     groups: GalaxyGroup[];
+    hopfRibbons?: GalaxyHopfRibbon[];
+    lorentzGuides?: GalaxyLorentzGuide[];
 }
 
 export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
@@ -141,12 +169,16 @@ export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
     backgroundMode: 'nebula',
     nodeDragMode: 'stretch',
     nodeShape: 'atom',
-    clickFocus: true,
+    clickFocus: false,
     labelLimit: 14,
     selectedPulse: true,
     layoutMode: 'single',
     hybridShellVisible: true,
     hybridShellOpacity: 1,
+    hopfSpaceVisible: true,
+    hopfSpaceIntensity: 1,
+    lorentzSpaceVisible: true,
+    lorentzSpaceIntensity: 1,
 };
 
 export function mergeGalaxySettings(settings?: Partial<GalaxyRenderSettings> | null): GalaxyRenderSettings {
@@ -155,6 +187,8 @@ export function mergeGalaxySettings(settings?: Partial<GalaxyRenderSettings> | n
     merged.edgeCurveStrength = Math.min(1.2, Math.max(0.25, merged.edgeCurveStrength));
     merged.edgeWidth = Math.min(1.1, Math.max(0.15, merged.edgeWidth));
     merged.hybridShellOpacity = Math.min(1, Math.max(0, merged.hybridShellOpacity));
+    merged.hopfSpaceIntensity = Math.min(1.4, Math.max(0, merged.hopfSpaceIntensity));
+    merged.lorentzSpaceIntensity = Math.min(1.4, Math.max(0, merged.lorentzSpaceIntensity));
     return merged;
 }
 
@@ -199,6 +233,18 @@ export function buildGalaxyScene(
         applyGalaxyMetadata(nodes);
         applyHybridSpaceLayout(nodes, links);
         return { nodes, links, layoutMode: 'hybridSpace', groups: [] };
+    }
+
+    if (settings.layoutMode === 'hopfProjection') {
+        applyGalaxyMetadata(nodes);
+        const hopfRibbons = applyHopfProjectionLayout(nodes, links);
+        return { nodes, links, layoutMode: 'hopfProjection', groups: [], hopfRibbons };
+    }
+
+    if (settings.layoutMode === 'lorentzTree') {
+        applyGalaxyMetadata(nodes);
+        const lorentzGuides = applyLorentzTreeLayout(nodes, links);
+        return { nodes, links, layoutMode: 'lorentzTree', groups: [], lorentzGuides };
     }
 
     const groupPlan = settings.layoutMode === 'multiGalaxy' ? buildGroupPlan(nodes) : [];
@@ -468,6 +514,20 @@ function applyMultiGalaxyLayout(nodes: GalaxyNode[], links: GalaxyEdge[], plans:
 }
 
 const HYBRID_SHELL_RADIUS = 2.32;
+const HOPF_PROJECTION_RADIUS = 0.88;
+const HOPF_MAX_RADIUS = 2.05;
+const TAU = Math.PI * 2;
+const HOPF_RIBBON_SEGMENTS = 96;
+const HOPF_SPACE_FIBERS = 24;
+const HOPF_TORUS_BAND_FIBERS = 14;
+
+interface HopfBaseInfo extends Rgb {
+    key: string;
+    direction: { x: number; y: number; z: number };
+    phases: number[];
+    nodeIds: string[];
+    importance: number;
+}
 
 function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void {
     for (const node of nodes) {
@@ -521,6 +581,326 @@ function hybridNodeScale(node: GalaxyNode, radius: number): number {
     if (sourceType === 'query') return 1.18;
     if (sourceType === 'entity') return 0.98;
     return 0.78 + radius * 0.18;
+}
+
+function applyHopfProjectionLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyHopfRibbon[] {
+    const baseInfos = new Map<string, HopfBaseInfo>();
+    for (const node of nodes) {
+        const baseKey = hopfBaseKey(node);
+        if (!baseKey) continue;
+        registerHopfBase(baseInfos, baseKey, node, isHopfAnchor(node));
+    }
+
+    for (const node of nodes) {
+        const baseKey = hopfBaseKey(node);
+        const baseInfo = baseKey ? baseInfos.get(baseKey) : undefined;
+        const direction = baseInfo?.direction ?? normalizedDirection(node);
+        const phase = hopfPhase(node, baseKey);
+        const point = hopfStereographicProjection(direction, phase, hopfPositionScale(node));
+        node.x = point.x;
+        node.y = point.y;
+        node.z = point.z;
+        node.baseX = node.x;
+        node.baseY = node.y;
+        node.baseZ = node.z;
+        node.depth = Math.min(1, Math.hypot(node.x, node.y, node.z) / HOPF_MAX_RADIUS);
+        node.radius *= hopfNodeScale(node);
+        if (baseInfo && (isHopfAnchor(node) || isHopfFiber(node))) {
+            baseInfo.phases.push(normalizePhaseRadians(phase));
+            baseInfo.nodeIds.push(node.entity.id);
+            baseInfo.importance += Math.max(1, Number(node.entity.totalMentions || 1));
+        }
+    }
+
+    for (const link of links) {
+        const type = link.type.toLowerCase();
+        if (type.includes('anchor-fiber')) {
+            link.alpha = Math.min(0.5, link.alpha * 1.55 + 0.07);
+            link.curve *= 1.48;
+            continue;
+        }
+        if (type.includes('fiber-edge')) {
+            link.alpha = Math.min(0.42, link.alpha * 1.22 + 0.03);
+            link.curve *= 1.18;
+        }
+    }
+
+    return buildHopfRibbons(baseInfos);
+}
+
+function registerHopfBase(baseInfos: Map<string, HopfBaseInfo>, baseKey: string, node: GalaxyNode, anchor: boolean): void {
+    const existing = baseInfos.get(baseKey);
+    if (existing && !anchor) return;
+    baseInfos.set(baseKey, {
+        key: baseKey,
+        direction: normalizedDirection(node),
+        phases: existing?.phases ?? [],
+        nodeIds: existing?.nodeIds ?? [],
+        importance: existing?.importance ?? 0,
+        r: node.r,
+        g: node.g,
+        b: node.b,
+    });
+}
+
+function buildHopfRibbons(baseInfos: Map<string, HopfBaseInfo>): GalaxyHopfRibbon[] {
+    const dataFibers = [...baseInfos.values()]
+        .filter((info) => info.nodeIds.length > 0)
+        .sort((left, right) => right.importance - left.importance)
+        .slice(0, 36)
+        .map((info) => ({
+            id: `hopf:ribbon:${info.key}`,
+            nodeIds: [...new Set(info.nodeIds)],
+            positions3d: hopfRibbonSegments(info.direction, info.phases),
+            importance: info.importance,
+            guideKind: 'dataFiber' as const,
+            guideWeight: 1,
+            r: info.r,
+            g: info.g,
+            b: info.b,
+        }));
+    return [
+        ...dataFibers,
+        ...buildHopfSpaceFibers(),
+        ...buildHopfTorusBands(),
+        buildHopfAxisCue(),
+    ];
+}
+
+function hopfRibbonSegments(direction: { x: number; y: number; z: number }, phases: number[]): Float32Array {
+    const phaseSet = new Set<number>();
+    for (let index = 0; index < HOPF_RIBBON_SEGMENTS; index++) {
+        phaseSet.add(roundPhase((index / HOPF_RIBBON_SEGMENTS) * TAU));
+    }
+    for (const phase of phases) phaseSet.add(roundPhase(phase));
+    const samples = [...phaseSet].sort((left, right) => left - right);
+    const positions = new Float32Array(samples.length * 2 * 3);
+    for (let index = 0; index < samples.length; index++) {
+        const current = hopfStereographicProjection(direction, samples[index], 1);
+        const next = hopfStereographicProjection(direction, samples[(index + 1) % samples.length], 1);
+        const offset = index * 6;
+        positions[offset] = current.x;
+        positions[offset + 1] = current.y;
+        positions[offset + 2] = current.z;
+        positions[offset + 3] = next.x;
+        positions[offset + 4] = next.y;
+        positions[offset + 5] = next.z;
+    }
+    return positions;
+}
+
+function buildHopfSpaceFibers(): GalaxyHopfRibbon[] {
+    const fibers: GalaxyHopfRibbon[] = [];
+    for (let index = 0; index < HOPF_SPACE_FIBERS; index++) {
+        const direction = fibonacciUnitDirection(index, HOPF_SPACE_FIBERS);
+        fibers.push({
+            id: `hopf:space-fiber:${index}`,
+            nodeIds: [],
+            positions3d: hopfRibbonSegments(direction, []),
+            importance: 0.2,
+            guideKind: 'spaceFiber',
+            guideWeight: 0.34,
+            r: 42,
+            g: 204,
+            b: index % 2 === 0 ? 214 : 166,
+        });
+    }
+    return fibers;
+}
+
+function buildHopfTorusBands(): GalaxyHopfRibbon[] {
+    const bands: GalaxyHopfRibbon[] = [];
+    const latitudes = [0.34, 0.5, 0.66];
+    for (const [latitudeIndex, latitude] of latitudes.entries()) {
+        const theta = latitude * Math.PI;
+        for (let ringIndex = 0; ringIndex < HOPF_TORUS_BAND_FIBERS; ringIndex++) {
+            const phi = (ringIndex / HOPF_TORUS_BAND_FIBERS) * TAU;
+            const direction = {
+                x: Math.sin(theta) * Math.cos(phi),
+                y: Math.cos(theta),
+                z: Math.sin(theta) * Math.sin(phi),
+            };
+            bands.push({
+                id: `hopf:torus-band:${latitudeIndex}:${ringIndex}`,
+                nodeIds: [],
+                positions3d: hopfRibbonSegments(direction, []),
+                importance: 0.12,
+                guideKind: 'torusBand',
+                guideWeight: latitudeIndex === 1 ? 0.28 : 0.2,
+                r: latitudeIndex === 1 ? 186 : 92,
+                g: latitudeIndex === 1 ? 96 : 142,
+                b: 255,
+            });
+        }
+    }
+    return bands;
+}
+
+function buildHopfAxisCue(): GalaxyHopfRibbon {
+    const points = 96;
+    const positions = new Float32Array((points - 1) * 2 * 3);
+    for (let index = 0; index < points - 1; index++) {
+        const a = -1.82 + (index / (points - 1)) * 3.64;
+        const b = -1.82 + ((index + 1) / (points - 1)) * 3.64;
+        const offset = index * 6;
+        positions[offset] = 0;
+        positions[offset + 1] = a;
+        positions[offset + 2] = 0;
+        positions[offset + 3] = 0;
+        positions[offset + 4] = b;
+        positions[offset + 5] = 0;
+    }
+    return {
+        id: 'hopf:axis:north-south',
+        nodeIds: [],
+        positions3d: positions,
+        importance: 0.1,
+        guideKind: 'axis',
+        guideWeight: 0.22,
+        r: 120,
+        g: 240,
+        b: 255,
+    };
+}
+
+function hopfStereographicProjection(direction: { x: number; y: number; z: number }, phase: number, scale: number): { x: number; y: number; z: number } {
+    const eta = Math.acos(clamp(direction.y, -1, 1));
+    const phi = Math.atan2(direction.z, direction.x);
+    const halfEta = eta * 0.5;
+    const plus = (phi + phase) * 0.5;
+    const minus = (phi - phase) * 0.5;
+    const cosEta = Math.cos(halfEta);
+    const sinEta = Math.sin(halfEta);
+    const x1 = cosEta * Math.cos(plus);
+    const y1 = cosEta * Math.sin(plus);
+    const x2 = sinEta * Math.cos(minus);
+    const y2 = sinEta * Math.sin(minus);
+    const inverse = 1 / Math.max(0.32, 1 - y2);
+    const raw = { x: x1 * inverse, y: x2 * inverse, z: y1 * inverse };
+    const norm = Math.hypot(raw.x, raw.y, raw.z);
+    const bound = norm > HOPF_MAX_RADIUS ? HOPF_MAX_RADIUS / norm : 1;
+    return {
+        x: raw.x * bound * HOPF_PROJECTION_RADIUS * scale,
+        y: raw.y * bound * HOPF_PROJECTION_RADIUS * scale,
+        z: raw.z * bound * HOPF_PROJECTION_RADIUS * scale,
+    };
+}
+
+function hopfPhase(node: GalaxyNode, baseKey: string | null): number {
+    const metadataPhase = Number(hopfMetadata(node)?.['phase']);
+    if (Number.isFinite(metadataPhase)) return metadataPhase >= 0 && metadataPhase <= 1 ? metadataPhase * TAU : metadataPhase;
+    if (isHopfAnchor(node)) return stableUnit(`${baseKey || node.entity.id}:anchor-phase`) * 0.08;
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (sourceType === 'query') return stableUnit(`${node.entity.id}:query-phase`) * TAU;
+    return fiberKindPhase(hopfFiberKind(node)) + (stableUnit(`${node.entity.id}:fiber-phase`) - 0.5) * 0.1;
+}
+
+function fiberKindPhase(kind: string): number {
+    switch (kind) {
+        case 'relationship':
+        case 'emotional':
+            return TAU * 0.18;
+        case 'location':
+            return TAU * 0.3;
+        case 'event':
+        case 'document_structure':
+            return TAU * 0.41;
+        case 'temporal':
+            return TAU * 0.53;
+        case 'causal':
+        case 'contradiction':
+            return TAU * 0.64;
+        case 'evidence':
+        case 'provenance':
+            return TAU * 0.75;
+        case 'political':
+            return TAU * 0.84;
+        case 'mechanical':
+        case 'power_system':
+            return TAU * 0.92;
+        default:
+            return TAU * 0.08;
+    }
+}
+
+function hopfPositionScale(node: GalaxyNode): number {
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (sourceType === 'query') return 1.08;
+    if (isHopfAnchor(node) || isHopfFiber(node)) return 1;
+    if (sourceType === 'entity') return 0.68;
+    return 0.88;
+}
+
+function normalizePhaseRadians(value: number): number {
+    return ((value % TAU) + TAU) % TAU;
+}
+
+function roundPhase(value: number): number {
+    return Math.round(normalizePhaseRadians(value) * 1000000) / 1000000;
+}
+
+function fibonacciUnitDirection(index: number, total: number): { x: number; y: number; z: number } {
+    const y = 1 - ((index + 0.5) / total) * 2;
+    const radial = Math.sqrt(Math.max(0, 1 - y * y));
+    const angle = index * 2.399963229728653;
+    return {
+        x: Math.cos(angle) * radial,
+        y,
+        z: Math.sin(angle) * radial,
+    };
+}
+
+function hopfNodeScale(node: GalaxyNode): number {
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (sourceType === 'query') return 1.14;
+    if (isHopfAnchor(node)) return 0.98;
+    if (isHopfFiber(node)) return 0.74;
+    if (sourceType === 'entity') return 0.82;
+    return 0.78;
+}
+
+function hopfBaseKey(node: GalaxyNode): string | null {
+    const metadata = hopfMetadata(node);
+    const baseId = String(metadata?.['baseId'] || '');
+    if (baseId) return baseId;
+    const id = node.entity.id;
+    if (id.startsWith('hopf:anchor:')) return id.slice('hopf:anchor:'.length);
+    if (!id.startsWith('hopf:fiber:')) return null;
+    const rest = id.slice('hopf:fiber:'.length);
+    const separator = rest.lastIndexOf(':');
+    return separator > 0 ? rest.slice(0, separator) : rest;
+}
+
+function hopfFiberKind(node: GalaxyNode): string {
+    const metadataKind = String(hopfMetadata(node)?.['fiberKind'] || '').toLowerCase();
+    if (metadataKind) return metadataKind;
+    const kind = String(node.entity.kind || '').toLowerCase();
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    const id = node.entity.id;
+    const kindMatch = kind.match(/hopf_fiber:([a-z0-9_-]+)/);
+    if (kindMatch?.[1]) return kindMatch[1];
+    if (id.startsWith('hopf:fiber:')) {
+        const separator = id.lastIndexOf(':');
+        if (separator > 'hopf:fiber:'.length) return id.slice(separator + 1).toLowerCase();
+    }
+    return sourceType || kind || 'identity';
+}
+
+function isHopfAnchor(node: GalaxyNode): boolean {
+    if (hopfMetadata(node)?.['role'] === 'anchor') return true;
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    return sourceType === 'hopf_anchor' || node.entity.id.startsWith('hopf:anchor:') || String(node.entity.kind || '').toLowerCase() === 'hopf_anchor';
+}
+
+function isHopfFiber(node: GalaxyNode): boolean {
+    if (hopfMetadata(node)?.['role'] === 'fiber') return true;
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    return sourceType === 'hopf_fiber' || node.entity.id.startsWith('hopf:fiber:') || String(node.entity.kind || '').toLowerCase().startsWith('hopf_fiber:');
+}
+
+function hopfMetadata(node: GalaxyNode): Record<string, unknown> | null {
+    const value = node.entity.metadata?.['hopf'];
+    return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
 function stringValue(value: unknown): string {

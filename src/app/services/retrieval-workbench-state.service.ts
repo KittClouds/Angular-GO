@@ -27,7 +27,7 @@ export class RetrievalWorkbenchStateService {
     readonly scope = signal<'global' | string>('global');
     readonly lanes = signal<RetrievalLaneState>({ ...DEFAULT_LANES });
     readonly graphFocus = signal<RetrievalGraphFocus | null>(null);
-    readonly graphLensMode = signal<RetrievalGraphLensMode>('narrative');
+    readonly graphLensMode = signal<RetrievalGraphLensMode>('global');
 
     readonly activeLanes = computed(() =>
         (Object.entries(this.lanes()) as Array<[RetrievalLane, boolean]>)

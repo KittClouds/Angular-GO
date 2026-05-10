@@ -7,12 +7,12 @@ use phoenix_semantic_v2::{
 use crate::semantic_graph_contradiction_ledger::collect_relationship_ledger_edges;
 use crate::semantic_graph_support::{truth_planes_compatible, Prototype};
 use crate::semantic_graph_workspace::{
-    embedding_distance, SemanticTargetIndex, EXACT_FALLBACK_MAX_TARGETS,
+    embedding_distance, EmbeddingRows, SemanticTargetIndex, EXACT_FALLBACK_MAX_TARGETS,
 };
 
 pub(crate) fn collect_contradictory_support_region_edges(
     prototypes: &[Prototype],
-    embeddings: &[Vec<f32>],
+    embeddings: EmbeddingRows<'_>,
     memory_sidecar: Option<&MemoryScopeSidecar>,
     neighbor_limit: usize,
     oversample: usize,
@@ -139,7 +139,7 @@ fn collect_conflict_guided_edges(
     prototype_by_id: &HashMap<&str, &Prototype>,
     state_buckets: &HashMap<String, Vec<&Prototype>>,
     prototypes: &[Prototype],
-    embeddings: &[Vec<f32>],
+    embeddings: EmbeddingRows<'_>,
     min_score_millis: u32,
 ) {
     let Some(memory_sidecar) = memory_sidecar else {
@@ -147,8 +147,12 @@ fn collect_conflict_guided_edges(
     };
     let embedding_by_id = prototypes
         .iter()
-        .zip(embeddings.iter())
-        .map(|(prototype, embedding)| (prototype.node_id.as_str(), embedding.as_slice()))
+        .enumerate()
+        .filter_map(|(index, prototype)| {
+            embeddings
+                .row(index)
+                .map(|embedding| (prototype.node_id.as_str(), embedding))
+        })
         .collect::<HashMap<_, _>>();
     for conflict in &memory_sidecar.conflicts {
         let bucket_key = format!("{}|{}", conflict.entity_id.0, conflict.slot_key);

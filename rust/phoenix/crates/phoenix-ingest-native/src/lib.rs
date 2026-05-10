@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
 use std::cmp::Ordering;
-use std::path::PathBuf;
+use std::collections::BTreeMap;
 #[cfg(feature = "background-verifier")]
 use std::path::Path;
+use std::path::PathBuf;
 
 use daachorse::{DoubleArrayAhoCorasick, DoubleArrayAhoCorasickBuilder, MatchKind};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
@@ -24,17 +24,15 @@ use phoenix_semantic_v2::{
     SessionArchive,
 };
 use phoenix_store_native_core::{
-    BundleHeader, BundleKey, BundleKind, PhoenixArchiveStoreV2, PhoenixBundleStoreV2,
-    StoreError,
+    BundleHeader, BundleKey, BundleKind, PhoenixArchiveStoreV2, PhoenixBundleStoreV2, StoreError,
 };
 use phoenix_types::{
-    BoundaryKind, ChunkKind, ChunkSpan, Diagnostic, DocumentId, EntityId, EntityKind,
-    EvidenceSpan, FrameSlot, IndexedSpan, IndexedTextField, IngestDocument, IngestDocumentSummary,
-    IngestResult, LexicalField, MentionEntityRef, MentionSource, MentionSpan,
-    NarrativeTransitivity, NarrativeVerbHit, PosTag, RelationCandidate, ResolverEntitySeed,
-    ResolverLink, ResolverLinkKind, ScopeKey, ScanArtifact, SentenceFrame, SentenceSpan,
-    SessionDocumentState, SessionId, StructureArtifact, TextRange, TokenClass, TokenSpan,
-    VerbFrame,
+    BoundaryKind, ChunkKind, ChunkSpan, Diagnostic, DocumentId, EntityId, EntityKind, EvidenceSpan,
+    FrameSlot, IndexedSpan, IndexedTextField, IngestDocument, IngestDocumentSummary, IngestResult,
+    LexicalField, MentionEntityRef, MentionSource, MentionSpan, NarrativeTransitivity,
+    NarrativeVerbHit, PosTag, RelationCandidate, ResolverEntitySeed, ResolverLink,
+    ResolverLinkKind, ScanArtifact, ScopeKey, SentenceFrame, SentenceSpan, SessionDocumentState,
+    SessionId, StructureArtifact, TextRange, TokenClass, TokenSpan, VerbFrame,
 };
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -243,7 +241,11 @@ fn tokenize(text: &str) -> Vec<TokenSpan> {
                 Some(PosTag::Pronoun)
             } else if is_verb_token(&lower) {
                 Some(PosTag::Verb)
-            } else if token.chars().next().is_some_and(|value| value.is_uppercase()) {
+            } else if token
+                .chars()
+                .next()
+                .is_some_and(|value| value.is_uppercase())
+            {
                 Some(PosTag::ProperNoun)
             } else {
                 Some(PosTag::Noun)
@@ -257,7 +259,10 @@ fn tokenize(text: &str) -> Vec<TokenSpan> {
                 }),
                 pos,
                 masked: false,
-                capitalized: token.chars().next().is_some_and(|value| value.is_uppercase()),
+                capitalized: token
+                    .chars()
+                    .next()
+                    .is_some_and(|value| value.is_uppercase()),
             });
         } else {
             tokens.push(TokenSpan {
@@ -521,8 +526,8 @@ fn infer_seed_kind(surface: &str, seeds: &[ResolverEntitySeed]) -> Option<Entity
 fn build_seed_gazetteer(resolver_seed: &[ResolverEntitySeed]) -> Option<CompiledSeedGazetteer> {
     let mut by_surface = FxHashMap::<String, SmallVec<[GazetteerEntry; 4]>>::default();
     for seed in resolver_seed {
-        let forms =
-            std::iter::once(seed.canonical_name.as_str()).chain(seed.aliases.iter().map(String::as_str));
+        let forms = std::iter::once(seed.canonical_name.as_str())
+            .chain(seed.aliases.iter().map(String::as_str));
         for form in forms {
             let normalized = normalize_surface(form);
             if normalized.is_empty() {
@@ -532,9 +537,9 @@ fn build_seed_gazetteer(resolver_seed: &[ResolverEntitySeed]) -> Option<Compiled
                 .entry(normalized)
                 .or_default()
                 .push(GazetteerEntry {
-                kind: seed.kind.clone(),
-                entity_ref: Some(MentionEntityRef::Known(seed.entity_id.clone())),
-            });
+                    kind: seed.kind.clone(),
+                    entity_ref: Some(MentionEntityRef::Known(seed.entity_id.clone())),
+                });
         }
     }
     if by_surface.is_empty() {
@@ -587,7 +592,10 @@ fn seeded_gazetteer_mentions(
         token_end_by_byte.insert(end, index);
     }
     let mut best_matches = FxHashMap::<usize, (usize, usize)>::default();
-    for found in gazetteer.matcher.find_overlapping_iter(token_stream.as_bytes()) {
+    for found in gazetteer
+        .matcher
+        .find_overlapping_iter(token_stream.as_bytes())
+    {
         let Some(start_ix) = token_start_by_byte.get(&found.start()).copied() else {
             continue;
         };
@@ -598,8 +606,7 @@ fn seeded_gazetteer_mentions(
         let replace = best_matches
             .get(&start_ix)
             .map(|(best_end_ix, best_pattern_ix)| {
-                end_ix > *best_end_ix
-                    || (end_ix == *best_end_ix && pattern_ix < *best_pattern_ix)
+                end_ix > *best_end_ix || (end_ix == *best_end_ix && pattern_ix < *best_pattern_ix)
             })
             .unwrap_or(true);
         if replace {
@@ -715,7 +722,10 @@ fn scirs2_pattern_mentions(text: &str, sentences: &[SentenceSpan]) -> Vec<Detect
 }
 
 fn connective_token(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "of" | "the" | "and" | "&")
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "of" | "the" | "and" | "&"
+    )
 }
 
 fn looks_like_entity_token(value: &str) -> bool {
@@ -730,8 +740,7 @@ fn looks_like_entity_token(value: &str) -> bool {
 fn title_token(value: &str) -> bool {
     matches!(
         value.to_ascii_lowercase().trim_end_matches('.'),
-        "mr"
-            | "mrs"
+        "mr" | "mrs"
             | "ms"
             | "dr"
             | "prof"
@@ -784,7 +793,10 @@ fn native_refinement_mentions(
     while index < tokens.len() {
         let token = &tokens[index];
         let range = token.range;
-        if observed_ranges.iter().any(|existing| range_overlaps(*existing, range)) {
+        if observed_ranges
+            .iter()
+            .any(|existing| range_overlaps(*existing, range))
+        {
             index += 1;
             continue;
         }
@@ -830,9 +842,11 @@ fn native_refinement_mentions(
                     surface: surface.clone(),
                     normalized: normalize_surface(&surface),
                     mention_kind: DetectedMentionKind::Named,
-                    type_hint: infer_seed_kind(&surface, resolver_seed).or(Some(EntityKind::Character)),
-                    entity_ref: infer_seed_entity_ref(&surface, resolver_seed)
-                        .or_else(|| Some(MentionEntityRef::Speculative(normalize_surface(&surface)))),
+                    type_hint: infer_seed_kind(&surface, resolver_seed)
+                        .or(Some(EntityKind::Character)),
+                    entity_ref: infer_seed_entity_ref(&surface, resolver_seed).or_else(|| {
+                        Some(MentionEntityRef::Speculative(normalize_surface(&surface)))
+                    }),
                     source: DetectedMentionSourceKind::NativeHeuristic,
                     confidence: 0.8,
                     sentence_index,
@@ -866,7 +880,8 @@ fn native_refinement_mentions(
                 surface: surface.clone(),
                 normalized: normalize_surface(&surface),
                 mention_kind: DetectedMentionKind::Named,
-                type_hint: infer_seed_kind(&surface, resolver_seed).or_else(|| infer_heuristic_kind(&surface)),
+                type_hint: infer_seed_kind(&surface, resolver_seed)
+                    .or_else(|| infer_heuristic_kind(&surface)),
                 entity_ref: infer_seed_entity_ref(&surface, resolver_seed)
                     .or_else(|| Some(MentionEntityRef::Speculative(normalize_surface(&surface)))),
                 source: DetectedMentionSourceKind::NativeHeuristic,
@@ -1023,8 +1038,11 @@ fn build_sentence_needs(
     let mut needs = vec![SentenceNeed::default(); sentences.len()];
     let mut normalized_counts = FxHashMap::<&str, usize>::default();
     for proposal in proposals {
-        if proposal.mention_kind != DetectedMentionKind::Pronoun && !proposal.normalized.is_empty() {
-            *normalized_counts.entry(proposal.normalized.as_str()).or_insert(0) += 1;
+        if proposal.mention_kind != DetectedMentionKind::Pronoun && !proposal.normalized.is_empty()
+        {
+            *normalized_counts
+                .entry(proposal.normalized.as_str())
+                .or_insert(0) += 1;
         }
     }
     for proposal in proposals {
@@ -1198,7 +1216,8 @@ fn selective_expensive_mentions(
             end: byte_end,
         };
         let window_text = safe_text_slice(text, window_range);
-        let local_sentences = shifted_sentence_spans(&sentences[sentence_start..sentence_end], byte_start);
+        let local_sentences =
+            shifted_sentence_spans(&sentences[sentence_start..sentence_end], byte_start);
         if config.enable_scirs2_rule_ner {
             mentions.extend(remap_detected_mentions(
                 scirs2_rule_mentions(window_text, &local_sentences, resolver_seed),
@@ -1231,7 +1250,10 @@ fn detect_mentions(
             text,
             tokens,
             sentences,
-            &detected.iter().map(|mention| mention.range).collect::<Vec<_>>(),
+            &detected
+                .iter()
+                .map(|mention| mention.range)
+                .collect::<Vec<_>>(),
             resolver_seed,
         ));
     }
@@ -1453,14 +1475,32 @@ fn scan_mentions_and_hits(
 ) -> (Vec<MentionSpan>, Vec<NarrativeVerbHit>) {
     if sentences.len() < SCAN_WINDOW_MIN_SENTENCES || text.len() <= SCAN_WINDOW_TARGET_BYTES * 2 {
         rayon::join(
-            || detect_mentions(text, tokens, sentences, seed_gazetteer, resolver_seed, extraction),
+            || {
+                detect_mentions(
+                    text,
+                    tokens,
+                    sentences,
+                    seed_gazetteer,
+                    resolver_seed,
+                    extraction,
+                )
+            },
             || discover_narrative_hits(text, tokens, sentences),
         )
     } else {
         let plans = plan_scan_windows(sentences, tokens);
         if plans.len() <= 1 {
             rayon::join(
-                || detect_mentions(text, tokens, sentences, seed_gazetteer, resolver_seed, extraction),
+                || {
+                    detect_mentions(
+                        text,
+                        tokens,
+                        sentences,
+                        seed_gazetteer,
+                        resolver_seed,
+                        extraction,
+                    )
+                },
                 || discover_narrative_hits(text, tokens, sentences),
             )
         } else {
@@ -1486,7 +1526,10 @@ fn scan_mentions_and_hits(
                 mentions.extend(output.mentions);
                 narrative_hits.extend(output.narrative_hits);
             }
-            (dedupe_mention_spans(mentions), dedupe_narrative_hits(narrative_hits))
+            (
+                dedupe_mention_spans(mentions),
+                dedupe_narrative_hits(narrative_hits),
+            )
         }
     }
 }
@@ -1596,7 +1639,10 @@ fn build_chunk_records(
                 text,
             });
         }
-        if let Some(summary) = boundary_label.as_deref().filter(|value| !value.trim().is_empty()) {
+        if let Some(summary) = boundary_label
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
             fields.push(IndexedTextField {
                 field: LexicalField::Summary,
                 text: summary.to_owned(),
@@ -1649,30 +1695,30 @@ fn scan_native_compact(
         let normalized = normalize_surface(&mention.surface);
         let is_pronoun_surface = is_pronoun(&normalized);
         let coref_kind = classify_coref_mention_with_pronoun(mention, is_pronoun_surface);
-        let surface_ord = if let Some(existing) = surface_ord_by_normalized.get(&normalized).copied()
-        {
-            existing
-        } else {
-            let ord = surface_atoms.len() as u32;
-            let acronym_ord = acronym_of_normalized(&normalized).map(|acronym| {
-                if let Some(existing) = acronym_ord_by_value.get(&acronym).copied() {
-                    existing
-                } else {
-                    let ord = acronym_values.len() as u32;
-                    acronym_ord_by_value.insert(acronym.clone(), ord);
-                    acronym_values.push(acronym.into_boxed_str());
-                    ord
-                }
-            });
-            surface_ord_by_normalized.insert(normalized.clone(), ord);
-            surface_atoms.push(SurfaceAtom {
-                normalized: normalized.into_boxed_str(),
-                is_pronoun: is_pronoun_surface,
-            });
-            surface_counts.push(0);
-            surface_acronym_ords.push(acronym_ord);
-            ord
-        };
+        let surface_ord =
+            if let Some(existing) = surface_ord_by_normalized.get(&normalized).copied() {
+                existing
+            } else {
+                let ord = surface_atoms.len() as u32;
+                let acronym_ord = acronym_of_normalized(&normalized).map(|acronym| {
+                    if let Some(existing) = acronym_ord_by_value.get(&acronym).copied() {
+                        existing
+                    } else {
+                        let ord = acronym_values.len() as u32;
+                        acronym_ord_by_value.insert(acronym.clone(), ord);
+                        acronym_values.push(acronym.into_boxed_str());
+                        ord
+                    }
+                });
+                surface_ord_by_normalized.insert(normalized.clone(), ord);
+                surface_atoms.push(SurfaceAtom {
+                    normalized: normalized.into_boxed_str(),
+                    is_pronoun: is_pronoun_surface,
+                });
+                surface_counts.push(0);
+                surface_acronym_ords.push(acronym_ord);
+                ord
+            };
         surface_counts[surface_ord as usize] += 1;
         mention_surface_ords.push(surface_ord);
         mention_coref_kinds.push(coref_kind);
@@ -1684,8 +1730,9 @@ fn scan_native_compact(
             _ => {}
         }
     }
-    let detected_named_count =
-        mentions.len().saturating_sub(detected_nominal_count + detected_pronoun_count);
+    let detected_named_count = mentions
+        .len()
+        .saturating_sub(detected_nominal_count + detected_pronoun_count);
     let discovery_count = mentions
         .iter()
         .filter(|mention| {
@@ -1762,7 +1809,10 @@ fn build_native_structure_rows(
             .get(sentence.index)
             .cloned()
             .unwrap_or_default();
-        let hit_indexes = sentence_hits.get(sentence.index).cloned().unwrap_or_default();
+        let hit_indexes = sentence_hits
+            .get(sentence.index)
+            .cloned()
+            .unwrap_or_default();
         for hit_ix in hit_indexes {
             let hit = &scan.narrative_hits[hit_ix];
             let mut subject_mention_ix = None;
@@ -1839,10 +1889,8 @@ fn coref_pair_route(
     current_acronym: Option<&str>,
     antecedent_acronym: Option<&str>,
 ) -> Option<CorefPairRoute> {
-    if let (
-        Some(MentionEntityRef::Known(left)),
-        Some(MentionEntityRef::Known(right)),
-    ) = (current.entity_ref.as_ref(), antecedent.entity_ref.as_ref())
+    if let (Some(MentionEntityRef::Known(left)), Some(MentionEntityRef::Known(right))) =
+        (current.entity_ref.as_ref(), antecedent.entity_ref.as_ref())
     {
         if left != right {
             return None;
@@ -1884,11 +1932,15 @@ fn coref_pair_route(
     }
 
     match (current_kind, antecedent_kind) {
-        (CorefMentionKind::Pronoun, CorefMentionKind::Named) => Some(CorefPairRoute::PronounToNamed),
+        (CorefMentionKind::Pronoun, CorefMentionKind::Named) => {
+            Some(CorefPairRoute::PronounToNamed)
+        }
         (CorefMentionKind::Pronoun, CorefMentionKind::Nominal) => {
             Some(CorefPairRoute::PronounToNominal)
         }
-        (CorefMentionKind::Nominal, CorefMentionKind::Named) => Some(CorefPairRoute::NominalToNamed),
+        (CorefMentionKind::Nominal, CorefMentionKind::Named) => {
+            Some(CorefPairRoute::NominalToNamed)
+        }
         (CorefMentionKind::Named, CorefMentionKind::Named)
         | (CorefMentionKind::Named, CorefMentionKind::Nominal)
         | (CorefMentionKind::Nominal, CorefMentionKind::Nominal) => {
@@ -1904,12 +1956,14 @@ fn coref_window_limits(
 ) -> (usize, usize) {
     match mention_kind {
         CorefMentionKind::Named => (config.max_named_antecedents, config.max_named_sent_window),
-        CorefMentionKind::Nominal => {
-            (config.max_nominal_antecedents, config.max_nominal_sent_window)
-        }
-        CorefMentionKind::Pronoun => {
-            (config.max_pronoun_antecedents, config.max_pronoun_sent_window)
-        }
+        CorefMentionKind::Nominal => (
+            config.max_nominal_antecedents,
+            config.max_nominal_sent_window,
+        ),
+        CorefMentionKind::Pronoun => (
+            config.max_pronoun_antecedents,
+            config.max_pronoun_sent_window,
+        ),
     }
 }
 
@@ -2009,11 +2063,8 @@ fn coref_push_candidate_ix(scratch: &mut CorefScratch, candidate_ix: usize, curr
     scratch.candidate_pool.push(candidate_ix);
 }
 
-fn push_recent_ix<A>(
-    values: &mut SmallVec<A>,
-    value: usize,
-    max_len: usize,
-) where
+fn push_recent_ix<A>(values: &mut SmallVec<A>, value: usize, max_len: usize)
+where
     A: smallvec::Array<Item = usize>,
 {
     if values.len() >= max_len {
@@ -2056,7 +2107,9 @@ fn intern_coref_head_ord(
 }
 
 fn coref_discourse_compatible(current: &CorefMentionRow, antecedent: &CorefMentionRow) -> bool {
-    if let (Some(current_chunk), Some(antecedent_chunk)) = (current.chunk_index, antecedent.chunk_index) {
+    if let (Some(current_chunk), Some(antecedent_chunk)) =
+        (current.chunk_index, antecedent.chunk_index)
+    {
         current_chunk.abs_diff(antecedent_chunk) <= 1
     } else {
         current
@@ -2076,14 +2129,22 @@ fn coref_block_candidates(
     recent_nominal_by_head_kind: &FxHashMap<(u32, u8), SmallVec<[usize; 8]>>,
 ) {
     if let Some(bucket) = scratch.surface_recent.get(row.surface_ord as usize) {
-        let recent = bucket.iter().rev().copied().collect::<SmallVec<[usize; 8]>>();
+        let recent = bucket
+            .iter()
+            .rev()
+            .copied()
+            .collect::<SmallVec<[usize; 8]>>();
         for candidate_ix in recent {
             coref_push_candidate_ix(scratch, candidate_ix, index);
         }
     }
     if let Some(acronym_ord) = row.acronym_ord {
         if let Some(bucket) = scratch.acronym_recent.get(acronym_ord as usize) {
-            let recent = bucket.iter().rev().copied().collect::<SmallVec<[usize; 8]>>();
+            let recent = bucket
+                .iter()
+                .rev()
+                .copied()
+                .collect::<SmallVec<[usize; 8]>>();
             for candidate_ix in recent {
                 coref_push_candidate_ix(scratch, candidate_ix, index);
             }
@@ -2100,10 +2161,7 @@ fn coref_block_candidates(
                 .collect::<SmallVec<[usize; 12]>>();
             for candidate_ix in recent_named {
                 let antecedent = &rows[candidate_ix];
-                if row
-                    .sentence_index
-                    .saturating_sub(antecedent.sentence_index)
-                    <= max_sent_window
+                if row.sentence_index.saturating_sub(antecedent.sentence_index) <= max_sent_window
                     && coref_discourse_compatible(row, antecedent)
                 {
                     coref_push_candidate_ix(scratch, candidate_ix, index);
@@ -2118,10 +2176,7 @@ fn coref_block_candidates(
                 .collect::<SmallVec<[usize; 6]>>();
             for candidate_ix in recent_nominal {
                 let antecedent = &rows[candidate_ix];
-                if row
-                    .sentence_index
-                    .saturating_sub(antecedent.sentence_index)
-                    <= max_sent_window
+                if row.sentence_index.saturating_sub(antecedent.sentence_index) <= max_sent_window
                     && coref_discourse_compatible(row, antecedent)
                 {
                     coref_push_candidate_ix(scratch, candidate_ix, index);
@@ -2133,12 +2188,14 @@ fn coref_block_candidates(
                 let kind_tag = coref_kind_tag(row.kind.as_ref());
                 for key in [(head_ord, kind_tag), (head_ord, 0)] {
                     if let Some(bucket) = recent_nominal_by_head_kind.get(&key) {
-                        let recent = bucket.iter().rev().copied().collect::<SmallVec<[usize; 8]>>();
+                        let recent = bucket
+                            .iter()
+                            .rev()
+                            .copied()
+                            .collect::<SmallVec<[usize; 8]>>();
                         for candidate_ix in recent {
                             let antecedent = &rows[candidate_ix];
-                            if row
-                                .sentence_index
-                                .saturating_sub(antecedent.sentence_index)
+                            if row.sentence_index.saturating_sub(antecedent.sentence_index)
                                 <= max_sent_window
                             {
                                 coref_push_candidate_ix(scratch, candidate_ix, index);
@@ -2147,12 +2204,14 @@ fn coref_block_candidates(
                     }
                 }
                 if let Some(bucket) = recent_named_by_head.get(head_ord as usize) {
-                    let recent = bucket.iter().rev().copied().collect::<SmallVec<[usize; 8]>>();
+                    let recent = bucket
+                        .iter()
+                        .rev()
+                        .copied()
+                        .collect::<SmallVec<[usize; 8]>>();
                     for candidate_ix in recent {
                         let antecedent = &rows[candidate_ix];
-                        if row
-                            .sentence_index
-                            .saturating_sub(antecedent.sentence_index)
+                        if row.sentence_index.saturating_sub(antecedent.sentence_index)
                             <= max_sent_window
                         {
                             coref_push_candidate_ix(scratch, candidate_ix, index);
@@ -2164,12 +2223,14 @@ fn coref_block_candidates(
         CorefMentionKind::Named => {
             if let Some(head_ord) = row.head_ord {
                 if let Some(bucket) = recent_named_by_head.get(head_ord as usize) {
-                    let recent = bucket.iter().rev().copied().collect::<SmallVec<[usize; 8]>>();
+                    let recent = bucket
+                        .iter()
+                        .rev()
+                        .copied()
+                        .collect::<SmallVec<[usize; 8]>>();
                     for candidate_ix in recent {
                         let antecedent = &rows[candidate_ix];
-                        if row
-                            .sentence_index
-                            .saturating_sub(antecedent.sentence_index)
+                        if row.sentence_index.saturating_sub(antecedent.sentence_index)
                             <= max_sent_window
                         {
                             coref_push_candidate_ix(scratch, candidate_ix, index);
@@ -2256,7 +2317,8 @@ fn build_coref_rows(
             CorefMentionKind::Pronoun | CorefMentionKind::Nominal => true,
             CorefMentionKind::Named => {
                 row.has_known_seed
-                    || scan.surface_acronym_ords[scan.mention_surface_ords[index] as usize].is_some()
+                    || scan.surface_acronym_ords[scan.mention_surface_ords[index] as usize]
+                        .is_some()
                     || scan.surface_counts[scan.mention_surface_ords[index] as usize] > 1
             }
         })
@@ -2274,8 +2336,7 @@ fn build_coref_rows(
         candidate_pool: SmallVec::new(),
     };
     let mut recent_named_by_head = vec![SmallVec::<[usize; 8]>::new(); head_values.len()];
-    let mut recent_nominal_by_head_kind =
-        FxHashMap::<(u32, u8), SmallVec<[usize; 8]>>::default();
+    let mut recent_nominal_by_head_kind = FxHashMap::<(u32, u8), SmallVec<[usize; 8]>>::default();
     let mut clusters = Vec::<CorefClusterState>::new();
     let mut accepted_edges = Vec::<CorefAcceptedEdge>::new();
     let mut candidate_link_count = 0usize;
@@ -2324,8 +2385,7 @@ fn build_coref_rows(
                     .as_ref(),
                 row.mention_kind,
                 antecedent_row.mention_kind,
-                acronym_ord
-                    .map(|ord| scan.acronym_values[ord].as_ref()),
+                acronym_ord.map(|ord| scan.acronym_values[ord].as_ref()),
                 scan.surface_acronym_ords[scan.mention_surface_ords[prior_ix] as usize]
                     .map(|ord| scan.acronym_values[ord as usize].as_ref()),
             ) else {
@@ -2367,12 +2427,15 @@ fn build_coref_rows(
             CorefMentionKind::Pronoun => (980, 180),
             _ => (900, 140),
         };
-        let top_score = best.map(|candidate| candidate.score_millis).unwrap_or_default();
-        let runner_score = runner_up.map(|candidate| candidate.score_millis).unwrap_or_default();
+        let top_score = best
+            .map(|candidate| candidate.score_millis)
+            .unwrap_or_default();
+        let runner_score = runner_up
+            .map(|candidate| candidate.score_millis)
+            .unwrap_or_default();
         let margin = top_score.saturating_sub(runner_score);
-        let attach = best.filter(|candidate| {
-            candidate.score_millis >= threshold && margin >= margin_threshold
-        });
+        let attach = best
+            .filter(|candidate| candidate.score_millis >= threshold && margin >= margin_threshold);
         let near_threshold = best.filter(|candidate| {
             candidate.score_millis + 80 >= threshold && candidate.score_millis < threshold
         });
@@ -2419,7 +2482,9 @@ fn build_coref_rows(
                     );
                     if kind_tag != 0 {
                         push_recent_ix(
-                            recent_nominal_by_head_kind.entry((head_ord, 0)).or_default(),
+                            recent_nominal_by_head_kind
+                                .entry((head_ord, 0))
+                                .or_default(),
                             index,
                             8,
                         );
@@ -2493,7 +2558,10 @@ fn build_coref_rows(
         cluster.last_sentence_index = cluster.last_sentence_index.max(row.sentence_index);
         if let Some(chunk_index) = row.chunk_index {
             if cluster.chunk_indexes.len() < config.persist_chunk_cap
-                && !cluster.chunk_indexes.iter().any(|existing| *existing == chunk_index)
+                && !cluster
+                    .chunk_indexes
+                    .iter()
+                    .any(|existing| *existing == chunk_index)
             {
                 cluster.chunk_indexes.push(chunk_index);
             }
@@ -2555,22 +2623,25 @@ fn build_native_entity_memory(snapshot: Option<&KernelGraphSnapshot>) -> NativeE
     let Some(snapshot) = snapshot else {
         return memory;
     };
-    let _ = memory.kernel.rebuild_from_kernel_batches(vec![
-        KernelMutationBatch {
-            layer: KernelGraphLayer::Asserted,
-            scope: KernelMutationScope::Full,
-            recorded_at: None,
-            vertices: snapshot.vertices.clone(),
-            edges: snapshot.asserted_edges.clone(),
-        },
-        KernelMutationBatch {
-            layer: KernelGraphLayer::Candidate,
-            scope: KernelMutationScope::Full,
-            recorded_at: None,
-            vertices: Vec::new(),
-            edges: snapshot.candidate_edges.clone(),
-        },
-    ], None);
+    let _ = memory.kernel.rebuild_from_kernel_batches(
+        vec![
+            KernelMutationBatch {
+                layer: KernelGraphLayer::Asserted,
+                scope: KernelMutationScope::Full,
+                recorded_at: None,
+                vertices: snapshot.vertices.clone(),
+                edges: snapshot.asserted_edges.clone(),
+            },
+            KernelMutationBatch {
+                layer: KernelGraphLayer::Candidate,
+                scope: KernelMutationScope::Full,
+                recorded_at: None,
+                vertices: Vec::new(),
+                edges: snapshot.candidate_edges.clone(),
+            },
+        ],
+        None,
+    );
     memory.entity_index = memory.kernel.entity_sidecar();
     for vertex in &snapshot.vertices {
         if let Some(facet) = vertex.entity_facet.as_ref() {
@@ -2680,17 +2751,10 @@ impl CandidateEvidenceKind {
     }
 }
 
-fn stable_slot_cmp(
-    left: &CandidateSlot,
-    right: &CandidateSlot,
-    entity_ids: &[String],
-) -> Ordering {
-    right
-        .score_millis
-        .cmp(&left.score_millis)
-        .then_with(|| {
-            entity_ids[left.entity_ord as usize].cmp(&entity_ids[right.entity_ord as usize])
-        })
+fn stable_slot_cmp(left: &CandidateSlot, right: &CandidateSlot, entity_ids: &[String]) -> Ordering {
+    right.score_millis.cmp(&left.score_millis).then_with(|| {
+        entity_ids[left.entity_ord as usize].cmp(&entity_ids[right.entity_ord as usize])
+    })
 }
 
 fn sort_candidate_slots(candidates: &mut SmallVec<[CandidateSlot; 6]>, entity_ids: &[String]) {
@@ -2709,7 +2773,10 @@ fn merge_candidate_slot(
     const MAX_CANDIDATE_SLOTS: usize = 8;
     let evidence_bits = evidence_kind.bit();
 
-    if let Some(entry) = candidates.iter_mut().find(|candidate| candidate.entity_ord == entity_ord) {
+    if let Some(entry) = candidates
+        .iter_mut()
+        .find(|candidate| candidate.entity_ord == entity_ord)
+    {
         if score_millis > entry.score_millis {
             entry.score_millis = score_millis;
             entry.source = source;
@@ -2726,7 +2793,10 @@ fn merge_candidate_slot(
 
     let mut evidence = SmallVec::<[CandidateEvidence; 4]>::new();
     if mode == ResolveDetailMode::Detailed {
-        evidence.push(candidate_evidence(evidence_kind.as_str(), evidence_detail()));
+        evidence.push(candidate_evidence(
+            evidence_kind.as_str(),
+            evidence_detail(),
+        ));
     }
 
     if candidates.len() < MAX_CANDIDATE_SLOTS {
@@ -2762,7 +2832,10 @@ fn merge_candidate_slot(
     };
 }
 
-fn best_candidate_summary(candidates: &[CandidateSlot], entity_ids: &[String]) -> Option<BestCandidateSummary> {
+fn best_candidate_summary(
+    candidates: &[CandidateSlot],
+    entity_ids: &[String],
+) -> Option<BestCandidateSummary> {
     candidates
         .iter()
         .max_by(|left, right| {
@@ -2802,12 +2875,9 @@ fn stable_compact_slot_cmp(
     right: &CompactCandidateSlot,
     entity_ids: &[String],
 ) -> Ordering {
-    right
-        .score_millis
-        .cmp(&left.score_millis)
-        .then_with(|| {
-            entity_ids[left.entity_ord as usize].cmp(&entity_ids[right.entity_ord as usize])
-        })
+    right.score_millis.cmp(&left.score_millis).then_with(|| {
+        entity_ids[left.entity_ord as usize].cmp(&entity_ids[right.entity_ord as usize])
+    })
 }
 
 fn sort_compact_candidate_slots(
@@ -2827,7 +2897,10 @@ fn merge_compact_candidate_slot(
     const MAX_CANDIDATE_SLOTS: usize = 8;
     let evidence_bits = evidence_kind.bit();
 
-    if let Some(entry) = candidates.iter_mut().find(|candidate| candidate.entity_ord == entity_ord) {
+    if let Some(entry) = candidates
+        .iter_mut()
+        .find(|candidate| candidate.entity_ord == entity_ord)
+    {
         if score_millis > entry.score_millis {
             entry.score_millis = score_millis;
             entry.source = source;
@@ -2899,12 +2972,10 @@ fn compact_candidate_has_alias_signal(candidate: &CompactCandidateSlot) -> bool 
         != 0
 }
 
-fn bump_small_count(
-    counts: &mut SmallVec<[(u32, usize); 4]>,
-    entity_ord: u32,
-    delta: usize,
-) {
-    if let Some((_, count)) = counts.iter_mut().find(|(existing_ord, _)| *existing_ord == entity_ord)
+fn bump_small_count(counts: &mut SmallVec<[(u32, usize); 4]>, entity_ord: u32, delta: usize) {
+    if let Some((_, count)) = counts
+        .iter_mut()
+        .find(|(existing_ord, _)| *existing_ord == entity_ord)
     {
         *count += delta;
     } else {
@@ -2957,7 +3028,10 @@ fn build_prepared_mentions_native(
         else {
             continue;
         };
-        links_by_source.entry(source_ix).or_default().push(target_ix);
+        links_by_source
+            .entry(source_ix)
+            .or_default()
+            .push(target_ix);
     }
     let mut entity_links_by_source =
         FxHashMap::<usize, SmallVec<[PreparedResolverEntityLink; 4]>>::default();
@@ -3009,7 +3083,9 @@ fn build_prepared_mentions_native(
             surface_ord: scan.mention_surface_ords[mention_ix],
             chunk_ix,
             linked_mentions: links_by_source.remove(&mention_ix).unwrap_or_default(),
-            resolver_entity_links: entity_links_by_source.remove(&mention_ix).unwrap_or_default(),
+            resolver_entity_links: entity_links_by_source
+                .remove(&mention_ix)
+                .unwrap_or_default(),
         });
     }
     prepared
@@ -3043,7 +3119,10 @@ fn build_prepared_mentions(
         else {
             continue;
         };
-        links_by_source.entry(source_ix).or_default().push(target_ix);
+        links_by_source
+            .entry(source_ix)
+            .or_default()
+            .push(target_ix);
     }
     let mut entity_links_by_source =
         FxHashMap::<usize, SmallVec<[PreparedResolverEntityLink; 4]>>::default();
@@ -3106,7 +3185,9 @@ fn build_prepared_mentions(
             surface_ord,
             chunk_ix,
             linked_mentions: links_by_source.remove(&mention_ix).unwrap_or_default(),
-            resolver_entity_links: entity_links_by_source.remove(&mention_ix).unwrap_or_default(),
+            resolver_entity_links: entity_links_by_source
+                .remove(&mention_ix)
+                .unwrap_or_default(),
         });
     }
     (prepared, surface_values)
@@ -3232,7 +3313,12 @@ fn resolve_mentions(
             entity_memory,
             ResolveDetailMode::Detailed,
         );
-    (detailed, resolved_mentions, alias_confirmations, diagnostics)
+    (
+        detailed,
+        resolved_mentions,
+        alias_confirmations,
+        diagnostics,
+    )
 }
 
 fn resolve_mentions_compact_native(
@@ -3304,7 +3390,8 @@ fn resolve_mentions_compact_native(
     }
     for surface in &scan.surface_atoms {
         let normalized = surface.normalized.as_ref();
-        if let Some(kernel_candidates) = entity_memory.entity_index.alias_candidates.get(normalized) {
+        if let Some(kernel_candidates) = entity_memory.entity_index.alias_candidates.get(normalized)
+        {
             for candidate in kernel_candidates {
                 intern_entity_ord(
                     &candidate.entity_id,
@@ -3316,8 +3403,11 @@ fn resolve_mentions_compact_native(
             }
         }
         if !normalized.is_empty() && !is_pronoun(normalized) {
-            let speculative_id =
-                format!("{}::{}", document.document_id.0, normalized.replace(' ', "_"));
+            let speculative_id = format!(
+                "{}::{}",
+                document.document_id.0,
+                normalized.replace(' ', "_")
+            );
             intern_entity_ord(
                 &speculative_id,
                 &mut entity_ord_by_id,
@@ -3351,7 +3441,8 @@ fn resolve_mentions_compact_native(
     for (surface_ord, surface) in scan.surface_atoms.iter().enumerate() {
         let normalized = surface.normalized.as_ref();
         surface_pronouns[surface_ord] = surface.is_pronoun;
-        if let Some(kernel_candidates) = entity_memory.entity_index.alias_candidates.get(normalized) {
+        if let Some(kernel_candidates) = entity_memory.entity_index.alias_candidates.get(normalized)
+        {
             for candidate in kernel_candidates {
                 let relation = candidate.relation_type.as_deref().unwrap_or("kernel");
                 let (source, bonus) = match relation {
@@ -3370,8 +3461,11 @@ fn resolve_mentions_compact_native(
             }
         }
         if !surface_pronouns[surface_ord] && !normalized.is_empty() {
-            let speculative_id =
-                format!("{}::{}", document.document_id.0, normalized.replace(' ', "_"));
+            let speculative_id = format!(
+                "{}::{}",
+                document.document_id.0,
+                normalized.replace(' ', "_")
+            );
             surface_speculative_ord[surface_ord] = entity_ord_by_id.get(&speculative_id).copied();
         }
     }
@@ -3488,7 +3582,9 @@ fn resolve_mentions_compact_native(
             );
         }
         if !normalized.is_empty() {
-            for (entity_ord, support) in &surface_known_counts[prepared_mention.surface_ord as usize] {
+            for (entity_ord, support) in
+                &surface_known_counts[prepared_mention.surface_ord as usize]
+            {
                 let own_known_match = matches!(
                     mention.entity_ref.as_ref(),
                     Some(MentionEntityRef::Known(known_id))
@@ -3641,7 +3737,8 @@ fn resolve_mentions_compact_native(
                     }
                 }
             }
-            if candidate.source == CandidateSourceKind::NewSpeculative && mention.confidence >= 0.8 {
+            if candidate.source == CandidateSourceKind::NewSpeculative && mention.confidence >= 0.8
+            {
                 candidate.score_millis += 180;
             }
             if prepared_mention.chunk_ix.is_some() {
@@ -3652,7 +3749,9 @@ fn resolve_mentions_compact_native(
         sort_compact_candidate_slots(candidates, &entity_ids);
         let top = candidates.first().copied();
         let runner_up = candidates.get(1).copied();
-        let top_score = top.map(|candidate| candidate.score_millis).unwrap_or_default();
+        let top_score = top
+            .map(|candidate| candidate.score_millis)
+            .unwrap_or_default();
         let margin = top_score.saturating_sub(
             runner_up
                 .map(|candidate| candidate.score_millis)
@@ -3869,10 +3968,7 @@ fn resolve_mentions_with_mode(
             );
         }
 
-        if let Some(kernel_candidates) = entity_memory
-            .entity_index
-            .alias_candidates
-            .get(normalized)
+        if let Some(kernel_candidates) = entity_memory.entity_index.alias_candidates.get(normalized)
         {
             for candidate in kernel_candidates {
                 let relation = candidate.relation_type.as_deref().unwrap_or("kernel");
@@ -3947,7 +4043,8 @@ fn resolve_mentions_with_mode(
         }
 
         if !normalized.is_empty() {
-            if let Some(surface_entities) = surface_known_counts.get(&prepared_mention.surface_ord) {
+            if let Some(surface_entities) = surface_known_counts.get(&prepared_mention.surface_ord)
+            {
                 for (entity_ord, support) in surface_entities {
                     let own_known_match = matches!(
                         mention.entity_ref.as_ref(),
@@ -4057,14 +4154,19 @@ fn resolve_mentions_with_mode(
                         if mode == ResolveDetailMode::Detailed {
                             let evidence =
                                 candidate_evidence("kind_penalty", existing_kind.clone());
-                            if !candidate.evidence.iter().any(|existing| existing == &evidence) {
+                            if !candidate
+                                .evidence
+                                .iter()
+                                .any(|existing| existing == &evidence)
+                            {
                                 candidate.evidence.push(evidence);
                             }
                         }
                     }
                 }
             }
-            if candidate.source == CandidateSourceKind::NewSpeculative && mention.confidence >= 0.8 {
+            if candidate.source == CandidateSourceKind::NewSpeculative && mention.confidence >= 0.8
+            {
                 candidate.score_millis += 180;
             }
             if prepared_mention.chunk_ix.is_some() {
@@ -4075,7 +4177,10 @@ fn resolve_mentions_with_mode(
         sort_candidate_slots(candidates, &entity_ids);
         let top = candidates.first().cloned();
         let runner_up = candidates.get(1).cloned();
-        let top_score = top.as_ref().map(|candidate| candidate.score_millis).unwrap_or_default();
+        let top_score = top
+            .as_ref()
+            .map(|candidate| candidate.score_millis)
+            .unwrap_or_default();
         let margin = top_score.saturating_sub(
             runner_up
                 .as_ref()
@@ -4101,17 +4206,17 @@ fn resolve_mentions_with_mode(
         let decision = if let Some(entity_id) = resolved.clone() {
             er_summary.resolved_count += 1;
             let code = match top.as_ref().map(|candidate| candidate.source) {
-                    Some(CandidateSourceKind::Seed) => "er_known_seed_match",
-                    Some(CandidateSourceKind::KernelAlias | CandidateSourceKind::KernelResolved) => {
-                        "er_kernel_alias_match"
-                    }
-                    Some(CandidateSourceKind::PronounLink) => "er_pronoun_link_match",
-                    Some(CandidateSourceKind::AliasLink | CandidateSourceKind::LocalSurface) => {
-                        "er_alias_link_match"
-                    }
-                    Some(CandidateSourceKind::NewSpeculative) => "er_new_speculative_entity",
-                    _ => "er_collective_merge",
-                };
+                Some(CandidateSourceKind::Seed) => "er_known_seed_match",
+                Some(CandidateSourceKind::KernelAlias | CandidateSourceKind::KernelResolved) => {
+                    "er_kernel_alias_match"
+                }
+                Some(CandidateSourceKind::PronounLink) => "er_pronoun_link_match",
+                Some(CandidateSourceKind::AliasLink | CandidateSourceKind::LocalSurface) => {
+                    "er_alias_link_match"
+                }
+                Some(CandidateSourceKind::NewSpeculative) => "er_new_speculative_entity",
+                _ => "er_collective_merge",
+            };
             record_resolution_diagnostic(
                 mode,
                 &mut diagnostics,
@@ -4160,11 +4265,9 @@ fn resolve_mentions_with_mode(
             }
         };
 
-        if let (ResolvedMentionKind::Resolved, Some(entity_id), Some(top_candidate)) = (
-            &decision.kind,
-            decision.entity_id.as_ref(),
-            top.as_ref(),
-        ) {
+        if let (ResolvedMentionKind::Resolved, Some(entity_id), Some(top_candidate)) =
+            (&decision.kind, decision.entity_id.as_ref(), top.as_ref())
+        {
             if !normalized.is_empty()
                 && !pronoun
                 && normalized.as_str() != normalize_surface(&entity_id.0)
@@ -4220,7 +4323,9 @@ fn resolve_mentions_with_mode(
         }
 
         let candidate_list = match mode {
-            ResolveDetailMode::Detailed => candidate_list_from_slots(candidates.clone(), &entity_ids),
+            ResolveDetailMode::Detailed => {
+                candidate_list_from_slots(candidates.clone(), &entity_ids)
+            }
             ResolveDetailMode::Compact => Vec::new(),
         };
         resolutions.push(CompactResolutionRow {
@@ -4237,11 +4342,11 @@ fn resolve_mentions_with_mode(
         });
         if mode == ResolveDetailMode::Detailed {
             detailed_resolutions.push(DetailedMentionResolution {
-            mention_ix: prepared_mention.mention_ix,
-            mention_id: mention_id(document, prepared_mention.mention_ix),
-            entity_id: decision.entity_id.clone(),
-            candidates: candidate_list.clone(),
-            decision: decision.clone(),
+                mention_ix: prepared_mention.mention_ix,
+                mention_id: mention_id(document, prepared_mention.mention_ix),
+                entity_id: decision.entity_id.clone(),
+                candidates: candidate_list.clone(),
+                decision: decision.clone(),
             });
             resolved_mentions.push(ResolvedMention {
                 mention_id: mention_id(document, prepared_mention.mention_ix),
@@ -4458,7 +4563,9 @@ fn materialize_coref_clusters(
                 continue;
             };
             let entity_id = EntityId(entity_ids[entity_ord as usize].clone());
-            if !resolved_entity_ids.iter().any(|existing| existing == &entity_id)
+            if !resolved_entity_ids
+                .iter()
+                .any(|existing| existing == &entity_id)
                 && resolved_entity_ids.len() < 4
             {
                 resolved_entity_ids.push(entity_id);
@@ -4699,7 +4806,9 @@ fn run_background_verification(
     ) else {
         summary.diagnostics.push(Diagnostic {
             code: "er_background_verifier_disabled".to_owned(),
-            message: "Background verifier is enabled, but local GLiNER model paths are not configured.".to_owned(),
+            message:
+                "Background verifier is enabled, but local GLiNER model paths are not configured."
+                    .to_owned(),
         });
         return summary;
     };
@@ -5019,7 +5128,10 @@ fn extract_boundaries(text: &str) -> Vec<BoundaryRecord> {
             let lower = trimmed.to_ascii_lowercase();
             let is_heading = trimmed.starts_with('#')
                 || lower.starts_with("chapter ")
-                || matches!(lower.as_str(), "prologue" | "epilogue" | "preface" | "introduction");
+                || matches!(
+                    lower.as_str(),
+                    "prologue" | "epilogue" | "preface" | "introduction"
+                );
             if is_heading {
                 let label = trimmed.trim_start_matches('#').trim().to_owned();
                 boundaries.push(BoundaryRecord {
@@ -5134,10 +5246,17 @@ fn build_lexical_postings_segment(
 }
 
 fn speculative_entity_id(document_id: &DocumentId, surface: &str) -> String {
-    format!("{}::{}", document_id.0, normalize_surface(surface).replace(' ', "_"))
+    format!(
+        "{}::{}",
+        document_id.0,
+        normalize_surface(surface).replace(' ', "_")
+    )
 }
 
-fn entity_id_from_ref(document: &IngestDocument, entity_ref: &MentionEntityRef) -> Option<EntityId> {
+fn entity_id_from_ref(
+    document: &IngestDocument,
+    entity_ref: &MentionEntityRef,
+) -> Option<EntityId> {
     match entity_ref {
         MentionEntityRef::Known(entity_id) => Some(entity_id.clone()),
         MentionEntityRef::Speculative(speculative) => Some(EntityId(format!(
@@ -5158,11 +5277,44 @@ fn is_pronoun(value: &str) -> bool {
 fn is_verb_token(value: &str) -> bool {
     matches!(
         value,
-        "attack" | "attacked" | "attacks" | "met" | "meet" | "meets" | "rose" | "rise"
-            | "rises" | "woke" | "wake" | "wakes" | "wrote" | "write" | "writes"
-            | "mapped" | "map" | "maps" | "gave" | "give" | "gives" | "waited" | "wait"
-            | "waits" | "saw" | "see" | "sees" | "found" | "find" | "finds" | "fought"
-            | "fight" | "fights" | "moved" | "move" | "moves" | "crossed" | "cross"
+        "attack"
+            | "attacked"
+            | "attacks"
+            | "met"
+            | "meet"
+            | "meets"
+            | "rose"
+            | "rise"
+            | "rises"
+            | "woke"
+            | "wake"
+            | "wakes"
+            | "wrote"
+            | "write"
+            | "writes"
+            | "mapped"
+            | "map"
+            | "maps"
+            | "gave"
+            | "give"
+            | "gives"
+            | "waited"
+            | "wait"
+            | "waits"
+            | "saw"
+            | "see"
+            | "sees"
+            | "found"
+            | "find"
+            | "finds"
+            | "fought"
+            | "fight"
+            | "fights"
+            | "moved"
+            | "move"
+            | "moves"
+            | "crossed"
+            | "cross"
             | "crosses"
     ) || value.ends_with("ed")
 }
@@ -5188,13 +5340,19 @@ fn classify_verb(value: &str) -> (String, String, String, Option<NarrativeTransi
             Some(NarrativeTransitivity::Ditransitive),
         ),
         "wrote" | "write" | "writes" | "mapped" | "map" | "maps" => (
-            value.trim_end_matches("ed").trim_end_matches('s').to_owned(),
+            value
+                .trim_end_matches("ed")
+                .trim_end_matches('s')
+                .to_owned(),
             "creation".to_owned(),
             "writes".to_owned(),
             Some(NarrativeTransitivity::Transitive),
         ),
         other => (
-            other.trim_end_matches("ed").trim_end_matches('s').to_owned(),
+            other
+                .trim_end_matches("ed")
+                .trim_end_matches('s')
+                .to_owned(),
             "action".to_owned(),
             "relates_to".to_owned(),
             Some(NarrativeTransitivity::Transitive),
@@ -5389,7 +5547,10 @@ mod tests {
             .expect("pronoun mention");
         assert_eq!(pronoun.decision.status, "resolved");
         assert_eq!(
-            pronoun.entity_id.as_ref().map(|entity_id| entity_id.0.as_str()),
+            pronoun
+                .entity_id
+                .as_ref()
+                .map(|entity_id| entity_id.0.as_str()),
             Some("luffy")
         );
         assert!(!pronoun
@@ -5505,13 +5666,8 @@ mod tests {
             candidate_edges: Vec::new(),
         };
         let memory = build_native_entity_memory(Some(&snapshot));
-        let (_resolutions, resolved_mentions, aliases, diagnostics) = resolve_mentions(
-            &document,
-            &scan,
-            &structure,
-            &chunks,
-            &memory,
-        );
+        let (_resolutions, resolved_mentions, aliases, diagnostics) =
+            resolve_mentions(&document, &scan, &structure, &chunks, &memory);
         assert_eq!(resolved_mentions.len(), 1);
         assert_eq!(resolved_mentions[0].decision.status, "resolved");
         assert_eq!(
@@ -5603,13 +5759,8 @@ mod tests {
             candidate_edges: Vec::new(),
         };
         let memory = build_native_entity_memory(Some(&snapshot));
-        let (_resolutions, resolved_mentions, aliases, diagnostics) = resolve_mentions(
-            &document,
-            &scan,
-            &structure,
-            &chunks,
-            &memory,
-        );
+        let (_resolutions, resolved_mentions, aliases, diagnostics) =
+            resolve_mentions(&document, &scan, &structure, &chunks, &memory);
         assert_eq!(resolved_mentions.len(), 1);
         assert_eq!(resolved_mentions[0].decision.status, "ambiguous");
         assert!(resolved_mentions[0].entity_id.is_none());
@@ -5669,7 +5820,10 @@ mod tests {
                     .map(|resolution| {
                         (
                             resolution.mention_id.0.clone(),
-                            resolution.entity_id.as_ref().map(|entity_id| entity_id.0.clone()),
+                            resolution
+                                .entity_id
+                                .as_ref()
+                                .map(|entity_id| entity_id.0.clone()),
                             resolution
                                 .candidates
                                 .iter()
@@ -5690,7 +5844,10 @@ mod tests {
                         (
                             mention.mention_id.0.clone(),
                             mention.decision.status.clone(),
-                            mention.entity_id.as_ref().map(|entity_id| entity_id.0.clone()),
+                            mention
+                                .entity_id
+                                .as_ref()
+                                .map(|entity_id| entity_id.0.clone()),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -6118,32 +6275,24 @@ struct BackgroundNerVerifier {
 
 #[cfg(feature = "background-verifier")]
 impl BackgroundNerVerifier {
-    fn load(
-        model_path: &Path,
-        tokenizer_path: &Path,
-    ) -> Result<Self, BackgroundVerifierError> {
+    fn load(model_path: &Path, tokenizer_path: &Path) -> Result<Self, BackgroundVerifierError> {
         let params = Parameters::default().with_threshold(0.75);
         let runtime_params = RuntimeParameters::default();
         let model = GLiNER::<SpanMode>::new(
             params,
             runtime_params,
-            tokenizer_path
-                .to_str()
-                .ok_or_else(|| {
-                    BackgroundVerifierError::InvalidPath(tokenizer_path.display().to_string())
-                })?,
-            model_path
-                .to_str()
-                .ok_or_else(|| BackgroundVerifierError::InvalidPath(model_path.display().to_string()))?,
+            tokenizer_path.to_str().ok_or_else(|| {
+                BackgroundVerifierError::InvalidPath(tokenizer_path.display().to_string())
+            })?,
+            model_path.to_str().ok_or_else(|| {
+                BackgroundVerifierError::InvalidPath(model_path.display().to_string())
+            })?,
         )
         .map_err(|error| BackgroundVerifierError::ModelLoad(error.to_string()))?;
         Ok(Self { model })
     }
 
-    fn extract(
-        &self,
-        text: &str,
-    ) -> Result<Vec<(String, String, f32)>, BackgroundVerifierError> {
+    fn extract(&self, text: &str) -> Result<Vec<(String, String, f32)>, BackgroundVerifierError> {
         const LABELS: [&str; 7] = [
             "person",
             "organization",
@@ -6405,8 +6554,12 @@ impl PhoenixInvarantV3 {
                     .iter()
                     .filter(|mention| mention.range.start >= hit.range.end)
                     .collect::<Vec<_>>();
-                let object = trailing.first().map(|mention| frame_slot_from_mention(mention));
-                let recipient = trailing.get(1).map(|mention| frame_slot_from_mention(mention));
+                let object = trailing
+                    .first()
+                    .map(|mention| frame_slot_from_mention(mention));
+                let recipient = trailing
+                    .get(1)
+                    .map(|mention| frame_slot_from_mention(mention));
                 let evidence = vec![EvidenceSpan {
                     document_id: None,
                     note_id: None,
@@ -6528,7 +6681,10 @@ impl PhoenixInvarantV3 {
             touched_scope_keys.insert(scope_storage_key(&outcome.scope));
         }
 
-        let mut touched_scopes = outcomes.iter().map(|outcome| outcome.scope.clone()).collect::<Vec<_>>();
+        let mut touched_scopes = outcomes
+            .iter()
+            .map(|outcome| outcome.scope.clone())
+            .collect::<Vec<_>>();
         touched_scopes.sort_by_key(scope_storage_key);
         touched_scopes.dedup_by(|left, right| scope_storage_key(left) == scope_storage_key(right));
         for scope in &touched_scopes {
@@ -7201,7 +7357,8 @@ impl PhoenixInvarantV3 {
         scope: Option<&ScopeKey>,
     ) -> Result<Vec<DocumentArchive>, StoreError> {
         let scope_key = scope.map(scope_storage_key);
-        let headers = store.list_bundle_headers(BundleKind::DocumentArchive, scope_key.as_deref())?;
+        let headers =
+            store.list_bundle_headers(BundleKind::DocumentArchive, scope_key.as_deref())?;
         let mut latest = FxHashMap::<String, BundleHeader>::default();
         for header in headers {
             match latest.get(&header.key.entity_key) {
@@ -7518,19 +7675,26 @@ impl PhoenixInvarantV3 {
         kernel_batch: &KernelMutationBatch,
         discovery_count: usize,
         mention_count: usize,
-    ) -> (IngestDocumentSummary, SessionDocumentState, DocumentManifest) {
+    ) -> (
+        IngestDocumentSummary,
+        SessionDocumentState,
+        DocumentManifest,
+    ) {
         let document_summary = IngestDocumentSummary {
             document_id: document.document_id.clone(),
             note_id: document.note_id.clone(),
-            chapter_count: boundaries.iter().filter(|boundary| boundary.is_chapter).count(),
+            chapter_count: boundaries
+                .iter()
+                .filter(|boundary| boundary.is_chapter)
+                .count(),
             boundary_count: boundaries.len(),
             parent_count: boundaries.len(),
             leaf_count: chunk_count,
             entity_count: entities.len(),
             edge_count: kernel_batch.edges.len(),
-            has_front_matter_chapter: boundaries.iter().any(|boundary| {
-                boundary.is_chapter && is_front_matter_label(&boundary.label)
-            }),
+            has_front_matter_chapter: boundaries
+                .iter()
+                .any(|boundary| boundary.is_chapter && is_front_matter_label(&boundary.label)),
             has_front_matter_boundary: boundaries
                 .iter()
                 .any(|boundary| is_front_matter_label(&boundary.label)),
@@ -7545,7 +7709,10 @@ impl PhoenixInvarantV3 {
                 .filter(|boundary| boundary.is_chapter)
                 .map(|boundary| boundary.label.clone())
                 .collect(),
-            boundary_labels: boundaries.iter().map(|boundary| boundary.label.clone()).collect(),
+            boundary_labels: boundaries
+                .iter()
+                .map(|boundary| boundary.label.clone())
+                .collect(),
             parent_count: document_summary.parent_count,
             leaf_count: document_summary.leaf_count,
             entity_count: document_summary.entity_count,
@@ -7765,8 +7932,12 @@ impl PhoenixInvarantV3 {
         }
         let mut values = by_scope.into_values().collect::<Vec<_>>();
         for value in &mut values {
-            value.document_ords.sort_by_key(|document_ord| document_ord.0);
-            value.document_ords.dedup_by(|left, right| left.0 == right.0);
+            value
+                .document_ords
+                .sort_by_key(|document_ord| document_ord.0);
+            value
+                .document_ords
+                .dedup_by(|left, right| left.0 == right.0);
         }
         values.sort_by(|left, right| left.scope_key.cmp(&right.scope_key));
         values
@@ -7781,7 +7952,8 @@ impl PhoenixInvarantV3 {
         created_at: i64,
     ) -> Result<PreparedDocumentDraft, StoreError> {
         let scan_bundle = self.scan_document_bundle(document)?;
-        let resolution_bundle = self.resolve_document_bundle(document, &scan_bundle, entity_memory)?;
+        let resolution_bundle =
+            self.resolve_document_bundle(document, &scan_bundle, entity_memory)?;
         self.build_prepared_document(
             document,
             session_id,
@@ -7803,7 +7975,8 @@ impl PhoenixInvarantV3 {
         let progress = native_progress_enabled();
         let document_started = Instant::now();
         let scan_bundle = self.scan_document_bundle(document)?;
-        let resolution_bundle = self.resolve_document_bundle(document, &scan_bundle, entity_memory)?;
+        let resolution_bundle =
+            self.resolve_document_bundle(document, &scan_bundle, entity_memory)?;
         let mention_count = scan_bundle.scan.mentions.len();
         let (document_summary, session_document, manifest) = self.build_document_state(
             document,

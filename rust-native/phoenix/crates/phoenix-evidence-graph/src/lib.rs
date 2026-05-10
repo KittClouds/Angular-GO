@@ -6,6 +6,7 @@
 mod candidate;
 mod compiler;
 mod fusion;
+mod lens_consumer;
 mod patch;
 mod surface;
 mod types;
@@ -13,6 +14,7 @@ mod types;
 pub use candidate::{CandidateGraphBuilder, CandidateIndex};
 pub use compiler::{EvidenceGraphCompiler, EvidenceGraphCompilerConfig, EvidenceGraphError};
 pub use fusion::FusionGate;
+pub use lens_consumer::EvidenceLensChunkConsumer;
 pub use patch::OverGraphPatchBuilder;
 pub use surface::{SurfaceFrame, SurfaceFrameBuilder};
 pub use types::{

@@ -1,5 +1,6 @@
 pub mod api;
 
+mod lens_consumer;
 mod mine;
 mod normalize;
 mod promote;
@@ -7,6 +8,7 @@ mod promote;
 mod tests;
 pub mod worker;
 
+pub use lens_consumer::AttributeLensChunkConsumer;
 pub use mine::mine_slot_candidates;
 pub use normalize::{
     normalize_state_schema_inputs, normalize_state_schema_inputs_from_analysis,

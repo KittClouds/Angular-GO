@@ -249,6 +249,9 @@ pub struct NerNeedVector {
     pub has_dependency_subject_object: bool,
     pub has_causal_or_temporal_cue: bool,
     pub has_domain_signature: bool,
+    pub has_entity_pair: bool,
+    pub has_ambiguous_reference: bool,
+    pub has_named_event_candidate: bool,
 
     pub candidate_count: u16,
     pub unknown_named_count: u16,
@@ -337,6 +340,9 @@ mod tests {
     fn need_vector_default_is_all_false() {
         let need = NerNeedVector::default();
         assert!(!need.has_known_seed);
+        assert!(!need.has_entity_pair);
+        assert!(!need.has_ambiguous_reference);
+        assert!(!need.has_named_event_candidate);
         assert_eq!(need.candidate_count, 0);
         assert_eq!(need.ambiguity_score, 0.0);
     }

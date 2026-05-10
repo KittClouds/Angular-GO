@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use phoenix_om::approx_token_count;
 #[cfg(feature = "legacy-cozo-store")]
 use phoenix_om::OmEngine;
-use phoenix_om::approx_token_count;
 #[cfg(feature = "legacy-cozo-store")]
 use phoenix_store_cozo::PhoenixCozoStore;
 use phoenix_store_native::PhoenixNativeRowStore;
@@ -15,7 +15,7 @@ use phoenix_types::{
     ChatRunSnapshot, ChatRunStatus, ChatRuntimeConfig, ChatToolCall, Diagnostic, EvidenceItem,
     RunOptions, Thread, ThreadId, ThreadMessage, ToolResultSubmission,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -1614,7 +1614,7 @@ fn pretty_tool_label(tool_name: &str) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider {
     use anyhow::Result;
-    use openrouter_rs::{OpenRouterClient, api::chat::ChatCompletionRequest};
+    use openrouter_rs::{api::chat::ChatCompletionRequest, OpenRouterClient};
 
     use crate::default_capabilities;
 

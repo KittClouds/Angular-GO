@@ -13,7 +13,7 @@ use core::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::poincare;
+use crate::poincare::{self, PoincareBall};
 use crate::MetricF32;
 
 const DEFAULT_EPS: f32 = 1e-6;
@@ -47,6 +47,9 @@ pub enum HybridSpaceError {
 
     #[error("invalid cone weights: semantic={semantic}, hierarchy={hierarchy}")]
     InvalidConeWeights { semantic: f32, hierarchy: f32 },
+
+    #[error(transparent)]
+    Poincare(#[from] poincare::HyperbolicError),
 }
 
 pub type HybridSpaceResult<T> = Result<T, HybridSpaceError>;
@@ -130,6 +133,11 @@ impl HybridSpaceConfig {
         (1.0 / self.curvature.sqrt()) - self.eps
     }
 
+    #[inline]
+    pub fn poincare_ball(&self) -> HybridSpaceResult<PoincareBall> {
+        Ok(PoincareBall::with_eps(self.curvature, self.eps)?)
+    }
+
     /// Convert graph depth into hyperbolic distance from the origin.
     #[inline]
     pub fn depth_to_hyperbolic_radius(&self, depth: f32) -> f32 {
@@ -159,6 +167,14 @@ impl HybridSpaceConfig {
         let sqrt_c = self.curvature.sqrt();
         let radius = ((sqrt_c * h) * 0.5).tanh() / sqrt_c;
         radius.min(self.max_poincare_radius()).max(0.0)
+    }
+
+    /// Convert Euclidean Poincare radius back to hyperbolic radial distance.
+    #[inline]
+    pub fn poincare_radius_to_hyperbolic_radius(&self, r: f32) -> f32 {
+        let sqrt_c = self.curvature.sqrt();
+        let clamped = (sqrt_c * r.max(0.0)).min(1.0 - self.eps);
+        (2.0 / sqrt_c) * clamped.atanh()
     }
 
     #[inline]
@@ -208,6 +224,41 @@ impl HybridPoint {
         })
     }
 
+    /// Build a hybrid point from an existing Poincare-interior coordinate.
+    ///
+    /// The semantic shell direction is recovered by radial projection toward the
+    /// hypersphere boundary. This is the bridge used after Möbius/exp-map updates
+    /// move the point inside the hyperball.
+    pub fn from_poincare_interior(
+        poincare_interior: &[f32],
+        depth: f32,
+        config: HybridSpaceConfig,
+    ) -> HybridSpaceResult<Self> {
+        let config = config.validate()?;
+        let ball = config.poincare_ball()?;
+        let mut poincare = poincare_interior.to_vec();
+        ball.project(&mut poincare)?;
+
+        let poincare_radius = poincare::norm(&poincare);
+        let hyperbolic_radius = config.poincare_radius_to_hyperbolic_radius(poincare_radius);
+        let semantic_direction = if poincare_radius <= DEFAULT_EPS {
+            normalize_or_north_pole(&poincare)?
+        } else {
+            poincare
+                .iter()
+                .map(|value| value / poincare_radius)
+                .collect()
+        };
+
+        Ok(Self {
+            semantic_direction,
+            poincare,
+            depth: depth.max(0.0),
+            hyperbolic_radius,
+            poincare_radius,
+        })
+    }
+
     pub fn root(dim: usize) -> HybridSpaceResult<Self> {
         if dim == 0 {
             return Err(HybridSpaceError::EmptyVector);
@@ -228,6 +279,12 @@ impl HybridPoint {
     #[inline]
     pub fn dim(&self) -> usize {
         self.semantic_direction.len()
+    }
+
+    pub fn project_interior(&mut self, config: HybridSpaceConfig) -> HybridSpaceResult<()> {
+        let projected = Self::from_poincare_interior(&self.poincare, self.depth, config)?;
+        *self = projected;
+        Ok(())
     }
 }
 
@@ -857,6 +914,88 @@ pub fn derive_child_point(
     })
 }
 
+/// Apply a Möbius translation inside the hybrid hyperball and rebuild the
+/// semantic shell direction from the moved Poincare interior point.
+///
+/// `depth` remains graph-owned; this operation updates the geometric radii but
+/// does not infer a new graph depth label.
+pub fn hybrid_mobius_translate(
+    point: &HybridPoint,
+    delta: &[f32],
+    config: HybridSpaceConfig,
+) -> HybridSpaceResult<HybridPoint> {
+    if point.dim() != delta.len() {
+        return Err(HybridSpaceError::DimensionMismatch {
+            expected: point.dim(),
+            got: delta.len(),
+        });
+    }
+    let config = config.validate()?;
+    let ball = config.poincare_ball()?;
+    let moved = ball.mobius_add(&point.poincare, delta)?;
+    HybridPoint::from_poincare_interior(&moved, point.depth, config)
+}
+
+/// Exponential map in the Poincare interior of the hybrid hyperball.
+pub fn hybrid_exp_map(
+    base: &HybridPoint,
+    tangent: &[f32],
+    config: HybridSpaceConfig,
+) -> HybridSpaceResult<HybridPoint> {
+    if base.dim() != tangent.len() {
+        return Err(HybridSpaceError::DimensionMismatch {
+            expected: base.dim(),
+            got: tangent.len(),
+        });
+    }
+    let config = config.validate()?;
+    let ball = config.poincare_ball()?;
+    let moved = ball.exp_map(&base.poincare, tangent)?;
+    HybridPoint::from_poincare_interior(&moved, base.depth, config)
+}
+
+/// Logarithmic map between two hybrid points, expressed in the tangent space at
+/// `base`'s Poincare coordinate.
+pub fn hybrid_log_map(
+    base: &HybridPoint,
+    target: &HybridPoint,
+    config: HybridSpaceConfig,
+) -> HybridSpaceResult<Vec<f32>> {
+    if base.dim() != target.dim() {
+        return Err(HybridSpaceError::DimensionMismatch {
+            expected: base.dim(),
+            got: target.dim(),
+        });
+    }
+    let config = config.validate()?;
+    let ball = config.poincare_ball()?;
+    Ok(ball.log_map(&base.poincare, &target.poincare)?)
+}
+
+/// Parallel transport a tangent vector between two hybrid Poincare interiors.
+pub fn hybrid_parallel_transport(
+    from: &HybridPoint,
+    to: &HybridPoint,
+    tangent: &[f32],
+    config: HybridSpaceConfig,
+) -> HybridSpaceResult<Vec<f32>> {
+    if from.dim() != to.dim() {
+        return Err(HybridSpaceError::DimensionMismatch {
+            expected: from.dim(),
+            got: to.dim(),
+        });
+    }
+    if from.dim() != tangent.len() {
+        return Err(HybridSpaceError::DimensionMismatch {
+            expected: from.dim(),
+            got: tangent.len(),
+        });
+    }
+    let config = config.validate()?;
+    let ball = config.poincare_ball()?;
+    Ok(ball.parallel_transport(&from.poincare, &to.poincare, tangent)?)
+}
+
 /// Project a Poincare interior point back to semantic boundary direction.
 ///
 /// Useful for UI rays, labels, and "where does this point aim?"
@@ -1269,6 +1408,29 @@ mod tests {
         v.iter().map(|x| x * x).sum::<f32>().sqrt()
     }
 
+    fn assert_close(left: f32, right: f32, tol: f32) {
+        assert!(
+            (left - right).abs() <= tol,
+            "expected {left} ~= {right} within {tol}, diff={}",
+            (left - right).abs()
+        );
+    }
+
+    fn assert_vec_close(left: &[f32], right: &[f32], tol: f32) {
+        assert_eq!(left.len(), right.len());
+        for (index, (l, r)) in left.iter().zip(right).enumerate() {
+            assert!(
+                (l - r).abs() <= tol,
+                "index {index}: expected {l} ~= {r} within {tol}, diff={}",
+                (l - r).abs()
+            );
+        }
+    }
+
+    fn riemannian_norm(point: &HybridPoint, tangent: &[f32], config: HybridSpaceConfig) -> f32 {
+        poincare::conformal_factor(&point.poincare, config.curvature) * norm(tangent)
+    }
+
     fn unit_from_angle(rad: f32) -> [f32; 2] {
         [rad.cos(), rad.sin()]
     }
@@ -1292,6 +1454,80 @@ mod tests {
         assert!(deep.hyperbolic_radius > shallow.hyperbolic_radius);
         assert!(deep.poincare_radius > shallow.poincare_radius);
         assert!(deep.poincare_radius < config.max_poincare_radius());
+    }
+
+    #[test]
+    fn hybrid_rebuilds_shell_direction_from_poincare_interior() {
+        let config = HybridSpaceConfig::default();
+        let point = HybridPoint::from_poincare_interior(&[0.3, 0.4], 3.0, config).assert_ok();
+
+        assert_close(norm(&point.semantic_direction), 1.0, 1e-5);
+        assert_close(point.poincare_radius, 0.5, 1e-5);
+        assert_close(
+            point.hyperbolic_radius,
+            config.poincare_radius_to_hyperbolic_radius(0.5),
+            1e-5,
+        );
+        assert_vec_close(&point.semantic_direction, &[0.6, 0.8], 1e-5);
+    }
+
+    #[test]
+    fn hybrid_projection_keeps_interior_inside_hyperball() {
+        let config = HybridSpaceConfig::default();
+        let mut point = HybridPoint {
+            semantic_direction: vec![1.0, 0.0],
+            poincare: vec![10.0, 0.0],
+            depth: 2.0,
+            hyperbolic_radius: 0.0,
+            poincare_radius: 10.0,
+        };
+
+        point.project_interior(config).assert_ok();
+
+        assert!(point.poincare_radius <= config.max_poincare_radius() + 1e-5);
+        assert_close(norm(&point.semantic_direction), 1.0, 1e-5);
+    }
+
+    #[test]
+    fn hybrid_mobius_translate_updates_projection_without_losing_depth_label() {
+        let config = HybridSpaceConfig::default();
+        let point = HybridPoint::from_embedding_and_depth(&[1.0, 0.0], 2.0, config).assert_ok();
+        let moved = hybrid_mobius_translate(&point, &[0.05, 0.08], config).assert_ok();
+
+        assert_eq!(moved.depth, point.depth);
+        assert!(moved.poincare_radius <= config.max_poincare_radius() + 1e-5);
+        assert_close(norm(&moved.semantic_direction), 1.0, 1e-5);
+        assert!(moved.semantic_direction[1] > point.semantic_direction[1]);
+    }
+
+    #[test]
+    fn hybrid_exp_log_roundtrip_uses_poincare_interior() {
+        let config = HybridSpaceConfig::default();
+        let base = HybridPoint::from_embedding_and_depth(&[1.0, 0.2], 2.0, config).assert_ok();
+        let tangent = vec![0.025, -0.015];
+
+        let moved = hybrid_exp_map(&base, &tangent, config).assert_ok();
+        let recovered = hybrid_log_map(&base, &moved, config).assert_ok();
+
+        assert_vec_close(&recovered, &tangent, 1e-3);
+        assert!(moved.poincare_radius <= config.max_poincare_radius() + 1e-5);
+        assert_close(norm(&moved.semantic_direction), 1.0, 1e-5);
+    }
+
+    #[test]
+    fn hybrid_parallel_transport_preserves_poincare_riemannian_norm() {
+        let config = HybridSpaceConfig::default();
+        let from = HybridPoint::from_embedding_and_depth(&[1.0, 0.1], 2.0, config).assert_ok();
+        let to = HybridPoint::from_embedding_and_depth(&[0.2, 1.0], 4.0, config).assert_ok();
+        let tangent = vec![0.02, -0.01];
+
+        let transported = hybrid_parallel_transport(&from, &to, &tangent, config).assert_ok();
+
+        assert_close(
+            riemannian_norm(&from, &tangent, config),
+            riemannian_norm(&to, &transported, config),
+            1e-3,
+        );
     }
 
     #[test]

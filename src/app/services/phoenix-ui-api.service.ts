@@ -14,6 +14,21 @@ import {
 } from '../lib/search/phoenix-line-search';
 import { PhoenixBackendService } from './phoenix-backend.service';
 import { PhoenixStoreService } from './phoenix-store.service';
+import {
+    HOPF_MANIFOLD_CAPABILITIES,
+    HYBRID_MANIFOLD_CAPABILITIES,
+    LORENTZ_MANIFOLD_CAPABILITIES,
+    type AtlasManifoldMode,
+    type LorentzForestBuildRequest,
+    type LorentzForestBuildResponse,
+    type LorentzForestCacheRequest,
+    type LorentzForestCacheStatus,
+    type LorentzForestQueryRequest,
+    type LorentzForestQueryResponse,
+    type ManifoldAtlasSnapshot,
+    type ManifoldProjectionSource,
+    type ManifoldTopologyPayload,
+} from './manifold-atlas.types';
 import type { PhoenixGraphDeltaBinaryResult } from './phoenix-wasm.service';
 
 export interface ProvenanceContext {
@@ -24,11 +39,118 @@ export interface ProvenanceContext {
 }
 
 export interface SearchScope {
+    mode?: string;
     noteId?: string;
+    noteIds?: string[];
     worldId?: string;
     narrativeId?: string;
     folderId?: string;
     folderPath?: string;
+}
+
+export type AtlasRichScanPolicy = 'dirty-only' | 'force';
+
+export interface AtlasRichScanDocumentInput {
+    documentId: string;
+    noteId?: string;
+    title: string;
+    text: string;
+    scope?: SearchScope;
+}
+
+export interface AtlasRichScanStageSummary {
+    stage: 'surface' | 'evidenceGraph' | 'embeddings' | 'overgraph' | string;
+    status: string;
+    durationMs: number;
+    counts: Record<string, number>;
+}
+
+export interface AtlasRichScanCandidateSummary {
+    id: string;
+    label: string;
+    kind: string;
+    confidence: number;
+    sourceDocumentId?: string;
+    sourceNoteId?: string;
+    evidence?: string;
+    aliases?: string[];
+    range?: { start: number; end: number } | null;
+    sourceStage?: string;
+}
+
+export interface AtlasRichScanResult {
+    scanId: string;
+    processedDocuments: number;
+    skippedDocuments: number;
+    manifestDirtyPlan?: Record<string, unknown>;
+    stageSummaries: AtlasRichScanStageSummary[];
+    lensChunkCounts: Record<string, number>;
+    graphDeltaCounts: Record<string, number>;
+    embeddingCounts: { leaf: number; entity: number; lens: number };
+    relationCandidateCount: number;
+    candidateSuggestions: AtlasRichScanCandidateSummary[];
+    appliedOptions?: AtlasRichScanAppliedOptions;
+    preservationCounts?: Record<string, number>;
+    diagnostics?: Array<{ code: string; message: string }>;
+}
+
+export interface AtlasRichScanAppliedOptions {
+    policy?: AtlasRichScanPolicy;
+    embeddingModelId?: string | null;
+    embeddingDimension?: number | null;
+    surfaceConfigHash?: string | null;
+    graphConfigHash?: string | null;
+    returnCandidateSuggestions?: boolean;
+    includeSemanticAtlas?: boolean;
+}
+
+export interface AtlasRichScanRequest {
+    scanId?: string;
+    scope?: SearchScope & { mode?: string };
+    documents?: AtlasRichScanDocumentInput[];
+    changedDocumentIds?: string[];
+    policy?: AtlasRichScanPolicy;
+    embeddingModelId?: string;
+    embeddingDimension?: number;
+    surfaceConfigHash?: string;
+    graphConfigHash?: string;
+    returnCandidateSuggestions?: boolean;
+    includeSemanticAtlas?: boolean;
+}
+
+export interface SemanticAtlasEmbeddingNode {
+    id: string;
+    label: string;
+    sourceType: 'leaf' | 'entity' | 'lens' | string;
+    vector: number[];
+    documentId?: string;
+    narrativeId?: string;
+    folderId?: string;
+    preview?: string;
+    kind?: string;
+    baseVector?: [number, number, number];
+    cellId?: string;
+    secondaryCellIds?: string[];
+    cellDistance?: number;
+    boundaryScore?: number;
+    phase?: number;
+    fiberKind?: string;
+    geometryVersion?: string;
+}
+
+export interface SemanticAtlasEmbeddingEdge {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: string;
+    confidence: number;
+}
+
+export interface SemanticAtlasEmbeddingAtlas extends ManifoldTopologyPayload {
+    nodes: SemanticAtlasEmbeddingNode[];
+    edges: SemanticAtlasEmbeddingEdge[];
+    sourceLabel: string;
+    projectionSource?: ManifoldProjectionSource | string;
 }
 
 export interface KnowledgeGraphNode {
@@ -527,6 +649,132 @@ export class PhoenixUiApiService {
         });
     }
 
+    async atlasRichScan(request: AtlasRichScanRequest): Promise<AtlasRichScanResult> {
+        await this.loadRuntime();
+        if (!this.dictionary.length) {
+            await this.hydrateWithEntitiesInternal();
+        }
+        const scope = this.toPhoenixScope(request.scope);
+        const result = await this.phoenix.atlasRichScan({
+            scanId: request.scanId ?? null,
+            sessionId: await this.ensureMainSession(),
+            scope: {
+                mode: request.scope?.mode || (request.scope?.noteId ? 'note' : request.scope?.folderId ? 'folder' : request.scope?.narrativeId ? 'narrative' : 'global'),
+                ...scope,
+                noteId: request.scope?.noteId || null,
+                noteIds: request.scope?.noteIds || [],
+            },
+            documents: (request.documents || []).map((document) => ({
+                documentId: document.documentId,
+                noteId: document.noteId || document.documentId,
+                title: document.title || document.documentId,
+                text: document.text || '',
+                scope: this.toPhoenixScope(document.scope || request.scope),
+            })),
+            changedDocumentIds: request.changedDocumentIds || [],
+            resolverSeed: this.buildResolverSeed(request.scope),
+            acceptedCandidateIds: [],
+            rejectedCandidateKeys: [],
+            options: {
+                policy: request.policy || 'dirty-only',
+                embeddingModelId: request.embeddingModelId || null,
+                embeddingDimension: request.embeddingDimension || null,
+                surfaceConfigHash: request.surfaceConfigHash || null,
+                graphConfigHash: request.graphConfigHash || null,
+                returnCandidateSuggestions: request.returnCandidateSuggestions !== false,
+                includeSemanticAtlas: request.includeSemanticAtlas !== false,
+            },
+        }) as AtlasRichScanResult;
+        this.invalidateKnowledgeGraphCache();
+        this.store.markDerivedDirty();
+        await this.store.triggerSnapshot();
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('phoenix-projection-invalidated'));
+            window.dispatchEvent(new CustomEvent('phoenix-semantic-atlas-updated', { detail: result }));
+        }
+        return result;
+    }
+
+    async loadSemanticAtlasEmbeddings(scope?: SearchScope): Promise<SemanticAtlasEmbeddingAtlas | null> {
+        await this.loadRuntime();
+        try {
+            const [documentRows, nodeRows, candidateRows] = await Promise.all([
+                this.phoenix.storeCommand('relation:list', { relation: 'semantic_documents' }),
+                this.phoenix.storeCommand('relation:list', { relation: 'semantic_node_prototypes' }),
+                this.phoenix.storeCommand('relation:list', { relation: 'graph_candidate_edges' }),
+            ]);
+            return semanticAtlasRowsToPayload(
+                Array.isArray(documentRows) ? documentRows : [],
+                Array.isArray(nodeRows) ? nodeRows : [],
+                Array.isArray(candidateRows) ? candidateRows : [],
+                scope,
+            );
+        } catch (error) {
+            console.warn('[PhoenixUiApi] Backend Semantic Atlas embeddings unavailable.', error);
+            return null;
+        }
+    }
+
+    async loadManifoldAtlasSnapshot(
+        manifold: AtlasManifoldMode,
+        scope?: SearchScope,
+    ): Promise<ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas> | null> {
+        await this.loadRuntime();
+        try {
+            const nativeSnapshot = await this.phoenix.manifoldSnapshot({ manifold, scope: this.toPhoenixScope(scope), limit: 360 });
+            if (nativeSnapshot?.payload?.nodes?.length) {
+                return nativeSnapshot as ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>;
+            }
+        } catch (error) {
+            console.warn('[PhoenixUiApi] Native manifold snapshot unavailable; using Semantic Atlas fallback.', error);
+        }
+        const payload = await this.loadSemanticAtlasEmbeddings(scope);
+        if (!payload) return null;
+        const isHopf = manifold === 'hopf';
+        const isLorentz = manifold === 'lorentz';
+        return {
+            manifold,
+            geometryVersion: isHopf
+                ? 'hopf_ico_r5_v1'
+                : isLorentz
+                  ? 'lorentz_h4_forest_v1'
+                  : 'hybrid_semantic_v1',
+            sourceLabel: isHopf
+                ? 'backend semantic atlas -> hopf adapter'
+                : isLorentz
+                  ? 'backend semantic atlas -> lorentz sidecar fallback'
+                : payload.sourceLabel,
+            capabilities: isHopf
+                ? HOPF_MANIFOLD_CAPABILITIES
+                : isLorentz
+                  ? LORENTZ_MANIFOLD_CAPABILITIES
+                : HYBRID_MANIFOLD_CAPABILITIES,
+            payload: {
+                ...payload,
+                projectionSource: 'semantic_atlas_rows',
+            },
+        };
+    }
+
+    async lorentzForestCacheStatus(
+        request: LorentzForestCacheRequest = {},
+    ): Promise<LorentzForestCacheStatus> {
+        await this.loadRuntime();
+        return this.phoenix.lorentzForestCache(this.withNativeScope(request)) as Promise<LorentzForestCacheStatus>;
+    }
+
+    async buildLorentzForest(
+        request: LorentzForestBuildRequest = {},
+    ): Promise<LorentzForestBuildResponse> {
+        await this.loadRuntime();
+        return this.phoenix.lorentzForestBuild(this.withNativeScope(request)) as Promise<LorentzForestBuildResponse>;
+    }
+
+    async queryLorentzForest(request: LorentzForestQueryRequest): Promise<LorentzForestQueryResponse> {
+        await this.loadRuntime();
+        return this.phoenix.lorentzForestQuery(this.withNativeScope(request)) as Promise<LorentzForestQueryResponse>;
+    }
+
     async systemCreateSession(config: Record<string, unknown> = {}): Promise<{ sessionId: string }> {
         await this.loadRuntime();
         const label = typeof config['label'] === 'string' ? String(config['label']) : 'phoenix-ui-session';
@@ -623,7 +871,6 @@ export class PhoenixUiApiService {
         queueMicrotask(() => {
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('phoenix-ready'));
-                window.dispatchEvent(new CustomEvent('gokitt-ready'));
             }
             for (const callback of readyCallbacks) {
                 try {
@@ -744,11 +991,24 @@ export class PhoenixUiApiService {
             return {};
         }
         const scopeRecord = scope as Record<string, unknown>;
+        const noteIds = Array.isArray(scopeRecord['noteIds'])
+            ? scopeRecord['noteIds'].filter((value): value is string => typeof value === 'string' && value.length > 0)
+            : undefined;
         return {
+            mode: typeof scopeRecord['mode'] === 'string' ? scopeRecord['mode'] : undefined,
+            noteId: typeof scopeRecord['noteId'] === 'string' ? scopeRecord['noteId'] : undefined,
+            noteIds,
             narrativeId: typeof scopeRecord['narrativeId'] === 'string' ? scopeRecord['narrativeId'] : undefined,
             folderPath: typeof scopeRecord['folderPath'] === 'string' ? scopeRecord['folderPath'] : undefined,
             worldId: typeof scopeRecord['worldId'] === 'string' ? scopeRecord['worldId'] : undefined,
             folderId: typeof scopeRecord['folderId'] === 'string' ? scopeRecord['folderId'] : undefined,
+        };
+    }
+
+    private withNativeScope(request: { scope?: Record<string, unknown> }): Record<string, unknown> {
+        return {
+            ...request,
+            scope: this.toPhoenixScope(request.scope),
         };
     }
 
@@ -1112,6 +1372,142 @@ function graphDeltaToKnowledgeGraph(delta: PhoenixGraphDeltaBinaryResult): Knowl
         }))
         .filter((edge) => edge.source && edge.target && nodes[edge.source] && nodes[edge.target]);
     return { nodes, edges };
+}
+
+function semanticAtlasRowsToPayload(
+    documentRows: any[],
+    nodeRows: any[],
+    candidateRows: any[],
+    scope?: SearchScope,
+): SemanticAtlasEmbeddingAtlas | null {
+    const nodes: SemanticAtlasEmbeddingNode[] = [];
+    const seen = new Set<string>();
+    const noteFilters = new Set([
+        ...(scope?.noteIds || []),
+        scope?.noteId || '',
+    ].filter(Boolean));
+
+    for (const row of documentRows) {
+        const documentId = stringField(row, 'document_id', 'documentId');
+        if (!documentId || (noteFilters.size && !noteFilters.has(documentId))) {
+            continue;
+        }
+        const vector = vectorField(row, 'vec');
+        if (!vector.length) {
+            continue;
+        }
+        const id = `doc::${documentId}`;
+        seen.add(id);
+        nodes.push({
+            id,
+            label: `Document ${documentId.slice(0, 8)}`,
+            sourceType: 'leaf',
+            vector,
+            documentId,
+            preview: evidencePreview(row),
+            kind: 'CONCEPT',
+        });
+    }
+
+    for (const row of nodeRows) {
+        const id = stringField(row, 'node_id', 'nodeId');
+        const documentId = stringField(row, 'document_id', 'documentId');
+        const narrativeId = stringField(row, 'narrative_id', 'narrativeId');
+        const folderId = stringField(row, 'folder_id', 'folderId');
+        if (!id || !semanticNodeMatchesScope({ documentId, narrativeId, folderId }, scope)) {
+            continue;
+        }
+        const vector = vectorField(row, 'vec');
+        if (!vector.length) {
+            continue;
+        }
+        const nodeKind = stringField(row, 'node_kind', 'nodeKind') || 'entity';
+        seen.add(id);
+        nodes.push({
+            id,
+            label: semanticNodeLabel(id),
+            sourceType: nodeKind.includes('lens') ? 'lens' : nodeKind.includes('entity') ? 'entity' : nodeKind,
+            vector,
+            documentId,
+            narrativeId,
+            folderId,
+            preview: evidencePreview(row),
+            kind: nodeKind.includes('event') ? 'EVENT' : 'CONCEPT',
+        });
+    }
+
+    if (!nodes.length) {
+        return null;
+    }
+
+    const edges = candidateRows
+        .map((row) => {
+            const sourceId = stringField(row, 'source_id', 'sourceId');
+            const targetId = stringField(row, 'target_id', 'targetId');
+            if (!sourceId || !targetId || !seen.has(sourceId) || !seen.has(targetId)) {
+                return null;
+            }
+            const type = stringField(row, 'edge_type', 'edgeType') || 'candidate_relation';
+            return {
+                id: `${sourceId}:${type}:${targetId}`,
+                sourceId,
+                targetId,
+                type,
+                confidence: candidateConfidence(row),
+            } satisfies SemanticAtlasEmbeddingEdge;
+        })
+        .filter((edge): edge is SemanticAtlasEmbeddingEdge => !!edge);
+
+    return {
+        nodes,
+        edges,
+        sourceLabel: 'backend semantic atlas',
+    };
+}
+
+function semanticNodeMatchesScope(
+    row: { documentId?: string; narrativeId?: string; folderId?: string },
+    scope?: SearchScope,
+): boolean {
+    if (!scope) return true;
+    if (scope.noteIds?.length && !scope.noteIds.includes(row.documentId || '')) return false;
+    if (scope.noteId && row.documentId !== scope.noteId) return false;
+    if (scope.narrativeId && row.narrativeId !== scope.narrativeId) return false;
+    if (scope.folderId && row.folderId !== scope.folderId) return false;
+    return true;
+}
+
+function stringField(row: any, snake: string, camel: string): string {
+    const value = row?.[snake] ?? row?.[camel];
+    return typeof value === 'string' ? value : '';
+}
+
+function vectorField(row: any, key: string): number[] {
+    const value = row?.[key];
+    return Array.isArray(value)
+        ? value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry))
+        : [];
+}
+
+function evidencePreview(row: any): string {
+    const refs = row?.evidence_refs ?? row?.evidenceRefs;
+    return Array.isArray(refs) ? refs.slice(0, 3).map(String).join(' · ') : '';
+}
+
+function semanticNodeLabel(id: string): string {
+    return id
+        .replace(/^(entity|event|doc)::/i, '')
+        .replace(/^atlas:/i, '')
+        .replace(/[-_:]+/g, ' ')
+        .trim()
+        .slice(0, 48) || id;
+}
+
+function candidateConfidence(row: any): number {
+    const attributes = asRecord(row?.attributes);
+    const graph = asRecord(attributes['graph']);
+    const raw = Number(attributes['score'] ?? graph['confidence'] ?? Number(row?.weight || 0) / 1000);
+    return Number.isFinite(raw) && raw > 0 ? raw : 0.35;
 }
 
 function extractDocumentIds(value: string): string[] {

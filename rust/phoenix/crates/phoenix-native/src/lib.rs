@@ -5,12 +5,12 @@ use phoenix_runtime::PhoenixRuntime;
 pub use phoenix_runtime::SnapshotPartition;
 use phoenix_store_native_core::{SnapshotEnvelope, StoreError};
 use phoenix_types::{
-    AnalyzeTextRequest, CommitRequest, CommitResult, CreateSessionRequest, GraphDeltaRequest,
-    GraphDeltaResult, IngestRequest, IngestResult, PhoenixBootSnapshotRows, QueryRequest,
-    QueryResult, RebuildRequest, RebuildResult, RuntimeConfig, RuntimeInitRequest,
-    RuntimeInitResult, ScanArtifact, ScanRequest, SessionRecord, SessionState, SessionStateRequest,
-    SessionStats, SessionStatsRequest, StoreCommandRequest, StoreCommandResult, StructureArtifact,
-    StructureRequest,
+    AnalyzeTextRequest, AtlasRichScanRequest, AtlasRichScanResult, CommitRequest, CommitResult,
+    CreateSessionRequest, GraphDeltaRequest, GraphDeltaResult, IngestRequest, IngestResult,
+    PhoenixBootSnapshotRows, QueryRequest, QueryResult, RebuildRequest, RebuildResult,
+    RuntimeConfig, RuntimeInitRequest, RuntimeInitResult, ScanArtifact, ScanRequest,
+    SessionRecord, SessionState, SessionStateRequest, SessionStats, SessionStatsRequest,
+    StoreCommandRequest, StoreCommandResult, StructureArtifact, StructureRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +110,13 @@ impl PhoenixNativeRuntime {
 
     pub fn scan(&self, request: ScanRequest) -> ScanArtifact {
         self.runtime.scan_text(request)
+    }
+
+    pub fn atlas_rich_scan(
+        &self,
+        request: AtlasRichScanRequest,
+    ) -> Result<AtlasRichScanResult, StoreError> {
+        self.runtime.atlas_rich_scan(request)
     }
 
     pub fn build_structure(&self, request: StructureRequest) -> StructureArtifact {
@@ -230,6 +237,13 @@ impl PhoenixNativeHost {
 
     pub fn scan(&self, request: ScanRequest) -> Result<ScanArtifact, PhoenixNativeError> {
         Ok(self.runtime()?.scan(request))
+    }
+
+    pub fn atlas_rich_scan(
+        &self,
+        request: AtlasRichScanRequest,
+    ) -> Result<AtlasRichScanResult, PhoenixNativeError> {
+        Ok(self.runtime()?.atlas_rich_scan(request)?)
     }
 
     pub fn build_structure(

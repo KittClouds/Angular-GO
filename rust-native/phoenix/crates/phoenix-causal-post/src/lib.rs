@@ -1,6 +1,7 @@
 pub mod api;
 
 mod graph;
+mod lens_consumer;
 mod normalize;
 #[cfg(test)]
 mod tests;
@@ -9,6 +10,7 @@ mod views;
 pub mod worker;
 
 pub use graph::{build_chain_records, build_counterfactual_reviews, CausalGraphStats};
+pub use lens_consumer::CausalLensChunkConsumer;
 pub use normalize::{
     normalize_causal_inputs, normalize_causal_inputs_with_sidecars, CausalEventProfile,
     CausalNormalizedInputs, CausalReviewCase, CausalSourceClaimTrace,

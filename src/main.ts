@@ -6,7 +6,7 @@ import { AppComponent } from './app/app.component';
 // Phase 0: Global Polyfills (SYNC - before any async)
 // =============================================================================
 
-// Polyfill for Go WASM environment
+// Browser-global compatibility for frontend dependencies that expect global.
 (window as any).global = window;
 
 // Fix Vue 3 Feature Flags Warning (for @tiptap/vue-3)

@@ -17,7 +17,7 @@ import {
 } from './phoenix-wal';
 
 const MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024;
-const ROOT_DIR_NAME = 'gokitt';
+const ROOT_DIR_NAME = 'phoenix';
 const PHOENIX_DIR_NAME = 'phoenix-wal-v1';
 const LEGACY_FILE = 'sqlite.db';
 const LEGACY_BAK = 'sqlite.db.bak';

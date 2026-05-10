@@ -1,3 +1,4 @@
+pub use phoenix_chunker::ChunkLens;
 use phoenix_graph::{GraphMutationBatch, GraptorGraph};
 use phoenix_graph_kernel::{
     KernelCheckpointData, KernelGraphSnapshot, KernelJournalEntry, KernelMutationBatch,
@@ -12,6 +13,7 @@ use phoenix_semantic_v2::{
 use phoenix_types::{IndexedSpan, IngestDocument, ScopeKey, SessionId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -97,6 +99,114 @@ pub struct ScopeLexicalQuerySidecar {
     pub index_path: PathBuf,
     #[serde(default)]
     pub docs: Vec<ScopeLexicalQueryDoc>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkManifest {
+    pub document_id: String,
+    pub document_hash: u64,
+    pub base_chunk_hashes: Vec<u64>,
+    pub lens_chunk_hashes: HashMap<ChunkLens, Vec<u64>>,
+    pub ner_config_hash: u64,
+    pub chunker_config_hash: u64,
+    pub graph_config_hash: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkManifestDirtyPlan {
+    pub document_id: String,
+    pub base_changed_indexes: Vec<usize>,
+    pub rebuild_hints: bool,
+    pub rebuild_all_lenses: bool,
+    pub rebuild_lenses: Vec<ChunkLens>,
+    pub rebuild_graph_edges_only: bool,
+    pub preserve_manual_edges: bool,
+    pub preserve_accepted_candidates: bool,
+    pub preserve_rejected_candidates: bool,
+    pub preserve_graph_positions: bool,
+    pub preserve_stable_entity_ids: bool,
+    pub preserve_stable_chunk_ids: bool,
+}
+
+impl ChunkManifestDirtyPlan {
+    pub fn is_clean(&self) -> bool {
+        self.base_changed_indexes.is_empty()
+            && !self.rebuild_hints
+            && !self.rebuild_all_lenses
+            && self.rebuild_lenses.is_empty()
+            && !self.rebuild_graph_edges_only
+    }
+}
+
+impl ChunkManifest {
+    pub fn dirty_plan_against(&self, previous: Option<&ChunkManifest>) -> ChunkManifestDirtyPlan {
+        let Some(previous) = previous else {
+            return ChunkManifestDirtyPlan {
+                document_id: self.document_id.clone(),
+                base_changed_indexes: (0..self.base_chunk_hashes.len()).collect(),
+                rebuild_hints: true,
+                rebuild_all_lenses: true,
+                rebuild_lenses: self.sorted_lenses(),
+                rebuild_graph_edges_only: true,
+                preserve_manual_edges: true,
+                preserve_accepted_candidates: true,
+                preserve_rejected_candidates: true,
+                preserve_graph_positions: true,
+                preserve_stable_entity_ids: true,
+                preserve_stable_chunk_ids: false,
+            };
+        };
+
+        let base_changed_indexes =
+            changed_hash_indexes(&previous.base_chunk_hashes, &self.base_chunk_hashes);
+        let ner_changed = previous.ner_config_hash != self.ner_config_hash;
+        let chunker_changed = previous.chunker_config_hash != self.chunker_config_hash;
+        let graph_changed = previous.graph_config_hash != self.graph_config_hash;
+        let document_changed = previous.document_hash != self.document_hash;
+        let mut rebuild_lenses = BTreeSet::new();
+        for lens in previous
+            .lens_chunk_hashes
+            .keys()
+            .chain(self.lens_chunk_hashes.keys())
+        {
+            if previous.lens_chunk_hashes.get(lens) != self.lens_chunk_hashes.get(lens) {
+                rebuild_lenses.insert(*lens);
+            }
+        }
+        if document_changed || chunker_changed || !base_changed_indexes.is_empty() {
+            rebuild_lenses.extend(self.sorted_lenses());
+        }
+
+        ChunkManifestDirtyPlan {
+            document_id: self.document_id.clone(),
+            base_changed_indexes,
+            rebuild_hints: ner_changed || document_changed,
+            rebuild_all_lenses: chunker_changed || document_changed,
+            rebuild_lenses: rebuild_lenses.into_iter().collect(),
+            rebuild_graph_edges_only: graph_changed,
+            preserve_manual_edges: true,
+            preserve_accepted_candidates: true,
+            preserve_rejected_candidates: true,
+            preserve_graph_positions: true,
+            preserve_stable_entity_ids: true,
+            preserve_stable_chunk_ids: !document_changed && !chunker_changed,
+        }
+    }
+
+    fn sorted_lenses(&self) -> Vec<ChunkLens> {
+        let mut lenses = self.lens_chunk_hashes.keys().copied().collect::<Vec<_>>();
+        lenses.sort_unstable();
+        lenses
+    }
+}
+
+fn changed_hash_indexes(previous: &[u64], current: &[u64]) -> Vec<usize> {
+    let len = previous.len().max(current.len());
+    (0..len)
+        .filter(|index| previous.get(*index) != current.get(*index))
+        .collect()
 }
 
 #[derive(Debug, Error)]
@@ -457,6 +567,19 @@ pub trait PhoenixBundleStoreV2 {
     fn delete_bundle(&self, key: &BundleKey) -> Result<bool, StoreError>;
 }
 
+pub trait PhoenixChunkManifestStore {
+    fn init_chunk_manifest_schema(&self) -> Result<(), StoreError>;
+    fn persist_chunk_manifest(&self, manifest: &ChunkManifest) -> Result<(), StoreError>;
+    fn load_chunk_manifest(&self, document_id: &str) -> Result<Option<ChunkManifest>, StoreError>;
+    fn plan_chunk_manifest_update(
+        &self,
+        manifest: &ChunkManifest,
+    ) -> Result<ChunkManifestDirtyPlan, StoreError> {
+        let previous = self.load_chunk_manifest(&manifest.document_id)?;
+        Ok(manifest.dirty_plan_against(previous.as_ref()))
+    }
+}
+
 pub trait PhoenixArchiveStoreV2 {
     fn init_archive_schema(&self) -> Result<(), StoreError>;
     fn ingest_mode(&self) -> IngestMode;
@@ -642,6 +765,12 @@ pub trait PhoenixSemanticIndexStore {
         &self,
         rows: &[NativeSemanticNodeVectorRecord],
     ) -> Result<(), StoreError>;
+    fn upsert_semantic_node_vectors_native_owned(
+        &self,
+        rows: Vec<NativeSemanticNodeVectorRecord>,
+    ) -> Result<(), StoreError> {
+        self.upsert_semantic_node_vectors_native(&rows)
+    }
     fn query_semantic_neighbors(
         &self,
         query_vector: &[f32],
@@ -792,6 +921,69 @@ pub trait PhoenixGraphKernelStoreV2 {
 pub trait PhoenixNativeStore: PhoenixNativeRowStore + PhoenixGraphDurabilityStore {}
 
 impl<T> PhoenixNativeStore for T where T: PhoenixNativeRowStore + PhoenixGraphDurabilityStore {}
+
+#[cfg(test)]
+mod chunk_manifest_tests {
+    use super::*;
+
+    fn manifest(document_hash: u64) -> ChunkManifest {
+        let mut lens_chunk_hashes = HashMap::new();
+        lens_chunk_hashes.insert(ChunkLens::Entity, vec![10, 20]);
+        lens_chunk_hashes.insert(ChunkLens::Relationship, vec![30]);
+        ChunkManifest {
+            document_id: "doc".to_owned(),
+            document_hash,
+            base_chunk_hashes: vec![1, 2, 3],
+            lens_chunk_hashes,
+            ner_config_hash: 4,
+            chunker_config_hash: 5,
+            graph_config_hash: 6,
+        }
+    }
+
+    #[test]
+    fn unchanged_manifest_is_clean_and_preserves_ids() {
+        let current = manifest(100);
+        let plan = current.dirty_plan_against(Some(&current));
+        assert!(plan.is_clean());
+        assert!(plan.preserve_manual_edges);
+        assert!(plan.preserve_accepted_candidates);
+        assert!(plan.preserve_rejected_candidates);
+        assert!(plan.preserve_graph_positions);
+        assert!(plan.preserve_stable_entity_ids);
+        assert!(plan.preserve_stable_chunk_ids);
+    }
+
+    #[test]
+    fn changed_base_chunk_rebuilds_hints_and_lenses() {
+        let previous = manifest(100);
+        let mut current = manifest(101);
+        current.base_chunk_hashes[1] = 99;
+        let plan = current.dirty_plan_against(Some(&previous));
+        assert_eq!(plan.base_changed_indexes, vec![1]);
+        assert!(plan.rebuild_hints);
+        assert!(plan.rebuild_all_lenses);
+        assert!(!plan.rebuild_lenses.is_empty());
+        assert!(!plan.preserve_stable_chunk_ids);
+    }
+
+    #[test]
+    fn config_changes_target_correct_layers() {
+        let previous = manifest(100);
+        let mut current = manifest(100);
+        current.ner_config_hash = 44;
+        let plan = current.dirty_plan_against(Some(&previous));
+        assert!(plan.rebuild_hints);
+        assert!(!plan.rebuild_all_lenses);
+        assert!(plan.preserve_stable_chunk_ids);
+
+        let mut current = manifest(100);
+        current.graph_config_hash = 66;
+        let plan = current.dirty_plan_against(Some(&previous));
+        assert!(plan.rebuild_graph_edges_only);
+        assert!(plan.rebuild_lenses.is_empty());
+    }
+}
 
 pub fn relation_spec(relation: &str) -> Result<&'static PhoenixRelationSpec, StoreError> {
     ALL_RELATIONS

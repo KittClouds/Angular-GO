@@ -70,7 +70,10 @@ impl PropositionLowerer {
                         document_id: evidence.document_id.clone(),
                         note_id: evidence.note_id.clone(),
                         label: CompactString::from(evidence.label.as_str()),
-                        kind: evidence.kind.as_ref().map(|kind| CompactString::from(kind.as_str())),
+                        kind: evidence
+                            .kind
+                            .as_ref()
+                            .map(|kind| CompactString::from(kind.as_str())),
                         range: SourceRange::from(evidence.range),
                     })
                     .collect(),

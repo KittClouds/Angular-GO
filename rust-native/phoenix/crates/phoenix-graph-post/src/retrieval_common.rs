@@ -718,6 +718,7 @@ fn with_query_embedder<R>(
                     prefix_passage: false,
                     pooling: Default::default(),
                     input_prefix: Default::default(),
+                    execution_provider: Default::default(),
                 })
                 .map_err(|error| {
                     GraphBackendError::Operation(format!("query embed load failed: {error}"))

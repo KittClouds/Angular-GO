@@ -1,11 +1,11 @@
 /**
  * Operations Module — Pure SQLite CRUD
  * 
- * Architecture (Pure OPFS + Go Memory):
- * - GoKittStoreService is the ONLY source of truth
+ * Architecture (Phoenix native + Dexie cache):
+ * - PhoenixStoreService is the source of truth
  * - Dexie is an ephemeral, in-memory state cache for Angular UI
  * - DataSyncService is ELIMINATED
- * - All CRUD goes directly to Go SQLite via the WASM worker
+ * - All durable CRUD goes through the native Phoenix bridge
  */
 import { db } from './dexie/db';
 import {
@@ -102,7 +102,7 @@ export interface Edge {
 }
 
 // =============================================================================
-// STORE ACCESS (Direct to GoKittStoreService — NO DataSyncService)
+// STORE ACCESS (Direct to PhoenixStoreService - NO DataSyncService)
 // =============================================================================
 
 let _store: PhoenixStoreService | null = null;

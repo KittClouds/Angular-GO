@@ -338,9 +338,6 @@ export class NoteEditorStore {
             return;
         }
         this.activeNoteId.set(id);
-        if (previousNoteId && previousNoteId !== id) {
-            void this.releaseNoteBody(previousNoteId);
-        }
     }
 
     private withActiveNote(noteId: string | null): EditorSessionState {

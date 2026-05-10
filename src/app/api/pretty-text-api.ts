@@ -74,7 +74,7 @@ export function setDiscoveryStore(store: DiscoveryStore) {
 export function setPhoenixUiApi(service: PhoenixUiApiService) {
     phoenixUiApi = service;
 
-    // Build the pipeline when GoKitt becomes available
+    // Build the pipeline when Phoenix native becomes available
     scanPipeline = new ScanPipeline(
         new HighlightScanner(service),
         new DiscoveryScanner(service, {
@@ -90,9 +90,6 @@ export function setPhoenixUiApi(service: PhoenixUiApiService) {
 export function getPhoenixUiApi(): PhoenixUiApiService | null {
     return phoenixUiApi;
 }
-
-export const setGoKittService = setPhoenixUiApi;
-export const getGoKittService = getPhoenixUiApi;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interface (unchanged — backward compatible)
@@ -167,8 +164,8 @@ class PrettyTextAPI implements PrettyTextApi {
         this.searchHighlightTerms = searchHighlightStore.getTerms();
 
         if (typeof window !== 'undefined') {
-            window.addEventListener('gokitt-ready', () => {
-                console.log('[PrettyTextAPI] GoKitt ready — triggering implicit refresh');
+            window.addEventListener('phoenix-ready', () => {
+                console.log('[PrettyTextAPI] Phoenix ready - triggering implicit refresh');
                 if (this.lastDoc && this.currentNoteId) {
                     this.scheduleImplicitRefresh(this.lastDoc, { immediate: true, force: true });
                     return;
@@ -441,7 +438,7 @@ class PrettyTextAPI implements PrettyTextApi {
         return this.implicitDecorations.filter(span => span.type === 'entity_implicit');
     }
 
-    /** Async scan that waits for GoKitt to return spans (used on note open) */
+    /** Async scan that waits for Phoenix native to return spans (used on note open) */
     async scanForSpansAsync(doc: ProseMirrorDoc): Promise<DecorationSpan[]> {
         if (!scanPipeline) return [];
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
 use crate::default_embedding_model_root;
 
@@ -54,6 +54,7 @@ impl TextEmbeddingProfile {
 pub enum TextEmbeddingPooling {
     #[default]
     Cls,
+    Mean,
     LastToken,
 }
 
@@ -64,6 +65,40 @@ pub enum TextEmbeddingInputPrefix {
     Passage,
     JinaQuery,
     JinaDocument,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OrtExecutionProviderPreference {
+    #[default]
+    Cpu,
+    DirectMl,
+    Cuda,
+}
+
+impl OrtExecutionProviderPreference {
+    pub fn from_env() -> Self {
+        env::var("PHOENIX_EMBED_ORT_EP")
+            .ok()
+            .and_then(|value| Self::parse(&value))
+            .unwrap_or_default()
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "cpu" => Some(Self::Cpu),
+            "dml" | "directml" | "direct-ml" => Some(Self::DirectMl),
+            "cuda" | "nvidia" => Some(Self::Cuda),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::DirectMl => "directml",
+            Self::Cuda => "cuda",
+        }
+    }
 }
 
 impl TextEmbeddingInputPrefix {
@@ -86,6 +121,7 @@ pub struct OrtTextEmbedConfig {
     pub prefix_passage: bool,
     pub pooling: TextEmbeddingPooling,
     pub input_prefix: TextEmbeddingInputPrefix,
+    pub execution_provider: OrtExecutionProviderPreference,
 }
 
 impl Default for OrtTextEmbedConfig {
@@ -98,6 +134,7 @@ impl Default for OrtTextEmbedConfig {
             prefix_passage: false,
             pooling: TextEmbeddingPooling::default(),
             input_prefix: TextEmbeddingInputPrefix::default(),
+            execution_provider: OrtExecutionProviderPreference::from_env(),
         }
     }
 }
@@ -112,6 +149,7 @@ impl OrtTextEmbedConfig {
             prefix_passage: false,
             pooling: TextEmbeddingPooling::LastToken,
             input_prefix: TextEmbeddingInputPrefix::JinaQuery,
+            execution_provider: OrtExecutionProviderPreference::from_env(),
         }
     }
 

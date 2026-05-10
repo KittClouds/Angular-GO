@@ -799,6 +799,167 @@ pub struct ScanRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AtlasRichScanPolicy {
+    DirtyOnly,
+    Force,
+}
+
+impl Default for AtlasRichScanPolicy {
+    fn default() -> Self {
+        Self::DirtyOnly
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanScope {
+    pub mode: Option<String>,
+    pub world_id: Option<String>,
+    pub narrative_id: Option<String>,
+    pub folder_id: Option<String>,
+    pub folder_path: Option<String>,
+    pub note_id: Option<NoteId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanOptions {
+    #[serde(default)]
+    pub policy: AtlasRichScanPolicy,
+    pub embedding_model_id: Option<String>,
+    pub embedding_dimension: Option<usize>,
+    pub surface_config_hash: Option<String>,
+    #[serde(default)]
+    pub lens_config_hashes: BTreeMap<String, String>,
+    pub graph_config_hash: Option<String>,
+    #[serde(default = "default_true")]
+    pub return_candidate_suggestions: bool,
+    #[serde(default = "default_true")]
+    pub include_semantic_atlas: bool,
+}
+
+impl Default for AtlasRichScanOptions {
+    fn default() -> Self {
+        Self {
+            policy: AtlasRichScanPolicy::DirtyOnly,
+            embedding_model_id: None,
+            embedding_dimension: None,
+            surface_config_hash: None,
+            lens_config_hashes: BTreeMap::new(),
+            graph_config_hash: None,
+            return_candidate_suggestions: true,
+            include_semantic_atlas: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanDocument {
+    pub document_id: DocumentId,
+    pub note_id: Option<NoteId>,
+    pub title: String,
+    pub text: String,
+    #[serde(default)]
+    pub scope: ScopeKey,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanRequest {
+    pub scan_id: Option<String>,
+    pub session_id: Option<SessionId>,
+    #[serde(default)]
+    pub scope: AtlasRichScanScope,
+    #[serde(default)]
+    pub documents: Vec<AtlasRichScanDocument>,
+    #[serde(default)]
+    pub changed_document_ids: Vec<DocumentId>,
+    #[serde(default)]
+    pub resolver_seed: Vec<ResolverEntitySeed>,
+    #[serde(default)]
+    pub accepted_candidate_ids: Vec<String>,
+    #[serde(default)]
+    pub rejected_candidate_keys: Vec<String>,
+    #[serde(default)]
+    pub options: AtlasRichScanOptions,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanStageSummary {
+    pub stage: String,
+    pub status: String,
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub counts: BTreeMap<String, usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanManifestSummary {
+    pub policy: String,
+    pub processed_documents: usize,
+    pub skipped_documents: usize,
+    pub dirty_documents: usize,
+    pub clean_documents: usize,
+    pub manifests_loaded: usize,
+    pub manifests_persisted: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanCandidateSummary {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub confidence: f32,
+    pub source_document_id: Option<DocumentId>,
+    pub source_note_id: Option<NoteId>,
+    pub evidence: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub range: Option<TextRange>,
+    pub source_stage: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanEmbeddingCounts {
+    pub leaf: usize,
+    pub entity: usize,
+    pub lens: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanResult {
+    pub scan_id: String,
+    pub processed_documents: usize,
+    pub skipped_documents: usize,
+    pub manifest_dirty_plan: AtlasRichScanManifestSummary,
+    #[serde(default)]
+    pub stage_summaries: Vec<AtlasRichScanStageSummary>,
+    #[serde(default)]
+    pub lens_chunk_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub graph_delta_counts: BTreeMap<String, usize>,
+    pub embedding_counts: AtlasRichScanEmbeddingCounts,
+    pub relation_candidate_count: usize,
+    #[serde(default)]
+    pub candidate_suggestions: Vec<AtlasRichScanCandidateSummary>,
+    #[serde(default)]
+    pub preservation_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TokenClass {
     Word,

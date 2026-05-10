@@ -13,8 +13,11 @@ use crate::schema::DynamicSchemaBuilder;
 use crate::types::{AdjudicateCase, MentionKind, NerNeedVector, NerRoute};
 use phoenix_types::SentenceSpan;
 
-/// Budget cap: max model-discovery windows per document.
-const MAX_MODEL_WINDOWS: usize = 64;
+/// Budget cap: max model-discovery seeds per document.
+///
+/// The dynamic lane is a precision layer over native discovery; keeping this
+/// budget tight preserves the sub-second warm path on long documents.
+const MAX_MODEL_WINDOWS: usize = 20;
 /// Sentence padding around a target sentence for model windows.
 const MODEL_SENTENCE_PAD: usize = 1;
 
@@ -94,6 +97,33 @@ impl SurfaceRouter {
             if let Some(need) = needs.get_mut(sentence.index) {
                 need.has_dialogue_structure = NativeDiscoveryLane::has_dialogue_cue(text, sentence);
             }
+        }
+
+        // Chunk-hint signals used by downstream substrate guidance.
+        for (idx, need) in needs.iter_mut().enumerate() {
+            let sentence_index = idx as u32;
+            let known_named = known
+                .iter()
+                .filter(|candidate| candidate.sentence_index == sentence_index)
+                .count();
+            let native_named = native
+                .iter()
+                .filter(|candidate| {
+                    candidate.sentence_index == sentence_index
+                        && candidate.mention_kind == MentionKind::Named
+                })
+                .count();
+            let has_ambiguous_native = native.iter().any(|candidate| {
+                candidate.sentence_index == sentence_index
+                    && matches!(
+                        candidate.mention_kind,
+                        MentionKind::Pronoun | MentionKind::Nominal
+                    )
+            });
+            need.has_entity_pair = known_named + native_named >= 2;
+            need.has_ambiguous_reference = has_ambiguous_native && known_named + native_named > 0;
+            need.has_named_event_candidate =
+                need.has_causal_or_temporal_cue && known_named + native_named > 0;
         }
 
         needs
@@ -192,6 +222,12 @@ impl SurfaceRouter {
         if need.has_known_seed {
             p += 1;
         }
+        if need.has_entity_pair {
+            p += 2;
+        }
+        if need.has_ambiguous_reference {
+            p += 2;
+        }
         p
     }
 
@@ -240,6 +276,11 @@ mod tests {
     fn need_priority_empty_is_zero() {
         let need = NerNeedVector::default();
         assert_eq!(SurfaceRouter::need_priority(&need), 0);
+    }
+
+    #[test]
+    fn default_model_window_budget_stays_tight() {
+        assert_eq!(SurfaceRouter::default().max_model_windows, 20);
     }
 
     #[test]

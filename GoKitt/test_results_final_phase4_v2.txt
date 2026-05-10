@@ -1,2 +1,0 @@
-﻿FAIL	github.com/kittclouds/gokitt/internal/graphstore [build failed]
-FAIL

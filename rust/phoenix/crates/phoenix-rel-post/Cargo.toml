@@ -1,0 +1,14 @@
+[package]
+name = "phoenix-rel-post"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+half = "2"
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["ndarray", "half", "load-dynamic"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }

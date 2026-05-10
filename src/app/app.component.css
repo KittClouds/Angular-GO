@@ -18,7 +18,7 @@
     place-items: center;
     padding: 32px;
     background:
-        radial-gradient(circle at top, rgba(20, 184, 166, 0.16), transparent 32%),
+        radial-gradient(circle at top, rgba(var(--ui-accent-rgb), 0.26), transparent 32%),
         linear-gradient(180deg, #050816 0%, #0b1120 55%, #060913 100%);
     color: #e2e8f0;
 }
@@ -34,7 +34,7 @@
 
 .fatal-boot-kicker {
     margin: 0 0 12px;
-    color: #2dd4bf;
+    color: var(--ui-accent-bright);
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.18em;
@@ -59,8 +59,8 @@
     margin: 16px 0 0;
     padding: 14px 16px;
     border-radius: 16px;
-    background: rgba(15, 118, 110, 0.14);
-    color: #ccfbf1;
+    background: rgba(var(--ui-accent-rgb), 0.28);
+    color: var(--ui-accent-bright);
     font-size: 14px;
     line-height: 1.55;
 }
@@ -70,7 +70,7 @@
     padding: 18px 20px;
     border-radius: 18px;
     background: rgba(15, 23, 42, 0.72);
-    border: 1px solid rgba(45, 212, 191, 0.18);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.72);
 }
 
 .fatal-boot-steps p {

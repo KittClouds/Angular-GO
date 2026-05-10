@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,13 +22,13 @@ use phoenix_types::{
     OmReflectorStep, OmReflectorToolCall, OmReflectorToolResult, OmReflectorToolSpec,
     ThreadMessage,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[cfg(not(target_arch = "wasm32"))]
 use openrouter_rs::{
-    OpenRouterClient,
     api::chat::{ChatCompletionRequest, Message},
     types::{Role, Tool},
+    OpenRouterClient,
 };
 
 const OBSERVE_KIND: &str = "observe";
@@ -1403,11 +1403,11 @@ mod tests {
 
     use phoenix_store_native_core::StoreError;
     use phoenix_types::OmConfig;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::{
-        OmEngine, OmPendingAction, OmReflectorModelRequest, OmReflectorModelResponse,
-        OmReflectorStep, OmStore, OmTransport, approx_token_count,
+        approx_token_count, OmEngine, OmPendingAction, OmReflectorModelRequest,
+        OmReflectorModelResponse, OmReflectorStep, OmStore, OmTransport,
     };
 
     #[derive(Default)]

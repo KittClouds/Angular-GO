@@ -139,6 +139,8 @@
 .faeryx-empty {
     display: grid;
     place-items: center;
+    contain: layout paint;
+    isolation: isolate;
     overflow: hidden;
     background:
         radial-gradient(circle at 50% 46%, rgba(45, 212, 191, 0.10), transparent 26%),
@@ -165,32 +167,49 @@
     width: min(112vw, 1360px);
     max-height: 108vh;
     opacity: 0.19;
-    filter: saturate(1.25) blur(0.2px);
+    contain: paint;
 }
 
 .faeryx-card {
     position: relative;
     z-index: 1;
+    isolation: isolate;
+    contain: paint;
     width: min(430px, calc(100vw - 48px));
     padding: 30px 28px 24px;
     text-align: center;
     border: 1px solid rgba(125, 249, 244, 0.28);
     border-radius: 26px;
     background:
-        linear-gradient(140deg, rgba(8, 22, 26, 0.82), rgba(16, 12, 31, 0.82)),
-        rgba(5, 6, 10, 0.82);
+        radial-gradient(circle at 50% 18%, rgba(45, 212, 191, 0.16), transparent 30%),
+        linear-gradient(140deg, rgba(8, 22, 26, 0.92), rgba(16, 12, 31, 0.90)),
+        rgba(5, 6, 10, 0.94);
     box-shadow:
         0 24px 80px rgba(0, 0, 0, 0.46),
         0 0 0 1px rgba(168, 85, 247, 0.10) inset,
         0 0 56px rgba(45, 212, 191, 0.12);
-    backdrop-filter: blur(18px);
+}
+
+.faeryx-card::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    z-index: -1;
+    width: min(270px, 70vw);
+    height: 170px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background:
+        radial-gradient(circle at 45% 40%, rgba(45, 212, 191, 0.20), transparent 36%),
+        radial-gradient(circle at 62% 48%, rgba(168, 85, 247, 0.18), transparent 42%);
+    opacity: 0.9;
 }
 
 .faeryx-mark {
     display: block;
     width: min(210px, 58vw);
     margin: -10px auto -2px;
-    filter: drop-shadow(0 0 20px rgba(45, 212, 191, 0.32));
 }
 
 :host ::ng-deep .faeryx-title {

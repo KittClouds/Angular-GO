@@ -1,7 +1,7 @@
 // src/lib/registry.ts
-// Entity Registry - Write-through Cache over Go SQLite (SSoT) + Dexie (ephemeral)
+// Entity Registry - write-through cache over Phoenix native + Dexie (ephemeral)
 // Synchronous reads from memory, async writes to both for persistence.
-// Hydrates from Dexie (populated during boot from Go SQLite).
+// Hydrates from Dexie, which is populated during boot from Phoenix native.
 
 import type { EntityKind } from './Scanner/types';
 import { db, Entity, Edge as DexieEdge } from './dexie';
@@ -27,7 +27,7 @@ export interface RegisteredEntity {
     createdBy: 'user' | 'extraction' | 'auto';
     attributes?: Record<string, any>;
     registeredAt: number;
-    // For GoKitt compatibility
+    // Backward-compatible note alias used by older UI call sites.
     noteId?: string;
 }
 
@@ -203,7 +203,7 @@ export class CentralRegistry {
             aliases: e.aliases || [],
             subtype: e.subtype,
             firstNote: e.firstNote,
-            noteId: e.firstNote, // Alias for GoKitt compatibility
+            noteId: e.firstNote, // Backward-compatible note alias.
             mentionsByNote: new Map(), // Not stored in Dexie currently
             totalMentions: e.totalMentions || 0,
             lastSeenDate: new Date(e.updatedAt),
@@ -259,7 +259,7 @@ export class CentralRegistry {
     }
 
     /**
-     * Alias for getAllEntities() - used by GoKitt
+     * Alias for getAllEntities() used by older UI call sites.
      */
     getAll(): RegisteredEntity[] {
         return this.snapshot;

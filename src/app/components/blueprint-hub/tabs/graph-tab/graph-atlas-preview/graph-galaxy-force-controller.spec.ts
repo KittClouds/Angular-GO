@@ -1,0 +1,100 @@
+import * as THREE from 'three';
+import { describe, expect, it } from 'vitest';
+
+import { GraphGalaxyForceController } from './graph-galaxy-force-controller';
+import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
+
+describe('GraphGalaxyForceController Hybrid constraints', () => {
+    it('keeps shell nodes on the Hybrid shell when force dragging', () => {
+        const scene = hybridScene([
+            [2.32, 0, 0],
+            [0.55, 0.1, 0.08],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('shell')).toBe(true);
+        controller.dragTo(new THREE.Vector3(8, 0, 0), 'force');
+
+        expect(radius3d(scene.positions3d, 0)).toBeCloseTo(2.32, 3);
+        expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(2.32);
+    });
+
+    it('clamps inner Hybrid nodes inside the shell when stretched past the boundary', () => {
+        const scene = hybridScene([
+            [2.32, 0, 0],
+            [0.55, 0.1, 0.08],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('inner')).toBe(true);
+        controller.dragTo(new THREE.Vector3(-9, 0, 0), 'force');
+
+        expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(2.32);
+    });
+
+    it('keeps Hopf force dragging inside the projection envelope', () => {
+        const scene = hopfScene([
+            [1.2, 0.1, 0.05],
+            [0.45, -0.25, 0.2],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('shell')).toBe(true);
+        controller.dragTo(new THREE.Vector3(9, 0, 0), 'force');
+
+        expect(radius3d(scene.positions3d, 0)).toBeLessThanOrEqual(1.95);
+        expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(1.95);
+    });
+});
+
+function hybridScene(points: Array<[number, number, number]>): GalaxySceneV2 {
+    return projectedScene('hybridSpace', points);
+}
+
+function hopfScene(points: Array<[number, number, number]>): GalaxySceneV2 {
+    return projectedScene('hopfProjection', points);
+}
+
+function projectedScene(layoutMode: GalaxySceneV2['layoutMode'], points: Array<[number, number, number]>): GalaxySceneV2 {
+    const positions3d = new Float32Array(points.length * 3);
+    const positions2d = new Float32Array(points.length * 3);
+    for (let index = 0; index < points.length; index++) {
+        const offset = index * 3;
+        const [x, y, z] = points[index];
+        positions3d[offset] = x;
+        positions3d[offset + 1] = y;
+        positions3d[offset + 2] = z;
+        positions2d[offset] = x;
+        positions2d[offset + 1] = y;
+    }
+    return {
+        sourceMode: 'embeddings',
+        layoutMode,
+        ids: ['shell', 'inner'],
+        labels: ['Shell', 'Inner'],
+        kinds: ['leaf', 'entity'],
+        groupIds: ['', ''],
+        groups: [],
+        hopfRibbons: [],
+        lorentzGuides: [],
+        positions3d,
+        positions2d,
+        radii: new Float32Array([0.08, 0.08]),
+        colors: new Float32Array([0, 1, 1, 0.7, 0.2, 1]),
+        edgePairs: new Uint32Array([0, 1]),
+        edgeColors: new Float32Array(6),
+        edgeAlpha: new Float32Array([1]),
+        edgeKinds: new Uint8Array([0]),
+    };
+}
+
+function radius3d(buffer: Float32Array, index: number): number {
+    const offset = index * 3;
+    return Math.hypot(buffer[offset], buffer[offset + 1], buffer[offset + 2]);
+}

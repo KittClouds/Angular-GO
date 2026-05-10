@@ -25,7 +25,6 @@ members = [
     "crates/phoenix-om",
     "crates/phoenix-proposition",
     "crates/phoenix-rel-post",
-    "crates/phoenix-reference",
     "crates/phoenix-scope-analysis",
     "crates/phoenix-store-native-core",
     "crates/phoenix-store-overgraph",

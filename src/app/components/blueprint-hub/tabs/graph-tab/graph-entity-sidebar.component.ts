@@ -65,7 +65,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     @Input() suggestions: NerSuggestion[] = [];
     @Input() selectedEntity: RegisteredEntity | null = null;
     @Input() linkCount = 0;
-    @Input() lensMode: GraphLensMode = 'narrative';
+    @Input() lensMode: GraphLensMode = 'global';
     @Input() isScanning = false;
     @Input() scanError: string | null = null;
     @Input() contextId = 'global';
@@ -79,6 +79,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     @Output() acceptSuggestionRequested = new EventEmitter<string>();
     @Output() rejectSuggestionRequested = new EventEmitter<string>();
     @Output() styleRequested = new EventEmitter<void>();
+    @Output() scanRequested = new EventEmitter<void>();
     @Output() lensModeChange = new EventEmitter<GraphLensMode>();
     @Output() searchTextChange = new EventEmitter<string>();
 
@@ -209,6 +210,7 @@ export class GraphEntitySidebarComponent implements OnChanges {
     }
 
     sourceLabel(source: EntitySuggestionProviderId): string {
+        if (source === 'atlas_surface') return 'Atlas Surface';
         if (source === 'dynamic_ner') return 'Dynamic NER';
         if (source === 'lfm_local_experiment') return 'LFM';
         if (source === 'gliner_local') return 'GLiNER';

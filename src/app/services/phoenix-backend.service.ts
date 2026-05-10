@@ -27,6 +27,11 @@ type PhoenixTransportMethodName =
     | 'commit'
     | 'rebuild'
     | 'scan'
+    | 'atlasRichScan'
+    | 'manifoldSnapshot'
+    | 'lorentzForestCache'
+    | 'lorentzForestBuild'
+    | 'lorentzForestQuery'
     | 'buildStructure'
     | 'analyzeText'
     | 'graphDelta'
@@ -197,6 +202,36 @@ export class PhoenixBackendService {
         return this.target === 'native'
             ? this.requireNativeBridge().scan(request)
             : this.wasm.scan(request);
+    }
+
+    async atlasRichScan(request: Record<string, unknown>): Promise<any> {
+        return this.target === 'native'
+            ? this.requireNativeBridge().atlasRichScan(request)
+            : this.wasm.atlasRichScan(request);
+    }
+
+    async manifoldSnapshot(request: Record<string, unknown>): Promise<any> {
+        return this.target === 'native'
+            ? this.requireNativeBridge().manifoldSnapshot(request)
+            : this.wasm.manifoldSnapshot(request);
+    }
+
+    async lorentzForestCache(request: Record<string, unknown>): Promise<any> {
+        return this.target === 'native'
+            ? this.requireNativeBridge().lorentzForestCache(request)
+            : this.wasm.lorentzForestCache(request);
+    }
+
+    async lorentzForestBuild(request: Record<string, unknown>): Promise<any> {
+        return this.target === 'native'
+            ? this.requireNativeBridge().lorentzForestBuild(request)
+            : this.wasm.lorentzForestBuild(request);
+    }
+
+    async lorentzForestQuery(request: Record<string, unknown>): Promise<any> {
+        return this.target === 'native'
+            ? this.requireNativeBridge().lorentzForestQuery(request)
+            : this.wasm.lorentzForestQuery(request);
     }
 
     async buildStructure(request: Record<string, unknown>): Promise<any> {

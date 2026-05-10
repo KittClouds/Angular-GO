@@ -10,10 +10,18 @@ import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
 const EPSILON = 0.0008;
 const MAX_XZ = 3.15;
 const MAX_Y = 2.55;
+const HYBRID_DEFAULT_BOUNDARY_RADIUS = 2.32;
+const HYBRID_SHELL_LOCK_RATIO = 0.92;
+const HYBRID_MIN_RADIUS = 0.000001;
+const HOPF_DEFAULT_BOUNDARY_RADIUS = 1.95;
+const HOPF_BOUNDARY_PADDING = 1.04;
 
 export class GraphGalaxyForceController {
     private base3d = new Float32Array(0);
     private base2d = new Float32Array(0);
+    private hybridShellLocked = new Uint8Array(0);
+    private hybridShellRadius3d = new Float32Array(0);
+    private hybridShellRadius2d = new Float32Array(0);
     private vx = new Float32Array(0);
     private vy = new Float32Array(0);
     private vz = new Float32Array(0);
@@ -27,15 +35,24 @@ export class GraphGalaxyForceController {
     private alpha = 0;
     private relaxing = false;
     private forceActive = false;
+    private hybridBoundaryRadius3d = HYBRID_DEFAULT_BOUNDARY_RADIUS;
+    private hybridBoundaryRadius2d = HYBRID_DEFAULT_BOUNDARY_RADIUS;
+    private hopfBoundaryRadius3d = HOPF_DEFAULT_BOUNDARY_RADIUS;
+    private hopfBoundaryRadius2d = HOPF_DEFAULT_BOUNDARY_RADIUS;
 
     bind(scene: GalaxySceneV2): void {
         this.scene = scene;
         this.base3d = scene.positions3d.slice();
         this.base2d = scene.positions2d.slice();
+        this.hybridShellLocked = new Uint8Array(scene.ids.length);
+        this.hybridShellRadius3d = new Float32Array(scene.ids.length);
+        this.hybridShellRadius2d = new Float32Array(scene.ids.length);
         this.vx = new Float32Array(scene.ids.length);
         this.vy = new Float32Array(scene.ids.length);
         this.vz = new Float32Array(scene.ids.length);
         this.fixed = new Uint8Array(scene.ids.length);
+        this.rebuildHybridConstraints(scene);
+        this.rebuildHopfConstraints(scene);
         this.neighbors.length = scene.ids.length;
         for (let i = 0; i < scene.ids.length; i++) this.neighbors[i] = [];
         for (let i = 0; i < scene.edgePairs.length; i += 2) {
@@ -118,7 +135,7 @@ export class GraphGalaxyForceController {
             this.alpha = Math.max(this.alpha, 0.66);
             this.forceActive = true;
             this.relaxing = false;
-            this.syncTwinBuffers(scene, live);
+            this.constrainAndSync(scene, live);
             return true;
         }
 
@@ -139,6 +156,7 @@ export class GraphGalaxyForceController {
             this.move(scene.positions3d, neighbor, delta.x * pull, delta.y * pull, delta.z * pull);
             this.move(scene.positions2d, neighbor, delta.x * pull, delta.y * pull, 0);
         }
+        this.constrainManifoldScene(scene);
         return true;
     }
 
@@ -213,7 +231,7 @@ export class GraphGalaxyForceController {
             this.vz[i] *= 0.82;
         }
 
-        this.syncTwinBuffers(scene, live);
+        this.constrainAndSync(scene, live);
         this.alpha *= 0.92;
         if (this.alpha <= EPSILON || kinetic <= EPSILON) {
             this.alpha = 0;
@@ -235,7 +253,7 @@ export class GraphGalaxyForceController {
                 live[offset + axis] = next;
             }
         }
-        this.syncTwinBuffers(scene, live);
+        this.constrainAndSync(scene, live);
         this.relaxing = maxDelta > EPSILON;
         return this.relaxing;
     }
@@ -312,6 +330,125 @@ export class GraphGalaxyForceController {
         buffer[offset + 2] = this.mode === '2d' ? 0 : clamp(z, -MAX_XZ, MAX_XZ);
     }
 
+    private rebuildHybridConstraints(scene: GalaxySceneV2): void {
+        this.hybridBoundaryRadius3d = HYBRID_DEFAULT_BOUNDARY_RADIUS;
+        this.hybridBoundaryRadius2d = HYBRID_DEFAULT_BOUNDARY_RADIUS;
+        if (scene.layoutMode !== 'hybridSpace') return;
+
+        for (let i = 0; i < scene.ids.length; i++) {
+            const radius3d = pointRadius(this.base3d, i, true);
+            const radius2d = pointRadius(this.base2d, i, false);
+            if (Number.isFinite(radius3d)) this.hybridBoundaryRadius3d = Math.max(this.hybridBoundaryRadius3d, radius3d);
+            if (Number.isFinite(radius2d)) this.hybridBoundaryRadius2d = Math.max(this.hybridBoundaryRadius2d, radius2d);
+            this.hybridShellRadius3d[i] = radius3d;
+            this.hybridShellRadius2d[i] = radius2d;
+        }
+
+        const shellCutoff = this.hybridBoundaryRadius3d * HYBRID_SHELL_LOCK_RATIO;
+        for (let i = 0; i < scene.ids.length; i++) {
+            this.hybridShellLocked[i] = this.hybridShellRadius3d[i] >= shellCutoff ? 1 : 0;
+        }
+    }
+
+    private constrainAndSync(scene: GalaxySceneV2, live: Float32Array): void {
+        this.constrainManifoldBuffer(scene, live);
+        this.syncTwinBuffers(scene, live);
+        this.constrainManifoldScene(scene);
+    }
+
+    private constrainManifoldScene(scene: GalaxySceneV2): void {
+        this.constrainManifoldBuffer(scene, scene.positions3d);
+        this.constrainManifoldBuffer(scene, scene.positions2d);
+    }
+
+    private constrainManifoldBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
+        this.constrainHybridBuffer(scene, buffer);
+        this.constrainHopfBuffer(scene, buffer);
+    }
+
+    private constrainHybridBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
+        if (scene.layoutMode !== 'hybridSpace') return;
+        const is3d = buffer === scene.positions3d && this.mode !== '2d';
+        const boundaryRadius = is3d ? this.hybridBoundaryRadius3d : this.hybridBoundaryRadius2d;
+        const shellRadii = is3d ? this.hybridShellRadius3d : this.hybridShellRadius2d;
+        for (let i = 0; i < scene.ids.length; i++) {
+            const offset = i * 3;
+            const x = buffer[offset];
+            const y = buffer[offset + 1];
+            const z = is3d ? buffer[offset + 2] : 0;
+            const radius = Math.hypot(x, y, z);
+            const shellLocked = this.hybridShellLocked[i] === 1;
+            const shellRadius = shellRadii[i] || boundaryRadius;
+            const targetRadius = shellLocked
+                ? clamp(shellRadius, HYBRID_MIN_RADIUS, boundaryRadius)
+                : Math.min(radius, boundaryRadius);
+
+            if (radius <= HYBRID_MIN_RADIUS) {
+                if (shellLocked) this.writeBaseDirection(buffer, i, is3d, targetRadius);
+                if (!is3d) buffer[offset + 2] = 0;
+                continue;
+            }
+            if (!shellLocked && radius <= boundaryRadius + EPSILON) {
+                if (!is3d) buffer[offset + 2] = 0;
+                continue;
+            }
+
+            const scale = targetRadius / radius;
+            buffer[offset] = x * scale;
+            buffer[offset + 1] = y * scale;
+            buffer[offset + 2] = is3d ? z * scale : 0;
+            this.zeroVelocity(i);
+        }
+    }
+
+    private rebuildHopfConstraints(scene: GalaxySceneV2): void {
+        this.hopfBoundaryRadius3d = HOPF_DEFAULT_BOUNDARY_RADIUS;
+        this.hopfBoundaryRadius2d = HOPF_DEFAULT_BOUNDARY_RADIUS;
+        if (scene.layoutMode !== 'hopfProjection') return;
+        for (let i = 0; i < scene.ids.length; i++) {
+            const radius3d = pointRadius(this.base3d, i, true);
+            const radius2d = pointRadius(this.base2d, i, false);
+            if (Number.isFinite(radius3d)) this.hopfBoundaryRadius3d = Math.max(this.hopfBoundaryRadius3d, radius3d * HOPF_BOUNDARY_PADDING);
+            if (Number.isFinite(radius2d)) this.hopfBoundaryRadius2d = Math.max(this.hopfBoundaryRadius2d, radius2d * HOPF_BOUNDARY_PADDING);
+        }
+    }
+
+    private constrainHopfBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
+        if (scene.layoutMode !== 'hopfProjection') return;
+        const is3d = buffer === scene.positions3d && this.mode !== '2d';
+        const boundaryRadius = is3d ? this.hopfBoundaryRadius3d : this.hopfBoundaryRadius2d;
+        for (let i = 0; i < scene.ids.length; i++) {
+            const offset = i * 3;
+            const x = buffer[offset];
+            const y = buffer[offset + 1];
+            const z = is3d ? buffer[offset + 2] : 0;
+            const radius = Math.hypot(x, y, z);
+            if (!is3d) buffer[offset + 2] = 0;
+            if (radius <= boundaryRadius + EPSILON || radius <= HYBRID_MIN_RADIUS) continue;
+
+            const scale = Math.max(HYBRID_MIN_RADIUS, boundaryRadius - EPSILON) / radius;
+            buffer[offset] = x * scale;
+            buffer[offset + 1] = y * scale;
+            buffer[offset + 2] = is3d ? z * scale : 0;
+            this.zeroVelocity(i);
+        }
+    }
+
+    private writeBaseDirection(buffer: Float32Array, index: number, is3d: boolean, radius: number): void {
+        const base = is3d ? this.base3d : this.base2d;
+        const offset = index * 3;
+        const bx = base[offset];
+        const by = base[offset + 1];
+        const bz = is3d ? base[offset + 2] : 0;
+        const baseRadius = Math.hypot(bx, by, bz);
+        if (baseRadius <= HYBRID_MIN_RADIUS) return;
+        const scale = radius / baseRadius;
+        buffer[offset] = bx * scale;
+        buffer[offset + 1] = by * scale;
+        buffer[offset + 2] = is3d ? bz * scale : 0;
+        this.zeroVelocity(index);
+    }
+
     private syncTwinBuffers(scene: GalaxySceneV2, live: Float32Array): void {
         if (live === scene.positions2d) this.copy2dTo3d(scene);
         else this.copy3dTo2d(scene);
@@ -334,4 +471,9 @@ export class GraphGalaxyForceController {
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
+}
+
+function pointRadius(buffer: Float32Array, index: number, includeZ: boolean): number {
+    const offset = index * 3;
+    return Math.hypot(buffer[offset], buffer[offset + 1], includeZ ? buffer[offset + 2] : 0);
 }

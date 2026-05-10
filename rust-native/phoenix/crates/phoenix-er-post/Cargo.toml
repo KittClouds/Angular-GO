@@ -9,6 +9,7 @@ authors.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustc-hash.workspace = true
+phoenix-chunker = { path = "../phoenix-chunker" }
 phoenix-embed = { path = "../phoenix-embed" }
 phoenix-ingest-overgraph = { path = "../phoenix-ingest-overgraph" }
 phoenix-kernel = { path = "../phoenix-kernel" }

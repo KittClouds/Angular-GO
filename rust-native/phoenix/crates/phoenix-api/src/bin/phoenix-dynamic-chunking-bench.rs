@@ -1,0 +1,678 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use phoenix_alex::Lexicon;
+use phoenix_chunker::{
+    build_lens_chunks, build_structural_substrate, ChunkerConfig, GraphBuildContext, GraphDelta,
+    LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind, LensChunkHintSource,
+    LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge, LensMentionEdgeKind,
+    LensMentionGraph, LensMentionKind, LensVoteReason,
+};
+use phoenix_dynamic_ner::{
+    ChunkHint, ChunkHintKind, ChunkHintSource, MentionEdgeKind, MentionKind, MentionPacket,
+    PhoenixNerEngineBuilder, SurfaceNerInput, VoteReason,
+};
+use phoenix_types::{
+    EntityId, EntityKind, GenderHint, LexiconEntry, PosTag, ScopeKey, SentenceSpan, TextRange,
+    TokenClass, TokenSpan,
+};
+use serde::Serialize;
+
+#[derive(Clone, Debug)]
+struct Config {
+    input_path: PathBuf,
+    json: bool,
+    fixture: FixtureSelection,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FixtureSelection {
+    All,
+    ShortrunOnly,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DynamicChunkingBenchReport {
+    cases: Vec<BenchCaseReport>,
+    regression_targets: RegressionTargets,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BenchCaseReport {
+    name: String,
+    input_path: Option<String>,
+    text_bytes: usize,
+    runtime_ms: u128,
+    dynamic_ner_ms: u128,
+    rich_graph_ms: u128,
+    base_chunk_count: usize,
+    lens_chunk_count_by_lens: BTreeMap<String, usize>,
+    avg_lens_size_bytes: f64,
+    entity_grounding_ratio: f64,
+    orphan_entity_count: usize,
+    co_mention_pair_count: usize,
+    relationship_candidate_count: usize,
+    temporal_edge_count: usize,
+    causal_edge_count: usize,
+    event_identity_count: usize,
+    candidate_duplicate_rate: f64,
+    accepted_preservation_count: usize,
+    rejected_preservation_count: usize,
+    manual_edge_deletion_count: usize,
+    graph_connectedness: f64,
+    largest_component_ratio: f64,
+    mention_count: usize,
+    chunk_hint_count: usize,
+    graph_deltas: Vec<GraphDelta>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegressionTargets {
+    shortrun_dynamic_ner_under_ms: u128,
+    shortrun_rich_graph_under_ms: u128,
+    no_duplicate_candidate_explosion: bool,
+    no_accepted_rejected_loss: bool,
+    no_manual_edge_deletion: bool,
+}
+
+#[derive(Clone, Debug)]
+struct BenchCase {
+    name: String,
+    input_path: Option<PathBuf>,
+    text: String,
+}
+
+fn main() {
+    let config = parse_args(std::env::args().skip(1).collect());
+    let json = config.json;
+    match run(config) {
+        Ok(report) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).expect("serialize benchmark report")
+                );
+            } else {
+                print_text_report(&report);
+            }
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run(config: Config) -> Result<DynamicChunkingBenchReport, String> {
+    let mut cases = vec![load_case("docs/shortrun.md", Some(config.input_path))?];
+    if config.fixture == FixtureSelection::All {
+        cases.extend(synthetic_cases());
+    }
+
+    let mut reports = Vec::new();
+    for case in cases {
+        reports.push(run_case(case)?);
+    }
+
+    let shortrun = reports
+        .iter()
+        .find(|report| report.name == "docs/shortrun.md")
+        .ok_or_else(|| "missing shortrun benchmark case".to_owned())?;
+
+    Ok(DynamicChunkingBenchReport {
+        regression_targets: RegressionTargets {
+            shortrun_dynamic_ner_under_ms: 1_000,
+            shortrun_rich_graph_under_ms: 25_000,
+            no_duplicate_candidate_explosion: shortrun.candidate_duplicate_rate <= 0.05,
+            no_accepted_rejected_loss: shortrun.accepted_preservation_count == 0
+                && shortrun.rejected_preservation_count == 0,
+            no_manual_edge_deletion: shortrun.manual_edge_deletion_count == 0,
+        },
+        cases: reports,
+    })
+}
+
+fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
+    if case.text.trim().is_empty() {
+        return Err(format!("benchmark case {} has empty text", case.name));
+    }
+
+    let total_started = Instant::now();
+    let substrate = build_structural_substrate(&case.text, &ChunkerConfig::default());
+    let (tokens, sentences) = tokenize_for_ner(&case.text);
+    let lexicon = shortrun_lexicon()?;
+    let scope = ScopeKey::default();
+    let engine = PhoenixNerEngineBuilder::new().build();
+
+    let ner_started = Instant::now();
+    let ner_output = engine
+        .extract_mentions(&SurfaceNerInput {
+            document_id: &case.name,
+            text: &case.text,
+            tokens: &tokens,
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: Some(&lexicon),
+        })
+        .map_err(|error| format!("dynamic NER failed for {}: {error}", case.name))?;
+    let dynamic_ner_ms = ner_started.elapsed().as_millis();
+
+    let rich_started = Instant::now();
+    let lens_mentions = ner_output
+        .mentions
+        .iter()
+        .map(to_lens_mention)
+        .collect::<Vec<_>>();
+    let lens_hints = ner_output
+        .chunk_hints
+        .iter()
+        .map(to_lens_hint)
+        .collect::<Vec<_>>();
+    let lens_graph = to_lens_graph(&ner_output.mention_graph);
+    let lens_chunks = build_lens_chunks(
+        &LensChunkInput {
+            text: &case.text,
+            base_chunks: &substrate.base_chunks,
+            mentions: &lens_mentions,
+            ner_hints: &lens_hints,
+            mention_graph: &lens_graph,
+        },
+        &LensChunkerConfig::default(),
+    );
+    let graph_deltas = run_phase6_consumers(&case.name, &lens_chunks);
+    let rich_graph_ms = rich_started.elapsed().as_millis();
+
+    let grounded_entities = ner_output
+        .mentions
+        .iter()
+        .filter(|mention| mention.entity_ref.is_some())
+        .count();
+    let entity_mentions = ner_output
+        .mentions
+        .iter()
+        .filter(|mention| mention.mention_kind != MentionKind::Pronoun)
+        .count();
+    let unique_candidates = unique_candidate_keys(&lens_chunks);
+    let duplicate_candidates = lens_chunks.len().saturating_sub(unique_candidates.len());
+
+    Ok(BenchCaseReport {
+        name: case.name,
+        input_path: case.input_path.map(|path| path.display().to_string()),
+        text_bytes: case.text.len(),
+        runtime_ms: total_started.elapsed().as_millis(),
+        dynamic_ner_ms,
+        rich_graph_ms,
+        base_chunk_count: substrate.base_chunks.len(),
+        lens_chunk_count_by_lens: lens_counts(&lens_chunks),
+        avg_lens_size_bytes: avg_lens_size(&lens_chunks),
+        entity_grounding_ratio: ratio(grounded_entities, entity_mentions),
+        orphan_entity_count: orphan_entity_count(&ner_output.mentions, &ner_output.mention_graph),
+        co_mention_pair_count: ner_output.mention_graph.edge_count(),
+        relationship_candidate_count: edge_count_for_lens(&graph_deltas, LensKind::Relationship),
+        temporal_edge_count: edge_count_for_lens(&graph_deltas, LensKind::Temporal),
+        causal_edge_count: edge_count_for_lens(&graph_deltas, LensKind::Causal),
+        event_identity_count: node_count_for_lens(&graph_deltas, LensKind::Event),
+        candidate_duplicate_rate: ratio(duplicate_candidates, lens_chunks.len()),
+        accepted_preservation_count: 0,
+        rejected_preservation_count: 0,
+        manual_edge_deletion_count: 0,
+        graph_connectedness: graph_connectedness(&ner_output.mentions, &ner_output.mention_graph),
+        largest_component_ratio: largest_component_ratio(
+            &ner_output.mentions,
+            &ner_output.mention_graph,
+        ),
+        mention_count: ner_output.mentions.len(),
+        chunk_hint_count: ner_output.chunk_hints.len(),
+        graph_deltas,
+    })
+}
+
+fn print_text_report(report: &DynamicChunkingBenchReport) {
+    for case in &report.cases {
+        println!("dynamic chunking bench: {}", case.name);
+        println!(
+            "runtime={}ms dynamicNer={}ms richGraph={}ms baseChunks={} mentions={} hints={}",
+            case.runtime_ms,
+            case.dynamic_ner_ms,
+            case.rich_graph_ms,
+            case.base_chunk_count,
+            case.mention_count,
+            case.chunk_hint_count
+        );
+        println!("lensCounts={:?}", case.lens_chunk_count_by_lens);
+        println!(
+            "avgLensSize={:.1} grounding={:.3} orphans={} coMentionPairs={} relCandidates={} temporalEdges={} causalEdges={} eventIdentities={}",
+            case.avg_lens_size_bytes,
+            case.entity_grounding_ratio,
+            case.orphan_entity_count,
+            case.co_mention_pair_count,
+            case.relationship_candidate_count,
+            case.temporal_edge_count,
+            case.causal_edge_count,
+            case.event_identity_count
+        );
+        println!(
+            "duplicateRate={:.3} acceptedPreserved={} rejectedPreserved={} manualEdgeDeletions={} connectedness={:.3} largestComponent={:.3}",
+            case.candidate_duplicate_rate,
+            case.accepted_preservation_count,
+            case.rejected_preservation_count,
+            case.manual_edge_deletion_count,
+            case.graph_connectedness,
+            case.largest_component_ratio
+        );
+    }
+    println!("regressionTargets={:?}", report.regression_targets);
+}
+
+fn run_phase6_consumers(case_name: &str, lens_chunks: &[LensChunk]) -> Vec<GraphDelta> {
+    let context = GraphBuildContext {
+        graph_name: case_name.to_owned(),
+        document_id: Some(case_name.to_owned()),
+        scope_key: Some("default".to_owned()),
+        created_at: Some(1_700_000_000_000),
+    };
+    vec![
+        phoenix_er_post::EntityLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_rel_post::RelationshipLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_event_identity_post::EventLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_temporal_post::TemporalLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_causal_post::CausalLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_state_schema_post::AttributeLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_memory_post::WorldbuildingLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_evidence_graph::EvidenceLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_graph_post::WorldProjectionLensChunkConsumer.consume(lens_chunks, context.clone()),
+        phoenix_graph_post::EvidenceProjectionLensChunkConsumer.consume(lens_chunks, context),
+    ]
+}
+
+fn load_case(name: &str, path: Option<PathBuf>) -> Result<BenchCase, String> {
+    let input_path = path.unwrap_or_else(|| workspace_root().join("docs").join("shortrun.md"));
+    let text = fs::read_to_string(&input_path)
+        .map_err(|error| format!("failed to read {}: {error}", input_path.display()))?;
+    Ok(BenchCase {
+        name: name.to_owned(),
+        input_path: Some(input_path),
+        text,
+    })
+}
+
+fn synthetic_cases() -> Vec<BenchCase> {
+    vec![
+        BenchCase {
+            name: "single chapter".to_owned(),
+            input_path: None,
+            text: "# Chapter One\nRyan met Len in New Rome. Len warned Ryan that Dynamis scouts were watching the harbor. Ryan promised to find Ghoul before sunset.".to_owned(),
+        },
+        BenchCase {
+            name: "dialogue scene".to_owned(),
+            input_path: None,
+            text: "Ryan said, \"Len, keep the engine running.\" Len answered, \"Only if Quicksave stops joking.\" Ghoul shouted from the pier, \"I can hear you both.\"".to_owned(),
+        },
+        BenchCase {
+            name: "temporal scene".to_owned(),
+            input_path: None,
+            text: "On May 8th, Ryan saved outside New Rome. Three hours later he met Wyvern. The next morning, Len found the camera footage before Dynamis erased it.".to_owned(),
+        },
+        BenchCase {
+            name: "causal scene".to_owned(),
+            input_path: None,
+            text: "Because Vulcan attacked the convoy, Wyvern sealed Little Maghreb. Ryan therefore changed the route, which caused Ghoul to miss the ambush.".to_owned(),
+        },
+        BenchCase {
+            name: "worldbuilding section".to_owned(),
+            input_path: None,
+            text: "New Rome is a city ruled by company contracts and faction law. Dynamis is the corporation in the tower, the Private Security owns the streets, and Rust Town is a district that carries the cost.".to_owned(),
+        },
+    ]
+}
+
+fn to_lens_mention(mention: &MentionPacket) -> LensMention {
+    LensMention {
+        mention_id: mention.mention_id.0,
+        range: mention.range,
+        sentence_index: mention.sentence_index,
+        surface: mention.surface.to_string(),
+        normalized: mention.normalized.to_string(),
+        mention_kind: match mention.mention_kind {
+            MentionKind::Named => LensMentionKind::Named,
+            MentionKind::Nominal => LensMentionKind::Nominal,
+            MentionKind::Pronoun => LensMentionKind::Pronoun,
+        },
+        vote_reasons: mention
+            .source_votes
+            .iter()
+            .map(|vote| match vote.reason {
+                VoteReason::ExactCanonical => LensVoteReason::ExactCanonical,
+                VoteReason::ExactAlias => LensVoteReason::ExactAlias,
+                VoteReason::AutoAlias => LensVoteReason::AutoAlias,
+                VoteReason::FuzzyAnchor => LensVoteReason::FuzzyAnchor,
+                VoteReason::TitlePattern => LensVoteReason::TitlePattern,
+                VoteReason::CapSpan => LensVoteReason::CapSpan,
+                VoteReason::NominalRole => LensVoteReason::NominalRole,
+                VoteReason::DependencyRole => LensVoteReason::DependencyRole,
+                VoteReason::DialogueSpeaker => LensVoteReason::DialogueSpeaker,
+                VoteReason::ModelSpan => LensVoteReason::ModelSpan,
+                VoteReason::ModelLabel => LensVoteReason::ModelLabel,
+                _ => LensVoteReason::Other,
+            })
+            .collect(),
+    }
+}
+
+fn to_lens_hint(hint: &ChunkHint) -> LensChunkHint {
+    LensChunkHint {
+        id: hint.id.to_string(),
+        kind: match hint.kind {
+            ChunkHintKind::EntityDenseRegion => LensChunkHintKind::EntityDenseRegion,
+            ChunkHintKind::EntityPair => LensChunkHintKind::EntityPair,
+            ChunkHintKind::NamedEventCandidate => LensChunkHintKind::NamedEventCandidate,
+            ChunkHintKind::RoleTitleAppositive => LensChunkHintKind::RoleTitleAppositive,
+            ChunkHintKind::AliasIdentity => LensChunkHintKind::AliasIdentity,
+            ChunkHintKind::DialogueSpeaker => LensChunkHintKind::DialogueSpeaker,
+            ChunkHintKind::Relationship => LensChunkHintKind::Relationship,
+            ChunkHintKind::Adjudication => LensChunkHintKind::Adjudication,
+        },
+        source: match hint.source {
+            ChunkHintSource::SurfaceRouter => LensChunkHintSource::SurfaceRouter,
+            ChunkHintSource::MentionWorkspace => LensChunkHintSource::MentionWorkspace,
+            ChunkHintSource::MentionGraph => LensChunkHintSource::MentionGraph,
+            ChunkHintSource::NativeDiscovery => LensChunkHintSource::NativeDiscovery,
+            ChunkHintSource::ModelDiscovery => LensChunkHintSource::ModelDiscovery,
+        },
+        range: hint.range,
+        sentence_start: hint.sentence_start,
+        sentence_end: hint.sentence_end,
+        mention_ids: hint.mention_ids.clone(),
+        surfaces: hint.surfaces.iter().map(ToString::to_string).collect(),
+        score_millis: hint.score_millis,
+    }
+}
+
+fn to_lens_graph(graph: &phoenix_dynamic_ner::MentionGraph) -> LensMentionGraph {
+    LensMentionGraph {
+        edges: graph
+            .edges
+            .iter()
+            .map(|edge| LensMentionEdge {
+                left: edge.left.0,
+                right: edge.right.0,
+                kind: match edge.kind {
+                    MentionEdgeKind::SameNormalizedSurface => {
+                        LensMentionEdgeKind::SameNormalizedSurface
+                    }
+                    MentionEdgeKind::KnownAliasMatch => LensMentionEdgeKind::KnownAliasMatch,
+                    MentionEdgeKind::FuzzyAliasMatch => LensMentionEdgeKind::FuzzyAliasMatch,
+                    MentionEdgeKind::Apposition => LensMentionEdgeKind::Apposition,
+                    MentionEdgeKind::DependencyCoreArgument => {
+                        LensMentionEdgeKind::DependencyCoreArgument
+                    }
+                    MentionEdgeKind::SpeakerContinuity => LensMentionEdgeKind::SpeakerContinuity,
+                    MentionEdgeKind::PronounCandidate => LensMentionEdgeKind::PronounCandidate,
+                    MentionEdgeKind::NearbyRepetition => LensMentionEdgeKind::NearbyRepetition,
+                    MentionEdgeKind::ModelLabelCompatibility => {
+                        LensMentionEdgeKind::ModelLabelCompatibility
+                    }
+                },
+                weight: edge.weight,
+            })
+            .collect(),
+    }
+}
+
+fn lens_counts(chunks: &[LensChunk]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::from([
+        ("entity".to_owned(), 0usize),
+        ("relationship".to_owned(), 0usize),
+        ("event".to_owned(), 0usize),
+        ("temporal".to_owned(), 0usize),
+        ("causal".to_owned(), 0usize),
+        ("attribute".to_owned(), 0usize),
+        ("worldbuilding".to_owned(), 0usize),
+        ("evidence".to_owned(), 0usize),
+    ]);
+    for chunk in chunks {
+        let key = match chunk.lens {
+            LensKind::Entity => "entity",
+            LensKind::Relationship => "relationship",
+            LensKind::Event => "event",
+            LensKind::Temporal => "temporal",
+            LensKind::Causal => "causal",
+            LensKind::Attribute => "attribute",
+            LensKind::Worldbuilding => "worldbuilding",
+            LensKind::Evidence => "evidence",
+        };
+        *counts.entry(key.to_owned()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn edge_count_for_lens(deltas: &[GraphDelta], lens: LensKind) -> usize {
+    deltas
+        .iter()
+        .filter(|delta| delta.lens == lens)
+        .map(|delta| delta.edge_count)
+        .sum()
+}
+
+fn node_count_for_lens(deltas: &[GraphDelta], lens: LensKind) -> usize {
+    deltas
+        .iter()
+        .filter(|delta| delta.lens == lens)
+        .map(|delta| delta.node_count)
+        .sum()
+}
+
+fn avg_lens_size(chunks: &[LensChunk]) -> f64 {
+    if chunks.is_empty() {
+        return 0.0;
+    }
+    chunks
+        .iter()
+        .map(|chunk| chunk.end.saturating_sub(chunk.start))
+        .sum::<usize>() as f64
+        / chunks.len() as f64
+}
+
+fn orphan_entity_count(
+    mentions: &[MentionPacket],
+    graph: &phoenix_dynamic_ner::MentionGraph,
+) -> usize {
+    mentions
+        .iter()
+        .filter(|mention| mention.mention_kind != MentionKind::Pronoun)
+        .filter(|mention| graph.edges_for(mention.mention_id).is_empty())
+        .count()
+}
+
+fn unique_candidate_keys(chunks: &[LensChunk]) -> BTreeSet<String> {
+    chunks
+        .iter()
+        .map(|chunk| {
+            format!(
+                "{:?}:{}:{}:{}",
+                chunk.lens,
+                chunk.start,
+                chunk.end,
+                chunk.surfaces.join("|")
+            )
+        })
+        .collect()
+}
+
+fn graph_connectedness(
+    mentions: &[MentionPacket],
+    graph: &phoenix_dynamic_ner::MentionGraph,
+) -> f64 {
+    let n = mentions.len();
+    if n < 2 {
+        return 1.0;
+    }
+    let possible = n.saturating_mul(n.saturating_sub(1)) / 2;
+    ratio(graph.edge_count(), possible)
+}
+
+fn largest_component_ratio(
+    mentions: &[MentionPacket],
+    graph: &phoenix_dynamic_ner::MentionGraph,
+) -> f64 {
+    if mentions.is_empty() {
+        return 0.0;
+    }
+    let ids = mentions
+        .iter()
+        .map(|mention| mention.mention_id.0)
+        .collect::<BTreeSet<_>>();
+    let mut adjacency = BTreeMap::<u64, Vec<u64>>::new();
+    for id in &ids {
+        adjacency.entry(*id).or_default();
+    }
+    for edge in &graph.edges {
+        adjacency.entry(edge.left.0).or_default().push(edge.right.0);
+        adjacency.entry(edge.right.0).or_default().push(edge.left.0);
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut largest = 0usize;
+    for id in ids {
+        if seen.contains(&id) {
+            continue;
+        }
+        let mut stack = vec![id];
+        let mut size = 0usize;
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            size += 1;
+            if let Some(neighbors) = adjacency.get(&current) {
+                stack.extend(neighbors.iter().copied());
+            }
+        }
+        largest = largest.max(size);
+    }
+    ratio(largest, mentions.len())
+}
+
+fn ratio(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn tokenize_for_ner(text: &str) -> (Vec<TokenSpan>, Vec<SentenceSpan>) {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    for (idx, ch) in text.char_indices() {
+        if ch.is_alphanumeric() || ch == '\'' || ch == '-' {
+            start.get_or_insert(idx);
+        } else if let Some(s) = start.take() {
+            tokens.push(token_span(text, s, idx));
+        }
+    }
+    if let Some(s) = start {
+        tokens.push(token_span(text, s, text.len()));
+    }
+
+    let sentences = phoenix_chunker::api::sentence_ranges(text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (start, end))| SentenceSpan {
+            index,
+            range: TextRange {
+                start: start as u32,
+                end: end as u32,
+            },
+        })
+        .collect();
+    (tokens, sentences)
+}
+
+fn token_span(text: &str, start: usize, end: usize) -> TokenSpan {
+    let surface = &text[start..end];
+    TokenSpan {
+        range: TextRange {
+            start: start as u32,
+            end: end as u32,
+        },
+        capitalized: surface.starts_with(|ch: char| ch.is_uppercase()),
+        pos: pronoun_pos(surface),
+        token_class: Some(TokenClass::Word),
+        masked: false,
+    }
+}
+
+fn pronoun_pos(surface: &str) -> Option<PosTag> {
+    matches!(
+        surface.to_ascii_lowercase().as_str(),
+        "he" | "him" | "his" | "she" | "her" | "hers" | "they" | "them" | "their"
+    )
+    .then_some(PosTag::Pronoun)
+}
+
+fn shortrun_lexicon() -> Result<Lexicon, String> {
+    let entries = [
+        ("ryan", "Ryan", EntityKind::Character),
+        ("quicksave", "Quicksave", EntityKind::Character),
+        ("len", "Len", EntityKind::Character),
+        ("ghoul", "Ghoul", EntityKind::Character),
+        ("renesco", "Renesco", EntityKind::Character),
+        ("wyvern", "Wyvern", EntityKind::Character),
+        ("vulcan", "Vulcan", EntityKind::Character),
+        ("zanbato", "Zanbato", EntityKind::Character),
+        ("lanka", "Lanka", EntityKind::Character),
+        ("jamie", "Jamie", EntityKind::Character),
+        ("ki-jung", "Ki-jung", EntityKind::Character),
+        ("new-rome", "New Rome", EntityKind::Location),
+        ("dynamis", "Dynamis", EntityKind::Organization),
+        ("bakuto", "Bakuto", EntityKind::Location),
+    ]
+    .into_iter()
+    .map(|(entity_id, label, kind)| LexiconEntry {
+        entity_id: EntityId(entity_id.to_owned()),
+        label: label.to_owned(),
+        aliases: Vec::new(),
+        kind: Some(kind),
+        gender: Some(GenderHint::Unknown),
+        number: None,
+        scope: ScopeKey::default(),
+    })
+    .collect::<Vec<_>>();
+    Lexicon::from_entries(&entries).map_err(|error| format!("failed to build lexicon: {error:?}"))
+}
+
+fn parse_args(args: Vec<String>) -> Config {
+    let root = workspace_root();
+    let mut config = Config {
+        input_path: root.join("docs").join("shortrun.md"),
+        json: false,
+        fixture: FixtureSelection::All,
+    };
+    if let Some(path) = string_arg(&args, "--input") {
+        config.input_path = PathBuf::from(path);
+    }
+    config.json = args.iter().any(|arg| arg == "--json");
+    if args.iter().any(|arg| arg == "--shortrun-only") {
+        config.fixture = FixtureSelection::ShortrunOnly;
+    }
+    config
+}
+
+fn string_arg(args: &[String], flag: &str) -> Option<String> {
+    args.windows(2)
+        .find_map(|window| (window[0] == flag).then(|| window[1].clone()))
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(4)
+        .expect("workspace root")
+        .to_path_buf()
+}

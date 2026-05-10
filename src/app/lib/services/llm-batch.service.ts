@@ -12,7 +12,7 @@
  */
 
 import { Injectable, signal, computed } from '@angular/core';
-import type { OpenRouterPlugin, OpenRouterStructuredOutputConfig } from '../../services/gokitt.service';
+import type { OpenRouterPlugin, OpenRouterStructuredOutputConfig } from './phoenix-chat.service';
 import { getSetting, setSetting } from '../dexie/settings.service';
 
 export type LlmProvider = 'google' | 'openrouter';

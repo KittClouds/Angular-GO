@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+phoenix-chunker = { path = "../phoenix-chunker" }
 phoenix-graph = { path = "../phoenix-graph" }
 phoenix-graph-kernel = { path = "../phoenix-graph-kernel" }
 phoenix-semantic-v2 = { path = "../phoenix-semantic-v2" }

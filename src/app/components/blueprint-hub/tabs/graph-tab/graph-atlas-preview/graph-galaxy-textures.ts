@@ -9,33 +9,42 @@ export function makeAtomTexture(): THREE.CanvasTexture {
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, 96, 96);
 
-    const outer = ctx.createRadialGradient(48, 48, 16, 48, 48, 34);
-    outer.addColorStop(0, 'rgba(255,255,255,0)');
-    outer.addColorStop(0.5, 'rgba(255,255,255,0.09)');
-    outer.addColorStop(0.76, 'rgba(255,255,255,0.035)');
-    outer.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = outer;
+    const corona = ctx.createRadialGradient(48, 48, 5, 48, 48, 31);
+    corona.addColorStop(0, 'rgba(255,255,255,0.34)');
+    corona.addColorStop(0.34, 'rgba(255,255,255,0.12)');
+    corona.addColorStop(0.68, 'rgba(255,255,255,0.032)');
+    corona.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = corona;
     ctx.fillRect(0, 0, 96, 96);
 
-    const core = ctx.createRadialGradient(39, 35, 2, 48, 48, 18);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    strokeFlare(ctx, 48, 48, 18, 0, 1.35, 0.34);
+    strokeFlare(ctx, 48, 48, 15, Math.PI * 0.5, 1.05, 0.28);
+    strokeFlare(ctx, 48, 48, 10, Math.PI * 0.25, 0.7, 0.18);
+    strokeFlare(ctx, 48, 48, 10, Math.PI * 0.75, 0.7, 0.18);
+    ctx.restore();
+
+    const core = ctx.createRadialGradient(43, 40, 1.5, 48, 48, 13.5);
     core.addColorStop(0, 'rgba(255,255,255,1)');
-    core.addColorStop(0.34, 'rgba(255,255,255,0.98)');
-    core.addColorStop(0.74, 'rgba(222,230,255,0.78)');
-    core.addColorStop(1, 'rgba(255,255,255,0.13)');
+    core.addColorStop(0.36, 'rgba(255,255,255,0.98)');
+    core.addColorStop(0.76, 'rgba(235,242,255,0.82)');
+    core.addColorStop(1, 'rgba(255,255,255,0.16)');
     ctx.beginPath();
-    ctx.arc(48, 48, 18, 0, Math.PI * 2);
+    ctx.arc(48, 48, 13.5, 0, Math.PI * 2);
     ctx.fillStyle = core;
     ctx.fill();
 
     ctx.beginPath();
-    ctx.arc(48, 48, 21, 0, Math.PI * 2);
-    ctx.lineWidth = 2.2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.arc(48, 48, 15.2, 0, Math.PI * 2);
+    ctx.lineWidth = 1.35;
+    ctx.strokeStyle = 'rgba(255,255,255,0.58)';
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(40, 36, 4.2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.58)';
+    ctx.arc(43, 40, 2.8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.68)';
     ctx.fill();
 
     return canvasTexture(canvas);
@@ -109,6 +118,29 @@ function canvasTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     return texture;
+}
+
+function strokeFlare(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    length: number,
+    angle: number,
+    width: number,
+    opacity: number,
+): void {
+    const dx = Math.cos(angle) * length;
+    const dy = Math.sin(angle) * length;
+    const gradient = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+    gradient.addColorStop(0, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.5, `rgba(255,255,255,${opacity})`);
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.beginPath();
+    ctx.moveTo(cx - dx, cy - dy);
+    ctx.lineTo(cx + dx, cy + dy);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = gradient;
+    ctx.stroke();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {

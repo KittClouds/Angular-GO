@@ -7,6 +7,7 @@
 
 mod engine;
 mod graph;
+mod hints;
 mod known_lane;
 mod native_lane;
 mod router;
@@ -19,6 +20,7 @@ pub use engine::{
     NerError, PhoenixNerEngine, PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceNerOutput,
 };
 pub use graph::{MentionEdge, MentionEdgeKind, MentionGraph, MentionGraphBuilder};
+pub use hints::{ChunkHint, ChunkHintKind, ChunkHintSource};
 pub use known_lane::KnownSurfaceLane;
 pub use native_lane::NativeDiscoveryLane;
 pub use router::SurfaceRouter;

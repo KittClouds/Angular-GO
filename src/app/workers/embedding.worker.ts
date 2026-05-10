@@ -36,10 +36,20 @@ interface StreamEmbedPayload {
     batchSize?: number;
 }
 
+interface FlatEmbeddingBatch {
+    values: Float32Array;
+    rows: number;
+    dims: number;
+    batchIndex: number;
+    totalBatches: number;
+}
+
 type WorkerMessage =
     | { type: 'INIT'; payload: InitPayload; _id: number }
     | { type: 'EMBED'; payload: EmbedPayload; _id: number }
+    | { type: 'EMBED_FLAT'; payload: EmbedPayload; _id: number }
     | { type: 'STREAM_EMBED'; payload: StreamEmbedPayload; _id: number }
+    | { type: 'STREAM_EMBED_FLAT'; payload: StreamEmbedPayload; _id: number }
     | { type: 'DISPOSE'; payload?: never; _id: number }
     | { type: 'GET_STATUS'; payload?: never; _id: number };
 
@@ -52,7 +62,7 @@ interface ProgressUpdate {
 }
 
 interface ResponseMessage {
-    type: 'INIT_COMPLETE' | 'EMBEDDINGS' | 'STREAM_BATCH' | 'STREAM_COMPLETE' | 'DISPOSED' | 'STATUS' | 'ERROR';
+    type: 'INIT_COMPLETE' | 'EMBEDDINGS' | 'EMBEDDINGS_FLAT' | 'STREAM_BATCH' | 'STREAM_FLAT_BATCH' | 'STREAM_COMPLETE' | 'DISPOSED' | 'STATUS' | 'ERROR';
     payload?: any;
     _id: number;
 }
@@ -69,7 +79,7 @@ class EmbeddingWorker {
 
     async initialize(payload: InitPayload, _id: number): Promise<void> {
         if (this.initialized) {
-            this.sendResponse({ type: 'INIT_COMPLETE', _id });
+            this.sendResponse({ type: 'INIT_COMPLETE', payload: this.getStatus(), _id });
             return;
         }
 
@@ -99,7 +109,7 @@ class EmbeddingWorker {
 
             this.initialized = true;
             console.log(`[EmbeddingWorker] Model loaded: ${this.modelId}`);
-            this.sendResponse({ type: 'INIT_COMPLETE', _id });
+            this.sendResponse({ type: 'INIT_COMPLETE', payload: this.getStatus(), _id });
         } catch (error: any) {
             // Fallback to WASM if WebGPU fails
             if (this.device === 'webgpu') {
@@ -110,7 +120,7 @@ class EmbeddingWorker {
                     device: 'wasm'
                 });
                 this.initialized = true;
-                this.sendResponse({ type: 'INIT_COMPLETE', _id });
+                this.sendResponse({ type: 'INIT_COMPLETE', payload: this.getStatus(), _id });
             } else {
                 throw error;
             }
@@ -162,6 +172,32 @@ class EmbeddingWorker {
         return allEmbeddings;
     }
 
+    async embedFlat(payload: EmbedPayload, _id: number): Promise<FlatEmbeddingBatch> {
+        if (!this.initialized || !this.pipeline) {
+            throw new Error('Worker not initialized');
+        }
+
+        const { texts, batchSize = 8 } = payload;
+        const batches: FlatEmbeddingBatch[] = [];
+        let dims = 0;
+        let rows = 0;
+        const totalBatches = Math.ceil(texts.length / batchSize);
+
+        for await (const batch of this.streamEmbedFlat({ texts, batchSize }, _id)) {
+            batches.push(batch);
+            dims = batch.dims;
+            rows += batch.rows;
+        }
+
+        const values = new Float32Array(rows * dims);
+        let offset = 0;
+        for (const batch of batches) {
+            values.set(batch.values, offset);
+            offset += batch.values.length;
+        }
+        return { values, rows, dims, batchIndex: 1, totalBatches };
+    }
+
     /**
      * Streaming embed: sends batches as they complete
      */
@@ -194,6 +230,33 @@ class EmbeddingWorker {
             yield { embeddings, batchIndex: batchNum, totalBatches };
 
             // Yield for GC
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+    }
+
+    async *streamEmbedFlat(payload: StreamEmbedPayload, _id: number): AsyncGenerator<FlatEmbeddingBatch> {
+        if (!this.initialized || !this.pipeline) {
+            throw new Error('Worker not initialized');
+        }
+
+        const { texts, batchSize = 8 } = payload;
+        const totalBatches = Math.ceil(texts.length / batchSize);
+
+        for (let i = 0; i < texts.length; i += batchSize) {
+            const batch = texts.slice(i, i + batchSize);
+            const batchNum = Math.floor(i / batchSize) + 1;
+            const output = await this.pipeline(batch, {
+                pooling: 'mean',
+                normalize: true,
+            });
+
+            const flat = tensorToFlatBatch(output, batch.length, batchNum, totalBatches);
+            const tensor = output as any;
+            if (typeof tensor.destroy === 'function') {
+                tensor.destroy();
+            }
+
+            yield flat;
             await new Promise(resolve => setTimeout(resolve, 5));
         }
     }
@@ -248,6 +311,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 break;
             }
 
+            case 'EMBED_FLAT': {
+                const batch = await worker.embedFlat(payload, _id);
+                self.postMessage({ type: 'EMBEDDINGS_FLAT', payload: batch, _id }, [batch.values.buffer]);
+                break;
+            }
+
             case 'STREAM_EMBED': {
                 const generator = worker.streamEmbed(payload, _id);
                 for await (const batch of generator) {
@@ -256,6 +325,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         payload: batch,
                         _id
                     });
+                }
+                self.postMessage({ type: 'STREAM_COMPLETE', _id });
+                break;
+            }
+
+            case 'STREAM_EMBED_FLAT': {
+                const generator = worker.streamEmbedFlat(payload, _id);
+                for await (const batch of generator) {
+                    self.postMessage({
+                        type: 'STREAM_FLAT_BATCH',
+                        payload: batch,
+                        _id
+                    }, [batch.values.buffer]);
                 }
                 self.postMessage({ type: 'STREAM_COMPLETE', _id });
                 break;
@@ -280,5 +362,31 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         });
     }
 };
+
+function tensorToFlatBatch(output: any, expectedRows: number, batchIndex: number, totalBatches: number): FlatEmbeddingBatch {
+    const dims = Array.isArray(output?.dims) ? output.dims : [];
+    const rows = dims.length >= 2 ? Number(dims[0]) : expectedRows;
+    const width = dims.length >= 2 ? Number(dims[dims.length - 1]) : 0;
+    const raw = output?.data;
+    if (raw && typeof raw.length === 'number') {
+        const values = raw instanceof Float32Array ? new Float32Array(raw) : Float32Array.from(raw as ArrayLike<number>);
+        return {
+            values,
+            rows: rows || expectedRows,
+            dims: width || Math.floor(values.length / Math.max(1, rows || expectedRows)),
+            batchIndex,
+            totalBatches,
+        };
+    }
+
+    const nested = output.tolist() as number[][];
+    const fallbackRows = nested.length;
+    const fallbackDims = nested[0]?.length || 0;
+    const values = new Float32Array(fallbackRows * fallbackDims);
+    for (let row = 0; row < fallbackRows; row++) {
+        values.set(nested[row], row * fallbackDims);
+    }
+    return { values, rows: fallbackRows, dims: fallbackDims, batchIndex, totalBatches };
+}
 
 console.log('[EmbeddingWorker] Worker script loaded');

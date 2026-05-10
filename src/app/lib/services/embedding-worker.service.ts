@@ -23,8 +23,17 @@ export interface EmbeddingBatch {
     totalBatches: number;
 }
 
+export interface EmbeddingFlatBatch {
+    values: Float32Array;
+    rows: number;
+    dims: number;
+    batchIndex: number;
+    totalBatches: number;
+}
+
 export type EmbeddingProgressCallback = (progress: EmbeddingProgress) => void;
 export type EmbeddingBatchCallback = (batch: EmbeddingBatch) => void;
+export type EmbeddingFlatBatchCallback = (batch: EmbeddingFlatBatch) => void;
 
 // ============================================================================
 // Service
@@ -38,6 +47,7 @@ export class EmbeddingWorkerService {
         reject: Function;
         onProgress?: EmbeddingProgressCallback;
         onBatch?: EmbeddingBatchCallback;
+        onFlatBatch?: EmbeddingFlatBatchCallback;
     }>();
     private callbackId = 0;
 
@@ -158,6 +168,41 @@ export class EmbeddingWorkerService {
         }
     }
 
+    async embedFlat(
+        texts: string[],
+        batchSize = 8,
+        onProgress?: EmbeddingProgressCallback
+    ): Promise<EmbeddingFlatBatch> {
+        if (!this.isReady()) {
+            throw new Error('Worker not ready. Call initialize() first.');
+        }
+
+        this.isProcessing.set(true);
+        this.progress.set({ type: 'batch', current: 0, total: Math.ceil(texts.length / batchSize), message: 'Starting...' });
+
+        const id = this.nextId();
+        const promise = new Promise<EmbeddingFlatBatch>((resolve, reject) => {
+            this.pendingCallbacks.set(id, { resolve, reject, onProgress });
+        });
+
+        this.worker!.postMessage({
+            type: 'EMBED_FLAT',
+            payload: { texts, batchSize },
+            _id: id
+        });
+
+        try {
+            const result = await promise;
+            this.isProcessing.set(false);
+            this.progress.set({ type: 'complete', current: 1, total: 1, message: 'Complete' });
+            return result;
+        } catch (error) {
+            this.isProcessing.set(false);
+            this.progress.set(null);
+            throw error;
+        }
+    }
+
     /**
      * Streaming embed: calls onBatch for each batch as it completes
      * Ideal for large documents with streaming ingestion
@@ -183,6 +228,41 @@ export class EmbeddingWorkerService {
 
         this.worker!.postMessage({
             type: 'STREAM_EMBED',
+            payload: { texts, batchSize },
+            _id: id
+        });
+
+        try {
+            await promise;
+            this.isProcessing.set(false);
+            this.progress.set({ type: 'complete', current: 1, total: 1, message: 'Complete' });
+        } catch (error) {
+            this.isProcessing.set(false);
+            this.progress.set(null);
+            throw error;
+        }
+    }
+
+    async embedStreamFlat(
+        texts: string[],
+        onBatch: EmbeddingFlatBatchCallback,
+        batchSize = 8,
+        onProgress?: EmbeddingProgressCallback
+    ): Promise<void> {
+        if (!this.isReady()) {
+            throw new Error('Worker not ready. Call initialize() first.');
+        }
+
+        this.isProcessing.set(true);
+        this.progress.set({ type: 'batch', current: 0, total: Math.ceil(texts.length / batchSize), message: 'Starting...' });
+
+        const id = this.nextId();
+        const promise = new Promise<void>((resolve, reject) => {
+            this.pendingCallbacks.set(id, { resolve, reject, onProgress, onFlatBatch: onBatch });
+        });
+
+        this.worker!.postMessage({
+            type: 'STREAM_EMBED_FLAT',
             payload: { texts, batchSize },
             _id: id
         });
@@ -304,6 +384,20 @@ export class EmbeddingWorkerService {
             return;
         }
 
+        if (type === 'STREAM_FLAT_BATCH') {
+            if (_id !== undefined && this.pendingCallbacks.has(_id)) {
+                const { onFlatBatch, onProgress } = this.pendingCallbacks.get(_id)!;
+                onFlatBatch?.(payload);
+                onProgress?.({
+                    type: 'batch',
+                    current: payload.batchIndex,
+                    total: payload.totalBatches,
+                    message: `Batch ${payload.batchIndex}/${payload.totalBatches}`
+                });
+            }
+            return;
+        }
+
         // Handle standard responses
         if (_id !== undefined && this.pendingCallbacks.has(_id)) {
             const { resolve, reject } = this.pendingCallbacks.get(_id)!;
@@ -315,12 +409,16 @@ export class EmbeddingWorkerService {
                 });
             } else if (type === 'INIT_COMPLETE') {
                 this.ngZone.run(() => {
-                    this.device.set('wasm'); // Could be webgpu, but we don't know
+                    this.device.set(payload?.device || 'wasm');
                     resolve();
                 });
             } else if (type === 'EMBEDDINGS') {
                 this.ngZone.run(() => {
                     resolve(payload?.embeddings);
+                });
+            } else if (type === 'EMBEDDINGS_FLAT') {
+                this.ngZone.run(() => {
+                    resolve(payload);
                 });
             } else if (type === 'DISPOSED') {
                 this.ngZone.run(() => {

@@ -12,13 +12,14 @@ import { GraphLensWorkspaceComponent } from './graph-lens-workspace.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
 import { ScopeService } from '../../../../lib/services/scope.service';
 import { NoteEditorStore } from '../../../../lib/store/note-editor.store';
-import { parseContentToPlainText } from '../../../../lib/analytics';
 import { NerService } from '../../../../services/ner.service';
-import { FooterStatsService } from '../../../../services/footer-stats.service';
 import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
 import { PhoenixMachineControlService } from '../../../../services/phoenix-machine-control.service';
 import { EntitySelectionService } from '../../../../lib/services/entity-selection.service';
-import type { EntitySuggestionScanRequest } from '../../../../lib/entity-suggestions/entity-suggestion.types';
+import { AtlasScanCoordinatorService } from '../../../../services/atlas-scan-coordinator.service';
+import type { AtlasMode } from './graph-atlas-preview/graph-atlas-preview.component';
+import type { GraphLensState } from './graph-lens';
+import { buildGraphAtlasReadContext } from './graph-atlas-preview/graph-atlas-read-context';
 
 @Component({
     selector: 'app-graph-tab',
@@ -39,30 +40,31 @@ export class GraphTabComponent {
     private scopeService = inject(ScopeService);
     private nerService = inject(NerService);
     private noteStore = inject(NoteEditorStore);
-    private footerStatsService = inject(FooterStatsService);
     private projection = inject(PhoenixProjectionService);
     private machine = inject(PhoenixMachineControlService);
     private entitySelection = inject(EntitySelectionService);
+    private atlasScan = inject(AtlasScanCoordinatorService);
 
     // State — entities now derived from ScopeService signal
-    entities = computed(() => this.scopeService.scopedEntities());
+    entities = computed(() => this.projection.entities());
     selectedEntity = signal<RegisteredEntity | null>(null);
     graphLensMode = this.machine.graphLensMode;
     isCreatorOpen = signal(false);
     editingEntity = signal<EntityCreatorData | undefined>(undefined);
     isStyleDrawerOpen = signal(false);
     atlasSearch = signal('');
+    atlasMode = signal<AtlasMode>('entities');
 
     // Scope state — driven by ScopeService
     scopeLabel = this.scopeService.scopeLabel;
     activeScope = this.scopeService.activeScope;
 
     suggestions = this.nerService.suggestions;
-    isScanningSuggestions = this.nerService.isAnalyzing;
+    isScanningSuggestions = computed(() => this.nerService.isAnalyzing() || this.atlasScan.running());
     activeSuggestionProvider = this.nerService.activeProvider;
-    suggestionError = this.nerService.errorMessage;
+    suggestionError = computed(() => this.atlasScan.error() || this.nerService.errorMessage());
 
-    totalEntities = this.scopeService.scopedEntityCount;
+    totalEntities = computed(() => this.entities().length);
     activeEntity = computed(() => {
         const local = this.selectedEntity();
         if (local) return local;
@@ -209,13 +211,26 @@ export class GraphTabComponent {
         }
     }
 
-    async runSuggestionScan() {
-        const request = this.buildScanRequest();
-        if (!request) {
-            alert('Open a note with rendered text before scanning.');
+    async runSuggestionScan(source: 'sidebar' | 'canvas' = 'sidebar', lens?: GraphLensState) {
+        if (this.atlasMode() !== 'embeddings') {
             return;
         }
-        await this.nerService.runDynamicScan(request);
+        try {
+            const context = buildGraphAtlasReadContext(lens || {
+                mode: this.graphLensMode(),
+                primaryNoteId: null,
+                selectedNoteIds: [],
+            });
+            this.machine.setScope(context.noteIds[0] || 'global');
+            await this.atlasScan.runRichEmbeddingScan({
+                source,
+                requireActiveNote: false,
+                lensMode: context.lensMode,
+                noteIds: context.noteIds,
+            });
+        } catch (err) {
+            console.error('[GraphTab] Semantic Atlas scan failed', err);
+        }
     }
 
     async acceptSuggestion(id: string) {
@@ -229,23 +244,6 @@ export class GraphTabComponent {
     getColor(kind: string): string {
         // Use entityColorStore for color parity across the app
         return entityColorStore.getEntityColor(kind);
-    }
-
-    private buildScanRequest(): EntitySuggestionScanRequest | null {
-        const currentNote = this.noteStore.currentNote();
-        if (!currentNote) return null;
-
-        const plainText =
-            this.footerStatsService.plainText() ||
-            parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
-
-        if (!plainText.trim()) return null;
-
-        return {
-            noteId: currentNote.id,
-            noteTitle: currentNote.title || 'Untitled Note',
-            plainText,
-        };
     }
 
     private machineScope(): 'global' | string {

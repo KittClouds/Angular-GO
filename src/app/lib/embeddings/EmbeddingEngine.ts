@@ -2,7 +2,6 @@
 // Unified Embedding Engine - orchestrates providers
 
 import type { IEmbeddingProvider } from './providers/types';
-import { LocalEmbeddingProvider } from './providers/LocalEmbeddingProvider';
 import { EmbeddingModelRegistry } from './models/ModelRegistry';
 
 /**
@@ -37,9 +36,13 @@ export class EmbeddingEngine {
 
             // Create appropriate provider
             switch (model.provider) {
-                case 'local':
+                case 'local': {
+                    // Keep Transformers.js out of the initial app bundle. It is only
+                    // needed after the user explicitly loads a semantic model.
+                    const { LocalEmbeddingProvider } = await import('./providers/LocalEmbeddingProvider');
                     provider = new LocalEmbeddingProvider(targetModelId);
                     break;
+                }
                 case 'rust': {
                     // Lazy import to avoid loading WASM unless needed
                     const { RustEmbeddingProvider } = await import('./providers/RustEmbeddingProvider');

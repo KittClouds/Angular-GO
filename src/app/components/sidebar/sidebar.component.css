@@ -101,8 +101,8 @@
 
 .import-select:focus,
 .import-input:focus {
-    border-color: rgba(45, 212, 191, 0.8);
-    box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.4);
+    border-color: rgba(var(--ui-accent-rgb), 0.9);
+    box-shadow: 0 0 0 1px rgba(var(--ui-accent-rgb), 0.48);
 }
 
 .import-source-button,
@@ -124,8 +124,8 @@
 
 .import-source-button,
 .import-primary-button {
-    background: linear-gradient(135deg, rgba(45, 212, 191, 0.92), rgba(14, 165, 233, 0.92));
-    color: rgb(8 15 27);
+    background: linear-gradient(135deg, rgba(var(--ui-accent-rgb), 0.96), rgba(var(--ui-accent-rgb), 0.72));
+    color: rgb(244 244 245);
 }
 
 .import-secondary-button {
@@ -135,7 +135,7 @@
 
 .import-link-button {
     background: transparent;
-    color: rgb(94 234 212);
+    color: var(--ui-accent-bright);
     font-size: 0.78rem;
     font-weight: 600;
 }
@@ -182,7 +182,7 @@
 
 .import-stat-card {
     border-radius: 0.75rem;
-    border: 1px solid rgba(45, 212, 191, 0.16);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.72);
     background: rgba(15, 23, 42, 0.7);
     padding: 0.8rem;
     display: flex;
@@ -193,7 +193,7 @@
 .import-stat-value {
     font-size: 1.1rem;
     font-weight: 700;
-    color: rgb(94 234 212);
+    color: var(--ui-accent-bright);
 }
 
 .import-stat-label {
@@ -272,7 +272,7 @@
 .import-progress-fill {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, rgba(45, 212, 191, 0.95), rgba(59, 130, 246, 0.95));
+    background: linear-gradient(90deg, rgba(var(--ui-accent-rgb), 0.96), rgba(var(--ui-accent-rgb), 0.72));
 }
 
 @media (max-width: 640px) {

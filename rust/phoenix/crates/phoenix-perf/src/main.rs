@@ -32,13 +32,14 @@ fn main() {
         }
     }
 
-    let report = match run_perf_suite_filtered_with_config(corpus_filter.as_deref(), &benchmark_config) {
-        Ok(report) => report,
-        Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(1);
-        }
-    };
+    let report =
+        match run_perf_suite_filtered_with_config(corpus_filter.as_deref(), &benchmark_config) {
+            Ok(report) => report,
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        };
 
     let (json_path, md_path) = match write_suite_report(&report, &out_dir) {
         Ok(paths) => paths,

@@ -3667,6 +3667,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-dynamic-ner"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "daachorse",
+ "memchr",
+ "phoenix-alex",
+ "phoenix-types",
+ "rustc-hash 1.1.0",
+ "serde",
+ "smallvec",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "phoenix-graph"
 version = "0.1.0"
 dependencies = [
@@ -3696,6 +3711,7 @@ dependencies = [
  "bytemuck",
  "memmap2",
  "rand 0.8.5",
+ "roaring",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -3866,19 +3882,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-rel-post"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "ort",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokenizers",
+]
+
+[[package]]
 name = "phoenix-runtime"
 version = "0.1.0"
 dependencies = [
  "js-sys",
  "overgraph",
+ "phoenix-alex",
  "phoenix-analytics",
  "phoenix-chat",
+ "phoenix-chunker",
+ "phoenix-dynamic-ner",
  "phoenix-graph",
  "phoenix-hyperbolic",
  "phoenix-invarant-v2",
  "phoenix-kernel",
  "phoenix-lex",
  "phoenix-om",
+ "phoenix-rel-post",
  "phoenix-runtime-native",
  "phoenix-scanner",
  "phoenix-semantic-v2",
@@ -4000,6 +4032,7 @@ dependencies = [
  "hound",
  "ort",
  "ort-sys",
+ "phoenix-hyperbolic",
  "phoenix-native",
  "phoenix-types",
  "serde",

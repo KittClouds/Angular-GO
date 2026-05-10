@@ -1,6 +1,6 @@
 /**
  * Shared entity types for use across the application.
- * These types are used by GoKitt services, extractors, and UI components.
+ * These types are used by Phoenix native services, extractors, and UI components.
  */
 
 /**

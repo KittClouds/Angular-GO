@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use hashbrown::HashMap;
+use phoenix_embed::TextEmbeddingBatch;
 use phoenix_hyperbolic::{AnnMetric, HnswBuildParams, HyperbolicHnswBuilder};
 use phoenix_store_native_core::SemanticNodeNeighbor;
 
@@ -11,6 +12,43 @@ const MIN_ANN_SEARCH_WIDTH: usize = 32;
 const ANN_SEARCH_OVERSAMPLE_MULTIPLIER: usize = 2;
 const SPHERE_DISTANCE_FOR_DEGENERATE_EMPTY: f64 = std::f64::consts::FRAC_PI_2;
 const SPHERE_EPS: f64 = 1e-12;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EmbeddingRows<'a> {
+    values: &'a [f32],
+    rows: usize,
+    dims: usize,
+}
+
+impl<'a> EmbeddingRows<'a> {
+    pub(crate) fn from_batch(batch: &'a TextEmbeddingBatch) -> Self {
+        Self {
+            values: batch.values(),
+            rows: batch.rows(),
+            dims: batch.dims(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_flat(values: &'a [f32], rows: usize, dims: usize) -> Option<Self> {
+        if rows == 0 {
+            return values.is_empty().then_some(Self { values, rows, dims });
+        }
+        if dims == 0 || values.len() != rows.checked_mul(dims)? {
+            return None;
+        }
+        Some(Self { values, rows, dims })
+    }
+
+    pub(crate) fn row(&self, index: usize) -> Option<&'a [f32]> {
+        if index >= self.rows || self.dims == 0 {
+            return None;
+        }
+        let start = index.checked_mul(self.dims)?;
+        let end = start.checked_add(self.dims)?;
+        self.values.get(start..end)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SemanticNeighborHit {
@@ -38,7 +76,7 @@ pub(crate) struct SemanticTargetIndex {
 }
 
 impl SemanticTargetIndex {
-    pub(crate) fn new(target_indices: Vec<usize>, embeddings: &[Vec<f32>]) -> Self {
+    pub(crate) fn new(target_indices: Vec<usize>, embeddings: EmbeddingRows<'_>) -> Self {
         let ann = build_kind_ann_index(&target_indices, embeddings);
         Self {
             target_indices,
@@ -49,10 +87,10 @@ impl SemanticTargetIndex {
     pub(crate) fn query_neighbors(
         &self,
         source_index: usize,
-        embeddings: &[Vec<f32>],
+        embeddings: EmbeddingRows<'_>,
         search_limit: usize,
     ) -> Vec<SemanticNeighborHit> {
-        let Some(source_embedding) = embeddings.get(source_index) else {
+        let Some(source_embedding) = embeddings.row(source_index) else {
             return Vec::new();
         };
         if let Some(index) = self.ann.as_ref() {
@@ -84,7 +122,7 @@ pub(crate) struct SemanticNeighborWorkspace<'a> {
     folder_id: Option<String>,
     folder_path: Option<String>,
     prototypes: &'a [Prototype],
-    embeddings: &'a [Vec<f32>],
+    embeddings: EmbeddingRows<'a>,
     targets_by_kind: HashMap<&'static str, SemanticTargetIndex>,
     cache: HashMap<(usize, &'static str), CachedNeighborList>,
 }
@@ -94,7 +132,7 @@ impl<'a> SemanticNeighborWorkspace<'a> {
         folder_id: Option<String>,
         folder_path: Option<String>,
         prototypes: &'a [Prototype],
-        embeddings: &'a [Vec<f32>],
+        embeddings: EmbeddingRows<'a>,
     ) -> Self {
         let mut indices_by_kind = HashMap::<&'static str, Vec<usize>>::new();
         for (prototype_index, prototype) in prototypes.iter().enumerate() {
@@ -191,12 +229,12 @@ impl<'a> SemanticNeighborWorkspace<'a> {
     }
 }
 
-fn build_kind_ann_index(indices: &[usize], embeddings: &[Vec<f32>]) -> Option<AnnKindIndex> {
+fn build_kind_ann_index(indices: &[usize], embeddings: EmbeddingRows<'_>) -> Option<AnnKindIndex> {
     if indices.len() <= EXACT_FALLBACK_MAX_TARGETS {
         return None;
     }
     let first_index = *indices.first()?;
-    let dim = embeddings.get(first_index)?.len();
+    let dim = embeddings.row(first_index)?.len();
     if dim == 0 {
         return None;
     }
@@ -205,11 +243,11 @@ fn build_kind_ann_index(indices: &[usize], embeddings: &[Vec<f32>]) -> Option<An
     let mut index = HyperbolicHnswBuilder::new(dim, metric, HnswBuildParams::default());
     let mut target_indices = Vec::with_capacity(indices.len());
     for &prototype_index in indices {
-        let embedding = embeddings.get(prototype_index)?;
+        let embedding = embeddings.row(prototype_index)?;
         if embedding.len() != dim {
             return None;
         }
-        index.insert(embedding.clone());
+        index.insert(embedding.to_vec());
         target_indices.push(prototype_index);
     }
 
@@ -256,7 +294,7 @@ fn build_neighbor_hits_exact(
     source_index: usize,
     target_indices: &[usize],
     source_embedding: &[f32],
-    embeddings: &[Vec<f32>],
+    embeddings: EmbeddingRows<'_>,
     search_limit: usize,
 ) -> Vec<SemanticNeighborHit> {
     if search_limit == 0 {
@@ -267,12 +305,12 @@ fn build_neighbor_hits_exact(
         if target_index == source_index {
             continue;
         }
-        let Some(target_embedding) = embeddings.get(target_index) else {
+        let Some(target_embedding) = embeddings.row(target_index) else {
             continue;
         };
         hits.push(SemanticNeighborHit {
             prototype_index: target_index,
-            distance: embedding_distance(source_embedding, target_embedding.as_slice()),
+            distance: embedding_distance(source_embedding, target_embedding),
         });
     }
     truncate_and_sort_hits(&mut hits, search_limit);
@@ -374,7 +412,7 @@ pub(crate) fn embedding_distance(left: &[f32], right: &[f32]) -> f64 {
 mod tests {
     use phoenix_semantic_v2::{SemanticGraphNodeKind, SemanticGraphNodeRecord};
 
-    use super::{SemanticNeighborWorkspace, EXACT_FALLBACK_MAX_TARGETS};
+    use super::{EmbeddingRows, SemanticNeighborWorkspace, EXACT_FALLBACK_MAX_TARGETS};
     use crate::semantic_graph_support::{Prototype, CLAIM_KIND, STATE_KIND};
 
     fn prototype(
@@ -419,12 +457,13 @@ mod tests {
             prototype("graph::claim::2", CLAIM_KIND, SemanticGraphNodeKind::Claim),
             prototype("graph::claim::3", CLAIM_KIND, SemanticGraphNodeKind::Claim),
         ];
-        let embeddings = vec![vec![0.0f32, 0.0], vec![0.1f32, 0.0], vec![0.9f32, 0.0]];
+        let embeddings = vec![0.0f32, 0.0, 0.1, 0.0, 0.9, 0.0];
+        let embedding_rows = EmbeddingRows::from_flat(&embeddings, 3, 2).expect("embedding rows");
         let mut workspace = SemanticNeighborWorkspace::new(
             Some("folder-a".to_owned()),
             Some("/vault/folder-a".to_owned()),
             &prototypes,
-            &embeddings,
+            embedding_rows,
         );
 
         let hits = workspace.query_semantic_node_neighbors(0, CLAIM_KIND, 2, 2);
@@ -443,8 +482,9 @@ mod tests {
             STATE_KIND,
             SemanticGraphNodeKind::State,
         )];
-        let embeddings = vec![vec![0.0f32, 0.0]];
-        let mut workspace = SemanticNeighborWorkspace::new(None, None, &prototypes, &embeddings);
+        let embeddings = vec![0.0f32, 0.0];
+        let embedding_rows = EmbeddingRows::from_flat(&embeddings, 1, 2).expect("embedding rows");
+        let mut workspace = SemanticNeighborWorkspace::new(None, None, &prototypes, embedding_rows);
 
         let hits = workspace.query_semantic_node_neighbors(0, "", 4, 8);
 
@@ -469,7 +509,13 @@ mod tests {
                 vec![angle.cos(), angle.sin(), 0.01 * (index % 7) as f32, 0.25]
             })
             .collect::<Vec<_>>();
-        let mut workspace = SemanticNeighborWorkspace::new(None, None, &prototypes, &embeddings);
+        let flat_embeddings = embeddings
+            .iter()
+            .flat_map(|row| row.iter().copied())
+            .collect::<Vec<_>>();
+        let embedding_rows =
+            EmbeddingRows::from_flat(&flat_embeddings, prototype_count, 4).expect("embedding rows");
+        let mut workspace = SemanticNeighborWorkspace::new(None, None, &prototypes, embedding_rows);
 
         let hits = workspace.query_semantic_node_neighbors(0, CLAIM_KIND, 4, 16);
 

@@ -6,12 +6,12 @@ use phoenix_machine::{SurfaceCompileArtifacts, SurfaceCompiler};
 use phoenix_mentions::MentionCompiler;
 use phoenix_proposition::PropositionLowerer;
 use phoenix_query::QueryPlan;
-use phoenix_semantics::{SemanticBundle, SemanticLowerer};
 use phoenix_semantic_v2::{DocumentRevisionRef, SessionArchive};
+use phoenix_semantics::{SemanticBundle, SemanticLowerer};
 use phoenix_store_native_core::{PhoenixArchiveStoreV2, StoreError};
 use phoenix_time::{TemporalBinding, TimeKernel};
 use phoenix_types::{
-    CausalBundle, Diagnostic, EntityId, IngestDocument, IngestResult, IndexedSpan,
+    CausalBundle, Diagnostic, EntityId, IndexedSpan, IngestDocument, IngestResult,
     LexicalSearchResult, NodeHit, PreparedMentionRecord, QueryRequest, QueryResult, ScanArtifact,
     ScanRequest, ScopeKey, SessionDocumentState, SessionId, StructureArtifact, StructureRequest,
 };
@@ -86,11 +86,17 @@ impl PhoenixRuntimeNative {
             .map_err(|error| StoreError::Query(error.to_string()))
     }
 
-    pub fn prepare_mentions(&self, artifacts: &SurfaceCompileArtifacts) -> Vec<PreparedMentionRecord> {
+    pub fn prepare_mentions(
+        &self,
+        artifacts: &SurfaceCompileArtifacts,
+    ) -> Vec<PreparedMentionRecord> {
         MentionCompiler::prepare(artifacts)
     }
 
-    pub fn lower_propositions(&self, artifacts: &SurfaceCompileArtifacts) -> Vec<phoenix_types::Proposition> {
+    pub fn lower_propositions(
+        &self,
+        artifacts: &SurfaceCompileArtifacts,
+    ) -> Vec<phoenix_types::Proposition> {
         PropositionLowerer::lower(artifacts)
     }
 
@@ -155,7 +161,11 @@ impl PhoenixRuntimeNative {
             let document_ids = lexical
                 .span_hits
                 .iter()
-                .filter_map(|hit| hit.document_id.as_ref().map(|document_id| document_id.0.clone()))
+                .filter_map(|hit| {
+                    hit.document_id
+                        .as_ref()
+                        .map(|document_id| document_id.0.clone())
+                })
                 .collect::<BTreeSet<_>>();
             if !document_ids.is_empty() {
                 let archives = store.load_latest_document_archives(Some(&request.scope))?;
@@ -180,7 +190,8 @@ impl PhoenixRuntimeNative {
                         entity_scores
                             .entry(entity.entity_id.0.clone())
                             .and_modify(|existing| {
-                                *existing += doc_boost + (entity.mention_count as f64).ln_1p() * 0.05
+                                *existing +=
+                                    doc_boost + (entity.mention_count as f64).ln_1p() * 0.05
                             })
                             .or_insert(doc_boost + (entity.mention_count as f64).ln_1p() * 0.05);
                     }
@@ -196,10 +207,15 @@ impl PhoenixRuntimeNative {
             })
             .collect::<Vec<_>>();
         if node_hits.is_empty() {
-            node_hits.extend(chunk_hits.iter().take(request.limit.unwrap_or(5)).map(|hit| NodeHit {
-                entity_id: None,
-                score: hit.score * 0.25,
-            }));
+            node_hits.extend(
+                chunk_hits
+                    .iter()
+                    .take(request.limit.unwrap_or(5))
+                    .map(|hit| NodeHit {
+                        entity_id: None,
+                        score: hit.score * 0.25,
+                    }),
+            );
         }
         node_hits.sort_by(|left, right| {
             right
@@ -321,7 +337,12 @@ impl PhoenixRuntimeNative {
         text: &str,
         scope: &ScopeKey,
         resolver_seed: &[phoenix_types::ResolverEntitySeed],
-    ) -> (SurfaceCompileArtifacts, Vec<PreparedMentionRecord>, Vec<phoenix_types::Proposition>, SemanticBundle) {
+    ) -> (
+        SurfaceCompileArtifacts,
+        Vec<PreparedMentionRecord>,
+        Vec<phoenix_types::Proposition>,
+        SemanticBundle,
+    ) {
         let artifacts = self.surface_compiler.compile(text, scope, resolver_seed);
         let mentions = self.prepare_mentions(&artifacts);
         let propositions = self.lower_propositions(&artifacts);

@@ -1,6 +1,7 @@
 pub mod api;
 
 mod graph;
+mod lens_consumer;
 mod normalize;
 mod resolve;
 #[cfg(test)]
@@ -9,6 +10,7 @@ mod views;
 pub mod worker;
 
 pub use graph::{build_identity_hypotheses, EventIdentityGraphStats};
+pub use lens_consumer::EventLensChunkConsumer;
 pub use normalize::{normalize_event_identity_inputs, EventIdentityNormalizedInputs};
 pub use resolve::resolve_canonical_events;
 pub use views::build_canonical_event_cards;

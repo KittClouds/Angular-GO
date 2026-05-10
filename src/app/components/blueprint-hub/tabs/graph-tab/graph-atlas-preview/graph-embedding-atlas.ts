@@ -1,4 +1,5 @@
 import type { Note, NoteBlockProjection } from '../../../../../lib/dexie/db';
+import type { AtlasManifoldMode, ManifoldCapabilities, ManifoldProjectionSource, ManifoldTopologyPayload } from '../../../../../services/manifold-atlas.types';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 
 export interface EmbeddingAtlasData {
@@ -6,6 +7,15 @@ export interface EmbeddingAtlasData {
     edges: GalaxyInputEdge[];
     sourceLabel: string;
     searchIndex: EmbeddingAtlasSearchItem[];
+    manifold?: EmbeddingAtlasManifoldMetadata;
+}
+
+export interface EmbeddingAtlasManifoldMetadata extends ManifoldTopologyPayload {
+    mode: AtlasManifoldMode;
+    geometryVersion: string;
+    sourceLabel: string;
+    capabilities: ManifoldCapabilities;
+    projectionSource?: ManifoldProjectionSource | string;
 }
 
 export interface EmbeddingAtlasSearchItem {
@@ -29,6 +39,50 @@ export interface EmbeddingQueryTrace {
     edgeIds: string[];
     edges: GalaxyInputEdge[];
     previews: EmbeddingSourcePreview[];
+    manifoldTrace?: EmbeddingManifoldTrace;
+}
+
+export interface EmbeddingManifoldTrace {
+    mode: AtlasManifoldMode;
+    geometryVersion: string;
+    coneId?: string;
+    cellIds: string[];
+    chartIds: string[];
+    pathEdgeIds: string[];
+}
+
+export interface BackendEmbeddingAtlasNode {
+    id: string;
+    label: string;
+    sourceType: string;
+    vector: number[];
+    documentId?: string;
+    narrativeId?: string;
+    folderId?: string;
+    preview?: string;
+    kind?: string;
+    baseVector?: [number, number, number];
+    cellId?: string;
+    secondaryCellIds?: string[];
+    cellDistance?: number;
+    boundaryScore?: number;
+    phase?: number;
+    fiberKind?: string;
+    geometryVersion?: string;
+}
+
+export interface BackendEmbeddingAtlasEdge {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: string;
+    confidence: number;
+}
+
+export interface BackendEmbeddingAtlasPayload extends ManifoldTopologyPayload {
+    nodes: BackendEmbeddingAtlasNode[];
+    edges: BackendEmbeddingAtlasEdge[];
+    sourceLabel: string;
 }
 
 interface Signature {
@@ -70,7 +124,7 @@ export function buildDocEmbeddingAtlas(notes: Note[], limit = 180, topK = 4): Em
     return {
         nodes,
         edges: buildKnnEdges(nodes, signatures, topK),
-        sourceLabel: 'doc vectors',
+        sourceLabel: 'local preview doc vectors',
         searchIndex: buildSearchIndex(nodes, signatures),
     };
 }
@@ -104,15 +158,103 @@ export function buildLeafEmbeddingAtlas(blocks: NoteBlockProjection[], limit = 2
     return {
         nodes,
         edges: buildKnnEdges(nodes, signatures, topK),
-        sourceLabel: 'leaf vectors',
+        sourceLabel: 'local preview leaf vectors',
         searchIndex: buildSearchIndex(nodes, signatures),
     };
+}
+
+export function buildBackendEmbeddingAtlas(payload: BackendEmbeddingAtlasPayload, limit = 260, topK = 5): EmbeddingAtlasData {
+    const selected = payload.nodes
+        .filter((node) => Array.isArray(node.vector) && node.vector.length > 0)
+        .slice(0, limit);
+    const signatures = selected.map((node) => ({
+        vector: normalizeBackendVector(node.vector),
+        tokens: Math.max(1, Math.round(node.vector.length / 8)),
+    }));
+    const nodes = selected.map((node, index) => {
+        const signature = signatures[index];
+        const point = backendAtlasPoint(node, signature.vector, index, selected.length);
+        const hopf = backendHopfMetadata(node);
+        return {
+            id: node.id,
+            label: node.label || node.id,
+            kind: node.kind || 'CONCEPT',
+            totalMentions: Math.max(1, signature.tokens),
+            atlasX: point.x,
+            atlasY: point.y,
+            atlasZ: point.z,
+            colorHsl: COLORS[index % COLORS.length],
+            metadata: {
+                sourceType: node.sourceType || 'semantic_atlas',
+                sourceId: node.id,
+                documentId: node.documentId,
+                narrativeId: node.narrativeId,
+                folderId: node.folderId,
+                tokenCount: signature.tokens,
+                preview: node.preview || `${node.sourceType || 'semantic'} vector from native Semantic Atlas`,
+                ...(hopf ? { hopf } : {}),
+            },
+        } satisfies GalaxyRenderableNode;
+    });
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const backendEdges = payload.edges
+        .filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId))
+        .map((edge) => ({
+            id: edge.id,
+            sourceId: edge.sourceId,
+            targetId: edge.targetId,
+            type: edge.type || 'semantic-candidate',
+            confidence: Number.isFinite(edge.confidence) ? edge.confidence : 0.35,
+        }));
+    return {
+        nodes,
+        edges: backendEdges.length ? backendEdges : buildKnnEdges(nodes, signatures, topK),
+        sourceLabel: payload.sourceLabel || 'backend semantic atlas',
+        searchIndex: buildSearchIndex(nodes, signatures),
+    };
+}
+
+function backendAtlasPoint(node: BackendEmbeddingAtlasNode, vector: Float32Array, index: number, total: number): { x: number; y: number; z: number } {
+    const base = node.baseVector;
+    if (Array.isArray(base) && base.length === 3 && base.every(Number.isFinite)) {
+        return { x: base[0], y: base[1], z: base[2] };
+    }
+    return projectSignature(vector, node.id, index, total);
+}
+
+function backendHopfMetadata(node: BackendEmbeddingAtlasNode): Record<string, unknown> | null {
+    const sourceType = String(node.sourceType || '').toLowerCase();
+    const role = sourceType === 'hopf_anchor'
+        ? 'anchor'
+        : sourceType === 'hopf_fiber'
+            ? 'fiber'
+            : '';
+    if (!role && !node.cellId) return null;
+    return {
+        role,
+        baseId: hopfBaseId(node.id),
+        fiberKind: node.fiberKind,
+        cellId: node.cellId,
+        secondaryCellIds: node.secondaryCellIds || [],
+        cellDistance: node.cellDistance,
+        boundaryScore: node.boundaryScore,
+        phase: node.phase,
+        geometryVersion: node.geometryVersion,
+    };
+}
+
+function hopfBaseId(id: string): string {
+    if (id.startsWith('hopf:anchor:')) return id.slice('hopf:anchor:'.length);
+    if (!id.startsWith('hopf:fiber:')) return id;
+    const rest = id.slice('hopf:fiber:'.length);
+    const separator = rest.lastIndexOf(':');
+    return separator > 0 ? rest.slice(0, separator) : rest;
 }
 
 export function buildEmbeddingQueryTrace(query: string, atlas: EmbeddingAtlasData, topK = 6): EmbeddingQueryTrace | null {
     const text = query.trim();
     if (!text || atlas.searchIndex.length === 0) return null;
-    const signature = textSignature(text);
+    const signature = textSignature(text, atlas.searchIndex[0]?.vector.length || DIMS);
     const scores = atlas.searchIndex
         .map((item) => ({ nodeId: item.nodeId, score: cosine(signature.vector, item.vector) }))
         .sort((a, b) => b.score - a.score);
@@ -152,6 +294,25 @@ export function buildEmbeddingQueryTrace(query: string, atlas: EmbeddingAtlasDat
         edgeIds: [...directEdges, ...hopEdges].map((edge) => edge.id),
         edges: [...directEdges, ...hopEdges],
         previews: primary.map((item) => sourcePreview(nodeById.get(item.nodeId), item.score)).filter(Boolean) as EmbeddingSourcePreview[],
+        manifoldTrace: buildManifoldTrace(atlas, [...primaryIds, ...secondaryIds], [...directEdges, ...hopEdges].map((edge) => edge.id)),
+    };
+}
+
+function buildManifoldTrace(atlas: EmbeddingAtlasData, nodeIds: string[], pathEdgeIds: string[]): EmbeddingManifoldTrace | undefined {
+    const manifold = atlas.manifold;
+    if (!manifold) return undefined;
+    const nodeById = new Map(atlas.nodes.map((node) => [node.id, node]));
+    const cellIds = [...new Set(nodeIds.map((id) => String((nodeById.get(id)?.metadata?.['hopf'] as Record<string, unknown> | undefined)?.['cellId'] || '')).filter(Boolean))];
+    const chartIds = manifold.charts
+        ?.filter((chart) => chart.memberCellIds.some((cellId) => cellIds.includes(cellId)))
+        .map((chart) => chart.chartId) ?? [];
+    return {
+        mode: manifold.mode,
+        geometryVersion: manifold.geometryVersion,
+        coneId: manifold.coneTraces?.[0]?.coneId,
+        cellIds,
+        chartIds: [...new Set(chartIds)],
+        pathEdgeIds,
     };
 }
 
@@ -163,8 +324,8 @@ function previewText(text: string): string {
     return text.replace(/\s+/g, ' ').trim().slice(0, 180);
 }
 
-function textSignature(text: string): Signature {
-    const vector = new Float32Array(DIMS);
+function textSignature(text: string, dims = DIMS): Signature {
+    const vector = new Float32Array(Math.max(1, dims));
     let token = '';
     let tokens = 0;
     for (let index = 0; index <= text.length; index++) {
@@ -192,12 +353,18 @@ function normalizeChar(code: number): string {
 
 function addToken(vector: Float32Array, token: string): void {
     const hash = hashToken(token);
-    const first = hash % DIMS;
-    const second = (hash >>> 7) % DIMS;
+    const first = hash % vector.length;
+    const second = (hash >>> 7) % vector.length;
     const sign = (hash & 0x80000000) === 0 ? 1 : -1;
     const weight = 1 + Math.min(9, token.length) * 0.035;
     vector[first] += sign * weight;
     vector[second] += sign * weight * 0.5;
+}
+
+function normalizeBackendVector(values: number[]): Float32Array {
+    const vector = new Float32Array(values.map((value) => Number.isFinite(value) ? value : 0));
+    normalize(vector);
+    return vector;
 }
 
 function hashToken(token: string): number {
@@ -314,12 +481,16 @@ function isQueryHop(edge: GalaxyInputEdge, primaryIds: string[], secondaryIds: s
 function sourcePreview(node: GalaxyRenderableNode | undefined, score: number): EmbeddingSourcePreview | null {
     if (!node) return null;
     const metadata = node.metadata || {};
+    const hopf = metadata['hopf'] as Record<string, unknown> | undefined;
+    const cell = hopf?.['cellId'] ? `cell ${String(hopf['cellId'])}` : '';
+    const boundary = Number(hopf?.['boundaryScore']);
+    const topology = cell ? `${cell}${Number.isFinite(boundary) ? `, boundary ${boundary.toFixed(2)}` : ''}. ` : '';
     return {
         nodeId: node.id,
         label: node.label,
         score,
         sourceType: String(metadata['sourceType'] || 'source'),
-        preview: String(metadata['preview'] || ''),
+        preview: `${topology}${String(metadata['preview'] || '')}`,
     };
 }
 

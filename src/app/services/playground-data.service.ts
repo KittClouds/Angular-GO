@@ -1,6 +1,6 @@
 // src/app/services/playground-data.service.ts
 // Shared document management for the Research Playground.
-// All eval modules share the same loaded chapters.
+// Experimental modules share the same loaded chapters.
 
 import { Injectable, signal, computed } from '@angular/core';
 import { PlaygroundLogService } from './playground-log.service';

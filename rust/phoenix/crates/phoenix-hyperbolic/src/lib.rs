@@ -5,6 +5,7 @@
 //! vectors (Poincaré ball) using `f32`.
 
 pub mod poincare;
+pub mod lorentz_tree;
 pub mod shard;
 pub mod tangent;
 

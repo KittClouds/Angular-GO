@@ -12,7 +12,7 @@ use phoenix_semantic_v2::{
 use phoenix_store_native_core::{
     NativeSemanticNodeVectorRecord, PhoenixArchiveStoreV2, PhoenixEventIdentityPatchStore,
     PhoenixGraphPatchStore, PhoenixMemoryPatchStore, PhoenixSemanticGraphPatchStore,
-    PhoenixSemanticIndexStore, SEMANTIC_VECTOR_DIM,
+    PhoenixSemanticIndexStore, SEMANTIC_MODEL_ID, SEMANTIC_VECTOR_DIM,
 };
 use phoenix_types::{ScopeKey, SessionId};
 use serde::{Deserialize, Serialize};
@@ -35,9 +35,7 @@ use crate::semantic_graph_support::{
     build_prototypes, family_label, neighbor_families, node_kind_label, resolve_family,
     status_label, truth_planes_compatible, Prototype, SEMANTIC_UNIT_PREFIX,
 };
-use crate::semantic_graph_workspace::SemanticNeighborWorkspace;
-
-const SEMANTIC_MODEL_ID: &str = "Snowflake/snowflake-arctic-embed-xs";
+use crate::semantic_graph_workspace::{EmbeddingRows, SemanticNeighborWorkspace};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SemanticGraphConfig {
@@ -68,6 +66,8 @@ pub enum SemanticGraphError {
     Embed(#[from] crate::semantic::SemanticNeighborError),
     #[error(transparent)]
     Ort(#[from] phoenix_embed::OrtTextEmbedError),
+    #[error("embedding batch shape mismatch: {0}")]
+    EmbeddingShape(String),
     #[error(transparent)]
     Nli(#[from] phoenix_rel_post::NliError),
 }
@@ -208,29 +208,22 @@ where
         .iter()
         .map(|prototype| prototype.text.as_str())
         .collect::<Vec<_>>();
-    let embeddings = model.embed_slices(&texts)?;
-    let rows = prototypes
-        .iter()
-        .zip(embeddings.iter())
-        .map(|(prototype, embedding)| NativeSemanticNodeVectorRecord {
-            scope: scope.clone(),
-            node_id: prototype.node_id.clone(),
-            node_kind: prototype.ann_kind.to_owned(),
-            document_id: prototype.document_id.clone(),
-            note_id: prototype.note_id.clone(),
-            narrative_id: prototype.narrative_id.clone(),
-            folder_id: scope.folder_id.clone(),
-            folder_path: scope.folder_path.clone(),
-            values: embedding.clone(),
-            evidence_refs: prototype.evidence_refs.clone(),
-            updated_at: created_at,
-        })
-        .collect::<Vec<_>>();
+    let embeddings = model.embed_slices_flat(&texts)?;
+    if embeddings.rows() != prototypes.len() || embeddings.dims() != SEMANTIC_VECTOR_DIM {
+        return Err(SemanticGraphError::EmbeddingShape(format!(
+            "expected {} rows x {} dims, got {} rows x {} dims",
+            prototypes.len(),
+            SEMANTIC_VECTOR_DIM,
+            embeddings.rows(),
+            embeddings.dims()
+        )));
+    }
+    let embedding_rows = EmbeddingRows::from_batch(&embeddings);
     let mut workspace = SemanticNeighborWorkspace::new(
         scope.folder_id.clone(),
         scope.folder_path.clone(),
         &prototypes,
-        &embeddings,
+        embedding_rows,
     );
     let mut candidates = collect_candidate_edges(
         &mut workspace,
@@ -248,7 +241,7 @@ where
     ));
     candidates.extend(collect_contradictory_support_region_edges(
         &prototypes,
-        &embeddings,
+        embedding_rows,
         memory_sidecar,
         config.neighbor_limit.max(1),
         config.oversample.max(config.neighbor_limit.max(1)),
@@ -276,7 +269,26 @@ where
         config.oversample.max(config.neighbor_limit.max(1)),
         config.min_score_millis,
     ));
-    store.upsert_semantic_node_vectors_native(&rows)?;
+    drop(workspace);
+    let row_values = embeddings.into_rows();
+    let rows = prototypes
+        .iter()
+        .zip(row_values)
+        .map(|(prototype, values)| NativeSemanticNodeVectorRecord {
+            scope: scope.clone(),
+            node_id: prototype.node_id.clone(),
+            node_kind: prototype.ann_kind.to_owned(),
+            document_id: prototype.document_id.clone(),
+            note_id: prototype.note_id.clone(),
+            narrative_id: prototype.narrative_id.clone(),
+            folder_id: scope.folder_id.clone(),
+            folder_path: scope.folder_path.clone(),
+            values,
+            evidence_refs: prototype.evidence_refs.clone(),
+            updated_at: created_at,
+        })
+        .collect::<Vec<_>>();
+    store.upsert_semantic_node_vectors_native_owned(rows)?;
     let mut warmed_kinds = prototypes
         .iter()
         .map(|prototype| prototype.ann_kind)

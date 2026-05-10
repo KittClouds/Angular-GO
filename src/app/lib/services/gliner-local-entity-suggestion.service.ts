@@ -77,6 +77,11 @@ export class GlinerLocalEntitySuggestionProvider implements EntitySuggestionProv
         }
     }
 
+    async warm(): Promise<void> {
+        this.cancelIdleDispose();
+        await this.initialize();
+    }
+
     async dispose(): Promise<void> {
         this.cancelIdleDispose();
         if (!this.worker) {

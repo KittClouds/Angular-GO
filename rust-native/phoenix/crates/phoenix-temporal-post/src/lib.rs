@@ -2,6 +2,7 @@ pub mod api;
 
 mod anchor;
 mod graph;
+mod lens_consumer;
 mod normalize;
 mod solve;
 #[cfg(test)]
@@ -11,6 +12,7 @@ pub mod worker;
 
 pub use anchor::{choose_best_anchor, has_world_anchor_support};
 pub use graph::{build_temporal_graph_stats, TemporalGraphStats};
+pub use lens_consumer::TemporalLensChunkConsumer;
 pub use normalize::{
     normalize_temporal_inputs, TemporalEventProfile, TemporalNormalizedInputs, TemporalReviewCase,
     TemporalTimexProfile,

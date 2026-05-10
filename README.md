@@ -1,59 +1,38 @@
-# AngularNotes
+# NewPhoenix
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.1.1.
+Native-first Phoenix workspace for the Angular frontend, Tauri desktop shell, native Rust Phoenix crates, local model assets, and `docs/` corpus/docs.
 
-## Development server
+The active branch is intentionally slimmed down to avoid accidentally compiling legacy GoKitt/WASM/reference targets.
 
-To start a local development server, run:
+## Start The Frontend
 
-```bash
-ng serve
+```powershell
+npm install
+npm start
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+Open `http://localhost:4200` for browser development.
 
-## Code scaffolding
+## Start The Tauri Native Shell
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+Run this in another terminal while `npm start` is running:
 
-```bash
-ng generate component component-name
+```powershell
+$env:CARGO_TARGET_DIR='G:\cargo-targets\Angular-build\tauri-dev'
+npm run desktop:dev
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+## Native Rust Work
 
-```bash
-ng generate --help
+Use `rust-native/phoenix` for current native Phoenix work:
+
+```powershell
+$env:CARGO_TARGET_DIR='G:\cargo-targets\Angular-build\tauri-dev'
+cargo check --manifest-path "rust-native\phoenix\Cargo.toml" -p phoenix-dynamic-ner -p phoenix-embed
 ```
 
-## Building
+The `rust/phoenix` tree remains only as the current Tauri compatibility shim for `src-tauri`; do not add new feature work there.
 
-To build the project run:
+## More Notes
 
-```bash
-ng build
-```
-
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+See `docs/newphoenix-startup.md` for model paths, Dynamic NER benchmark commands, Semantic Atlas probe commands, and branch rules.

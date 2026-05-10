@@ -29,16 +29,16 @@ use phoenix_semantic_v2::{
 };
 use phoenix_store_native_core::{
     relation_spec, snapshot_relations_for_partition, AnnGenerationId, AnnIndexFamily, AnnIndexKey,
-    AnnManifest, AnnPackedSegments, BundleHeader, BundleKey, BundleKind, IngestMode,
+    AnnManifest, AnnPackedSegments, BundleHeader, BundleKey, BundleKind, ChunkManifest, IngestMode,
     NativeSemanticDocumentVectorRecord, NativeSemanticLeafVectorRecord,
     NativeSemanticNodeVectorRecord, PhoenixArchiveStoreV2, PhoenixBundleStoreV2,
-    PhoenixCausalPatchStore, PhoenixErPatchStore, PhoenixEventIdentityPatchStore,
-    PhoenixGraphKernelStoreV2, PhoenixGraphPatchStore, PhoenixMemoryPatchStore,
-    PhoenixNativeRowStore, PhoenixRelationMentionSeedStore, PhoenixRelationPatchStore,
-    PhoenixSemanticGraphPatchStore, PhoenixSemanticIndexStore, PhoenixStateSchemaPatchStore,
-    PhoenixTemporalPatchStore, PreparedIngestContext, SemanticDocumentNeighbor, SemanticNeighbor,
-    SemanticNodeNeighbor, SnapshotEnvelope, SnapshotPartition, StoreError, ALL_RELATIONS,
-    SEMANTIC_MODEL_ID, SEMANTIC_VECTOR_DIM,
+    PhoenixCausalPatchStore, PhoenixChunkManifestStore, PhoenixErPatchStore,
+    PhoenixEventIdentityPatchStore, PhoenixGraphKernelStoreV2, PhoenixGraphPatchStore,
+    PhoenixMemoryPatchStore, PhoenixNativeRowStore, PhoenixRelationMentionSeedStore,
+    PhoenixRelationPatchStore, PhoenixSemanticGraphPatchStore, PhoenixSemanticIndexStore,
+    PhoenixStateSchemaPatchStore, PhoenixTemporalPatchStore, PreparedIngestContext,
+    SemanticDocumentNeighbor, SemanticNeighbor, SemanticNodeNeighbor, SnapshotEnvelope,
+    SnapshotPartition, StoreError, ALL_RELATIONS, SEMANTIC_MODEL_ID, SEMANTIC_VECTOR_DIM,
 };
 use phoenix_types::{IndexedSpan, IngestDocument, ScopeKey, SessionId};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -86,6 +86,7 @@ const TYPE_GRAPH_PATCH_SIDECAR: u32 = 31;
 const TYPE_SEMANTIC_GRAPH_PATCH_SIDECAR: u32 = 32;
 const TYPE_NATIVE_ROW: u32 = 33;
 const TYPE_KERNEL_TOPOLOGY_VERTEX: u32 = 34;
+const TYPE_CHUNK_MANIFEST: u32 = 35;
 const EDGE_KERNEL_TOPOLOGY_ASSERTED: u32 = 1001;
 const EDGE_KERNEL_TOPOLOGY_CANDIDATE: u32 = 1002;
 
@@ -2956,6 +2957,44 @@ impl PhoenixBundleStoreV2 for PhoenixOvergraphStore {
     }
 }
 
+impl PhoenixChunkManifestStore for PhoenixOvergraphStore {
+    fn init_chunk_manifest_schema(&self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn persist_chunk_manifest(&self, manifest: &ChunkManifest) -> Result<(), StoreError> {
+        self.with_engine(|engine| {
+            engine
+                .upsert_node(
+                    TYPE_CHUNK_MANIFEST,
+                    &chunk_manifest_key(&manifest.document_id),
+                    UpsertNodeOptions {
+                        props: btree_props([
+                            (
+                                PROP_DOCUMENT_ID,
+                                PropValue::String(manifest.document_id.clone()),
+                            ),
+                            (PROP_RECORD, PropValue::Bytes(encode_record(manifest)?)),
+                        ]),
+                        ..Default::default()
+                    },
+                )
+                .map_err(store_query_error)?;
+            Ok(())
+        })
+    }
+
+    fn load_chunk_manifest(&self, document_id: &str) -> Result<Option<ChunkManifest>, StoreError> {
+        self.with_engine(|engine| {
+            engine
+                .get_node_by_key(TYPE_CHUNK_MANIFEST, &chunk_manifest_key(document_id))
+                .map_err(store_query_error)?
+                .map(|node| decode_record_prop_required(&node, PROP_RECORD))
+                .transpose()
+        })
+    }
+}
+
 impl PhoenixArchiveStoreV2 for PhoenixOvergraphStore {
     fn init_archive_schema(&self) -> Result<(), StoreError> {
         Ok(())
@@ -3734,6 +3773,16 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
         if rows.is_empty() {
             return Ok(());
         }
+        self.upsert_semantic_node_vectors_native_owned(rows.to_vec())
+    }
+
+    fn upsert_semantic_node_vectors_native_owned(
+        &self,
+        rows: Vec<NativeSemanticNodeVectorRecord>,
+    ) -> Result<(), StoreError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
         self.with_engine(|engine| {
             let mut batch = Vec::with_capacity(rows.len());
             let mut affected = HashSet::new();
@@ -3741,10 +3790,24 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
             for row in rows {
                 Self::validate_semantic_vector(&row.values, &row.node_id)?;
                 let scope_ord = self.ensure_scope_ord(engine, &scope_storage_key(&row.scope))?;
+                let scope_key = scope_storage_key(&row.scope);
+                let NativeSemanticNodeVectorRecord {
+                    scope,
+                    node_id,
+                    node_kind,
+                    document_id,
+                    note_id,
+                    narrative_id,
+                    folder_id,
+                    folder_path,
+                    values,
+                    evidence_refs,
+                    updated_at,
+                } = row;
                 let index = AnnIndexKey {
                     scope_ord,
                     family: AnnIndexFamily::NodePrototype,
-                    kind: Some(row.node_kind.clone()),
+                    kind: Some(node_kind.clone()),
                 };
                 affected.insert(index.clone());
                 affected.insert(AnnIndexKey {
@@ -3753,33 +3816,33 @@ impl PhoenixSemanticIndexStore for PhoenixOvergraphStore {
                     kind: None,
                 });
                 let record = AnnSourceNodeRecord {
-                    scope: row.scope.clone(),
-                    scope_key: scope_storage_key(&row.scope),
-                    node_id: row.node_id.clone(),
-                    node_kind: row.node_kind.clone(),
-                    document_id: row.document_id.clone(),
-                    note_id: row.note_id.clone(),
-                    narrative_id: row.narrative_id.clone(),
-                    folder_id: row.folder_id.clone(),
-                    folder_path: row.folder_path.clone(),
-                    values: row.values.clone(),
-                    evidence_refs: row.evidence_refs.clone(),
-                    updated_at: row.updated_at,
+                    scope,
+                    scope_key: scope_key.clone(),
+                    node_id: node_id.clone(),
+                    node_kind: node_kind.clone(),
+                    document_id,
+                    note_id,
+                    narrative_id,
+                    folder_id,
+                    folder_path,
+                    values,
+                    evidence_refs,
+                    updated_at,
                 };
                 batch.push(NodeInput {
                     type_id: TYPE_ANN_SOURCE_NODE,
                     key: ann_source_row_key(
                         scope_ord,
                         AnnIndexFamily::NodePrototype,
-                        Some(&row.node_kind),
-                        &row.node_id,
+                        Some(&node_kind),
+                        &node_id,
                     ),
                     props: btree_props([
-                        (PROP_SCOPE_KEY, PropValue::String(record.scope_key.clone())),
+                        (PROP_SCOPE_KEY, PropValue::String(scope_key)),
                         (PROP_SCOPE_ORD, PropValue::UInt(scope_ord.0)),
-                        (PROP_NODE_ID, PropValue::String(row.node_id.clone())),
-                        (PROP_KIND, PropValue::String(row.node_kind.clone())),
-                        (PROP_UPDATED_AT, PropValue::Int(row.updated_at)),
+                        (PROP_NODE_ID, PropValue::String(node_id)),
+                        (PROP_KIND, PropValue::String(node_kind)),
+                        (PROP_UPDATED_AT, PropValue::Int(updated_at)),
                         (PROP_RECORD, PropValue::Bytes(encode_record(&record)?)),
                     ]),
                     weight: 1.0,
@@ -4551,6 +4614,10 @@ fn document_value_key(scope_key: &str, document_id: &str) -> String {
     format!("{scope_key}\u{1f}{}", document_id)
 }
 
+fn chunk_manifest_key(document_id: &str) -> String {
+    format!("chunk-manifest\u{1f}{document_id}")
+}
+
 fn manifest_key(scope_ord: ScopeOrd, document_ord: DocumentOrd, revision: u64) -> String {
     format!("manifest:{}:{}:{}", scope_ord.0, document_ord.0, revision)
 }
@@ -4766,6 +4833,7 @@ mod lexical_query_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phoenix_store_native_core::{ChunkLens, PhoenixChunkManifestStore};
     use serde_json::json;
 
     fn temp_store_path(name: &str) -> PathBuf {
@@ -5479,5 +5547,29 @@ mod tests {
             still_present.is_none(),
             "corrupt sidecar node should be deleted"
         );
+    }
+
+    #[test]
+    fn chunk_manifest_round_trips_through_overgraph() {
+        let store = temp_store("chunk-manifest");
+        let mut lens_chunk_hashes = HashMap::new();
+        lens_chunk_hashes.insert(ChunkLens::Entity, vec![11, 22]);
+        let manifest = ChunkManifest {
+            document_id: "doc".to_owned(),
+            document_hash: 100,
+            base_chunk_hashes: vec![1, 2],
+            lens_chunk_hashes,
+            ner_config_hash: 3,
+            chunker_config_hash: 4,
+            graph_config_hash: 5,
+        };
+        store
+            .persist_chunk_manifest(&manifest)
+            .expect("persist manifest");
+        let loaded = store
+            .load_chunk_manifest("doc")
+            .expect("load manifest")
+            .expect("manifest exists");
+        assert_eq!(loaded, manifest);
     }
 }

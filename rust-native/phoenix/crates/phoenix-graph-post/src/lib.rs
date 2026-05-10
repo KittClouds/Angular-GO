@@ -22,9 +22,11 @@ pub mod semantic_graph;
 mod signal_quality;
 pub mod smoke_support;
 
+mod chunk_manifest;
 mod compile;
 #[cfg(test)]
 mod eval_tests;
+mod lens_consumer;
 #[cfg(test)]
 mod phase4_graph_tests;
 #[cfg(test)]
@@ -49,7 +51,9 @@ mod semantic_graph_tests;
 mod semantic_graph_workspace;
 pub mod worker;
 
+pub use chunk_manifest::{plan_lens_graph_rebuild, LensGraphRebuildPlan};
 pub use compile::{compile_graph_projection, CompiledGraphProjection};
+pub use lens_consumer::{EvidenceProjectionLensChunkConsumer, WorldProjectionLensChunkConsumer};
 pub use phase4_contract::{
     GraphPathRerankScore, GraphPhase4RerankScore, GraphStructuralRerankScore,
 };

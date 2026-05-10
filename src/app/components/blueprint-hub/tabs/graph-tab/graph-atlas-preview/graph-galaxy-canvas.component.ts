@@ -101,7 +101,6 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
             const previous = mergeGalaxySettings(changes['settings'].previousValue);
             const current = mergeGalaxySettings(this.settings);
             if (this.renderer.hasContext()) this.renderer.setSettings(this.settings);
-            if (previous.clickFocus && !current.clickFocus) this.clearCameraFocus();
             if (previous.layoutMode !== current.layoutMode) this.markLayoutDirty();
             if (this.viewReady) this.syncSurface();
         }
@@ -208,16 +207,18 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         if (entity) {
             const nextId = entity.id === this.selectedEntityId ? null : entity.id;
             this.renderer.selectNode(nextId);
-            if (!nextId) this.clearCameraFocus();
-            else if (mergeGalaxySettings(this.settings).clickFocus) this.focusEntity(id!);
-            else this.draw();
+            this.draw();
             this.entitySelected.emit(entity);
         }
     }
 
     onDoubleClick(event: MouseEvent): void {
         const id = this.pick(event);
-        id ? this.focusEntity(id) : this.fitToGraph();
+        if (!id) {
+            this.fitToGraph();
+            return;
+        }
+        if (mergeGalaxySettings(this.settings).clickFocus) this.focusEntity(id);
     }
 
     private start(): void {
@@ -258,7 +259,12 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
 
     private shouldAnimate(): boolean {
         const settings = mergeGalaxySettings(this.settings);
-        return this.canHoldSurface() && (this.dragging || this.renderer.hasActiveForces() || settings.autoRotate || settings.particleFlow);
+        return this.canHoldSurface() && (
+            this.dragging ||
+            this.renderer.hasActiveForces() ||
+            settings.autoRotate ||
+            settings.particleFlow
+        );
     }
 
     private canHoldSurface(): boolean {

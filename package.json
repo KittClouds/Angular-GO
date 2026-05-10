@@ -2,15 +2,12 @@
   "name": "angular-notes",
   "version": "0.0.0",
   "scripts": {
-    "wasm:ensure": "node ./scripts/ensure-wasm-assets.mjs",
-    "wasm:sync": "node ./scripts/sync-gokitt-wasm.mjs && node ./scripts/sync-phoenix-wasm.mjs",
-    "wasm:build": "node ./scripts/build-wasm-assets.mjs",
-    "start:wasm": "npm run wasm:ensure && ng serve",
-    "build:wasm": "npm run wasm:ensure && ng build",
-    "watch:wasm": "npm run wasm:ensure && ng build --watch --configuration development",
     "ng": "ng",
     "start": "ng serve",
+    "desktop:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "build": "ng build",
+    "desktop:build": "npm run build && cargo build --release --manifest-path src-tauri/Cargo.toml",
     "watch": "ng build --watch --configuration development",
     "test": "vitest run",
     "test:watch": "vitest"

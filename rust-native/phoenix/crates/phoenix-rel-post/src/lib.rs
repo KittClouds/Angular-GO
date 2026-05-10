@@ -15,6 +15,7 @@ mod gliner_relex;
 mod gliner_relex_decode;
 mod gliner_seed;
 mod glirel;
+mod lens_consumer;
 mod nli;
 mod ort_runtime;
 mod seed_worker;
@@ -68,6 +69,7 @@ pub use glirel::{
     GlirelError, GlirelModel, GlirelPairSeed, GlirelProposalConfig, GlirelRelationPrediction,
     GlirelRelationTypeSpec, GlirelSentenceWindow,
 };
+pub use lens_consumer::RelationshipLensChunkConsumer;
 pub use nli::{NliError, NliModel, NliPairJudgment, NliScores};
 pub use seed_worker::{
     build_relation_mention_seed_sidecar, build_relation_mention_seed_sidecar_from_store,

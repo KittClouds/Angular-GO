@@ -7,9 +7,7 @@ use phoenix_store_native::{
     relation_spec, snapshot_relations_for_partition, PhoenixNativeRowStore,
     NATIVE_COVERED_RELATIONS,
 };
-use phoenix_store_native_core::{
-    SnapshotEnvelope, SnapshotPartition, StoreError,
-};
+use phoenix_store_native_core::{SnapshotEnvelope, SnapshotPartition, StoreError};
 use serde_json::Value;
 
 const ROW_JSON_PROP: &str = "row_json";
@@ -25,8 +23,8 @@ impl PhoenixOvergraphStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let path = path.as_ref().to_path_buf();
         std::fs::create_dir_all(&path).map_err(|error| StoreError::Init(error.to_string()))?;
-        let engine = DatabaseEngine::open(&path, &DbOptions::default())
-            .map_err(overgraph_init_error)?;
+        let engine =
+            DatabaseEngine::open(&path, &DbOptions::default()).map_err(overgraph_init_error)?;
         Ok(Self {
             path,
             engine: RefCell::new(engine),
@@ -192,7 +190,9 @@ fn row_from_prop(prop: PropValue) -> Result<Value, StoreError> {
         PropValue::String(row) => {
             serde_json::from_str(&row).map_err(|error| StoreError::Snapshot(error.to_string()))
         }
-        _ => Err(StoreError::Snapshot("overgraph row payload was not JSON".to_owned())),
+        _ => Err(StoreError::Snapshot(
+            "overgraph row payload was not JSON".to_owned(),
+        )),
     }
 }
 

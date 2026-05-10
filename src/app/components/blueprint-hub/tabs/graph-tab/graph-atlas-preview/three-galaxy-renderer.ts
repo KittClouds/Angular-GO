@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type { GalaxySceneGroupView, GalaxySceneV2 } from './graph-galaxy-scene-v2';
+import type { GalaxyHopfRibbonView, GalaxyLorentzGuideView, GalaxySceneGroupView, GalaxySceneV2 } from './graph-galaxy-scene-v2';
 import { buildGalaxyFocusMask, type GalaxyFocusMask } from './graph-galaxy-focus';
 import { mergeGalaxySettings, type GalaxyRenderSettings } from './graph-galaxy-engine';
 import { GraphGalaxyForceController } from './graph-galaxy-force-controller';
@@ -11,6 +11,15 @@ import type { GraphRendererMode, GraphRendererPointer, GraphRendererPort } from 
 
 const MAX_EDGE_SEGMENTS = 8;
 const MAX_EDGE_STROKES = 5;
+const MAX_HOPF_RIBBON_GUIDES = 128;
+const MAX_HOPF_DATA_TUBES = 20;
+const MAX_HOPF_TORUS_TUBES = 12;
+const HOPF_TUBE_SEGMENTS = 96;
+const HOPF_TUBE_RADIAL_SEGMENTS = 6;
+const MAX_LORENTZ_GUIDES = 260;
+const MAX_LORENTZ_TUBES = 40;
+const LORENTZ_TUBE_SEGMENTS = 36;
+const LORENTZ_TUBE_RADIAL_SEGMENTS = 5;
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
     private renderer: THREE.WebGLRenderer | null = null;
@@ -23,6 +32,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private readonly dragOffset = new THREE.Vector3();
     private readonly dragTarget = new THREE.Vector3();
     private readonly pickVector = new THREE.Vector3();
+    private readonly cameraTarget = new THREE.Vector3();
     private readonly perspective = new THREE.PerspectiveCamera(48, 1, 0.01, 100);
     private readonly ortho = new THREE.OrthographicCamera(-4, 4, 3, -3, 0.01, 100);
     private readonly color = new THREE.Color();
@@ -156,7 +166,9 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     }
 
     zoom(delta: number): void {
-        this.distance = THREE.MathUtils.clamp(this.distance * Math.exp(delta * 0.0012), 2.2, 22);
+        const nextDistance = THREE.MathUtils.clamp(this.distance * Math.exp(delta * 0.0012), 2.2, 22);
+        if (nextDistance === this.distance) return;
+        this.distance = nextDistance;
         this.updateCamera();
     }
 
@@ -311,14 +323,12 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             const core = Math.max(0.038, data.radii[i] * 0.021) * pulse;
             const sphere = this.nodeShape === 'sphere';
             const atom = this.nodeShape === 'atom';
-            const halo = core * this.settings.glow * (atom
-                ? (hovered ? 2.44 : active ? 2.58 : neighbor ? 1.72 : dimmed ? 0.62 : 1.16)
-                : sphere
+            const halo = atom ? 0 : core * this.settings.glow * (sphere
                     ? (hovered ? 1.94 : active ? 2.12 : neighbor ? 1.28 : dimmed ? 0.52 : 0.94)
                     : (hovered ? 4.9 : active ? 5.05 : neighbor ? 3.1 : dimmed ? 1.15 : 2.45));
             node.position.set(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
             node.scale.setScalar(core * (atom
-                ? (hovered || active ? 2.64 : neighbor ? 2.05 : dimmed ? 1.28 : 1.78)
+                ? (hovered || active ? 2.38 : neighbor ? 1.84 : dimmed ? 1.15 : 1.6)
                 : sphere
                     ? (hovered || active ? 0.89 : neighbor ? 0.72 : dimmed ? 0.52 : 0.6)
                     : (hovered || active ? 2.65 : neighbor ? 2.02 : dimmed ? 1.34 : 1.72)));
@@ -330,12 +340,11 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             glow.scale.setScalar(halo);
             this.glowColor(data, i, active, hovered, dimmed);
             glow.material.color.copy(this.color);
-            const glowBase = atom
-                ? (dimmed ? 0.012 : hovered || active ? 0.24 : neighbor ? 0.105 : 0.072)
-                : sphere
+            const glowBase = atom ? 0 : sphere
                     ? (dimmed ? 0.012 : hovered || active ? 0.28 : neighbor ? 0.11 : 0.078)
                     : (dimmed ? 0.04 : hovered || active ? 0.58 : neighbor ? 0.28 : 0.22);
             glow.material.opacity = THREE.MathUtils.clamp(glowBase * this.settings.glow, 0, 0.34);
+            glow.visible = glow.material.opacity > 0;
         }
     }
 
@@ -406,11 +415,11 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     }
 
     private updateCamera(): void {
-        const target = new THREE.Vector3(this.panX, this.panY, this.panZ);
+        const target = this.cameraTarget.set(this.panX, this.panY, this.panZ);
         if (this.mode === '3d') {
             const x = target.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
             const y = target.y + Math.sin(this.pitch) * this.distance;
-            const z = Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
+            const z = target.z + Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
             this.perspective.position.set(x, y, z);
             this.perspective.lookAt(target);
             this.perspective.updateProjectionMatrix();
@@ -487,13 +496,53 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             material.opacity = THREE.MathUtils.clamp(this.settings.glow * 0.2, 0, 0.34);
             material.needsUpdate = true;
         });
-        this.shells?.children.forEach((child) => {
-            const material = (child as THREE.Mesh | THREE.Line).material as THREE.MeshBasicMaterial | THREE.LineBasicMaterial;
-            const shellOpacity = this.settings.hybridShellVisible ? this.settings.hybridShellOpacity : 0;
-            material.opacity = THREE.MathUtils.clamp(0.012 + this.settings.glow * 0.01, 0.01, 0.028) * shellOpacity;
+        this.shells?.traverse((child) => {
+            const drawable = child as THREE.Mesh | THREE.LineSegments;
+            const material = drawable.material as THREE.Material | undefined;
+            if (!material) return;
+            const guideKind = child.userData['guideKind'];
+            if (guideKind === 'hopf') {
+                const weight = Number(child.userData['guideWeight'] ?? 1);
+                const layer = String(child.userData['hopfLayer'] ?? 'line');
+                const hopfGuideKind = child.userData['hopfGuideKind'] as GalaxyHopfRibbonView['guideKind'] | undefined;
+                this.setGuideOpacity(material, this.hopfLayerOpacity(layer, hopfGuideKind, weight));
+            } else if (guideKind === 'lorentz') {
+                const weight = Number(child.userData['guideWeight'] ?? 1);
+                const layer = String(child.userData['lorentzLayer'] ?? 'line');
+                const lorentzGuideKind = child.userData['lorentzGuideKind'] as GalaxyLorentzGuideView['guideKind'] | undefined;
+                const treeKind = String(child.userData['treeKind'] ?? '');
+                this.setGuideOpacity(material, this.lorentzLayerOpacity(layer, lorentzGuideKind, treeKind, weight));
+            } else if (guideKind === 'multi') {
+                this.setGuideOpacity(material, this.multiShellOpacity());
+            } else {
+                this.setGuideOpacity(material, this.hybridShellOpacity());
+            }
             material.needsUpdate = true;
         });
         this.particles.updateSettings(this.settings);
+    }
+
+    private setGuideOpacity(material: THREE.Material, opacity: number): void {
+        const shader = material as THREE.ShaderMaterial;
+        if (shader.uniforms?.['opacity']) {
+            shader.uniforms['opacity'].value = opacity;
+        } else {
+            material.opacity = opacity;
+        }
+    }
+
+    private hybridShellOpacity(): number {
+        if (!this.settings.hybridShellVisible) return 0;
+        const shellOpacity = THREE.MathUtils.clamp(this.settings.hybridShellOpacity, 0, 1);
+        const glow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        return THREE.MathUtils.clamp(0.018 + glow * 0.016, 0.014, 0.048) * shellOpacity;
+    }
+
+    private multiShellOpacity(): number {
+        if (!this.settings.hybridShellVisible) return 0;
+        const shellOpacity = THREE.MathUtils.clamp(this.settings.hybridShellOpacity, 0, 1);
+        const glow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        return THREE.MathUtils.clamp(0.014 + glow * 0.012, 0.01, 0.038) * shellOpacity;
     }
 
     private edgeStrokeCount(): number {
@@ -527,49 +576,618 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
 
     private buildGroupShells(scene: GalaxySceneV2): THREE.Group | null {
         if (scene.layoutMode === 'hybridSpace') return this.buildHybridGuides();
+        if (scene.layoutMode === 'hopfProjection') return this.buildHopfGuides(scene);
+        if (scene.layoutMode === 'lorentzTree') return this.buildLorentzGuides(scene);
         if (scene.layoutMode !== 'multiGalaxy' || scene.groups.length < 2) return null;
         const group = new THREE.Group();
         for (const shell of scene.groups) {
-            const geometry = new THREE.SphereGeometry(shell.radius, 28, 14);
-            const material = new THREE.MeshBasicMaterial({
-                color: new THREE.Color(shell.color.r, shell.color.g, shell.color.b),
-                transparent: true,
-                opacity: THREE.MathUtils.clamp(0.026 + this.settings.glow * 0.018, 0.02, 0.07),
-                wireframe: true,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending,
-                toneMapped: false,
-            });
+            const geometry = new THREE.SphereGeometry(shell.radius, 40, 20);
+            const material = this.multiGlassMaterial(shell);
             const mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(shell.center.x, shell.center.y, shell.center.z);
             mesh.userData['groupId'] = shell.id;
+            mesh.userData['guideKind'] = 'multi';
             mesh.userData['pickable'] = false;
             group.add(mesh);
         }
         return group;
     }
 
-    private buildHybridGuides(): THREE.Group {
-        const group = new THREE.Group();
-        const shellOpacity = this.settings.hybridShellVisible ? this.settings.hybridShellOpacity : 0;
-        const shellMaterial = new THREE.MeshBasicMaterial({
-            color: new THREE.Color(0.22, 0.9, 0.86),
+    private multiGlassMaterial(shell: GalaxySceneGroupView): THREE.ShaderMaterial {
+        const tint = new THREE.Color(shell.color.r, shell.color.g, shell.color.b);
+        return new THREE.ShaderMaterial({
+            uniforms: {
+                coreColor: { value: new THREE.Color(0.055, 0.28, 0.255) },
+                rimColor: { value: new THREE.Color(0.42, 1.0, 0.92) },
+                depthColor: { value: new THREE.Color(0.58, 0.32, 1.0) },
+                tintColor: { value: tint },
+                opacity: { value: this.multiShellOpacity() },
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vView;
+                varying vec3 vWorld;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vNormal = normalize(normalMatrix * normal);
+                    vView = normalize(cameraPosition - worldPosition.xyz);
+                    vWorld = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 coreColor;
+                uniform vec3 rimColor;
+                uniform vec3 depthColor;
+                uniform vec3 tintColor;
+                uniform float opacity;
+                varying vec3 vNormal;
+                varying vec3 vView;
+                varying vec3 vWorld;
+                void main() {
+                    float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 2.2);
+                    float vertical = smoothstep(-1.65, 1.65, vWorld.y);
+                    float latitude = 0.5 + 0.5 * sin(vWorld.y * 2.0);
+                    vec3 base = mix(coreColor, depthColor, vertical * 0.42 + latitude * 0.12);
+                    vec3 tinted = mix(base, tintColor, 0.16);
+                    vec3 hue = mix(tinted, rimColor, smoothstep(0.22, 0.98, rim) * 0.72);
+                    float glass = 0.12 + smoothstep(0.04, 0.92, rim) * 0.74;
+                    gl_FragColor = vec4(hue, opacity * glass);
+                }
+            `,
             transparent: true,
-            opacity: THREE.MathUtils.clamp(0.012 + this.settings.glow * 0.01, 0.01, 0.028) * shellOpacity,
             side: THREE.BackSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
             toneMapped: false,
         });
-        const outer = new THREE.Mesh(new THREE.SphereGeometry(2.32, 48, 24), shellMaterial);
+    }
+
+    private buildHybridGuides(): THREE.Group {
+        const group = new THREE.Group();
+        const outer = new THREE.Mesh(new THREE.SphereGeometry(2.32, 48, 24), this.hybridGlassMaterial());
+        outer.userData['guideKind'] = 'hybrid';
         outer.userData['pickable'] = false;
         group.add(outer);
         return group;
     }
 
+    private hybridGlassMaterial(): THREE.ShaderMaterial {
+        return new THREE.ShaderMaterial({
+            uniforms: {
+                coreColor: { value: new THREE.Color(0.055, 0.28, 0.255) },
+                rimColor: { value: new THREE.Color(0.42, 1.0, 0.92) },
+                depthColor: { value: new THREE.Color(0.58, 0.32, 1.0) },
+                opacity: { value: this.hybridShellOpacity() },
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vView;
+                varying vec3 vWorld;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vNormal = normalize(normalMatrix * normal);
+                    vView = normalize(cameraPosition - worldPosition.xyz);
+                    vWorld = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 coreColor;
+                uniform vec3 rimColor;
+                uniform vec3 depthColor;
+                uniform float opacity;
+                varying vec3 vNormal;
+                varying vec3 vView;
+                varying vec3 vWorld;
+                void main() {
+                    float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 2.25);
+                    float vertical = smoothstep(-1.85, 1.85, vWorld.y);
+                    float latitude = 0.5 + 0.5 * sin(vWorld.y * 2.25);
+                    vec3 hue = mix(coreColor, depthColor, vertical * 0.5 + latitude * 0.18);
+                    hue = mix(hue, rimColor, smoothstep(0.18, 0.95, rim));
+                    float glass = 0.16 + smoothstep(0.05, 0.92, rim) * 0.84;
+                    gl_FragColor = vec4(hue, opacity * glass);
+                }
+            `,
+            transparent: true,
+            side: THREE.BackSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+    }
+
+    private buildLorentzGuides(scene: GalaxySceneV2): THREE.Group {
+        const group = new THREE.Group();
+        const shells = this.buildLorentzGlassShells(scene.lorentzGuides);
+        if (shells) group.add(shells);
+        const tubes = this.buildLorentzTubeLayer(scene.lorentzGuides);
+        if (tubes) group.add(tubes);
+        const lines = this.buildLorentzGuideSegments(scene.lorentzGuides);
+        if (lines) group.add(lines);
+        return group;
+    }
+
+    private buildLorentzGlassShells(guides: GalaxyLorentzGuideView[]): THREE.Group | null {
+        const shells = guides
+            .filter((guide) => guide.guideKind === 'levelShell')
+            .sort((left, right) => left.level - right.level)
+            .slice(0, 7);
+        if (!shells.length) return null;
+        const group = new THREE.Group();
+        for (const guide of shells) {
+            const radius = this.lorentzShellRadius(guide);
+            const geometry = new THREE.SphereGeometry(radius, 48, 24);
+            const material = this.lorentzGlassMaterial(guide);
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.userData['guideKind'] = 'lorentz';
+            mesh.userData['lorentzGuideKind'] = guide.guideKind;
+            mesh.userData['lorentzLayer'] = 'shell';
+            mesh.userData['guideWeight'] = guide.guideWeight;
+            mesh.userData['treeKind'] = guide.treeKind;
+            mesh.userData['pickable'] = false;
+            group.add(mesh);
+        }
+        return group.children.length ? group : null;
+    }
+
+    private lorentzGlassMaterial(guide: GalaxyLorentzGuideView): THREE.ShaderMaterial {
+        return new THREE.ShaderMaterial({
+            uniforms: {
+                color: { value: new THREE.Color(guide.color.r, guide.color.g, guide.color.b) },
+                opacity: { value: this.lorentzLayerOpacity('shell', guide.guideKind, guide.treeKind, guide.guideWeight) },
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vView;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vNormal = normalize(normalMatrix * normal);
+                    vView = normalize(cameraPosition - worldPosition.xyz);
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 color;
+                uniform float opacity;
+                varying vec3 vNormal;
+                varying vec3 vView;
+                void main() {
+                    float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 2.1);
+                    float breath = smoothstep(0.08, 0.96, rim);
+                    gl_FragColor = vec4(color, opacity * (0.18 + breath * 0.82));
+                }
+            `,
+            transparent: true,
+            side: THREE.BackSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+    }
+
+    private buildLorentzTubeLayer(guides: GalaxyLorentzGuideView[]): THREE.Group | null {
+        const lanes = guides
+            .filter((guide) => guide.guideKind === 'membership' || guide.guideKind === 'rootLane')
+            .sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id))
+            .slice(0, MAX_LORENTZ_TUBES);
+        if (!lanes.length) return null;
+        const group = new THREE.Group();
+        for (const [index, guide] of lanes.entries()) {
+            const glow = this.buildLorentzTubeMesh(guide, index, 'tubeGlow');
+            const core = this.buildLorentzTubeMesh(guide, index, 'tubeCore');
+            if (glow) group.add(glow);
+            if (core) group.add(core);
+        }
+        return group.children.length ? group : null;
+    }
+
+    private buildLorentzTubeMesh(guide: GalaxyLorentzGuideView, index: number, layer: 'tubeCore' | 'tubeGlow'): THREE.Mesh | null {
+        const points = this.lorentzGuidePath(guide);
+        if (points.length < 4) return null;
+        const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.35);
+        const geometry = new THREE.TubeGeometry(curve, LORENTZ_TUBE_SEGMENTS, this.lorentzTubeRadius(guide, layer), LORENTZ_TUBE_RADIAL_SEGMENTS, false);
+        const tint = this.lorentzGuideTint(guide, index);
+        const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(tint.r, tint.g, tint.b),
+            transparent: true,
+            opacity: this.lorentzLayerOpacity(layer, guide.guideKind, guide.treeKind, guide.guideWeight),
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData['guideKind'] = 'lorentz';
+        mesh.userData['lorentzGuideKind'] = guide.guideKind;
+        mesh.userData['lorentzLayer'] = layer;
+        mesh.userData['guideWeight'] = guide.guideWeight;
+        mesh.userData['treeKind'] = guide.treeKind;
+        mesh.userData['pickable'] = false;
+        return mesh;
+    }
+
+    private buildLorentzGuideSegments(guides: GalaxyLorentzGuideView[]): THREE.Group | null {
+        const visible = guides.slice(0, MAX_LORENTZ_GUIDES);
+        if (!visible.length) return null;
+        const grouped = new Map<GalaxyLorentzGuideView['guideKind'], GalaxyLorentzGuideView[]>();
+        for (const guide of visible) {
+            const group = grouped.get(guide.guideKind) ?? [];
+            group.push(guide);
+            grouped.set(guide.guideKind, group);
+        }
+        const result = new THREE.Group();
+        for (const [guideKind, groupGuides] of grouped) {
+            const line = this.buildLorentzGuideLine(groupGuides, guideKind);
+            if (line) result.add(line);
+        }
+        return result.children.length ? result : null;
+    }
+
+    private buildLorentzGuideLine(guides: GalaxyLorentzGuideView[], guideKind: GalaxyLorentzGuideView['guideKind']): THREE.LineSegments | null {
+        const vertexCount = guides.reduce((total, guide) => total + guide.positions3d.length / 3, 0);
+        if (!vertexCount) return null;
+        const positions = new Float32Array(vertexCount * 3);
+        const colors = new Float32Array(vertexCount * 3);
+        let cursor = 0;
+        for (const [guideIndex, guide] of guides.entries()) {
+            for (let source = 0; source < guide.positions3d.length; source += 3) {
+                const phase = source / Math.max(3, guide.positions3d.length - 3);
+                positions[cursor] = guide.positions3d[source];
+                positions[cursor + 1] = guide.positions3d[source + 1];
+                positions[cursor + 2] = guide.positions3d[source + 2];
+                this.writeLorentzGuideColor(colors, cursor, guide, guideIndex, phase);
+                cursor += 3;
+            }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const material = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: this.lorentzLayerOpacity('line', guideKind, guides[0]?.treeKind, this.lorentzGuideWeightForKind(guideKind)),
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+        const line = new THREE.LineSegments(geometry, material);
+        line.userData['guideKind'] = 'lorentz';
+        line.userData['lorentzGuideKind'] = guideKind;
+        line.userData['lorentzLayer'] = 'line';
+        line.userData['guideWeight'] = this.lorentzGuideWeightForKind(guideKind);
+        line.userData['treeKind'] = guides[0]?.treeKind ?? '';
+        line.userData['pickable'] = false;
+        return line;
+    }
+
+    private buildHopfGuides(scene: GalaxySceneV2): THREE.Group {
+        const group = new THREE.Group();
+        const tubes = this.buildHopfTubeLayer(scene.hopfRibbons);
+        if (tubes) group.add(tubes);
+        const ribbons = this.buildHopfRibbonSegments(scene.hopfRibbons);
+        if (ribbons) group.add(ribbons);
+        return group;
+    }
+
+    private buildHopfTubeLayer(ribbons: GalaxyHopfRibbonView[]): THREE.Group | null {
+        if (!ribbons.length) return null;
+        const group = new THREE.Group();
+        const dataFibers = ribbons
+            .filter((ribbon) => ribbon.guideKind === 'dataFiber')
+            .sort((left, right) => right.importance - left.importance)
+            .slice(0, MAX_HOPF_DATA_TUBES);
+        const torusFibers = ribbons
+            .filter((ribbon) => ribbon.guideKind === 'torusBand')
+            .filter((_, index) => index % 3 === 0)
+            .slice(0, MAX_HOPF_TORUS_TUBES);
+        for (const [index, ribbon] of dataFibers.entries()) {
+            const glow = this.buildHopfTubeMesh(ribbon, index, 'tubeGlow');
+            const core = this.buildHopfTubeMesh(ribbon, index, 'tubeCore');
+            if (glow) group.add(glow);
+            if (core) group.add(core);
+        }
+        for (const [index, ribbon] of torusFibers.entries()) {
+            const glow = this.buildHopfTubeMesh(ribbon, index, 'tubeGlow');
+            const core = this.buildHopfTubeMesh(ribbon, index, 'tubeCore');
+            if (glow) group.add(glow);
+            if (core) group.add(core);
+        }
+        return group.children.length ? group : null;
+    }
+
+    private buildHopfTubeMesh(ribbon: GalaxyHopfRibbonView, index: number, layer: 'tubeCore' | 'tubeGlow'): THREE.Mesh | null {
+        const points = this.hopfRibbonPath(ribbon);
+        if (points.length < 4) return null;
+        const curve = new THREE.CatmullRomCurve3(points, true, 'centripetal', 0.45);
+        const radius = this.hopfTubeRadius(ribbon.guideKind, layer);
+        const geometry = new THREE.TubeGeometry(curve, HOPF_TUBE_SEGMENTS, radius, HOPF_TUBE_RADIAL_SEGMENTS, true);
+        const tint = this.hopfRibbonTint(ribbon, index);
+        const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(tint.r, tint.g, tint.b),
+            transparent: true,
+            opacity: this.hopfLayerOpacity(layer, ribbon.guideKind, this.hopfGuideWeightForKind(ribbon.guideKind)),
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData['guideKind'] = 'hopf';
+        mesh.userData['hopfGuideKind'] = ribbon.guideKind;
+        mesh.userData['hopfLayer'] = layer;
+        mesh.userData['guideWeight'] = this.hopfGuideWeightForKind(ribbon.guideKind);
+        mesh.userData['pickable'] = false;
+        return mesh;
+    }
+
+    private hopfRibbonPath(ribbon: GalaxyHopfRibbonView): THREE.Vector3[] {
+        const segmentCount = Math.floor(ribbon.positions3d.length / 6);
+        if (segmentCount < 4) return [];
+        const stride = Math.max(1, Math.floor(segmentCount / 72));
+        const points: THREE.Vector3[] = [];
+        for (let segment = 0; segment < segmentCount; segment += stride) {
+            const offset = segment * 6;
+            points.push(new THREE.Vector3(
+                ribbon.positions3d[offset],
+                ribbon.positions3d[offset + 1],
+                ribbon.positions3d[offset + 2],
+            ));
+        }
+        return points;
+    }
+
+    private buildHopfRibbonSegments(ribbons: GalaxyHopfRibbonView[]): THREE.Group | null {
+        if (!ribbons.length) return null;
+        const visible = ribbons.slice(0, MAX_HOPF_RIBBON_GUIDES);
+        const grouped = new Map<GalaxyHopfRibbonView['guideKind'], GalaxyHopfRibbonView[]>();
+        for (const ribbon of visible) {
+            const group = grouped.get(ribbon.guideKind) ?? [];
+            group.push(ribbon);
+            grouped.set(ribbon.guideKind, group);
+        }
+        const result = new THREE.Group();
+        for (const [guideKind, groupRibbons] of grouped) {
+            const line = this.buildHopfRibbonLine(groupRibbons, guideKind);
+            if (line) result.add(line);
+        }
+        return result.children.length ? result : null;
+    }
+
+    private buildHopfRibbonLine(ribbons: GalaxyHopfRibbonView[], guideKind: GalaxyHopfRibbonView['guideKind']): THREE.LineSegments | null {
+        const vertexCount = ribbons.reduce((total, ribbon) => total + ribbon.positions3d.length / 3, 0);
+        const positions = new Float32Array(vertexCount * 3);
+        const colors = new Float32Array(vertexCount * 3);
+        let cursor = 0;
+        for (const [ribbonIndex, ribbon] of ribbons.entries()) {
+            for (let source = 0; source < ribbon.positions3d.length; source += 3) {
+                const phase = source / Math.max(3, ribbon.positions3d.length - 3);
+                positions[cursor] = ribbon.positions3d[source];
+                positions[cursor + 1] = ribbon.positions3d[source + 1];
+                positions[cursor + 2] = ribbon.positions3d[source + 2];
+                this.writeHopfRibbonColor(colors, cursor, ribbon, ribbonIndex, phase);
+                cursor += 3;
+            }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const material = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: this.hopfGuideOpacity(this.hopfGuideWeightForKind(guideKind)),
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+        });
+        const line = new THREE.LineSegments(geometry, material);
+        line.userData['guideKind'] = 'hopf';
+        line.userData['guideWeight'] = this.hopfGuideWeightForKind(guideKind);
+        line.userData['hopfGuideKind'] = guideKind;
+        line.userData['hopfLayer'] = 'line';
+        line.userData['pickable'] = false;
+        return line;
+    }
+
+    private hopfRibbonTint(ribbon: GalaxyHopfRibbonView, index: number): { r: number; g: number; b: number } {
+        const palette = this.hopfRibbonPalette(ribbon, index, 0.35);
+        return this.hslColor(palette.h, palette.s, palette.l);
+    }
+
+    private writeHopfRibbonColor(colors: Float32Array, offset: number, ribbon: GalaxyHopfRibbonView, index: number, phase: number): void {
+        const palette = this.hopfRibbonPalette(ribbon, index, phase);
+        this.writeHslColor(colors, offset, palette.h, palette.s, palette.l);
+        if (ribbon.guideKind === 'dataFiber') {
+            colors[offset] = THREE.MathUtils.lerp(colors[offset], ribbon.color.r, 0.2);
+            colors[offset + 1] = THREE.MathUtils.lerp(colors[offset + 1], ribbon.color.g, 0.2);
+            colors[offset + 2] = THREE.MathUtils.lerp(colors[offset + 2], ribbon.color.b, 0.2);
+        }
+    }
+
+    private hopfRibbonPalette(ribbon: GalaxyHopfRibbonView, index: number, phase: number): { h: number; s: number; l: number } {
+        const seed = this.stableUnit(ribbon.id);
+        switch (ribbon.guideKind) {
+            case 'dataFiber':
+                return { h: 0.5 + seed * 0.3 + phase * 0.055, s: 0.68, l: 0.47 + Math.sin(phase * Math.PI) * 0.05 };
+            case 'torusBand': {
+                const latitude = this.torusBandIndex(ribbon.id);
+                return { h: 0.62 + latitude * 0.045 + seed * 0.018 + phase * 0.025, s: 0.64, l: 0.34 };
+            }
+            case 'spaceFiber':
+                return { h: 0.46 + seed * 0.12 + phase * 0.018, s: 0.48, l: 0.25 + (index % 2) * 0.025 };
+            case 'axis':
+                return { h: 0.52 + phase * 0.02, s: 0.74, l: 0.42 };
+        }
+    }
+
+    private hopfGuideOpacity(weight = 1): number {
+        if (!this.settings.hopfSpaceVisible) return 0;
+        const intensity = THREE.MathUtils.clamp(this.settings.hopfSpaceIntensity, 0, 1.4);
+        return THREE.MathUtils.clamp((0.035 + this.settings.glow * 0.024) * weight * intensity, 0, 0.16);
+    }
+
+    private hopfLayerOpacity(layer: string, kind: GalaxyHopfRibbonView['guideKind'] | undefined, weight = 1): number {
+        if (!this.settings.hopfSpaceVisible) return 0;
+        if (layer === 'tubeCore') return this.hopfTubeOpacity(kind, false);
+        if (layer === 'tubeGlow') return this.hopfTubeOpacity(kind, true);
+        return this.hopfGuideOpacity(weight);
+    }
+
+    private hopfTubeOpacity(kind: GalaxyHopfRibbonView['guideKind'] | undefined, glow: boolean): number {
+        const intensity = THREE.MathUtils.clamp(this.settings.hopfSpaceIntensity, 0, 1.4);
+        const globalGlow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        if (kind === 'dataFiber') {
+            return THREE.MathUtils.clamp((glow ? 0.03 : 0.12) * intensity * (0.76 + globalGlow * 0.24), 0, glow ? 0.055 : 0.22);
+        }
+        if (kind === 'torusBand') {
+            return THREE.MathUtils.clamp((glow ? 0.012 : 0.045) * intensity * (0.8 + globalGlow * 0.18), 0, glow ? 0.026 : 0.085);
+        }
+        return 0;
+    }
+
+    private hopfTubeRadius(kind: GalaxyHopfRibbonView['guideKind'], layer: 'tubeCore' | 'tubeGlow'): number {
+        if (kind === 'dataFiber') return layer === 'tubeGlow' ? 0.018 : 0.0055;
+        if (kind === 'torusBand') return layer === 'tubeGlow' ? 0.012 : 0.0038;
+        return 0.003;
+    }
+
+    private hopfGuideWeightForKind(kind: GalaxyHopfRibbonView['guideKind']): number {
+        switch (kind) {
+            case 'dataFiber':
+                return 1.22;
+            case 'spaceFiber':
+                return 0.34;
+            case 'torusBand':
+                return 0.54;
+            case 'axis':
+                return 0.24;
+        }
+    }
+
+    private lorentzGuidePath(guide: GalaxyLorentzGuideView): THREE.Vector3[] {
+        const segmentCount = Math.floor(guide.positions3d.length / 6);
+        if (segmentCount < 2) return [];
+        const stride = Math.max(1, Math.floor(segmentCount / 40));
+        const points: THREE.Vector3[] = [];
+        points.push(new THREE.Vector3(guide.positions3d[0], guide.positions3d[1], guide.positions3d[2]));
+        for (let segment = 0; segment < segmentCount; segment += stride) {
+            const offset = segment * 6 + 3;
+            points.push(new THREE.Vector3(
+                guide.positions3d[offset],
+                guide.positions3d[offset + 1],
+                guide.positions3d[offset + 2],
+            ));
+        }
+        const lastOffset = guide.positions3d.length - 3;
+        points.push(new THREE.Vector3(guide.positions3d[lastOffset], guide.positions3d[lastOffset + 1], guide.positions3d[lastOffset + 2]));
+        return points;
+    }
+
+    private writeLorentzGuideColor(colors: Float32Array, offset: number, guide: GalaxyLorentzGuideView, index: number, phase: number): void {
+        const pulse = Math.sin((phase + this.stableUnit(guide.id)) * Math.PI) * 0.08;
+        const levelShade = THREE.MathUtils.clamp(0.08 - guide.level * 0.012, -0.04, 0.08);
+        colors[offset] = THREE.MathUtils.clamp(guide.color.r * (0.62 + pulse + levelShade), 0, 0.82);
+        colors[offset + 1] = THREE.MathUtils.clamp(guide.color.g * (0.66 + pulse + levelShade), 0, 0.86);
+        colors[offset + 2] = THREE.MathUtils.clamp(guide.color.b * (0.72 + pulse + levelShade), 0, 0.94);
+        if (guide.guideKind === 'wAxis') {
+            colors[offset] = THREE.MathUtils.clamp(0.18 + index * 0.003, 0, 0.46);
+            colors[offset + 1] = 0.82;
+            colors[offset + 2] = 0.94;
+        }
+    }
+
+    private lorentzGuideTint(guide: GalaxyLorentzGuideView, index: number): { r: number; g: number; b: number } {
+        const offset = this.stableUnit(`${guide.id}:${index}`) * 0.08;
+        return {
+            r: THREE.MathUtils.clamp(guide.color.r + offset, 0, 1),
+            g: THREE.MathUtils.clamp(guide.color.g + offset * 0.45, 0, 1),
+            b: THREE.MathUtils.clamp(guide.color.b + offset * 0.72, 0, 1),
+        };
+    }
+
+    private lorentzLayerOpacity(layer: string, guideKind: GalaxyLorentzGuideView['guideKind'] | undefined, treeKind = '', weight = 1): number {
+        if (!this.settings.lorentzSpaceVisible) return 0;
+        const intensity = THREE.MathUtils.clamp(this.settings.lorentzSpaceIntensity, 0, 1.4);
+        const globalGlow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        const treeBoost = treeKind === 'evidence' || treeKind === 'causal' ? 1.08 : 1;
+        if (layer === 'tubeCore') return THREE.MathUtils.clamp(0.105 * intensity * treeBoost * weight, 0, 0.2);
+        if (layer === 'tubeGlow') return THREE.MathUtils.clamp(0.026 * intensity * (0.8 + globalGlow * 0.2) * weight, 0, 0.06);
+        if (layer === 'shell') return THREE.MathUtils.clamp(0.022 * intensity * (0.72 + globalGlow * 0.18) * weight, 0, 0.055);
+        return THREE.MathUtils.clamp((0.028 + globalGlow * 0.018) * intensity * weight * this.lorentzGuideWeightForKind(guideKind), 0, 0.14);
+    }
+
+    private lorentzTubeRadius(guide: GalaxyLorentzGuideView, layer: 'tubeCore' | 'tubeGlow'): number {
+        const rootBoost = guide.guideKind === 'rootLane' ? 1.22 : 1;
+        return layer === 'tubeGlow' ? 0.015 * rootBoost : 0.0048 * rootBoost;
+    }
+
+    private lorentzGuideWeightForKind(kind: GalaxyLorentzGuideView['guideKind'] | undefined): number {
+        switch (kind) {
+            case 'membership':
+                return 0.86;
+            case 'rootLane':
+                return 1.08;
+            case 'levelShell':
+                return 0.46;
+            case 'wAxis':
+                return 0.24;
+            default:
+                return 0.7;
+        }
+    }
+
+    private lorentzShellRadius(guide: GalaxyLorentzGuideView): number {
+        const segment = guide.positions3d.length >= 3
+            ? Math.hypot(guide.positions3d[0], guide.positions3d[1], guide.positions3d[2])
+            : 0;
+        return THREE.MathUtils.clamp(segment || 0.58 + guide.level * 0.24, 0.58, 2.18);
+    }
+
+    private torusBandIndex(id: string): number {
+        const match = id.match(/torus-band:(\d+)/);
+        return match ? Math.min(2, Math.max(0, Number(match[1]) || 0)) : 1;
+    }
+
+    private stableUnit(value: string): number {
+        let hash = 2166136261;
+        for (let index = 0; index < value.length; index++) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0) / 4294967295;
+    }
+
+    private hslColor(h: number, s: number, l: number): { r: number; g: number; b: number } {
+        const buffer = new Float32Array(3);
+        this.writeHslColor(buffer, 0, h, s, l);
+        return { r: buffer[0], g: buffer[1], b: buffer[2] };
+    }
+
+    private writeHslColor(colors: Float32Array, offset: number, h: number, s: number, l: number): void {
+        const hue = ((h % 1) + 1) % 1;
+        if (s <= 0) {
+            colors[offset] = colors[offset + 1] = colors[offset + 2] = l;
+            return;
+        }
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        colors[offset] = this.hueToRgb(p, q, hue + 1 / 3);
+        colors[offset + 1] = this.hueToRgb(p, q, hue);
+        colors[offset + 2] = this.hueToRgb(p, q, hue - 1 / 3);
+    }
+
+    private hueToRgb(p: number, q: number, t: number): number {
+        let hue = t;
+        if (hue < 0) hue += 1;
+        if (hue > 1) hue -= 1;
+        if (hue < 1 / 6) return p + (q - p) * 6 * hue;
+        if (hue < 1 / 2) return q;
+        if (hue < 2 / 3) return p + (q - p) * (2 / 3 - hue) * 6;
+        return p;
+    }
+
     private updateGroupShells(data: GalaxySceneV2): void {
         if (!this.shells) return;
-        if (data.layoutMode === 'hybridSpace') {
+        if (data.layoutMode === 'hybridSpace' || data.layoutMode === 'hopfProjection' || data.layoutMode === 'lorentzTree') {
             this.shells.scale.set(1, 1, this.mode === '2d' ? 0.08 : 1);
             return;
         }
@@ -685,8 +1303,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             this.scene.remove(object);
             if (object instanceof THREE.Group) {
                 object.traverse((child) => {
-                    const drawable = child as THREE.Mesh | THREE.Sprite;
-                    const geometry = (drawable as THREE.Mesh).geometry;
+                    const drawable = child as THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+                    const geometry = drawable.geometry;
                     geometry?.dispose();
                     const material = drawable.material;
                     if (Array.isArray(material)) material.forEach((item) => item.dispose());

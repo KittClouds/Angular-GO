@@ -1,8 +1,0 @@
-[package]
-name = "gte-wasm-test"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-getrandom = { version = "0.2.15", features = ["js"] }
-gte-rs = "0.9.1"

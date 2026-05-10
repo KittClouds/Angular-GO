@@ -1,9 +1,9 @@
 // src/app/services/playground-log.service.ts
-// Shared log service for the Research Playground — all modules write here.
+// Shared log service for the Research Playground.
 
 import { Injectable, signal, computed } from '@angular/core';
 
-export type LogSource = 'raptor' | 'memory' | 'numerology' | 'rlm' | 'system';
+export type LogSource = 'numerology' | 'system';
 export type LogLevel = 'info' | 'warn' | 'error' | 'success';
 
 export interface LogEntry {

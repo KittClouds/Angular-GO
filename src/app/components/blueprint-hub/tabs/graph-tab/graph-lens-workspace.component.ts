@@ -3,10 +3,9 @@ import { Component, EventEmitter, Input, OnDestroy, Output, computed, effect, in
 import { FormsModule } from '@angular/forms';
 
 import type { RegisteredEntity } from '../../../../lib/registry';
-import { ScopeService, type ResolvedScope } from '../../../../lib/services/scope.service';
 import { db } from '../../../../lib/dexie/db';
 import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
-import { GraphAtlasPreviewComponent, type AtlasPreviewEdge } from './graph-atlas-preview/graph-atlas-preview.component';
+import { GraphAtlasPreviewComponent, type AtlasMode, type AtlasPreviewEdge } from './graph-atlas-preview/graph-atlas-preview.component';
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 import {
     DEFAULT_GRAPH_LENS,
@@ -64,13 +63,16 @@ import {
                 [edges]="lensedGraph().edges"
                 [sourceLabel]="lensedGraph().sourceLabel"
                 [lensMode]="lens().mode"
+                [primaryNoteId]="lens().primaryNoteId"
+                [selectedNoteIds]="lens().selectedNoteIds"
                 [atlasSearch]="atlasSearch"
                 [isScanning]="isScanning"
                 [activeProvider]="activeProvider"
                 (entitySelected)="entitySelected.emit($event)"
                 (addEntityRequested)="addEntityRequested.emit()"
-                (scanRequested)="scanRequested.emit()"
+                (scanRequested)="scanRequested.emit(lens())"
                 (styleRequested)="styleRequested.emit()"
+                (atlasModeChange)="atlasModeChange.emit($event)"
                 (atlasSearchChange)="atlasSearchChange.emit($event)"
                 (lensModeChange)="setLensMode($event)">
             </app-graph-atlas-preview>
@@ -78,7 +80,6 @@ import {
     `,
 })
 export class GraphLensWorkspaceComponent implements OnDestroy {
-    private readonly scopeService = inject(ScopeService);
     private readonly projection = inject(PhoenixProjectionService);
     private readonly narrativeEntitiesSignal = signal<RegisteredEntity[]>([]);
     private readonly narrativeEdgesSignal = signal<AtlasPreviewEdge[]>([]);
@@ -106,8 +107,9 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
 
     @Output() entitySelected = new EventEmitter<RegisteredEntity>();
     @Output() addEntityRequested = new EventEmitter<void>();
-    @Output() scanRequested = new EventEmitter<void>();
+    @Output() scanRequested = new EventEmitter<GraphLensState>();
     @Output() styleRequested = new EventEmitter<void>();
+    @Output() atlasModeChange = new EventEmitter<AtlasMode>();
     @Output() lensModeChange = new EventEmitter<GraphLensMode>();
     @Output() atlasSearchChange = new EventEmitter<string>();
 
@@ -146,7 +148,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     });
 
     constructor() {
-        effect(() => void this.refreshNotes(this.scopeService.resolvedScope()));
+        void this.refreshNotes();
         effect(() => void this.refreshMemberships(this.lens()));
     }
 
@@ -171,13 +173,13 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     setLensMode(mode: GraphLensMode, emitChange = true): void {
         if (mode === this.lens().mode) return;
         this.lens.update((current) => {
-            const primary = current.primaryNoteId ?? this.scopeService.resolvedScope().selectedNoteId ?? this.notes()[0]?.id ?? null;
+            const primary = current.primaryNoteId ?? current.selectedNoteIds[0] ?? this.notes()[0]?.id ?? null;
             if (mode === 'note') return { mode, primaryNoteId: primary, selectedNoteIds: primary ? [primary] : [] };
             if (mode === 'multiNote') {
                 const selected = current.selectedNoteIds.length ? current.selectedNoteIds : (primary ? [primary] : []);
                 return { mode, primaryNoteId: primary, selectedNoteIds: selected };
             }
-            return { ...current, mode };
+            return { mode, primaryNoteId: null, selectedNoteIds: [] };
         });
         if (emitChange) this.lensModeChange.emit(mode);
     }
@@ -208,22 +210,14 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         }));
     }
 
-    private async refreshNotes(scope: ResolvedScope): Promise<void> {
+    private async refreshNotes(): Promise<void> {
         const token = ++this.noteToken;
-        const rows = scope.narrativeId
-            ? await db.notes.where('narrativeId').equals(scope.narrativeId).toArray()
-            : await db.notes.toArray();
+        const rows = await db.notes.toArray();
         if (token !== this.noteToken) return;
         const notes = rows
             .sort((left, right) => right.updatedAt - left.updatedAt)
             .map((note) => ({ id: note.id, title: note.title || 'Untitled' }));
         this.notes.set(notes);
-        const activeNoteId = scope.selectedNoteId && notes.some((note) => note.id === scope.selectedNoteId)
-            ? scope.selectedNoteId
-            : notes[0]?.id ?? null;
-        this.lens.update((current) => current.primaryNoteId
-            ? current
-            : { ...current, primaryNoteId: activeNoteId, selectedNoteIds: activeNoteId ? [activeNoteId] : [] });
     }
 
     private async refreshMemberships(lens: GraphLensState): Promise<void> {

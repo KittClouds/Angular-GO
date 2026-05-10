@@ -8,13 +8,17 @@
 pub mod ann_metric;
 pub mod graph_adapter;
 pub mod graph_hardening;
+pub mod hopf;
 pub mod hybrid_space;
+pub mod lorentz_tree;
+pub mod manifold_v2;
 pub mod poincare;
 pub mod shard;
 pub mod sphere;
 pub mod sphere_shard;
 pub mod sphere_tangent;
 pub mod tangent;
+pub mod v15cones;
 
 pub use ann_metric::AnnMetric;
 
@@ -770,10 +774,10 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
         u64::from_le_bytes(bytes)
     }
 
-    fn get_neighbors(&self, id: u32, target_level: u32) -> Vec<u32> {
+    fn for_each_neighbor(&self, id: u32, target_level: u32, mut visit: impl FnMut(u32)) {
         let max_lvl = self.get_node_max_level(id);
         if target_level > max_lvl {
-            return vec![];
+            return;
         }
 
         let mut byte_offset = (self.adjacency_offset + self.get_node_base_offset(id)) as usize;
@@ -789,7 +793,6 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
             byte_offset += 4;
 
             if l == target_level {
-                let mut neighbors = Vec::with_capacity(len);
                 for _ in 0..len {
                     let nb_bytes = [
                         self.mmap[byte_offset],
@@ -797,14 +800,13 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
                         self.mmap[byte_offset + 2],
                         self.mmap[byte_offset + 3],
                     ];
-                    neighbors.push(u32::from_le_bytes(nb_bytes));
+                    visit(u32::from_le_bytes(nb_bytes));
                     byte_offset += 4;
                 }
-                return neighbors;
+                return;
             }
             byte_offset += len * 4;
         }
-        vec![]
     }
 
     pub fn search(&self, query: &[f32], k: usize, ef_search: usize) -> Vec<Candidate> {
@@ -822,14 +824,14 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
             let mut changed = true;
             while changed {
                 changed = false;
-                for nb in self.get_neighbors(curr, l) {
+                self.for_each_neighbor(curr, l, |nb| {
                     let d = self.metric.rank_eval(&q_proj, self.get_vector(nb));
                     if d < curr_dist {
                         curr_dist = d;
                         curr = nb;
                         changed = true;
                     }
-                }
+                });
             }
         }
 
@@ -853,7 +855,7 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
                 break;
             }
 
-            for nb in self.get_neighbors(cand.id, 0) {
+            self.for_each_neighbor(cand.id, 0, |nb| {
                 if visited.insert(nb) {
                     let d = self.metric.rank_eval(&q_proj, self.get_vector(nb));
 
@@ -866,7 +868,7 @@ impl<M: MetricF32> HyperbolicDiskHnsw<M> {
                         }
                     }
                 }
-            }
+            });
         }
 
         let mut final_cands = results.into_vec();
