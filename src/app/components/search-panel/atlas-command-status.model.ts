@@ -10,16 +10,20 @@ import {
     type AtlasLedgerGroup,
     type AtlasLedgerMetric,
 } from '../../services/atlas-count-ledger.model';
+import {
+    ATLAS_CAPABILITY_LAYERS,
+    ATLAS_CAPABILITY_RECIPES,
+    ATLAS_CAPABILITY_REGISTRY,
+    atlasCapabilityById,
+    type AtlasCapability,
+    type AtlasCapabilityId,
+    type AtlasRecipeId,
+} from './atlas-capability.model';
 
 export type AtlasPipelineStageId = 'scope' | 'surface' | 'ner' | 'graph' | 'semantic' | 'sidecars' | 'retrieval';
-export type AtlasRecipeId =
-    | 'runNer'
-    | 'fastTextGraph'
-    | 'fullTextGraph'
-    | 'semanticAtlas'
-    | 'warmFullIndexStack'
-    | 'visualizeCurrentGraph';
+export type { AtlasRecipeId } from './atlas-capability.model';
 export type AtlasPipelineTone = 'idle' | 'dirty' | 'running' | 'ready' | 'error';
+export type AtlasCapabilityTone = AtlasPipelineTone | 'sleeping';
 
 export interface AtlasInventoryCounts {
     notes: number;
@@ -49,6 +53,29 @@ export interface AtlasPipelineStageStatus {
     action: string;
 }
 
+export interface AtlasCapabilityStatusCard {
+    id: AtlasCapabilityId;
+    label: string;
+    family: AtlasCapability['family'];
+    status: AtlasCapabilityTone;
+    detail: string;
+    input: string;
+    output: string;
+    cost: AtlasCapability['cost'];
+    mutationPolicy: AtlasCapability['mutationPolicy'];
+    uiCoverage: AtlasCapability['uiCoverage'];
+    runnable: boolean;
+    backendRoute: string;
+}
+
+export interface AtlasCapabilityLayerStatus {
+    id: string;
+    label: string;
+    description: string;
+    status: AtlasCapabilityTone;
+    capabilities: AtlasCapabilityStatusCard[];
+}
+
 export interface AtlasRecipe {
     id: AtlasRecipeId;
     label: string;
@@ -73,6 +100,8 @@ export interface AtlasCommandStatus {
     ledgerGroups: AtlasLedgerGroup[];
     metrics: AtlasLedgerMetric[];
     stages: AtlasPipelineStageStatus[];
+    capabilityLayers: AtlasCapabilityLayerStatus[];
+    sleepingCapabilities: AtlasCapabilityStatusCard[];
     sidecars: AtlasInventoryMetric[];
     chunking: {
         chunkSize: number;
@@ -108,58 +137,15 @@ export interface AtlasCommandStatusInput {
     embeddingDimensionLabel: string;
 }
 
-export const ATLAS_RECIPES: AtlasRecipe[] = [
-    {
-        id: 'runNer',
-        label: 'Run NER',
-        subtitle: 'active note',
-        detail: 'Phoenix dynamic NER candidates for review.',
-        output: 'candidate entities',
-        icon: 'lucideCpu',
-    },
-    {
-        id: 'fastTextGraph',
-        label: 'Fast Text Graph',
-        subtitle: 'dirty-only, no embeddings',
-        detail: 'Surface scan, chunking, evidence graph, and graph commit.',
-        output: 'vertices + evidence edges',
-        icon: 'lucideZap',
-        primary: true,
-    },
-    {
-        id: 'fullTextGraph',
-        label: 'Full Text Graph',
-        subtitle: 'force, no embeddings',
-        detail: 'Rebuild the text graph path from current scope data.',
-        output: 'fresh committed graph',
-        icon: 'lucideLayers',
-    },
-    {
-        id: 'semanticAtlas',
-        label: 'Semantic Atlas',
-        subtitle: 'embeddings on',
-        detail: 'Run rich scan with semantic sidecar rows and candidates.',
-        output: 'vectors + candidate links',
-        icon: 'lucideSparkles',
-        primary: true,
-    },
-    {
-        id: 'warmFullIndexStack',
-        label: 'Warm Full Index Stack',
-        subtitle: 'no graph mutation',
-        detail: 'Load embedding, GLiNER, and NLI model lanes.',
-        output: 'ready model sidecars',
-        icon: 'lucideMicrochip',
-    },
-    {
-        id: 'visualizeCurrentGraph',
-        label: 'Visualize Current Graph',
-        subtitle: 'read-only',
-        detail: 'Open the graph lens without changing backend state.',
-        output: 'current snapshot view',
-        icon: 'lucideSearch',
-    },
-];
+export const ATLAS_RECIPES: AtlasRecipe[] = ATLAS_CAPABILITY_RECIPES.map((recipe) => ({
+    id: recipe.id,
+    label: recipe.label,
+    subtitle: recipe.subtitle,
+    detail: recipe.description,
+    output: recipe.outputLabel,
+    icon: recipe.icon,
+    primary: recipe.primary,
+}));
 
 const CHUNK_SIZE = 500;
 const CHUNK_OVERLAP = 100;
@@ -200,6 +186,8 @@ export function buildAtlasCommandStatus(input: AtlasCommandStatusInput): AtlasCo
         ledgerGroups,
         metrics: flattenAtlasLedgerGroups(ledgerGroups),
         stages: buildStages(input, inventory),
+        capabilityLayers: buildCapabilityLayers(input, inventory),
+        sleepingCapabilities: buildSleepingCapabilities(input, inventory),
         sidecars: buildSidecars(input),
         chunking: {
             chunkSize: CHUNK_SIZE,
@@ -213,6 +201,47 @@ export function buildAtlasCommandStatus(input: AtlasCommandStatusInput): AtlasCo
             detail: lastRunDetail(last),
             durationMs: input.lastSummary?.durationMs ?? null,
         },
+    };
+}
+
+function buildCapabilityLayers(input: AtlasCommandStatusInput, counts: AtlasInventoryCounts): AtlasCapabilityLayerStatus[] {
+    return ATLAS_CAPABILITY_LAYERS.map((layer) => {
+        const capabilities = layer.capabilityIds.map((id) => buildCapabilityStatusCard(atlasCapabilityById(id), input, counts));
+        return {
+            id: layer.id,
+            label: layer.label,
+            description: layer.description,
+            status: aggregateCapabilityTone(capabilities.map((capability) => capability.status)),
+            capabilities,
+        };
+    });
+}
+
+function buildSleepingCapabilities(input: AtlasCommandStatusInput, counts: AtlasInventoryCounts): AtlasCapabilityStatusCard[] {
+    return ATLAS_CAPABILITY_REGISTRY
+        .filter((capability) => capability.uiCoverage === 'sleeping' || capability.uiCoverage === 'partial')
+        .map((capability) => buildCapabilityStatusCard(capability, input, counts));
+}
+
+function buildCapabilityStatusCard(
+    capability: AtlasCapability,
+    input: AtlasCommandStatusInput,
+    counts: AtlasInventoryCounts,
+): AtlasCapabilityStatusCard {
+    const status = capabilityTone(capability, input, counts);
+    return {
+        id: capability.id,
+        label: capability.label,
+        family: capability.family,
+        status,
+        detail: capabilityDetail(capability, input, counts),
+        input: capability.inputs.join(' + ') || 'none',
+        output: capability.outputs.join(' + ') || 'none',
+        cost: capability.cost,
+        mutationPolicy: capability.mutationPolicy,
+        uiCoverage: capability.uiCoverage,
+        runnable: capability.runnable,
+        backendRoute: capability.backendRoute,
     };
 }
 
@@ -235,6 +264,128 @@ function buildSidecars(input: AtlasCommandStatusInput): AtlasInventoryMetric[] {
         { label: 'Hopf projection', value: null, detail: input.manifoldStatuses.hopf, source: 'Hopf' },
         { label: 'Lorentz forest', value: null, detail: input.manifoldStatuses.lorentz, source: 'Lorentz' },
     ];
+}
+
+function capabilityTone(
+    capability: AtlasCapability,
+    input: AtlasCommandStatusInput,
+    counts: AtlasInventoryCounts,
+): AtlasCapabilityTone {
+    if (capability.uiCoverage === 'sleeping') return 'sleeping';
+
+    switch (capability.id) {
+        case 'dynamicSurface':
+        case 'dynamicChunking':
+            return toneFromMachine(input.stages['surface']?.status);
+        case 'dynamicNer':
+            return nerTone(input.dynamicNerStatus);
+        case 'mentionGraph':
+        case 'evidenceGraph':
+        case 'surfaceGraph':
+        case 'assertedKernel':
+            return graphTone(input.graphStatus);
+        case 'relationGraph':
+            if ((input.lastRichScan?.relationCandidateCount || 0) > 0) return 'ready';
+            return counts.committedVertices ? 'idle' : 'sleeping';
+        case 'semanticEmbedding':
+        case 'semanticAtlas':
+            return vectorTone(input.vectorStatus, counts.embeddingVectors);
+        case 'semanticCandidate':
+            return (counts.candidateEdges || 0) > 0 || (input.lastRichScan?.relationCandidateCount || 0) > 0
+                ? 'ready'
+                : 'idle';
+        case 'nliAdjudication':
+            return capability.uiCoverage === 'partial' ? 'idle' : 'sleeping';
+        case 'hybridManifold':
+            return manifoldTone(input.manifoldStatuses.hybrid);
+        case 'hopfProjection':
+            return manifoldTone(input.manifoldStatuses.hopf);
+        case 'lorentzForest':
+            return manifoldTone(input.manifoldStatuses.lorentz);
+        case 'retrievalWalk':
+            return input.enabledLanes.length ? 'ready' : 'idle';
+        case 'galaxyVisualization':
+            return counts.committedVertices || counts.evidenceEdges ? 'ready' : 'idle';
+        case 'temporalGraph':
+        case 'eventIdentity':
+        case 'memoryState':
+        case 'causalGraph':
+            return 'sleeping';
+    }
+}
+
+function capabilityDetail(
+    capability: AtlasCapability,
+    input: AtlasCommandStatusInput,
+    counts: AtlasInventoryCounts,
+): string {
+    if (capability.uiCoverage === 'sleeping') {
+        return `${capability.mutationPolicy}; backend types/sidecars detected, not exposed as a runnable recipe yet`;
+    }
+
+    switch (capability.id) {
+        case 'dynamicSurface':
+            return `${input.estimatedChunks} est. chunks; ${stageSummaryDetail(input, capability)}`;
+        case 'dynamicChunking':
+            return `${input.estimatedChunks} estimated chunks; lens counts ${recordCount(input.lastRichScan?.lensChunkCounts)}`;
+        case 'dynamicNer':
+            return `Phoenix ${input.dynamicNerStatus}; ${input.lastRichScan?.candidateSuggestions.length ?? 0} last surface suggestions`;
+        case 'mentionGraph':
+            return `${countNoun(counts.graphLeaves, 'committed leaf', 'committed leaves')}; co-occurrence lane`;
+        case 'evidenceGraph':
+            return `${countNoun(counts.evidenceEdges, 'evidence edge', 'evidence edges')}; graph delta ${recordCount(input.lastRichScan?.graphDeltaCounts)}`;
+        case 'surfaceGraph':
+            return `${countNoun(counts.graphLeaves, 'leaf/chunk node', 'leaf/chunk nodes')}; surface topology`;
+        case 'assertedKernel':
+            return `${countNoun(counts.committedVertices, 'vertex', 'vertices')}, ${countNoun(counts.evidenceEdges, 'edge', 'edges')}`;
+        case 'relationGraph':
+            return `${input.lastRichScan?.relationCandidateCount || 0} relation candidates from last rich scan`;
+        case 'semanticEmbedding':
+            return `${input.embeddingModelLabel} ${input.embeddingDimensionLabel}; ${valueLabel(counts.embeddingVectors, 'vectors')}`;
+        case 'semanticAtlas':
+            return `${valueLabel(counts.embeddingVectors, 'vectors')}; semantic ${input.lastRichScan ? 'last run available' : 'not run yet'}`;
+        case 'semanticCandidate':
+            return `${valueLabel(counts.candidateEdges, 'candidate edges')}; ${input.lastRichScan?.relationCandidateCount || 0} relation candidates`;
+        case 'nliAdjudication':
+            return 'NLI model lane can warm, adjudication queue is future/partial';
+        case 'hybridManifold':
+            return `Hybrid ${input.manifoldStatuses.hybrid}`;
+        case 'hopfProjection':
+            return `Hopf ${input.manifoldStatuses.hopf}`;
+        case 'lorentzForest':
+            return `Lorentz ${input.manifoldStatuses.lorentz}; tree kinds include temporal/causal/evidence/provenance`;
+        case 'retrievalWalk':
+            return input.enabledLanes.join(' + ') || 'lexical fallback';
+        case 'galaxyVisualization':
+            return counts.committedVertices || counts.evidenceEdges ? 'current graph snapshot available' : 'no committed graph snapshot yet';
+        case 'temporalGraph':
+        case 'eventIdentity':
+        case 'memoryState':
+        case 'causalGraph':
+            return `${capability.mutationPolicy}; sleeping capability detected in native runtime`;
+    }
+}
+
+function aggregateCapabilityTone(statuses: AtlasCapabilityTone[]): AtlasCapabilityTone {
+    if (statuses.includes('error')) return 'error';
+    if (statuses.includes('running')) return 'running';
+    if (statuses.includes('dirty')) return 'dirty';
+    if (statuses.includes('ready')) return 'ready';
+    if (statuses.every((status) => status === 'sleeping')) return 'sleeping';
+    return 'idle';
+}
+
+function stageSummaryDetail(input: AtlasCommandStatusInput, capability: AtlasCapability): string {
+    const keys = capability.stageSummaryKeys || [];
+    const summary = input.lastRichScan?.stageSummaries.find((stageSummary) => keys.includes(stageSummary.stage));
+    if (!summary) return 'stage summary pending';
+    return `${summary.status} ${summary.durationMs}ms`;
+}
+
+function recordCount(record: Record<string, number> | undefined): string {
+    if (!record) return 'not run';
+    const total = Object.values(record).reduce((sum, value) => sum + value, 0);
+    return `${total} total`;
 }
 
 function stage(

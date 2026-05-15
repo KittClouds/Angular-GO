@@ -1,7 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-import { EmbeddingEngine } from '../lib/embeddings/EmbeddingEngine';
-import { SemanticSearchService } from '../lib/services/semantic-search.service';
 import { PhoenixGraphOrchestratorService, type PhoenixGraphIndexPolicy } from './phoenix-graph-orchestrator.service';
 import { PhoenixMachineControllerService } from './phoenix-machine-controller.service';
 import { PhoenixUiApiService, type AtlasRichScanResult, type SearchScope } from './phoenix-ui-api.service';
@@ -56,7 +54,6 @@ export interface PhoenixMachineSummary {
 export class PhoenixMachineControlService {
     private readonly workbench = inject(RetrievalWorkbenchStateService);
     private readonly phoenixUiApi = inject(PhoenixUiApiService);
-    private readonly semanticSearch = inject(SemanticSearchService);
     private readonly graphOrchestrator = inject(PhoenixGraphOrchestratorService);
     private readonly graphAuditService = inject(GraphAuditService);
     private readonly machineController = inject(PhoenixMachineControllerService);
@@ -72,7 +69,7 @@ export class PhoenixMachineControlService {
     readonly stages = this.machineController.stages;
     readonly activeSignals = this.machineController.activeSignals;
 
-    readonly vectorStatus = signal<PhoenixMachineVectorStatus>(EmbeddingEngine.isReady() ? 'ready' : 'idle');
+    readonly vectorStatus = signal<PhoenixMachineVectorStatus>('idle');
     readonly graphStatus = signal<PhoenixMachineGraphStatus>('idle');
     readonly graphAudit = signal<GraphAuditSnapshot | null>(null);
     readonly manifoldMode = signal<AtlasManifoldMode>('hybrid');
@@ -178,12 +175,14 @@ export class PhoenixMachineControlService {
         this.error.set(null);
 
         try {
-            await this.semanticSearch.initializeWorker();
-            await EmbeddingEngine.initialize(modelId);
             this.vectorStatus.set('ready');
             this.machineController.finishStage('embeddings', 'semantic-load');
-            this.notice.set(`${label} loaded at ${dimensionLabel}. Semantic work stays explicit.`);
-            this.finishJob('semantic-load', `${label} loaded`, startedAt, { modelId, dimensionLabel });
+            this.notice.set(`${label} selected at ${dimensionLabel}. Native Rust semantic runner will execute during Atlas scan.`);
+            this.finishJob('semantic-load', `${label} selected`, startedAt, {
+                modelId,
+                dimensionLabel,
+                runner: 'native-rust',
+            });
         } catch (err) {
             this.vectorStatus.set('error');
             this.machineController.failStage('embeddings', 'semantic-load', err);
@@ -199,12 +198,12 @@ export class PhoenixMachineControlService {
         this.error.set(null);
 
         try {
-            await this.semanticSearch.indexNotes(documents);
             this.vectorStatus.set('ready');
             this.machineController.finishStage('embeddings', 'semantic-index');
-            this.notice.set(`Queued ${documents.length} notes for embedding. Graph commits remain explicit.`);
-            this.finishJob('semantic-index', `Queued ${documents.length} semantic documents`, startedAt, {
+            this.notice.set(`Native semantic sidecar is ready for ${documents.length} selected note${documents.length === 1 ? '' : 's'}. Run Semantic Graph to embed via Rust.`);
+            this.finishJob('semantic-index', `Prepared ${documents.length} native semantic documents`, startedAt, {
                 documentCount: documents.length,
+                runner: 'native-rust',
             });
         } catch (err) {
             this.vectorStatus.set('error');

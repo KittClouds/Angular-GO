@@ -41,6 +41,7 @@ describe('HubFooterComponent', () => {
     const activeNoteId = signal<string | null>('note-1');
     const currentNote = signal<{ markdownContent?: string } | null>({ markdownContent: 'hello world' });
     const captureSnapshot = vi.fn();
+    const save = vi.fn();
     const templatePath = join(dirname(fileURLToPath(import.meta.url)), 'hub-footer.component.html');
 
     beforeEach(() => {
@@ -67,6 +68,7 @@ describe('HubFooterComponent', () => {
         activeNoteId.set('note-1');
         currentNote.set({ markdownContent: 'hello world' });
         captureSnapshot.mockReturnValue(null);
+        save.mockClear();
 
         injector = createEnvironmentInjector([
             {
@@ -120,6 +122,7 @@ describe('HubFooterComponent', () => {
                 provide: EditorService,
                 useValue: {
                     captureSnapshot,
+                    save,
                 },
             },
             {
@@ -225,5 +228,23 @@ describe('HubFooterComponent', () => {
 
         const tts = injector.get(TtsService) as any;
         expect(tts.speak).toHaveBeenCalledWith('fresh live editor text');
+    });
+
+    it('uses the footer save status pill as the manual save button', () => {
+        const template = readFileSync(templatePath, 'utf8');
+
+        expect(template).toContain('(click)="saveCurrentNote()"');
+
+        component.saveCurrentNote();
+
+        expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not request another manual save while the status pill is already saving', () => {
+        isSaved.set(false);
+
+        component.saveCurrentNote();
+
+        expect(save).not.toHaveBeenCalled();
     });
 });

@@ -1,7 +1,6 @@
 // src/app/lib/embeddings/providers/RustEmbeddingProvider.ts
 //
-// WASM-based embedding provider using kittcore's EmbedCortex
-// This is the A/B testing alternative to LocalEmbeddingProvider (Transformers.js)
+// Native Rust/WASM embedding provider using kittcore's EmbedCortex.
 
 import type { IEmbeddingProvider } from './types';
 import type { EmbeddingModelDefinition } from '../models/ModelRegistry';
@@ -153,7 +152,7 @@ export class RustEmbeddingProvider implements IEmbeddingProvider {
 
             this.loadProgress = 100;
             this.initialized = true;
-            console.log(`[RustEmbeddingProvider] ✓ Model loaded: ${this.name} (${this.cortex.getDimensions()}d)`);
+            console.log(`[RustEmbeddingProvider] Model loaded: ${this.name} (${this.cortex.getDimensions()}d)`);
 
         } catch (error) {
             console.error('[RustEmbeddingProvider] Failed to initialize:', error);

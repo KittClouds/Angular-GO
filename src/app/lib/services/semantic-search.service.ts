@@ -1,7 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
-
-import { EmbeddingQueueService } from './embedding-queue.service';
-import { RagWorkerService } from './rag-worker.service';
+import { Injectable, signal } from '@angular/core';
 
 export interface SemanticIndexNote {
     id: string;
@@ -12,22 +9,21 @@ export interface SemanticIndexNote {
 
 /**
  * Explicit semantic sidecar controls for the search panel.
- * Retrieval is owned by Phoenix search/graph paths; this service only loads the
- * local embedding worker and warms embeddings when the user asks for it.
+ * Retrieval and embedding execution are owned by Phoenix native search/graph
+ * paths; this shim keeps old UI state calls inert.
  */
 @Injectable({ providedIn: 'root' })
 export class SemanticSearchService {
-    private readonly embeddingQueue = inject(EmbeddingQueueService);
-    private readonly ragWorker = inject(RagWorkerService);
-
+    // The semantic sidecar is native Rust-owned. This service only preserves
+    // legacy UI state so old callers do not spin up browser/cloud embeddings.
     readonly isIndexing = signal(false);
     readonly lastIndexedCount = signal(0);
     readonly lastIndexTime = signal(0);
-    readonly isModelLoaded = this.ragWorker.isModelLoaded;
-    readonly modelDimension = this.ragWorker.modelDimension;
+    readonly isModelLoaded = signal(false);
+    readonly modelDimension = signal(0);
 
     async initializeWorker(): Promise<void> {
-        return this.ragWorker.initialize();
+        this.isModelLoaded.set(true);
     }
 
     async indexNotes(notes: SemanticIndexNote[]): Promise<void> {
@@ -35,15 +31,6 @@ export class SemanticSearchService {
         this.isIndexing.set(true);
 
         try {
-            for (const note of notes) {
-                this.embeddingQueue.markDirty(
-                    note.id,
-                    note.narrativeId || 'global',
-                    note.title,
-                    note.content,
-                );
-            }
-            this.embeddingQueue.flushAll();
             this.lastIndexedCount.set(notes.length);
             this.lastIndexTime.set(Math.round(performance.now() - startedAt));
         } finally {
@@ -52,10 +39,11 @@ export class SemanticSearchService {
     }
 
     hasPendingWork(): boolean {
-        return this.embeddingQueue.hasPendingWork();
+        return false;
     }
 
     dispose(): void {
-        this.ragWorker.dispose();
+        this.isModelLoaded.set(false);
+        this.modelDimension.set(0);
     }
 }

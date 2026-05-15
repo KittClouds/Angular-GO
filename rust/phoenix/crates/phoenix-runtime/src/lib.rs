@@ -143,11 +143,25 @@ struct DynamicAtlasPipelineResult {
 }
 
 const RUNTIME_CAPABILITIES: &[&str] = &[
+    "runtime:capabilities",
+    "relation:list",
+    "relation:getFirst",
+    "relation:upsert",
+    "relation:delete",
+    "graph:overgraphStatus",
+    "graph:repairLiveTopology",
+    "graph:upsertNode",
+    "graph:upsertEdge",
     "note:list",
     "note:get",
     "note:listByIds",
+    "note:upsert",
+    "note:delete",
     "persistence:applyWalBatch",
     "persistence:clearDerived",
+    "persistence:clearDerivedEphemera",
+    "semantic:listNliJudgmentInputs",
+    "semantic:applyNliJudgments",
     "session:close",
 ];
 const DERIVED_EPHEMERA_RELATIONS: &[&str] = &[

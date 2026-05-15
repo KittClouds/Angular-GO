@@ -7,17 +7,6 @@ import {
 } from '@angular/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../lib/embeddings/EmbeddingEngine', () => ({
-    EmbeddingEngine: {
-        isReady: vi.fn(() => false),
-        initialize: vi.fn(async () => undefined),
-    },
-}));
-
-vi.mock('../lib/services/semantic-search.service', () => ({
-    SemanticSearchService: class SemanticSearchService { },
-}));
-
 import type { GraphAuditSnapshot } from './graph-audit.model';
 import { GraphAuditService } from './graph-audit.service';
 import { PhoenixGraphOrchestratorService } from './phoenix-graph-orchestrator.service';
@@ -25,8 +14,6 @@ import { PhoenixMachineControllerService } from './phoenix-machine-controller.se
 import { PhoenixMachineControlService } from './phoenix-machine-control.service';
 import { PhoenixUiApiService } from './phoenix-ui-api.service';
 import { RetrievalWorkbenchStateService } from './retrieval-workbench-state.service';
-import { SemanticSearchService } from '../lib/services/semantic-search.service';
-import { EmbeddingEngine } from '../lib/embeddings/EmbeddingEngine';
 
 const snapshot: GraphAuditSnapshot = {
     notes: 2,
@@ -62,10 +49,6 @@ describe('PhoenixMachineControlService', () => {
         searchScoped: ReturnType<typeof vi.fn>;
         invalidateKnowledgeGraphCache: ReturnType<typeof vi.fn>;
     };
-    let semanticSearch: {
-        initializeWorker: ReturnType<typeof vi.fn>;
-        indexNotes: ReturnType<typeof vi.fn>;
-    };
     let machineController: {
         beginStage: ReturnType<typeof vi.fn>;
         finishStage: ReturnType<typeof vi.fn>;
@@ -82,18 +65,11 @@ describe('PhoenixMachineControlService', () => {
             searchScoped: vi.fn(async () => [{ DocID: 'note-1', Score: 0.9 }]),
             invalidateKnowledgeGraphCache: vi.fn(),
         };
-        semanticSearch = {
-            initializeWorker: vi.fn(async () => undefined),
-            indexNotes: vi.fn(async () => undefined),
-        };
         machineController = {
             beginStage: vi.fn(),
             finishStage: vi.fn(),
             failStage: vi.fn(),
         };
-
-        vi.mocked(EmbeddingEngine.isReady).mockReturnValue(false);
-        vi.mocked(EmbeddingEngine.initialize).mockResolvedValue(undefined);
 
         injector = createEnvironmentInjector([
             RetrievalWorkbenchStateService,
@@ -101,7 +77,6 @@ describe('PhoenixMachineControlService', () => {
             { provide: GraphAuditService, useValue: graphAudit },
             { provide: PhoenixGraphOrchestratorService, useValue: graphOrchestrator },
             { provide: PhoenixUiApiService, useValue: uiApi },
-            { provide: SemanticSearchService, useValue: semanticSearch },
             { provide: PhoenixMachineControllerService, useValue: machineController },
         ], Injector.create({ providers: [] }));
         service = runInInjectionContext(injector, () => injector.get(PhoenixMachineControlService));

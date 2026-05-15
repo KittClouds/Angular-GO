@@ -5,6 +5,7 @@ import { Component, inject, signal, computed, OnInit, OnDestroy, HostListener } 
 import { Router, NavigationEnd } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
+import { NgxGradientTextComponent } from '@omnedia/ngx-gradient-text';
 import { LucideAngularModule, Plus, FolderPlus, BookOpen, Users, MapPin, Package, Lightbulb, Calendar, Clock, GitBranch, Layers, BookMarked, Film, Zap, Shield, User, Folder, PanelLeft, PanelLeftClose, FileText, Search, Undo, Redo, Sun, Moon, MoveVertical, RefreshCw, Upload, Download, MessageCircle, History } from 'lucide-angular';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
@@ -31,6 +32,8 @@ interface EntityFolderOption {
     label: string;
     icon: any;
     color: string;
+    gradientStart: string;
+    gradientEnd: string;
 }
 
 interface FolderOption {
@@ -48,17 +51,17 @@ interface CreateFolderOption {
 }
 
 const ENTITY_FOLDER_OPTIONS: EntityFolderOption[] = [
-    { entityKind: 'NARRATIVE', label: 'Narrative Timeline Folder', icon: BookOpen, color: 'hsl(270, 70%, 60%)' },
-    { entityKind: 'TIMELINE', label: 'General Timeline Folder', icon: Clock, color: 'hsl(180, 60%, 50%)' },
-    { entityKind: 'ARC', label: 'Arc Folder', icon: GitBranch, color: 'hsl(280, 60%, 55%)' },
-    { entityKind: 'ACT', label: 'Act Folder', icon: Layers, color: 'hsl(220, 70%, 60%)' },
-    { entityKind: 'CHAPTER', label: 'Chapter Folder', icon: BookMarked, color: 'hsl(30, 70%, 55%)' },
-    { entityKind: 'EVENT', label: 'Event Folder', icon: Calendar, color: 'hsl(320, 70%, 60%)' },
-    { entityKind: 'CHARACTER', label: 'Character Folder', icon: Users, color: 'hsl(200, 80%, 60%)' },
-    { entityKind: 'LOCATION', label: 'Location Folder', icon: MapPin, color: 'hsl(140, 60%, 50%)' },
-    { entityKind: 'NPC', label: 'NPC Folder', icon: User, color: 'hsl(190, 70%, 55%)' },
-    { entityKind: 'ITEM', label: 'Item Folder', icon: Package, color: 'hsl(40, 80%, 60%)' },
-    { entityKind: 'CONCEPT', label: 'Concept Folder', icon: Lightbulb, color: 'hsl(60, 70%, 50%)' },
+    { entityKind: 'NARRATIVE', label: 'Narrative Timeline Folder', icon: BookOpen, color: 'hsl(270, 70%, 60%)', gradientStart: '#a855f7', gradientEnd: '#f472b6' },
+    { entityKind: 'TIMELINE', label: 'General Timeline Folder', icon: Clock, color: 'hsl(180, 60%, 50%)', gradientStart: '#22d3ee', gradientEnd: '#2dd4bf' },
+    { entityKind: 'ARC', label: 'Arc Folder', icon: GitBranch, color: 'hsl(280, 60%, 55%)', gradientStart: '#c084fc', gradientEnd: '#ec4899' },
+    { entityKind: 'ACT', label: 'Act Folder', icon: Layers, color: 'hsl(220, 70%, 60%)', gradientStart: '#60a5fa', gradientEnd: '#818cf8' },
+    { entityKind: 'CHAPTER', label: 'Chapter Folder', icon: BookMarked, color: 'hsl(30, 70%, 55%)', gradientStart: '#fb923c', gradientEnd: '#facc15' },
+    { entityKind: 'EVENT', label: 'Event Folder', icon: Calendar, color: 'hsl(320, 70%, 60%)', gradientStart: '#f472b6', gradientEnd: '#fb7185' },
+    { entityKind: 'CHARACTER', label: 'Character Folder', icon: Users, color: 'hsl(200, 80%, 60%)', gradientStart: '#38bdf8', gradientEnd: '#22d3ee' },
+    { entityKind: 'LOCATION', label: 'Location Folder', icon: MapPin, color: 'hsl(140, 60%, 50%)', gradientStart: '#22c55e', gradientEnd: '#86efac' },
+    { entityKind: 'NPC', label: 'NPC Folder', icon: User, color: 'hsl(190, 70%, 55%)', gradientStart: '#22d3ee', gradientEnd: '#67e8f9' },
+    { entityKind: 'ITEM', label: 'Item Folder', icon: Package, color: 'hsl(40, 80%, 60%)', gradientStart: '#fbbf24', gradientEnd: '#fb923c' },
+    { entityKind: 'CONCEPT', label: 'Concept Folder', icon: Lightbulb, color: 'hsl(60, 70%, 50%)', gradientStart: '#facc15', gradientEnd: '#bef264' },
 ];
 
 const ROOT_CREATE_FOLDER_OPTIONS: CreateFolderOption[] = [
@@ -73,7 +76,7 @@ const ROOT_CREATE_FOLDER_OPTIONS: CreateFolderOption[] = [
 @Component({
     selector: 'app-sidebar',
     standalone: true,
-    imports: [CommonModule, DialogModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent],
+    imports: [CommonModule, DialogModule, FileTreeComponent, LucideAngularModule, SearchPanelComponent, NgxGradientTextComponent],
     templateUrl: './sidebar.component.html',
     styleUrls: ['./sidebar.component.css']
 })
@@ -203,7 +206,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         ).subscribe((event: any) => {
             this.isChatRoute.set(event.urlAfterRedirects.includes('/chat'));
         });
-        
+
         // Initial setup
         this.isChatRoute.set(this.router.url.includes('/chat'));
     }
@@ -610,7 +613,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.isResizing = true;
         this.startX = event.clientX;
         this.startWidth = this.sidebarWidth;
-        
+
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
 

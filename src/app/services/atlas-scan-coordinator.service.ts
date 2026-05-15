@@ -6,6 +6,7 @@ import { parseContentToPlainText } from '../lib/analytics';
 import { NerService } from './ner.service';
 import { PhoenixMachineControlService, type PhoenixMachineModelId } from './phoenix-machine-control.service';
 import { PhoenixUiApiService, type AtlasRichScanPolicy, type AtlasRichScanResult as NativeAtlasRichScanResult } from './phoenix-ui-api.service';
+import type { AtlasBuildScope } from './atlas-capability-runtime.model';
 
 export type AtlasScanPhase =
     | 'idle'
@@ -33,6 +34,7 @@ interface AtlasScanOptions {
     source?: 'search-panel' | 'graph-tab' | 'sidebar' | 'canvas';
     requireActiveNote?: boolean;
     lensMode?: 'global' | 'narrative' | 'note' | 'multiNote';
+    buildScope?: AtlasBuildScope;
     noteIds?: string[];
     modelId?: PhoenixMachineModelId;
     modelLabel?: string;
@@ -172,15 +174,17 @@ export class AtlasScanCoordinatorService {
     }
 
     private async loadScopedDocuments(options: AtlasScanOptions): Promise<SemanticDocumentRow[]> {
-        const noteIds = uniqueIds(options.noteIds || []);
+        const noteIds = uniqueIds(options.noteIds || noteIdsFromBuildScope(options.buildScope));
         if (noteIds.length) {
             const rows = (await db.notes.bulkGet(noteIds)).filter((note): note is NonNullable<typeof note> => !!note);
             return this.toSemanticDocumentRows(rows);
         }
-        const scope = this.machine.scope();
-        const rows = scope === 'global'
+        const folderId = options.buildScope?.mode === 'folder'
+            ? options.buildScope.folderId
+            : this.machine.scope();
+        const rows = folderId === 'global' || options.buildScope?.mode === 'global'
             ? await db.notes.toArray()
-            : await db.notes.where('folderId').equals(scope).toArray();
+            : await db.notes.where('folderId').equals(folderId).toArray();
         return this.toSemanticDocumentRows(rows);
     }
 
@@ -197,12 +201,22 @@ export class AtlasScanCoordinatorService {
     }
 
     private buildScanScope(options: AtlasScanOptions): { mode: string; folderId?: string; folderPath?: string; noteId?: string; noteIds?: string[] } {
-        const noteIds = uniqueIds(options.noteIds || []);
+        const noteIds = uniqueIds(options.noteIds || noteIdsFromBuildScope(options.buildScope));
         if (noteIds.length === 1) {
             return { mode: 'note', noteId: noteIds[0], noteIds };
         }
         if (noteIds.length > 1) {
             return { mode: 'multiNote', noteIds };
+        }
+        if (options.buildScope?.mode === 'folder') {
+            return {
+                mode: 'folder',
+                folderId: options.buildScope.folderId,
+                folderPath: options.buildScope.folderId,
+            };
+        }
+        if (options.buildScope?.mode === 'global') {
+            return { mode: options.lensMode || 'global' };
         }
         const scope = this.machine.scope();
         if (scope === 'global') {
@@ -218,4 +232,11 @@ export class AtlasScanCoordinatorService {
 
 function uniqueIds(values: string[]): string[] {
     return [...new Set(values.filter(Boolean))];
+}
+
+function noteIdsFromBuildScope(scope: AtlasBuildScope | undefined): string[] {
+    if (!scope) return [];
+    if (scope.mode === 'note') return [scope.noteId];
+    if (scope.mode === 'multiNote') return scope.noteIds;
+    return [];
 }

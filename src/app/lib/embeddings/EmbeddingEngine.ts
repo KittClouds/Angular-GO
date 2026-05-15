@@ -7,7 +7,7 @@ import { EmbeddingModelRegistry } from './models/ModelRegistry';
 /**
  * Unified Embedding Engine
  * 
- * Provides embeddings from local models (Transformers.js), Rust/WASM models, or cloud APIs.
+ * Provides semantic embeddings through native Rust/WASM providers only.
  */
 export class EmbeddingEngine {
     private static providers: Map<string, IEmbeddingProvider> = new Map();
@@ -17,7 +17,7 @@ export class EmbeddingEngine {
      * Initialize embedding engine with configured model
      */
     static async initialize(modelId?: string): Promise<void> {
-        // Default to local model with batch processing for memory efficiency
+        // Default to the native semantic runner target.
         const targetModelId = modelId || 'mongodb-leaf';
 
         // Check if already initialized with this model
@@ -34,31 +34,13 @@ export class EmbeddingEngine {
                 throw new Error(`Unknown embedding model: ${targetModelId}`);
             }
 
-            // Create appropriate provider
-            switch (model.provider) {
-                case 'local': {
-                    // Keep Transformers.js out of the initial app bundle. It is only
-                    // needed after the user explicitly loads a semantic model.
-                    const { LocalEmbeddingProvider } = await import('./providers/LocalEmbeddingProvider');
-                    provider = new LocalEmbeddingProvider(targetModelId);
-                    break;
-                }
-                case 'rust': {
-                    // Lazy import to avoid loading WASM unless needed
-                    const { RustEmbeddingProvider } = await import('./providers/RustEmbeddingProvider');
-                    provider = new RustEmbeddingProvider(targetModelId);
-                    break;
-                }
-                case 'openrouter': {
-                    // Lazy import to avoid loading unless needed
-                    const { OpenRouterEmbeddingProvider } = await import('./providers/OpenRouterEmbeddingProvider');
-                    provider = new OpenRouterEmbeddingProvider(targetModelId, model.dimensions);
-                    break;
-                }
-                default:
-                    throw new Error(`Unsupported provider: ${model.provider}`);
+            if (model.provider !== 'rust') {
+                throw new Error(`Semantic embeddings are native Rust-runner only. Unsupported provider: ${model.provider}`);
             }
 
+            // Lazy import to avoid loading WASM unless needed.
+            const { RustEmbeddingProvider } = await import('./providers/RustEmbeddingProvider');
+            provider = new RustEmbeddingProvider(targetModelId);
             this.providers.set(targetModelId, provider);
         }
 
@@ -117,9 +99,9 @@ export class EmbeddingEngine {
     }
 
     /**
-     * Get the active provider type for routing
+     * Get the active provider type for routing.
      */
-    static getActiveProviderType(): 'rust' | 'local' | 'cloud' | 'none' {
+    static getActiveProviderType(): 'rust' | 'none' {
         if (!this.currentProvider) {
             return 'none';
         }
@@ -127,13 +109,9 @@ export class EmbeddingEngine {
         const modelInfo = this.currentProvider.getModelInfo();
         if (modelInfo.provider === 'rust') {
             return 'rust';
-        } else if (modelInfo.provider === 'local') {
-            return 'local';
-        } else if (modelInfo.provider === 'gemini' || modelInfo.provider === 'openrouter') {
-            return 'cloud';
         }
 
-        return 'local';
+        return 'none';
     }
 
     /**

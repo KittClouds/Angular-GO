@@ -1,7 +1,8 @@
 <!-- Two-Rail Sidebar: Icon Rail (always visible) + Content Panel (collapsible) -->
 <div class="flex h-full">
     <div class="w-12 h-full flex flex-col border-r border-sidebar-border bg-sidebar shrink-0">
-        <div class="h-10 flex items-center justify-center border-b border-white/10 bg-gradient-to-b from-zinc-800 to-zinc-950">
+        <div
+            class="h-10 flex items-center justify-center border-b border-white/10 bg-gradient-to-b from-zinc-800 to-zinc-950">
             <button
                 class="w-9 h-9 flex items-center justify-center rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"
                 title="New Note" (click)="createNote()">
@@ -69,8 +70,8 @@
 
         <!-- Resize Handle -->
         <div *ngIf="sidebarService.isOpen()"
-             class="absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-primary/50 transition-colors"
-             (mousedown)="startResize($event)"></div>
+            class="absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-primary/50 transition-colors"
+            (mousedown)="startResize($event)"></div>
 
         <div
             class="h-10 flex items-center px-2 border-b border-white/10 shrink-0 bg-gradient-to-b from-zinc-800 to-zinc-950 text-slate-200">
@@ -124,32 +125,37 @@
                 </button>
 
                 <div *ngIf="viewMode() === 'files'" class="relative">
-                    <button class="p-1.5 rounded-md hover:bg-white/10 text-white/80 hover:text-white transition-colors"
+                    <button class="folder-action-button" [class.folder-action-button--open]="folderDropdownOpen()"
                         title="New Folder" (click)="toggleFolderDropdown()">
                         <lucide-icon [img]="FolderPlus" size="14"></lucide-icon>
                     </button>
 
-                    <div *ngIf="folderDropdownOpen()"
-                        class="absolute top-full right-0 mt-1 z-[1000] min-w-56 bg-popover border border-border rounded-lg shadow-xl py-1 text-sm">
-                        <div class="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            Entity Folders
+                    <div *ngIf="folderDropdownOpen()" class="folder-create-menu">
+                        <div class="folder-menu-header">
+                            <span class="folder-menu-eyebrow">Entity Folders</span>
                         </div>
 
-                        <button *ngFor="let option of entityFolderOptions" class="folder-menu-item"
-                            (click)="createEntityFolder(option)">
-                            <lucide-icon [img]="option.icon" size="14" [style.color]="option.color"></lucide-icon>
-                            <span class="flex-1">{{ option.label }}</span>
-                            <span class="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                                [style.background-color]="option.color" [style.color]="'white'">
-                                {{ option.entityKind }}
+                        <button *ngFor="let option of entityFolderOptions" class="folder-menu-item folder-menu-entity"
+                            [style.--folder-color]="option.color" (click)="createEntityFolder(option)">
+                            <span class="folder-menu-icon-shell">
+                                <lucide-icon [img]="option.icon" size="14" [style.color]="option.color"></lucide-icon>
+                            </span>
+                            <span class="folder-menu-copy">
+                                <om-gradient-text [text]="option.label" [gradientStart]="option.gradientStart"
+                                    [gradientEnd]="option.gradientEnd" styleClass="folder-type-gradient">
+                                </om-gradient-text>
                             </span>
                         </button>
 
-                        <div class="h-px bg-border my-1"></div>
+                        <div class="folder-menu-divider"></div>
 
-                        <button class="folder-menu-item" (click)="createRegularFolder()">
-                            <lucide-icon [img]="Folder" size="14" class="text-muted-foreground"></lucide-icon>
-                            <span class="flex-1">Regular Folder</span>
+                        <button class="folder-menu-item folder-menu-regular" (click)="createRegularFolder()">
+                            <span class="folder-menu-icon-shell folder-menu-icon-shell--regular">
+                                <lucide-icon [img]="Folder" size="14"></lucide-icon>
+                            </span>
+                            <span class="folder-menu-copy">
+                                <span class="folder-regular-label">Regular Folder</span>
+                            </span>
                         </button>
                     </div>
                 </div>
@@ -160,20 +166,24 @@
 
         <div class="flex-1 overflow-hidden flex flex-col">
             <!-- Main Content Area (Tree / Search) -->
-            <div class="flex-1 overflow-hidden relative" [class.border-b]="isChatRoute() && viewMode() === 'files'" [class.border-border]="isChatRoute() && viewMode() === 'files'">
-                <app-file-tree *ngIf="viewMode() === 'files'" [tree]="treeData()" class="absolute inset-0"></app-file-tree>
+            <div class="flex-1 overflow-hidden relative" [class.border-b]="isChatRoute() && viewMode() === 'files'"
+                [class.border-border]="isChatRoute() && viewMode() === 'files'">
+                <app-file-tree *ngIf="viewMode() === 'files'" [tree]="treeData()"
+                    class="absolute inset-0"></app-file-tree>
                 <app-search-panel *ngIf="viewMode() === 'search'" class="absolute inset-0"></app-search-panel>
             </div>
 
             <!-- Virtual Chat History Bottom Panel -->
-            <div *ngIf="isChatRoute() && viewMode() === 'files'" class="h-1/3 min-h-[150px] max-h-[300px] shrink-0 flex flex-col border-t border-sidebar-border bg-sidebar">
-                <div class="px-3 py-2 border-b border-sidebar-border text-xs font-semibold text-sidebar-foreground flex items-center shrink-0">
+            <div *ngIf="isChatRoute() && viewMode() === 'files'"
+                class="h-1/3 min-h-[150px] max-h-[300px] shrink-0 flex flex-col border-t border-sidebar-border bg-sidebar">
+                <div
+                    class="px-3 py-2 border-b border-sidebar-border text-xs font-semibold text-sidebar-foreground flex items-center shrink-0">
                     <div class="flex items-center gap-1.5 opacity-80">
                         <lucide-icon [img]="HistoryIcon" size="14"></lucide-icon>
                         <span>Chat History</span>
                     </div>
                 </div>
-                
+
                 <div class="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
                     <button *ngFor="let session of chatSessions()"
                         class="w-full text-left p-2.5 rounded-lg border transition-all group"
@@ -182,22 +192,26 @@
                         [class.border-border/50]="session.id !== goChatService.currentThread()?.id"
                         [class.hover:bg-muted/50]="session.id !== goChatService.currentThread()?.id"
                         (click)="selectChatSession(session.id)">
-                        
+
                         <div class="flex items-center justify-between mb-0.5">
-                            <span class="text-xs font-medium text-slate-200 truncate pr-2 group-hover:text-teal-400 transition-colors">{{ session.id }}</span>
-                            <span class="text-[10px] text-muted-foreground shrink-0">{{ session.messageCount }} msgs</span>
+                            <span
+                                class="text-xs font-medium text-slate-200 truncate pr-2 group-hover:text-teal-400 transition-colors">{{
+                                session.id }}</span>
+                            <span class="text-[10px] text-muted-foreground shrink-0">{{ session.messageCount }}
+                                msgs</span>
                         </div>
-                        
+
                         <div class="text-[10px] text-muted-foreground/80">
                             {{ formatSessionDate(session.createdAt) }}
                         </div>
-                        
+
                         <div *ngIf="session.preview" class="text-xs text-muted-foreground/90 mt-1 truncate italic">
                             "{{ session.preview }}"
                         </div>
                     </button>
-                    
-                    <div *ngIf="chatSessions().length === 0" class="flex flex-col items-center justify-center pt-8 text-muted-foreground">
+
+                    <div *ngIf="chatSessions().length === 0"
+                        class="flex flex-col items-center justify-center pt-8 text-muted-foreground">
                         <lucide-icon [img]="HistoryIcon" size="24" class="opacity-30 mb-2"></lucide-icon>
                         <p class="text-[10px]">No chat history available.</p>
                     </div>
@@ -222,177 +236,175 @@
     </aside>
 </div>
 
-<p-dialog
-    [visible]="importDialogOpen()"
-    (visibleChange)="importDialogOpen.set($event)"
-    [modal]="true"
-    [draggable]="false"
-    [dismissableMask]="!importInProgress()"
-    [closable]="!importInProgress()"
-    [style]="{ width: '36rem', maxWidth: 'calc(100vw - 2rem)' }"
-    styleClass="sidebar-import-dialog"
-    header="Import Text Documents"
-    (onHide)="closeImportDialog()">
+<p-dialog [visible]="importDialogOpen()" (visibleChange)="importDialogOpen.set($event)" [modal]="true"
+    [draggable]="false" [dismissableMask]="!importInProgress()" [closable]="!importInProgress()"
+    [style]="{ width: '36rem', maxWidth: 'calc(100vw - 2rem)' }" styleClass="sidebar-import-dialog"
+    header="Import Text Documents" (onHide)="closeImportDialog()">
     <ng-template pTemplate="content">
         <div class="import-dialog-body">
-        <section class="import-section">
-            <div class="import-section-header">
-                <span class="import-section-title">Source</span>
-                <span class="import-section-meta">.txt only</span>
-            </div>
-            <div class="import-source-actions">
-                <button class="import-source-button" type="button" (click)="chooseImportSource('files')" [disabled]="importInProgress()">
-                    Select Files
-                </button>
-                <button class="import-source-button" type="button" (click)="chooseImportSource('folder')" [disabled]="importInProgress()">
-                    Select Folder
-                </button>
-            </div>
-            <p class="import-hint">
-                {{ importMode() === 'folder' ? 'Folder import reads every .txt file recursively and flattens them into one destination folder.' : 'Select one or more .txt files from your computer.' }}
-            </p>
-        </section>
+            <section class="import-section">
+                <div class="import-section-header">
+                    <span class="import-section-title">Source</span>
+                    <span class="import-section-meta">.txt only</span>
+                </div>
+                <div class="import-source-actions">
+                    <button class="import-source-button" type="button" (click)="chooseImportSource('files')"
+                        [disabled]="importInProgress()">
+                        Select Files
+                    </button>
+                    <button class="import-source-button" type="button" (click)="chooseImportSource('folder')"
+                        [disabled]="importInProgress()">
+                        Select Folder
+                    </button>
+                </div>
+                <p class="import-hint">
+                    <span *ngIf="importMode() === 'folder'">
+                        Folder import reads every .txt file recursively and flattens them into one destination folder.
+                    </span>
+                    <span *ngIf="importMode() !== 'folder'">
+                        Select one or more .txt files from your computer.
+                    </span>
+                </p>
+            </section>
 
-        <section class="import-section">
-            <div class="import-section-header">
-                <span class="import-section-title">Destination</span>
-                <button class="import-link-button" type="button" (click)="toggleCreateFolderPanel()" [disabled]="createFolderInProgress() || importInProgress()">
-                    {{ createFolderOpen() ? 'Cancel New Folder' : 'Create Folder' }}
-                </button>
-            </div>
+            <section class="import-section">
+                <div class="import-section-header">
+                    <span class="import-section-title">Destination</span>
+                    <button class="import-link-button" type="button" (click)="toggleCreateFolderPanel()"
+                        [disabled]="createFolderInProgress() || importInProgress()">
+                        {{ createFolderOpen() ? 'Cancel New Folder' : 'Create Folder' }}
+                    </button>
+                </div>
 
-            <label class="import-label" for="import-destination">Add notes to</label>
-            <select
-                id="import-destination"
-                class="import-select"
-                [value]="importDestinationFolderId()"
-                (change)="setImportDestination(($any($event.target)).value)"
-                [disabled]="importInProgress()">
-                <option value="">Choose a folder</option>
-                <option *ngFor="let folder of folderOptions()" [value]="folder.id">{{ folder.label }}</option>
-            </select>
-
-            <p class="import-hint" *ngIf="selectedDestinationFolder()">
-                Importing into <strong>{{ selectedDestinationFolder()?.label }}</strong>.
-            </p>
-            <p class="import-hint" *ngIf="!selectedDestinationFolder()">
-                Pick an existing folder or create a new one before importing.
-            </p>
-
-            <div class="create-folder-panel" *ngIf="createFolderOpen()">
-                <div class="create-folder-meta">New folder will be created under {{ getCreateFolderParentLabel() }}.</div>
-
-                <label class="import-label" for="import-folder-type">Folder type</label>
-                <select
-                    id="import-folder-type"
-                    class="import-select"
-                    [value]="createFolderEntityKind()"
-                    (change)="createFolderEntityKind.set(($any($event.target)).value)"
-                    [disabled]="createFolderInProgress()">
-                    <option *ngFor="let option of createFolderOptions()" [value]="option.entityKind">{{ option.label }}</option>
+                <label class="import-label" for="import-destination">Add notes to</label>
+                <select id="import-destination" class="import-select" [value]="importDestinationFolderId()"
+                    (change)="setImportDestination(($any($event.target)).value)" [disabled]="importInProgress()">
+                    <option value="">Choose a folder</option>
+                    <option *ngFor="let folder of folderOptions()" [value]="folder.id">{{ folder.label }}</option>
                 </select>
 
-                <label class="import-label" for="import-folder-name">Folder name</label>
-                <input
-                    id="import-folder-name"
-                    class="import-input"
-                    type="text"
-                    [value]="createFolderName()"
-                    (input)="createFolderName.set(($any($event.target)).value)"
-                    [placeholder]="getCreateFolderOptionLabel(createFolderEntityKind())"
-                    [disabled]="createFolderInProgress()">
+                <p class="import-hint" *ngIf="selectedDestinationFolder()">
+                    Importing into <strong>{{ selectedDestinationFolder()?.label }}</strong>.
+                </p>
+                <p class="import-hint" *ngIf="!selectedDestinationFolder()">
+                    Pick an existing folder or create a new one before importing.
+                </p>
 
-                <button class="import-primary-button" type="button" (click)="createFolderForImport()" [disabled]="createFolderInProgress()">
-                    {{ createFolderInProgress() ? 'Creating...' : 'Create and Use Folder' }}
+                <div class="create-folder-panel" *ngIf="createFolderOpen()">
+                    <div class="create-folder-meta">New folder will be created under {{ getCreateFolderParentLabel() }}.
+                    </div>
+
+                    <label class="import-label" for="import-folder-type">Folder type</label>
+                    <select id="import-folder-type" class="import-select" [value]="createFolderEntityKind()"
+                        (change)="createFolderEntityKind.set(($any($event.target)).value)"
+                        [disabled]="createFolderInProgress()">
+                        <option *ngFor="let option of createFolderOptions()" [value]="option.entityKind">{{ option.label
+                            }}</option>
+                    </select>
+
+                    <label class="import-label" for="import-folder-name">Folder name</label>
+                    <input id="import-folder-name" class="import-input" type="text" [value]="createFolderName()"
+                        (input)="createFolderName.set(($any($event.target)).value)"
+                        [placeholder]="getCreateFolderOptionLabel(createFolderEntityKind())"
+                        [disabled]="createFolderInProgress()">
+
+                    <button class="import-primary-button" type="button" (click)="createFolderForImport()"
+                        [disabled]="createFolderInProgress()">
+                        {{ createFolderInProgress() ? 'Creating...' : 'Create and Use Folder' }}
+                    </button>
+
+                    <div class="import-inline-error" *ngIf="createFolderError()">{{ createFolderError() }}</div>
+                </div>
+            </section>
+
+            <section class="import-section" *ngIf="selectedImportFiles().length > 0">
+                <div class="import-section-header">
+                    <span class="import-section-title">Preview</span>
+                    <span class="import-section-meta">Suffix collisions</span>
+                </div>
+                <div class="import-stats-grid">
+                    <div class="import-stat-card">
+                        <span class="import-stat-value">{{ selectedImportFiles().length }}</span>
+                        <span class="import-stat-label">Selected</span>
+                    </div>
+                    <div class="import-stat-card">
+                        <span class="import-stat-value">{{ supportedImportFilesCount() }}</span>
+                        <span class="import-stat-label">Will import</span>
+                    </div>
+                    <div class="import-stat-card">
+                        <span class="import-stat-value">{{ skippedImportFilesCount() }}</span>
+                        <span class="import-stat-label">Skipped</span>
+                    </div>
+                </div>
+
+                <div class="import-preview-list">
+                    <div class="import-preview-item" *ngFor="let fileName of importPreviewFiles()">{{ fileName }}</div>
+                    <div class="import-preview-item import-preview-more"
+                        *ngIf="selectedImportFiles().length > importPreviewFiles().length">
+                        +{{ selectedImportFiles().length - importPreviewFiles().length }} more files
+                    </div>
+                </div>
+            </section>
+
+            <section class="import-section" *ngIf="importInProgress()">
+                <div class="import-section-header">
+                    <span class="import-section-title">Progress</span>
+                    <span class="import-section-meta">{{ importProgress().processed }} / {{ importProgress().total
+                        }}</span>
+                </div>
+                <div class="import-progress-bar">
+                    <div class="import-progress-fill"
+                        [style.width.%]="importProgress().total ? (importProgress().processed / importProgress().total) * 100 : 0">
+                    </div>
+                </div>
+            </section>
+
+            <section class="import-section import-result-section" *ngIf="importResult() as result">
+                <div class="import-section-header">
+                    <span class="import-section-title">Result</span>
+                    <span class="import-section-meta">{{ result.created.length }} created</span>
+                </div>
+
+                <div class="import-result-summary">
+                    <span>{{ result.created.length }} created</span>
+                    <span>{{ result.skipped.length }} skipped</span>
+                    <span>{{ result.failed.length }} failed</span>
+                </div>
+
+                <div class="import-result-list" *ngIf="result.created.length > 0">
+                    <div class="import-result-item" *ngFor="let item of result.created">
+                        <strong>{{ item.title }}</strong>
+                        <span>{{ item.fileName }}</span>
+                    </div>
+                </div>
+
+                <div class="import-result-list" *ngIf="result.skipped.length > 0">
+                    <div class="import-result-item import-result-warning" *ngFor="let item of result.skipped">
+                        <strong>{{ item.fileName }}</strong>
+                        <span>{{ item.reason }}</span>
+                    </div>
+                </div>
+
+                <div class="import-result-list" *ngIf="result.failed.length > 0">
+                    <div class="import-result-item import-result-error" *ngFor="let item of result.failed">
+                        <strong>{{ item.fileName }}</strong>
+                        <span>{{ item.reason }}</span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="import-inline-error" *ngIf="importError()">{{ importError() }}</div>
+
+            <div class="import-dialog-actions">
+                <button class="import-secondary-button" type="button" (click)="closeImportDialog()"
+                    [disabled]="importInProgress()">
+                    Close
                 </button>
-
-                <div class="import-inline-error" *ngIf="createFolderError()">{{ createFolderError() }}</div>
+                <button class="import-primary-button" type="button" (click)="runImport()"
+                    [disabled]="!canStartImport()">
+                    {{ importInProgress() ? 'Importing...' : 'Import Documents' }}
+                </button>
             </div>
-        </section>
-
-        <section class="import-section" *ngIf="selectedImportFiles().length > 0">
-            <div class="import-section-header">
-                <span class="import-section-title">Preview</span>
-                <span class="import-section-meta">Suffix collisions</span>
-            </div>
-            <div class="import-stats-grid">
-                <div class="import-stat-card">
-                    <span class="import-stat-value">{{ selectedImportFiles().length }}</span>
-                    <span class="import-stat-label">Selected</span>
-                </div>
-                <div class="import-stat-card">
-                    <span class="import-stat-value">{{ supportedImportFilesCount() }}</span>
-                    <span class="import-stat-label">Will import</span>
-                </div>
-                <div class="import-stat-card">
-                    <span class="import-stat-value">{{ skippedImportFilesCount() }}</span>
-                    <span class="import-stat-label">Skipped</span>
-                </div>
-            </div>
-
-            <div class="import-preview-list">
-                <div class="import-preview-item" *ngFor="let fileName of importPreviewFiles()">{{ fileName }}</div>
-                <div class="import-preview-item import-preview-more" *ngIf="selectedImportFiles().length > importPreviewFiles().length">
-                    +{{ selectedImportFiles().length - importPreviewFiles().length }} more files
-                </div>
-            </div>
-        </section>
-
-        <section class="import-section" *ngIf="importInProgress()">
-            <div class="import-section-header">
-                <span class="import-section-title">Progress</span>
-                <span class="import-section-meta">{{ importProgress().processed }} / {{ importProgress().total }}</span>
-            </div>
-            <div class="import-progress-bar">
-                <div class="import-progress-fill"
-                    [style.width.%]="importProgress().total ? (importProgress().processed / importProgress().total) * 100 : 0"></div>
-            </div>
-        </section>
-
-        <section class="import-section import-result-section" *ngIf="importResult() as result">
-            <div class="import-section-header">
-                <span class="import-section-title">Result</span>
-                <span class="import-section-meta">{{ result.created.length }} created</span>
-            </div>
-
-            <div class="import-result-summary">
-                <span>{{ result.created.length }} created</span>
-                <span>{{ result.skipped.length }} skipped</span>
-                <span>{{ result.failed.length }} failed</span>
-            </div>
-
-            <div class="import-result-list" *ngIf="result.created.length > 0">
-                <div class="import-result-item" *ngFor="let item of result.created">
-                    <strong>{{ item.title }}</strong>
-                    <span>{{ item.fileName }}</span>
-                </div>
-            </div>
-
-            <div class="import-result-list" *ngIf="result.skipped.length > 0">
-                <div class="import-result-item import-result-warning" *ngFor="let item of result.skipped">
-                    <strong>{{ item.fileName }}</strong>
-                    <span>{{ item.reason }}</span>
-                </div>
-            </div>
-
-            <div class="import-result-list" *ngIf="result.failed.length > 0">
-                <div class="import-result-item import-result-error" *ngFor="let item of result.failed">
-                    <strong>{{ item.fileName }}</strong>
-                    <span>{{ item.reason }}</span>
-                </div>
-            </div>
-        </section>
-
-        <div class="import-inline-error" *ngIf="importError()">{{ importError() }}</div>
-
-        <div class="import-dialog-actions">
-            <button class="import-secondary-button" type="button" (click)="closeImportDialog()" [disabled]="importInProgress()">
-                Close
-            </button>
-            <button class="import-primary-button" type="button" (click)="runImport()" [disabled]="!canStartImport()">
-                {{ importInProgress() ? 'Importing...' : 'Import Documents' }}
-            </button>
         </div>
-    </div>
     </ng-template>
 </p-dialog>

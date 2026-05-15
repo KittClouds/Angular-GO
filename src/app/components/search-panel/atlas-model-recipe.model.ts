@@ -1,12 +1,16 @@
-import type { AtlasRecipeId } from './atlas-command-status.model';
 import type { PhoenixMachineVectorStatus, PhoenixMachineManifoldStatusMap } from '../../services/phoenix-machine-control.service';
+import {
+    ATLAS_CAPABILITY_RECIPES,
+    ATLAS_MODEL_LANE_LABELS,
+    atlasRecipeDefinitionById,
+    laneLabelFromRegistry,
+    type AtlasCapabilityId,
+    type AtlasCapabilityMutationPolicy,
+    type AtlasModelLaneId,
+    type AtlasRecipeId,
+} from './atlas-capability.model';
 
-export type AtlasModelLaneId =
-    | 'dynamicNer'
-    | 'coOccurrence'
-    | 'semanticEmbedding'
-    | 'nli'
-    | 'manifoldProjection';
+export type { AtlasModelLaneId, AtlasRecipeId } from './atlas-capability.model';
 
 export type AtlasModelLaneStatus =
     | 'idle'
@@ -24,10 +28,17 @@ export interface AtlasModelRecipePlan {
     label: string;
     description: string;
     actionLabel: string;
+    dependencyChain: AtlasCapabilityId[];
+    requiredCapabilities: AtlasCapabilityId[];
+    optionalCapabilities: AtlasCapabilityId[];
+    skippedCapabilities: AtlasCapabilityId[];
     requiredLanes: AtlasModelLaneId[];
     optionalLanes: AtlasModelLaneId[];
     skippedLanes: AtlasModelLaneId[];
     outputLabel: string;
+    mutationPolicy: AtlasCapabilityMutationPolicy;
+    backendRoute: string;
+    cost: string;
 }
 
 export interface AtlasModelLaneView {
@@ -59,76 +70,23 @@ export interface AtlasModelLaneViewInput {
     manifoldStatuses: PhoenixMachineManifoldStatusMap;
 }
 
-export const ATLAS_MODEL_RECIPE_PLANS: AtlasModelRecipePlan[] = [
-    {
-        id: 'runNer',
-        label: 'Run NER',
-        description: 'Scan the active note for dynamic entity candidates.',
-        actionLabel: 'Run NER',
-        requiredLanes: ['dynamicNer'],
-        optionalLanes: ['coOccurrence'],
-        skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
-        outputLabel: 'candidate entities',
-    },
-    {
-        id: 'fastTextGraph',
-        label: 'Fast Text Graph',
-        description: 'Dirty-only surface, chunking, evidence graph, and graph commit.',
-        actionLabel: 'Run Fast Text Graph',
-        requiredLanes: ['dynamicNer', 'coOccurrence'],
-        optionalLanes: [],
-        skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
-        outputLabel: 'vertices + evidence edges',
-    },
-    {
-        id: 'fullTextGraph',
-        label: 'Full Text Graph',
-        description: 'Force rebuild the deterministic text graph path without embeddings.',
-        actionLabel: 'Run Full Text Graph',
-        requiredLanes: ['dynamicNer', 'coOccurrence'],
-        optionalLanes: [],
-        skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
-        outputLabel: 'fresh committed graph',
-    },
-    {
-        id: 'semanticAtlas',
-        label: 'Semantic Atlas',
-        description: 'Run the rich scan with selected embeddings and candidate links.',
-        actionLabel: 'Index Semantic Atlas',
-        requiredLanes: ['dynamicNer', 'semanticEmbedding'],
-        optionalLanes: ['manifoldProjection'],
-        skippedLanes: ['nli'],
-        outputLabel: 'vectors + candidate links',
-    },
-    {
-        id: 'warmFullIndexStack',
-        label: 'Warm Full Index Stack',
-        description: 'Load the local embedding, BI small Dynamic NER, and NLI lanes only.',
-        actionLabel: 'Warm Full Index Stack',
-        requiredLanes: ['dynamicNer', 'semanticEmbedding', 'nli'],
-        optionalLanes: ['coOccurrence'],
-        skippedLanes: ['manifoldProjection'],
-        outputLabel: 'ready model sidecars',
-    },
-    {
-        id: 'visualizeCurrentGraph',
-        label: 'Visualize Current Graph',
-        description: 'Open the current graph lens without warming models or mutating data.',
-        actionLabel: 'Visualize Current Graph',
-        requiredLanes: [],
-        optionalLanes: ['manifoldProjection'],
-        skippedLanes: ['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli'],
-        outputLabel: 'current snapshot view',
-    },
-];
-
-const LANE_LABELS: Record<AtlasModelLaneId, string> = {
-    dynamicNer: 'Dynamic NER',
-    coOccurrence: 'Co-occurrence',
-    semanticEmbedding: 'Semantic Embedding',
-    nli: 'NLI',
-    manifoldProjection: 'Manifold Projection',
-};
+export const ATLAS_MODEL_RECIPE_PLANS: AtlasModelRecipePlan[] = ATLAS_CAPABILITY_RECIPES.map((recipe) => ({
+    id: recipe.id,
+    label: recipe.label,
+    description: recipe.description,
+    actionLabel: recipe.actionLabel,
+    dependencyChain: recipe.dependencyChain,
+    requiredCapabilities: recipe.requiredCapabilities,
+    optionalCapabilities: recipe.optionalCapabilities,
+    skippedCapabilities: recipe.skippedCapabilities,
+    requiredLanes: recipe.requiredLanes,
+    optionalLanes: recipe.optionalLanes,
+    skippedLanes: recipe.skippedLanes,
+    outputLabel: recipe.outputLabel,
+    mutationPolicy: recipe.mutationPolicy,
+    backendRoute: recipe.backendRoute,
+    cost: recipe.cost,
+}));
 
 const LIFECYCLE: Array<Omit<AtlasRecipeLifecycleView, 'status'>> = [
     { id: 'scope', label: 'Check scope', detail: 'Use active Atlas scope' },
@@ -138,11 +96,12 @@ const LIFECYCLE: Array<Omit<AtlasRecipeLifecycleView, 'status'>> = [
 ];
 
 export function getAtlasModelRecipePlan(id: AtlasRecipeId): AtlasModelRecipePlan {
-    return ATLAS_MODEL_RECIPE_PLANS.find((plan) => plan.id === id) || ATLAS_MODEL_RECIPE_PLANS[0];
+    const recipe = atlasRecipeDefinitionById(id);
+    return ATLAS_MODEL_RECIPE_PLANS.find((plan) => plan.id === recipe.id) || ATLAS_MODEL_RECIPE_PLANS[0];
 }
 
 export function laneLabel(id: AtlasModelLaneId): string {
-    return LANE_LABELS[id];
+    return laneLabelFromRegistry(id);
 }
 
 export function buildAtlasModelLaneViews(input: AtlasModelLaneViewInput): AtlasModelLaneView[] {
@@ -178,7 +137,7 @@ export function laneListLabel(lanes: AtlasModelLaneId[]): string {
 }
 
 function lane(id: AtlasModelLaneId, status: AtlasModelLaneStatus, detail: string, usedBy: string): AtlasModelLaneView {
-    return { id, label: LANE_LABELS[id], status, detail, usedBy };
+    return { id, label: ATLAS_MODEL_LANE_LABELS[id], status, detail, usedBy };
 }
 
 function mapDynamicNerStatus(status: AtlasModelLaneViewInput['dynamicNerStatus']): AtlasModelLaneStatus {

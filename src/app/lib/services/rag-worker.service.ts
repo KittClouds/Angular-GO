@@ -18,7 +18,7 @@ export class RagWorkerService {
 
     // State
     readonly isModelLoaded = signal(false);
-    readonly modelDimension = signal(256); // Gemini Embedding reduced to 256d
+    readonly modelDimension = signal(384);
 
     constructor(private readonly ngZone: NgZone = createNoopNgZone()) {
         console.log('[RagWorkerService] Initialized');
@@ -52,14 +52,15 @@ export class RagWorkerService {
             await this.sendWorkerMessage({ type: 'INIT' });
             this.workerReady = true;
 
-            // Set dimensions for MDBR Leaf (256d)
+            // The legacy worker is not part of the semantic sidecar path; keep
+            // its external-vector mode generic for callers that still use it.
             await this.sendWorkerMessage({
                 type: 'SET_DIMENSIONS',
-                payload: { dims: 256 }
+                payload: { dims: 384 }
             });
 
             this.isModelLoaded.set(true);
-            console.log('[RagWorker] Worker initialized with 256d (Gemini Embedding reduced)');
+            console.log('[RagWorker] Worker initialized in external embedding mode (384d)');
         } catch (err) {
             console.error('[RagWorker] Failed to initialize worker:', err);
             throw err;

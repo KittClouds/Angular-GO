@@ -262,6 +262,13 @@ export class HubFooterComponent implements OnInit, OnDestroy {
         this.ttsService.stop();
     }
 
+    saveCurrentNote(): void {
+        if (!this.statsService.isSaved()) {
+            return;
+        }
+        this.editorService.save();
+    }
+
     private stripMarkdown(text: string): string {
         return text
             // Remove code blocks first (before other processing)

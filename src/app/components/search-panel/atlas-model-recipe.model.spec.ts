@@ -8,24 +8,29 @@ import {
 } from './atlas-model-recipe.model';
 
 describe('atlas model recipe model', () => {
-    it('keeps text graph recipes on NER and co-occurrence without semantic or NLI lanes', () => {
+    it('keeps text graph recipes model-free without semantic, NER, or NLI warm lanes', () => {
         for (const recipeId of ['fastTextGraph', 'fullTextGraph'] as const) {
             const plan = getAtlasModelRecipePlan(recipeId);
 
-            expect(plan.requiredLanes).toEqual(['dynamicNer', 'coOccurrence']);
+            expect(plan.requiredLanes).toEqual([]);
+            expect(plan.skippedLanes).toContain('dynamicNer');
+            expect(plan.skippedLanes).toContain('coOccurrence');
             expect(plan.skippedLanes).toContain('semanticEmbedding');
             expect(plan.skippedLanes).toContain('nli');
             expect(plan.outputLabel).toMatch(/graph|vertices/i);
         }
     });
 
-    it('marks Semantic Atlas as embedding-backed and NLI-free', () => {
+    it('marks Semantic Atlas as embedding-backed and NER/NLI-free for required warm lanes', () => {
         const plan = getAtlasModelRecipePlan('semanticAtlas');
 
-        expect(plan.requiredLanes).toEqual(['dynamicNer', 'semanticEmbedding']);
+        expect(plan.requiredLanes).toEqual(['semanticEmbedding']);
+        expect(plan.optionalLanes).toContain('dynamicNer');
         expect(plan.optionalLanes).toContain('manifoldProjection');
         expect(plan.skippedLanes).toEqual(['nli']);
         expect(plan.actionLabel).toBe('Index Semantic Atlas');
+        expect(plan.dependencyChain).toContain('semanticCandidate');
+        expect(plan.mutationPolicy).toBe('dirty-only');
     });
 
     it('keeps warm stack as a no-mutation model readiness recipe', () => {

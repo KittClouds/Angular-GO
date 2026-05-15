@@ -5,6 +5,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideAlertCircle,
+  lucideCheck,
+  lucideChevronDown,
   lucideCpu,
   lucideFileText,
   lucideFolder,
@@ -12,7 +14,9 @@ import {
   lucideLayers,
   lucideLoader2,
   lucideMicrochip,
+  lucideMoreVertical,
   lucideSearch,
+  lucideSlidersHorizontal,
   lucideSparkles,
   lucideZap,
 } from '@ng-icons/lucide';
@@ -23,16 +27,23 @@ import { ButtonModule } from 'primeng/button';
 import { type SearchScope } from '../../services/phoenix-ui-api.service';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
-import { EmbeddingEngine } from '../../lib/embeddings/EmbeddingEngine';
 import * as ops from '../../lib/operations';
 import { type RetrievalLane } from '../../services/retrieval-workbench-state.service';
 import { PhoenixMachineControlService } from '../../services/phoenix-machine-control.service';
 import { NerService } from '../../services/ner.service';
 import { AtlasScanCoordinatorService } from '../../services/atlas-scan-coordinator.service';
-import { parseContentToPlainText } from '../../lib/analytics';
-import type { EntitySuggestionScanRequest } from '../../lib/entity-suggestions/entity-suggestion.types';
 import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
+import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
+import type {
+  AtlasCapabilityRuntimeState,
+  AtlasBuildAddOns,
+  AtlasBuildScope,
+  AtlasExpectedOutput,
+  AtlasModelRequirement,
+  AtlasRunOptions,
+  AtlasServiceRequirement,
+} from '../../services/atlas-capability-runtime.model';
 import {
   EMBEDDING_MODELS,
   RETRIEVAL_LANE_OPTIONS,
@@ -45,7 +56,6 @@ import {
   type TruncateDim,
 } from './search-panel.model';
 import {
-  ATLAS_RECIPES,
   buildAtlasCommandStatus,
   estimateDynamicChunks,
   type AtlasRecipeId,
@@ -53,14 +63,35 @@ import {
 import {
   buildAtlasModelLaneViews,
   buildAtlasRecipeLifecycle,
-  getAtlasModelRecipePlan,
   laneListLabel,
   type AtlasModelLaneId,
   type AtlasRecipeLifecycleId,
 } from './atlas-model-recipe.model';
-import { SemanticWorkshopComponent } from './semantic-workshop/semantic-workshop.component';
+import {
+  ATLAS_GRAPH_BUILD_RECIPE_IDS,
+  ATLAS_CAPABILITY_LAYERS,
+  ATLAS_CAPABILITY_REGISTRY,
+  atlasCapabilityById,
+  atlasRecipeDefinitionById,
+  capabilityListLabel,
+  type AtlasCapability,
+  type AtlasCapabilityId,
+} from './atlas-capability.model';
 
-const NLI_MODEL_ID = 'onnx-community/ModernBERT-base-nli-ONNX';
+type BuilderCapabilityCard = {
+  capability: AtlasCapability;
+  state: AtlasCapabilityRuntimeState;
+  layerLabel: string;
+  chain: AtlasCapabilityId[];
+};
+
+type BuilderCapabilityGroup = {
+  id: string;
+  label: string;
+  count: number;
+  selectedCount: number;
+  targets: BuilderCapabilityCard[];
+};
 
 @Component({
   selector: 'app-search-panel',
@@ -72,10 +103,11 @@ const NLI_MODEL_ID = 'onnx-community/ModernBERT-base-nli-ONNX';
     InputTextModule,
     SelectModule,
     ButtonModule,
-    SemanticWorkshopComponent,
   ],
   providers: [provideIcons({
     lucideAlertCircle,
+    lucideCheck,
+    lucideChevronDown,
     lucideCpu,
     lucideFileText,
     lucideFolder,
@@ -83,7 +115,9 @@ const NLI_MODEL_ID = 'onnx-community/ModernBERT-base-nli-ONNX';
     lucideLayers,
     lucideLoader2,
     lucideMicrochip,
+    lucideMoreVertical,
     lucideSearch,
+    lucideSlidersHorizontal,
     lucideSparkles,
     lucideZap,
   })],
@@ -99,6 +133,7 @@ export class SearchPanelComponent implements OnInit {
   private readonly atlasScan = inject(AtlasScanCoordinatorService);
   private readonly hubService = inject(BlueprintHubService);
   private readonly nli = inject(NliWorkerService);
+  private readonly atlasRuntime = inject(AtlasCapabilityRuntimeService);
 
   readonly query = this.machine.query;
   readonly indexScope = this.machine.scope;
@@ -121,28 +156,135 @@ export class SearchPanelComponent implements OnInit {
 
   readonly selectedModel = signal<ModelId>('mongodb-leaf');
   readonly truncateDim = signal<TruncateDim>('full');
-  readonly selectedRecipe = signal<AtlasRecipeId>('fastTextGraph');
+  readonly selectedRecipe = signal<AtlasRecipeId>('textGraph');
+  readonly selectedCapabilityId = signal<AtlasCapabilityId>('assertedKernel');
+  readonly selectedCapabilityIds = signal<AtlasCapabilityId[]>(expandCapabilityChain('assertedKernel'));
   readonly activeRecipe = signal<AtlasRecipeId | null>(null);
+  readonly activeCapability = signal<AtlasCapabilityId | null>(null);
   readonly activeLaneWarm = signal<AtlasModelLaneId | null>(null);
   readonly activeRecipeStep = signal<AtlasRecipeLifecycleId | null>(null);
   readonly completedRecipeSteps = signal<AtlasRecipeLifecycleId[]>([]);
   readonly failedRecipeStep = signal<AtlasRecipeLifecycleId | null>(null);
   readonly folders = signal<Array<{ id: string; name: string }>>([]);
   readonly notes = signal<SearchPanelNote[]>([]);
+  readonly buildScopeMode = signal<AtlasBuildScope['mode']>('global');
+  readonly selectedBuildFolderId = signal('');
+  readonly selectedBuildNoteIds = signal<string[]>([]);
+  readonly buildNoteQuery = signal('');
+  readonly graphTargetQuery = signal('');
+  readonly collapsedCapabilityGroups = signal<string[]>([]);
+  readonly buildPolicy = signal<'dirty-only' | 'force'>('dirty-only');
+  readonly buildAddOns = signal<Required<AtlasBuildAddOns>>({
+    dynamicNer: false,
+    manifold: false,
+    visualization: false,
+  });
 
   readonly laneOptions = RETRIEVAL_LANE_OPTIONS;
   readonly models = EMBEDDING_MODELS;
   readonly truncateDims = TRUNCATE_DIMS;
-  readonly atlasRecipes = ATLAS_RECIPES;
+  readonly buildScopeModes: AtlasBuildScope['mode'][] = ['global', 'folder', 'note', 'multiNote'];
+  readonly buildAddOnDefs: Array<{ id: keyof Required<AtlasBuildAddOns>; label: string; detail: string }> = [
+    { id: 'dynamicNer', label: 'Dynamic NER', detail: 'selected scope' },
+    { id: 'manifold', label: 'Manifold', detail: 'snapshot after build' },
+    { id: 'visualization', label: 'Open Graph', detail: 'focus graph view' },
+  ];
+  readonly graphBuildRecipes = ATLAS_GRAPH_BUILD_RECIPE_IDS.map((id) => {
+    const recipe = atlasRecipeDefinitionById(id);
+    return {
+      id: recipe.id,
+      label: recipe.label,
+      subtitle: recipe.subtitle,
+      output: recipe.outputLabel,
+      icon: recipe.icon,
+    };
+  });
+  readonly backendGraphTargets = computed<BuilderCapabilityCard[]>(() => {
+    const options = this.atlasRunOptions();
+    return BUILDER_CAPABILITY_IDS.map((id) => {
+      const capability = atlasCapabilityById(id);
+      return {
+        capability,
+        state: this.atlasRuntime.capabilityState(id, options),
+        layerLabel: layerLabelForCapability(id),
+        chain: expandCapabilityChain(id),
+      };
+    });
+  });
+  readonly filteredBackendGraphTargets = computed(() => {
+    const query = this.graphTargetQuery().trim().toLowerCase();
+    const targets = this.backendGraphTargets();
+    if (!query) return targets;
+    return targets.filter((target) => {
+      const haystack = [
+        target.capability.label,
+        target.capability.graphTargetLabel || '',
+        target.layerLabel,
+        target.capability.family,
+        target.capability.backendRoute,
+        target.state.runPolicy,
+        target.state.operationKind,
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  });
+  readonly backendGraphTargetGroups = computed<BuilderCapabilityGroup[]>(() => {
+    const targets = this.filteredBackendGraphTargets();
+    const selected = new Set(this.selectedCapabilityIds());
+    return ATLAS_CAPABILITY_LAYERS
+      .map((layer) => {
+        const layerTargets = targets.filter((target) => layer.capabilityIds.includes(target.capability.id));
+        return {
+          id: layer.id,
+          label: layer.label,
+          count: layerTargets.length,
+          selectedCount: layerTargets.filter((target) => selected.has(target.capability.id)).length,
+          targets: layerTargets,
+        };
+      })
+      .filter((group) => group.count > 0);
+  });
   readonly atlasPhase = this.atlasScan.phase;
   readonly atlasMessage = this.atlasScan.message;
   readonly lastAtlasResult = this.atlasScan.lastResult;
 
+  readonly selectedBuildScope = computed<AtlasBuildScope>(() => {
+    const mode = this.buildScopeMode();
+    if (mode === 'global') return { mode: 'global' };
+    if (mode === 'folder') {
+      const folderId = this.selectedBuildFolderId()
+        || (this.indexScope() !== 'global' ? this.indexScope() : '')
+        || this.folders()[0]?.id
+        || '';
+      return folderId ? { mode: 'folder', folderId } : { mode: 'global' };
+    }
+    if (mode === 'note') {
+      const noteId = this.noteStore.currentNote()?.id || this.selectedBuildNoteIds()[0] || this.notes()[0]?.id || '';
+      return noteId ? { mode: 'note', noteId } : { mode: 'global' };
+    }
+    return { mode: 'multiNote', noteIds: this.selectedBuildNoteIds() };
+  });
+  readonly buildNoteIds = computed(() => noteIdsFromBuildScope(this.selectedBuildScope()));
   readonly scopedNotes = computed(() => {
-    const scope = this.indexScope();
+    const scope = this.selectedBuildScope();
     const notes = this.notes();
-    if (scope === 'global') return notes;
-    return notes.filter((note) => note.folderId === scope);
+    if (scope.mode === 'global') return notes;
+    if (scope.mode === 'folder') return notes.filter((note) => note.folderId === scope.folderId);
+    const ids = new Set(noteIdsFromBuildScope(scope));
+    return notes.filter((note) => ids.has(note.id));
+  });
+  readonly buildScopeLabel = computed(() => {
+    const scope = this.selectedBuildScope();
+    if (scope.mode === 'global') return 'Global';
+    if (scope.mode === 'folder') return this.folders().find((folder) => folder.id === scope.folderId)?.name || 'Folder';
+    if (scope.mode === 'note') return this.notes().find((note) => note.id === scope.noteId)?.title || 'Active Note';
+    return `${scope.noteIds.length} notes`;
+  });
+  readonly filteredBuildNotes = computed(() => {
+    const query = this.buildNoteQuery().trim().toLowerCase();
+    const notes = this.notes();
+    if (!query) return notes.slice(0, 24);
+    return notes.filter((note) => note.title.toLowerCase().includes(query)).slice(0, 24);
   });
 
   readonly graphNodes = this.machine.graphNodes;
@@ -158,7 +300,7 @@ export class SearchPanelComponent implements OnInit {
   readonly selectedModelDefinition = computed(() =>
     this.models.find((model) => model.id === this.selectedModel()) || this.models[0]
   );
-  readonly embeddingsReady = computed(() => EmbeddingEngine.isReady());
+  readonly embeddingsReady = computed(() => this.vectorStatus() === 'ready');
   readonly activeEmbeddingDimensionLabel = computed(() => {
     const modelDims = this.selectedModelDefinition().dims;
     const truncateDim = this.truncateDim();
@@ -169,12 +311,14 @@ export class SearchPanelComponent implements OnInit {
     return labels.length ? labels.join(' + ') : 'Lexical retrieval';
   });
   readonly vectorRouteLabel = computed(() =>
-    this.embeddingsReady() ? 'Embeddings ready for semantic sidecar' : 'Phoenix line fallback'
+    this.embeddingsReady() ? 'Native Rust semantic runner ready' : 'Native Rust semantic runner idle'
   );
   readonly scopeLabel = computed(() => {
-    const scope = this.indexScope();
-    if (scope === 'global') return 'Global (all notes)';
-    return this.folders().find((folder) => folder.id === scope)?.name || scope;
+    const scope = this.selectedBuildScope();
+    if (scope.mode === 'global') return 'Global (all notes)';
+    if (scope.mode === 'folder') return this.folders().find((folder) => folder.id === scope.folderId)?.name || scope.folderId;
+    if (scope.mode === 'note') return this.notes().find((note) => note.id === scope.noteId)?.title || 'Active note';
+    return `${scope.noteIds.length} selected notes`;
   });
   readonly commandStatus = computed(() => buildAtlasCommandStatus({
     scopeLabel: this.scopeLabel(),
@@ -198,10 +342,29 @@ export class SearchPanelComponent implements OnInit {
   readonly ledgerGroups = computed(() => this.commandStatus().ledgerGroups);
   readonly inventoryMetrics = computed(() => this.commandStatus().metrics);
   readonly pipelineStages = computed(() => this.commandStatus().stages);
+  readonly capabilityLayers = computed(() => this.commandStatus().capabilityLayers);
+  readonly sleepingCapabilities = computed(() => this.commandStatus().sleepingCapabilities);
   readonly sidecarMetrics = computed(() => this.commandStatus().sidecars);
   readonly chunkingStatus = computed(() => this.commandStatus().chunking);
   readonly lastRunStatus = computed(() => this.commandStatus().lastRun);
-  readonly selectedRecipePlan = computed(() => getAtlasModelRecipePlan(this.selectedRecipe()));
+  readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
+  readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
+  readonly selectedCapabilityState = computed(() =>
+    this.atlasRuntime.capabilityState(this.selectedCapabilityId(), this.atlasRunOptions())
+  );
+  readonly selectedCapabilityChain = computed(() =>
+    expandCapabilityChain(this.selectedCapabilityId()).map((id) => ({
+      capability: atlasCapabilityById(id),
+      state: this.atlasRuntime.capabilityState(id, this.atlasRunOptions()),
+    }))
+  );
+  readonly selectedPipelineRail = computed(() => this.buildSelectedPipelineRail());
+  readonly runtimeCapabilities = computed(() =>
+    ATLAS_CAPABILITY_REGISTRY.map((capability) => this.atlasRuntime.capabilityState(capability.id, this.atlasRunOptions()))
+  );
+  readonly blockedRuntimeCapabilities = computed(() =>
+    this.runtimeCapabilities().filter((capability) => !capability.runnable || capability.blockedReason)
+  );
   readonly modelLaneViews = computed(() => {
     const statuses = this.nerStatus();
     const coOccurrence = statuses.fst;
@@ -302,6 +465,68 @@ export class SearchPanelComponent implements OnInit {
     void this.machine.refreshAuditSafe();
   }
 
+  setBuildScopeMode(mode: AtlasBuildScope['mode']): void {
+    this.buildScopeMode.set(mode);
+    if (mode === 'global') {
+      this.machine.setScope('global');
+      void this.machine.refreshAuditSafe();
+      return;
+    }
+    if (mode === 'folder') {
+      const folderId = this.selectedBuildFolderId() || this.folders()[0]?.id || '';
+      if (folderId) {
+        this.selectedBuildFolderId.set(folderId);
+        this.machine.setScope(folderId);
+        void this.machine.refreshAuditSafe();
+      }
+      return;
+    }
+    if (mode === 'note') {
+      const noteId = this.noteStore.currentNote()?.id || this.notes()[0]?.id || '';
+      if (noteId) this.selectedBuildNoteIds.set([noteId]);
+      return;
+    }
+    if (!this.selectedBuildNoteIds().length) {
+      const noteId = this.noteStore.currentNote()?.id || this.notes()[0]?.id || '';
+      if (noteId) this.selectedBuildNoteIds.set([noteId]);
+    }
+  }
+
+  onBuildFolderChange(folderId: string): void {
+    this.selectedBuildFolderId.set(folderId);
+    this.buildScopeMode.set('folder');
+    this.machine.setScope(folderId || 'global');
+    void this.machine.refreshAuditSafe();
+  }
+
+  toggleBuildNote(noteId: string): void {
+    if (!noteId) return;
+    if (this.buildScopeMode() === 'note') {
+      this.selectedBuildNoteIds.set([noteId]);
+      return;
+    }
+    this.buildScopeMode.set('multiNote');
+    this.selectedBuildNoteIds.update((ids) =>
+      ids.includes(noteId) ? ids.filter((id) => id !== noteId) : [...ids, noteId],
+    );
+  }
+
+  isBuildNoteSelected(noteId: string): boolean {
+    return this.buildNoteIds().includes(noteId);
+  }
+
+  setBuildPolicy(policy: 'dirty-only' | 'force'): void {
+    this.buildPolicy.set(policy);
+  }
+
+  toggleBuildAddOn(id: keyof Required<AtlasBuildAddOns>): void {
+    this.buildAddOns.update((addOns) => ({ ...addOns, [id]: !addOns[id] }));
+  }
+
+  isBuildAddOnDisabled(_id: keyof Required<AtlasBuildAddOns>): boolean {
+    return false;
+  }
+
   async loadVectorModel(): Promise<void> {
     try {
       await this.machine.loadSemanticModel(
@@ -332,37 +557,20 @@ export class SearchPanelComponent implements OnInit {
   async runAtlasRecipe(recipeId: AtlasRecipeId): Promise<void> {
     if (this.activeRecipe()) return;
     this.selectedRecipe.set(recipeId);
+    this.selectedCapabilityId.set(capabilityForRecipe(recipeId));
     this.activeRecipe.set(recipeId);
     this.resetRecipeProgress();
     this.error.set(null);
     try {
+      const options = this.atlasRunOptions();
+      const plan = this.atlasRuntime.recipePlan(recipeId, options);
       this.beginRecipeStep('scope');
       this.completeRecipeStep('scope');
       this.beginRecipeStep('warm');
-      await this.prepareRecipeModels(recipeId);
+      await this.atlasRuntime.warmRequiredModels(plan, options);
       this.completeRecipeStep('warm');
       this.beginRecipeStep('run');
-      switch (recipeId) {
-        case 'runNer':
-          await this.runDynamicScan();
-          break;
-        case 'fastTextGraph':
-          await this.runAtlasSurfaceGraph('dirty-only');
-          break;
-        case 'fullTextGraph':
-          await this.runAtlasSurfaceGraph('force');
-          break;
-        case 'semanticAtlas':
-          await this.runSemanticAtlas();
-          break;
-        case 'warmFullIndexStack':
-          await this.warmFullIndexStack();
-          break;
-        case 'visualizeCurrentGraph':
-          this.openGraphLens();
-          this.machine.setNotice('Loaded current graph snapshot for visualization. No backend mutation was run.');
-          break;
-      }
+      await this.atlasRuntime.runRecipe(recipeId, { ...options, skipModelWarm: true });
       this.completeRecipeStep('run');
       this.beginRecipeStep('refresh');
       this.completeRecipeStep('refresh');
@@ -375,20 +583,14 @@ export class SearchPanelComponent implements OnInit {
     }
   }
 
-  async runDynamicScan(): Promise<void> {
-    const request = this.buildActiveNoteScanRequest();
-    if (!request) {
-      throw new Error('Open a note with rendered text before running Dynamic NER.');
-    }
-    await this.nerService.runDynamicScan(request);
-    const count = this.nerService.suggestions().length;
-    this.notice.set(`Dynamic NER scan complete. ${count} candidate${count === 1 ? '' : 's'} available for review.`);
-  }
-
   openGraphLens(): void {
+    const scope = this.selectedBuildScope();
+    const noteIds = noteIdsFromBuildScope(scope);
     this.machine.requestGraphFocus({
       query: this.query().trim(),
-      scope: this.indexScope(),
+      scope: scope.mode === 'folder' ? scope.folderId : 'global',
+      noteId: noteIds[0],
+      title: noteIds.length > 1 ? `${noteIds.length} selected notes` : this.buildScopeLabel(),
     });
     this.hubService.openPage('graph');
   }
@@ -444,14 +646,104 @@ export class SearchPanelComponent implements OnInit {
     return value === null ? 'unavailable' : value.toLocaleString();
   }
 
+  modelRequirementLabel(models: AtlasModelRequirement[]): string {
+    return this.atlasRuntime.modelRequirementLabel(models);
+  }
+
+  serviceRequirementLabel(services: AtlasServiceRequirement[]): string {
+    return this.atlasRuntime.serviceRequirementLabel(services);
+  }
+
+  expectedOutputLabel(outputs: AtlasExpectedOutput[]): string {
+    return this.atlasRuntime.expectedOutputLabel(outputs);
+  }
+
+  capabilityRuntimeLabel(state: AtlasCapabilityRuntimeState): string {
+    return ATLAS_CAPABILITY_REGISTRY.find((capability) => capability.id === state.capabilityId)?.label || state.capabilityId;
+  }
+
+  selectCapability(capabilityId: AtlasCapabilityId): void {
+    if (this.activeRecipe() || this.activeCapability()) return;
+    this.selectedCapabilityId.set(capabilityId);
+    this.selectedCapabilityIds.update((ids) =>
+      ids.includes(capabilityId) ? ids : [...ids, capabilityId],
+    );
+    this.selectedRecipe.set(recipeForCapability(capabilityId));
+    this.resetRecipeProgress();
+  }
+
+  toggleCapabilitySelection(event: Event, capabilityId: AtlasCapabilityId): void {
+    event.stopPropagation();
+    this.selectedCapabilityIds.update((ids) =>
+      ids.includes(capabilityId)
+        ? ids.filter((id) => id !== capabilityId)
+        : [...ids, capabilityId],
+    );
+    this.selectedCapabilityId.set(capabilityId);
+    this.selectedRecipe.set(recipeForCapability(capabilityId));
+    this.resetRecipeProgress();
+  }
+
+  isCapabilitySelected(capabilityId: AtlasCapabilityId): boolean {
+    return this.selectedCapabilityIds().includes(capabilityId);
+  }
+
+  toggleCapabilityGroup(groupId: string): void {
+    this.collapsedCapabilityGroups.update((ids) =>
+      ids.includes(groupId) ? ids.filter((id) => id !== groupId) : [...ids, groupId],
+    );
+  }
+
+  isCapabilityGroupCollapsed(groupId: string): boolean {
+    return this.collapsedCapabilityGroups().includes(groupId);
+  }
+
+  toggleFilteredCapabilitySelection(): void {
+    const visibleIds = this.filteredBackendGraphTargets().map((target) => target.capability.id);
+    if (!visibleIds.length) return;
+    const selected = new Set(this.selectedCapabilityIds());
+    const allVisibleSelected = visibleIds.every((id) => selected.has(id));
+    this.selectedCapabilityIds.set(allVisibleSelected
+      ? this.selectedCapabilityIds().filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...this.selectedCapabilityIds(), ...visibleIds])));
+  }
+
   selectRecipe(recipeId: AtlasRecipeId): void {
     if (this.activeRecipe()) return;
     this.selectedRecipe.set(recipeId);
+    this.selectedCapabilityId.set(capabilityForRecipe(recipeId));
     this.resetRecipeProgress();
   }
 
   async runSelectedRecipe(): Promise<void> {
     await this.runAtlasRecipe(this.selectedRecipe());
+  }
+
+  async runSelectedCapability(): Promise<void> {
+    if (this.activeRecipe() || this.activeCapability()) return;
+    const capabilityId = this.selectedCapabilityId();
+    this.activeCapability.set(capabilityId);
+    this.resetRecipeProgress();
+    this.error.set(null);
+    try {
+      this.beginRecipeStep('scope');
+      this.completeRecipeStep('scope');
+      this.beginRecipeStep('warm');
+      await this.atlasRuntime.warmRequiredModels(this.selectedCapabilityState(), this.atlasRunOptions());
+      this.completeRecipeStep('warm');
+      this.beginRecipeStep('run');
+      await this.atlasRuntime.runCapability(capabilityId, { ...this.atlasRunOptions(), skipModelWarm: true });
+      this.completeRecipeStep('run');
+      this.beginRecipeStep('refresh');
+      await this.machine.refreshAuditSafe();
+      this.completeRecipeStep('refresh');
+    } catch (err) {
+      this.failRecipeStep(this.activeRecipeStep() || 'run');
+      this.error.set(this.toErrorMessage(err));
+    } finally {
+      this.activeCapability.set(null);
+      this.activeRecipeStep.set(null);
+    }
   }
 
   async warmSelectedRecipeModels(): Promise<void> {
@@ -466,7 +758,7 @@ export class SearchPanelComponent implements OnInit {
       this.beginRecipeStep('warm');
       await this.prepareRecipeModels(recipeId);
       this.completeRecipeStep('warm');
-      this.notice.set(`${this.selectedRecipePlan().label} lanes are warm. No graph data was mutated.`);
+      this.notice.set(`${this.selectedRecipePlan().label} required runtime models are warm. No graph data was mutated.`);
     } catch (err) {
       this.failRecipeStep(this.activeRecipeStep() || 'warm');
       this.error.set(this.toErrorMessage(err));
@@ -476,12 +768,33 @@ export class SearchPanelComponent implements OnInit {
     }
   }
 
+  async warmSelectedCapabilityModels(): Promise<void> {
+    if (this.activeRecipe() || this.activeCapability()) return;
+    const state = this.selectedCapabilityState();
+    if (!state.requiredModels.length) return;
+    this.activeCapability.set(state.capabilityId);
+    this.resetRecipeProgress();
+    this.error.set(null);
+    try {
+      this.beginRecipeStep('warm');
+      await this.atlasRuntime.warmRequiredModels(state, this.atlasRunOptions());
+      this.completeRecipeStep('warm');
+      this.notice.set(`${this.selectedCapability().label} required model lane is warm. No graph data was mutated.`);
+    } catch (err) {
+      this.failRecipeStep('warm');
+      this.error.set(this.toErrorMessage(err));
+    } finally {
+      this.activeCapability.set(null);
+      this.activeRecipeStep.set(null);
+    }
+  }
+
   async warmModelLaneFromCard(laneId: AtlasModelLaneId): Promise<void> {
     if (this.activeRecipe() || this.activeLaneWarm() || laneId === 'manifoldProjection') return;
     this.error.set(null);
     this.activeLaneWarm.set(laneId);
     try {
-      await this.warmModelLane(laneId, this.selectedRecipe());
+      await this.atlasRuntime.warmModelLane(laneId, this.atlasRunOptions());
       this.notice.set(`${laneListLabel([laneId])} is warm.`);
     } catch (err) {
       this.error.set(this.toErrorMessage(err));
@@ -504,35 +817,172 @@ export class SearchPanelComponent implements OnInit {
     return laneListLabel(lanes);
   }
 
+  capabilityListLabel(capabilities: AtlasCapabilityId[]): string {
+    return capabilityListLabel(capabilities);
+  }
+
+  buildScopeModeLabel(mode: AtlasBuildScope['mode']): string {
+    switch (mode) {
+      case 'global':
+        return 'Global';
+      case 'folder':
+        return 'Folder';
+      case 'note':
+        return 'Active Note';
+      case 'multiNote':
+        return 'Multi-note';
+    }
+  }
+
   isRecipeBusy(recipeId: AtlasRecipeId): boolean {
     return this.activeRecipe() === recipeId || (!!this.activeJob() && this.activeRecipe() === recipeId);
+  }
+
+  isCapabilityBusy(capabilityId: AtlasCapabilityId): boolean {
+    return this.activeCapability() === capabilityId;
+  }
+
+  capabilityStatusClass(state: AtlasCapabilityRuntimeState): string {
+    return `capability-${state.status}`;
+  }
+
+  capabilityIconName(capability: AtlasCapability): string {
+    switch (capability.family) {
+      case 'surface':
+        return 'lucideFileText';
+      case 'entity':
+        return 'lucideCpu';
+      case 'graph':
+      case 'manifold':
+      case 'visualization':
+        return 'lucideLayers';
+      case 'semantic':
+        return 'lucideMicrochip';
+      case 'reasoning':
+        return 'lucideSparkles';
+      case 'retrieval':
+        return 'lucideSearch';
+    }
+  }
+
+  compactPolicyLabel(policy: string): string {
+    switch (policy) {
+      case 'dirty-only':
+        return 'Dirty';
+      case 'read-only':
+        return 'RO';
+      case 'warm-only':
+        return 'Warm';
+      case 'native-only':
+        return 'Native';
+      default:
+        return policy;
+    }
+  }
+
+  compactOperationLabel(kind: string): string {
+    return kind
+      .replace('richTextGraphScan', 'Rich')
+      .replace('semanticAtlasScan', 'Semantic')
+      .replace('dynamicNerScan', 'Dynamic')
+      .replace('nativeStoreProbe', 'Native')
+      .replace('nliAdjudication', 'NLI')
+      .replace('manifoldSnapshot', 'Manifold')
+      .replace('graphVisualization', 'Graph View')
+      .replace('retrievalWalk', 'Retrieve')
+      .replace('modelWarm', 'Model');
+  }
+
+  capabilityActionLabel(): string {
+    const state = this.selectedCapabilityState();
+    if (this.activeCapability() === state.capabilityId && this.activeRecipeStep() === 'run') return 'Running';
+    if (state.blockedReason) return 'Not Wired';
+    if (state.operationKind === 'nativeStoreProbe') return `Probe ${this.selectedCapability().label}`;
+    if (state.operationKind === 'modelWarm') return `Warm ${this.selectedCapability().label}`;
+    if (state.operationKind === 'graphVisualization') return 'Open Graph';
+    if (state.runPolicy === 'read-only') return `Run ${this.selectedCapability().label}`;
+    return `Build ${this.selectedCapability().label}`;
   }
 
   isRecipeDisabled(recipeId: AtlasRecipeId): boolean {
     if (recipeId === 'visualizeCurrentGraph') return false;
     const activeJob = this.activeJob();
     const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
-    return !!this.activeRecipe() || !!blockingJob || this.isDynamicScanning();
+    return !!this.activeRecipe() || !!blockingJob || this.isDynamicScanning() || !this.hasRunnableBuildScope();
+  }
+
+  isSelectedCapabilityDisabled(): boolean {
+    const activeJob = this.activeJob();
+    const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
+    const state = this.selectedCapabilityState();
+    return !!this.activeRecipe()
+      || !!this.activeCapability()
+      || !!blockingJob
+      || !state.runnable
+      || !this.hasRunnableBuildScope();
   }
 
   isWarmDisabled(): boolean {
     const activeJob = this.activeJob();
     const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
-    return !!this.activeRecipe() || !!blockingJob || !this.selectedRecipePlan().requiredLanes.length;
+    return !!this.activeRecipe() || !!blockingJob || !this.selectedRecipePlan().requiredModels.length;
+  }
+
+  isSelectedCapabilityWarmDisabled(): boolean {
+    const activeJob = this.activeJob();
+    const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
+    return !!this.activeRecipe()
+      || !!this.activeCapability()
+      || !!blockingJob
+      || !this.selectedCapabilityState().requiredModels.length;
+  }
+
+  capabilityWarmButtonLabel(): string {
+    const required = this.selectedCapabilityState().requiredModels;
+    if (!required.length) return 'No Warm Needed';
+    if (this.activeCapability() === this.selectedCapabilityId() && this.activeRecipeStep() === 'warm') return 'Warming';
+    const ids = required.map((model) => model.id);
+    if (ids.includes('semanticEmbedding') && ids.includes('nli')) return 'Warm Embedding + NLI';
+    if (ids.includes('semanticEmbedding')) return 'Warm Embedding';
+    if (ids.includes('nli')) return 'Warm NLI';
+    if (ids.includes('dynamicNer')) return 'Warm Dynamic NER';
+    return 'Warm Required';
+  }
+
+  capabilityWarmButtonTone(): string {
+    const required = this.selectedCapabilityState().requiredModels;
+    if (!required.length) return 'warm-neutral';
+    if (this.activeCapability() === this.selectedCapabilityId() && this.activeRecipeStep() === 'warm') return 'warm-running';
+    return required.every((model) => model.readiness === 'ready') ? 'warm-ready' : 'warm-required';
+  }
+
+  selectedCapabilityModelSummary(): string {
+    const models = this.selectedCapabilityState().requiredModels;
+    const chain = this.selectedCapabilityChain().map((item) => item.capability.id);
+    const labels = models.map((model) => model.dims ? `${model.label} ${model.dims}` : model.label);
+    if (chain.includes('dynamicNer')) {
+      labels.unshift('Native GLiNER BI-small auto-load');
+    }
+    if (!labels.length) return 'none';
+    return Array.from(new Set(labels)).join(' / ');
   }
 
   warmButtonLabel(): string {
-    const required = this.selectedRecipePlan().requiredLanes;
+    const required = this.selectedRecipePlan().requiredModels;
     if (!required.length) return 'No Warm Needed';
     if (this.activeRecipeStep() === 'warm') return 'Warming';
-    return this.requiredRecipeLanesReady() ? 'Warmed' : 'Warm Required';
+    if (this.requiredRecipeModelsReady()) return 'Warmed';
+    const ids = required.map((model) => model.id);
+    if (ids.includes('semanticEmbedding') && ids.includes('nli')) return 'Warm Embedding + NLI';
+    if (ids.includes('semanticEmbedding')) return 'Warm Embedding';
+    return 'Warm Required';
   }
 
   warmButtonTone(): string {
-    const required = this.selectedRecipePlan().requiredLanes;
+    const required = this.selectedRecipePlan().requiredModels;
     if (!required.length) return 'warm-neutral';
     if (this.activeRecipeStep() === 'warm') return 'warm-running';
-    return this.requiredRecipeLanesReady() ? 'warm-ready' : 'warm-required';
+    return this.requiredRecipeModelsReady() ? 'warm-ready' : 'warm-required';
   }
 
   laneStatusLabel(lane: RetrievalLane): string {
@@ -602,55 +1052,40 @@ export class SearchPanelComponent implements OnInit {
     this.results.set(await this.mapGoResults(rawResults, this.resultSource(), enabled));
   }
 
-  private buildActiveNoteScanRequest(): EntitySuggestionScanRequest | null {
-    const currentNote = this.noteStore.currentNote();
-    if (!currentNote) return null;
-    const plainText = parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
-    if (!plainText.trim()) return null;
-    return {
-      noteId: currentNote.id,
-      noteTitle: currentNote.title || 'Untitled Note',
-      plainText,
-    };
-  }
-
   private async prepareRecipeModels(recipeId: AtlasRecipeId): Promise<void> {
-    const plan = getAtlasModelRecipePlan(recipeId);
-    for (const lane of plan.requiredLanes) {
-      await this.warmModelLane(lane, recipeId);
-    }
+    const options = this.atlasRunOptions();
+    await this.atlasRuntime.warmRequiredModels(
+      this.atlasRuntime.recipePlan(recipeId, options),
+      options,
+    );
   }
 
-  private requiredRecipeLanesReady(): boolean {
-    const required = this.selectedRecipePlan().requiredLanes;
+  private requiredRecipeModelsReady(): boolean {
+    const required = this.selectedRecipePlan().requiredModels;
     if (!required.length) return false;
-    const lanes = new Map(this.modelLaneViews().map((lane) => [lane.id, lane.status]));
-    return required.every((lane) => lanes.get(lane) === 'ready');
+    return required.every((model) => model.readiness === 'ready');
   }
 
-  private async warmModelLane(lane: AtlasModelLaneId, recipeId: AtlasRecipeId): Promise<void> {
-    switch (lane) {
-      case 'dynamicNer':
-        await this.nerService.warmProvider('dynamic_ner');
-        return;
-      case 'coOccurrence':
-        await this.nerService.warmProvider('fst');
-        return;
-      case 'semanticEmbedding':
-        if (this.embeddingsReady() && this.vectorStatus() === 'ready') return;
-        await this.machine.loadSemanticModel(
-          this.selectedModel(),
-          this.currentModelLabel(),
-          this.activeEmbeddingDimensionLabel()
-        );
-        return;
-      case 'nli':
-        if (this.nli.isInitialized()) return;
-        await this.nli.initialize(NLI_MODEL_ID);
-        return;
-      case 'manifoldProjection':
-        return;
+  private hasRunnableBuildScope(): boolean {
+    const scope = this.selectedBuildScope();
+    if (scope.mode === 'note') return !!scope.noteId;
+    if (scope.mode === 'multiNote') return scope.noteIds.length > 0;
+    if (scope.mode === 'folder') return !!scope.folderId;
+    return true;
+  }
+
+  private buildSelectedPipelineRail(): Array<{ id: string; label: string; status: string }> {
+    const rail: Array<{ id: string; label: string; status: string }> = [
+      { id: 'scope', label: this.buildScopeLabel(), status: this.hasRunnableBuildScope() ? 'ready' : 'idle' },
+    ];
+    for (const item of this.selectedCapabilityChain()) {
+      rail.push({
+        id: item.capability.id,
+        label: item.capability.label,
+        status: item.state.status,
+      });
     }
+    return rail;
   }
 
   private resetRecipeProgress(): void {
@@ -676,29 +1111,18 @@ export class SearchPanelComponent implements OnInit {
     this.activeRecipeStep.set(null);
   }
 
-  private async runAtlasSurfaceGraph(policy: 'dirty-only' | 'force'): Promise<void> {
-    await this.atlasScan.runRichEmbeddingScan({
-      source: 'search-panel',
-      requireActiveNote: false,
-      policy,
-      includeSemanticAtlas: false,
-    });
-  }
-
-  private async runSemanticAtlas(): Promise<void> {
-    await this.atlasScan.runRichEmbeddingScan({
-      source: 'search-panel',
-      requireActiveNote: false,
-      modelId: this.selectedModel(),
-      modelLabel: this.currentModelLabel(),
+  private atlasRunOptions(): AtlasRunOptions {
+    return {
+      selectedModel: this.selectedModel(),
+      selectedModelLabel: this.currentModelLabel(),
       dimensionLabel: this.activeEmbeddingDimensionLabel(),
-      policy: 'dirty-only',
-      includeSemanticAtlas: true,
-    });
-  }
-
-  private async warmFullIndexStack(): Promise<void> {
-    this.notice.set(`${this.currentModelLabel()}, BI small Dynamic NER, and NLI are warm. No graph data was mutated.`);
+      scope: this.indexScope(),
+      buildScope: this.selectedBuildScope(),
+      buildPolicy: this.buildPolicy(),
+      addOns: this.buildAddOns(),
+      noteIds: this.buildDocumentIdsForRun(),
+      query: this.query().trim(),
+    };
   }
 
   private async mapGoResults(rawResults: any[], source: SearchMode, lanes: RetrievalLane[]): Promise<SearchResultView[]> {
@@ -728,10 +1152,14 @@ export class SearchPanelComponent implements OnInit {
     });
   }
 
+  private buildDocumentIdsForRun(): string[] {
+    const scope = this.selectedBuildScope();
+    if (scope.mode === 'global') return [];
+    if (scope.mode === 'folder') return this.scopedNotes().map((note) => note.id);
+    return noteIdsFromBuildScope(scope);
+  }
+
   private async hydrateUiState(): Promise<void> {
-    if (EmbeddingEngine.isReady()) {
-      this.vectorStatus.set('ready');
-    }
     await this.machine.refreshAuditSafe();
   }
 
@@ -808,5 +1236,75 @@ export class SearchPanelComponent implements OnInit {
         hasBody: !!full || !!cached?.hasBody,
       };
     });
+  }
+}
+
+function noteIdsFromBuildScope(scope: AtlasBuildScope): string[] {
+  if (scope.mode === 'note') return scope.noteId ? [scope.noteId] : [];
+  if (scope.mode === 'multiNote') return scope.noteIds.filter(Boolean);
+  return [];
+}
+
+const BUILDER_CAPABILITY_IDS: AtlasCapabilityId[] = [
+  'dynamicSurface',
+  'dynamicChunking',
+  'dynamicNer',
+  'mentionGraph',
+  'evidenceGraph',
+  'surfaceGraph',
+  'assertedKernel',
+  'relationGraph',
+  'temporalGraph',
+  'eventIdentity',
+  'memoryState',
+  'causalGraph',
+  'semanticEmbedding',
+  'semanticAtlas',
+  'semanticCandidate',
+  'nliAdjudication',
+  'hybridManifold',
+  'hopfProjection',
+  'lorentzForest',
+  'retrievalWalk',
+  'galaxyVisualization',
+];
+
+function expandCapabilityChain(id: AtlasCapabilityId, seen = new Set<AtlasCapabilityId>()): AtlasCapabilityId[] {
+  if (seen.has(id)) return [];
+  seen.add(id);
+  const capability = atlasCapabilityById(id);
+  const chain = capability.dependencies.flatMap((dependency) => expandCapabilityChain(dependency, seen));
+  return [...chain, id].filter((capabilityId, index, values) => values.indexOf(capabilityId) === index);
+}
+
+function layerLabelForCapability(id: AtlasCapabilityId): string {
+  return ATLAS_CAPABILITY_LAYERS.find((layer) => layer.capabilityIds.includes(id))?.label || atlasCapabilityById(id).family;
+}
+
+function recipeForCapability(id: AtlasCapabilityId): AtlasRecipeId {
+  if (id === 'semanticEmbedding' || id === 'semanticAtlas' || id === 'semanticCandidate') return 'semanticGraph';
+  if (id === 'nliAdjudication') return 'adjudicatedSemanticGraph';
+  if (id === 'galaxyVisualization' || id === 'retrievalWalk' || id === 'hybridManifold' || id === 'hopfProjection' || id === 'lorentzForest') {
+    return 'visualizeCurrentGraph';
+  }
+  return 'textGraph';
+}
+
+function capabilityForRecipe(id: AtlasRecipeId): AtlasCapabilityId {
+  switch (id) {
+    case 'semanticGraph':
+    case 'semanticAtlas':
+      return 'semanticAtlas';
+    case 'adjudicatedSemanticGraph':
+      return 'nliAdjudication';
+    case 'visualizeCurrentGraph':
+      return 'galaxyVisualization';
+    case 'runNer':
+      return 'dynamicNer';
+    case 'fastTextGraph':
+    case 'fullTextGraph':
+    case 'textGraph':
+    case 'warmFullIndexStack':
+      return 'assertedKernel';
   }
 }

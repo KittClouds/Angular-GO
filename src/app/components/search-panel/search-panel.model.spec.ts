@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGraphPreview, buildSearchSnippet } from './search-panel.model';
+import { ATLAS_GRAPH_TARGETS, buildGraphPreview, buildSearchSnippet } from './search-panel.model';
 
 describe('search panel model helpers', () => {
     it('builds a compact graph preview from audit samples', () => {
@@ -14,6 +14,7 @@ describe('search panel model helpers', () => {
             indexedDocuments: 1,
             staleDocuments: 0,
             staleDocumentIds: [],
+            staleDocumentSamples: [],
             orphanEdges: 0,
             duplicateEdges: 0,
             nodeKinds: [],
@@ -40,5 +41,22 @@ describe('search panel model helpers', () => {
 
         expect(snippet).toContain('harbor');
         expect(snippet.length).toBeLessThan(80);
+    });
+
+    it('derives the full graph target list from the capability registry', () => {
+        expect(ATLAS_GRAPH_TARGETS.map((target) => target.id)).toEqual([
+            'mention',
+            'evidence',
+            'surface',
+            'kernel',
+            'relation',
+            'temporal',
+            'eventIdentity',
+            'memoryState',
+            'causal',
+            'semanticAtlas',
+            'semanticCandidate',
+            'galaxy',
+        ]);
     });
 });

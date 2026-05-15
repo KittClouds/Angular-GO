@@ -114,6 +114,52 @@ describe('atlas command status model', () => {
         ]);
     });
 
+    it('maps richer capability layers and sleeping capabilities from command state', () => {
+        const status = buildAtlasCommandStatus({
+            scopeLabel: 'Global',
+            noteCount: 1,
+            estimatedChunks: 2,
+            audit: audit(),
+            stages: { surface: { stage: 'surface', status: 'ready', updatedAt: 1 } },
+            activeJob: null,
+            lastSummary: null,
+            lastRichScan: {
+                ...richScan(true),
+                stageSummaries: [{ stage: 'surface', status: 'ready', durationMs: 12, counts: { chunks: 2 } }],
+                lensChunkCounts: { global: 2 },
+                graphDeltaCounts: { candidateEdges: 3 },
+                embeddingCounts: { leaf: 2, entity: 1, lens: 1 },
+                relationCandidateCount: 5,
+            },
+            vectorStatus: 'ready',
+            graphStatus: 'ready',
+            manifoldMode: 'hybrid',
+            manifoldStatus: 'ready',
+            manifoldStatuses: { hybrid: 'ready', hopf: 'stale', lorentz: 'idle' },
+            dynamicNerStatus: 'ready',
+            enabledLanes: ['lexical', 'graph'],
+            embeddingModelLabel: 'MDBR Leaf',
+            embeddingDimensionLabel: '384d',
+        });
+
+        expect(status.capabilityLayers.map((layer) => layer.label)).toContain('Reasoning Graphs');
+        expect(status.capabilityLayers.flatMap((layer) => layer.capabilities).map((capability) => capability.id))
+            .toContain('causalGraph');
+        expect(status.sleepingCapabilities.map((capability) => capability.id)).toEqual([
+            'relationGraph',
+            'temporalGraph',
+            'eventIdentity',
+            'memoryState',
+            'causalGraph',
+            'semanticCandidate',
+            'nliAdjudication',
+            'lorentzForest',
+        ]);
+        expect(status.sleepingCapabilities.find((capability) => capability.id === 'temporalGraph')?.status).toBe('sleeping');
+        expect(status.sleepingCapabilities.find((capability) => capability.id === 'relationGraph')?.status).toBe('ready');
+        expect(status.sleepingCapabilities.find((capability) => capability.id === 'semanticCandidate')?.status).toBe('ready');
+    });
+
     it('does not mark the whole command console running for passive manifold loads', () => {
         const status = buildAtlasCommandStatus({
             scopeLabel: 'Global',

@@ -1,14 +1,14 @@
-<div class="workbench-scroll flex h-full w-full flex-col gap-2 overflow-y-auto overflow-x-hidden bg-sidebar-background p-2 custom-scrollbar">
+<div
+  class="workbench-scroll flex h-full w-full flex-col gap-2 overflow-y-auto overflow-x-hidden bg-sidebar-background p-2 custom-scrollbar">
 
-  <!-- ═══════════════════════ HERO BANNER ═══════════════════════ -->
   <section class="atlas-banner">
     <div class="banner-left">
       <div class="banner-glyph">
         <ng-icon name="lucideSparkles" class="h-3.5 w-3.5"></ng-icon>
       </div>
       <div class="banner-titles">
-        <h2>Atlas Command</h2>
-        <span class="banner-sub">{{ commandStatus().scopeLabel }}</span>
+        <h2>Graph Builder</h2>
+        <span class="banner-sub">{{ buildScopeLabel() }}</span>
       </div>
     </div>
     <div class="banner-right">
@@ -20,180 +20,155 @@
     </div>
   </section>
 
-  <!-- ═══════════════════════ LEDGER GRID ═══════════════════════ -->
-  <section class="workbench-surface ledger-surface">
-    <div *ngFor="let group of ledgerGroups()" class="ledger-block" [attr.data-ledger-group]="group.id">
-      <div class="ledger-block-head">
-        <span>{{ group.title }}</span>
-        <small>{{ group.subtitle }}</small>
-      </div>
-      <div class="ledger-rows">
-        <div *ngFor="let metric of group.metrics" class="ledger-row"
-          [class.ledger-alert]="metric.availability === 'warning'"
-          [class.ledger-unavailable]="metric.availability === 'unavailable'">
-          <span class="lr-label">{{ metric.label }}</span>
-          <strong class="lr-value">{{ countLabel(metric.value) }}</strong>
-          <small class="lr-sub">{{ metric.explanation }} · {{ metric.source }} / {{ metric.scope }}</small>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══════════════════════ SCOPE + QUERY ═══════════════════════ -->
-  <section class="workbench-surface command-surface">
+  <section class="workbench-surface command-surface graph-builder-surface">
     <div class="section-heading">
       <div>
-        <h3>Scope + Query</h3>
-        <p>Build recipes use this scope. Search sources below are query-time only.</p>
+        <h3>Build Graph</h3>
+        <p>{{ scopedNotes().length }} notes / {{ chunkingStatus().estimatedChunks }} chunks</p>
       </div>
+      <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
     </div>
 
-    <div class="scope-grid">
-      <p-select [options]="[{id: 'global', name: 'Global (All Notes)'}, ...folders()]" [ngModel]="indexScope()"
-        (ngModelChange)="onScopeChange($event)" optionLabel="name" optionValue="id"
-        styleClass="scope-select"
-        panelStyleClass="text-sm bg-zinc-900 border-zinc-700 text-zinc-300 shadow-xl max-w-[240px]">
-        <ng-template #selectedItem let-selectedOption>
-          <div class="scope-option" *ngIf="selectedOption">
-            <ng-icon [name]="indexScope() === 'global' ? 'lucideGlobe' : 'lucideFolder'"
-              [class]="indexScope() === 'global' ? 'scope-icon-global h-3.5 w-3.5 shrink-0' : 'text-amber-400 h-3.5 w-3.5 shrink-0'">
-            </ng-icon>
-            <span class="truncate">{{ selectedOption.name }}</span>
-          </div>
-        </ng-template>
-        <ng-template #item let-item>
-          <div class="scope-option">
-            <ng-icon [name]="item.id === 'global' ? 'lucideGlobe' : 'lucideFolder'"
-              [class]="item.id === 'global' ? 'scope-icon-global h-3.5 w-3.5 shrink-0' : 'text-amber-400 h-3.5 w-3.5 shrink-0'">
-            </ng-icon>
-            <span class="truncate">{{ item.name }}</span>
-          </div>
-        </ng-template>
-      </p-select>
-
-      <button type="button" (click)="handleSearch()" [disabled]="isSearching()" class="secondary-action compact-action">
-        <ng-icon [name]="isSearching() ? 'lucideLoader2' : 'lucideSearch'" class="h-3.5 w-3.5"
-          [class.animate-spin]="isSearching()"></ng-icon>
+    <div class="builder-row source-mode-row">
+      <button *ngFor="let mode of buildScopeModes" type="button" class="builder-pill"
+        [class.builder-pill-active]="buildScopeMode() === mode" (click)="setBuildScopeMode(mode)">
+        {{ buildScopeModeLabel(mode) }}
       </button>
     </div>
 
-    <label class="search-box">
-      <ng-icon name="lucideSearch" class="h-3.5 w-3.5 text-zinc-500"></ng-icon>
-      <input pInputText type="text" placeholder="Ask the graph, notes, and evidence..."
-        [ngModel]="query()" (ngModelChange)="query.set($event)" (keydown.enter)="handleSearch()" />
-    </label>
+    <div class="builder-source-detail" *ngIf="buildScopeMode() === 'folder'">
+      <p-select [options]="folders()" [ngModel]="selectedBuildFolderId()" (ngModelChange)="onBuildFolderChange($event)"
+        optionLabel="name" optionValue="id" styleClass="scope-select">
+      </p-select>
+    </div>
 
-    <div class="search-sources">
-      <div class="search-sources-head">
-        <span>Search sources</span>
-        <small>query-time only / builds nothing</small>
-      </div>
-      <div class="source-lane-grid">
-        <button *ngFor="let lane of laneOptions" type="button" (click)="toggleLane(lane.id)"
-          [disabled]="lane.id === 'lexical'" class="source-lane"
-          [ngClass]="lanes()[lane.id] ? 'source-lane-active' : 'source-lane-muted'">
-          <span class="lane-icon">
-            <ng-icon [name]="lane.icon" class="h-3.5 w-3.5"></ng-icon>
-          </span>
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-[10px] font-semibold">{{ lane.label }}</span>
-            <span class="block truncate text-[9px] opacity-60">{{ laneSourceLabel(lane.id) }}</span>
-          </span>
-          <span class="source-status">{{ laneStatusLabel(lane.id) }}</span>
+    <div class="builder-source-detail" *ngIf="buildScopeMode() === 'note' || buildScopeMode() === 'multiNote'">
+      <label class="search-box compact-search">
+        <ng-icon name="lucideSearch" class="h-3.5 w-3.5 text-zinc-500"></ng-icon>
+        <input pInputText type="text" placeholder="Find notes to build..." [ngModel]="buildNoteQuery()"
+          (ngModelChange)="buildNoteQuery.set($event)" />
+      </label>
+      <div class="note-chip-row">
+        <button *ngFor="let note of filteredBuildNotes()" type="button" class="note-chip"
+          [class.note-chip-active]="isBuildNoteSelected(note.id)" (click)="toggleBuildNote(note.id)">
+          {{ note.title || 'Untitled' }}
         </button>
       </div>
     </div>
-  </section>
 
-  <!-- ═══════════════════════ PIPELINE RIBBON ═══════════════════════ -->
-  <section class="workbench-surface command-surface pipeline-surface">
-    <div class="section-heading">
-      <div>
-        <h3>Pipeline Map</h3>
-        <p>Actual backend route from text to graph, sidecars, and retrieval.</p>
-      </div>
-      <span class="status-chip" [class.status-live]="activeSignals().count > 0">
-        {{ activeSignals().count }} signals
-      </span>
+    <div class="graph-target-head">
+      <span>Graph Targets</span>
+      <strong>{{ selectedCapabilityIds().length }} selected</strong>
     </div>
 
-    <div class="pipeline-ribbon">
-      <div *ngFor="let stage of pipelineStages(); let index = index" class="pipe-node" [ngClass]="'pipe-' + stage.status">
+    <div class="graph-target-toolbar">
+      <label class="graph-target-filter">
+        <ng-icon name="lucideSearch" class="h-3.5 w-3.5"></ng-icon>
+        <input pInputText type="text" placeholder="Filter graphs..." [ngModel]="graphTargetQuery()"
+          (ngModelChange)="graphTargetQuery.set($event)" />
+      </label>
+      <button type="button" class="graph-target-tool" title="Toggle filtered target selection"
+        (click)="toggleFilteredCapabilitySelection()">
+        <ng-icon name="lucideSlidersHorizontal" class="h-3.5 w-3.5"></ng-icon>
+      </button>
+    </div>
+
+    <div class="graph-target-list">
+      <section *ngFor="let group of backendGraphTargetGroups()" class="graph-target-group">
+        <button type="button" class="graph-target-group-head" (click)="toggleCapabilityGroup(group.id)">
+          <span>{{ group.label }}</span>
+          <em>{{ group.selectedCount }} / {{ group.count }}</em>
+          <ng-icon name="lucideChevronDown" class="h-3.5 w-3.5"
+            [class.group-collapsed]="isCapabilityGroupCollapsed(group.id)"></ng-icon>
+        </button>
+
+        <div class="graph-target-rows" *ngIf="!isCapabilityGroupCollapsed(group.id)">
+          <div *ngFor="let target of group.targets" role="button" tabindex="0" class="graph-target-row"
+            [ngClass]="capabilityStatusClass(target.state)"
+            [class.graph-target-row-active]="selectedCapabilityId() === target.capability.id"
+            (click)="selectCapability(target.capability.id)">
+            <span class="target-check" [class.target-check-on]="isCapabilitySelected(target.capability.id)"
+              (click)="toggleCapabilitySelection($event, target.capability.id)">
+              <ng-icon *ngIf="isCapabilitySelected(target.capability.id)" name="lucideCheck" class="h-3 w-3"></ng-icon>
+            </span>
+            <span class="target-icon">
+              <ng-icon [name]="capabilityIconName(target.capability)" class="h-3.5 w-3.5"></ng-icon>
+            </span>
+            <span class="target-title">
+              <strong>{{ target.capability.graphTargetLabel || target.capability.label }}</strong>
+              <small>{{ target.layerLabel }}</small>
+            </span>
+            <span class="target-tags">
+              <em>{{ compactPolicyLabel(target.state.runPolicy) }}</em>
+              <em>{{ compactOperationLabel(target.state.operationKind) }}</em>
+            </span>
+            <span class="target-status">{{ target.state.statusLabel }}</span>
+            <span class="target-menu">
+              <ng-icon name="lucideMoreVertical" class="h-3.5 w-3.5"></ng-icon>
+            </span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="preset-strip">
+      <button *ngFor="let recipe of graphBuildRecipes" type="button" class="preset-chip"
+        [class.preset-chip-active]="selectedRecipe() === recipe.id"
+        [disabled]="!!activeRecipe() && activeRecipe() !== recipe.id" (click)="selectRecipe(recipe.id)">
+        {{ recipe.label }}
+      </button>
+    </div>
+
+    <div class="builder-row build-mode-row">
+      <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'dirty-only'"
+        (click)="setBuildPolicy('dirty-only')">Dirty Update</button>
+      <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'force'"
+        (click)="setBuildPolicy('force')">Force Rebuild</button>
+    </div>
+
+    <div class="builder-row add-on-row">
+      <button *ngFor="let addOn of buildAddOnDefs" type="button" class="builder-pill add-on-pill"
+        [class.builder-pill-active]="buildAddOns()[addOn.id]" [disabled]="isBuildAddOnDisabled(addOn.id)"
+        (click)="toggleBuildAddOn(addOn.id)">
+        <strong>{{ addOn.label }}</strong>
+        <small>{{ addOn.detail }}</small>
+      </button>
+    </div>
+
+    <div class="selected-pipeline-rail">
+      <button *ngFor="let stage of selectedPipelineRail(); let index = index" type="button" class="pipe-node"
+        [ngClass]="'pipe-' + stage.status">
         <span class="pipe-idx">{{ index + 1 }}</span>
         <div class="pipe-body">
           <strong>{{ stage.label }}</strong>
           <em>{{ stage.status }}</em>
         </div>
-        <div class="pipe-io">
-          <span>in: {{ stage.input }}</span>
-          <span>out: {{ stage.output }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="chunk-strip">
-      <div>
-        <span>Chunking</span>
-        <strong>{{ chunkingStatus().chunkSize }}t / {{ chunkingStatus().overlap }}ov</strong>
-      </div>
-      <div>
-        <span>Boundary</span>
-        <strong>{{ chunkingStatus().sentenceBoundaries ? 'sentence' : 'raw' }}</strong>
-      </div>
-      <div>
-        <span>Estimate</span>
-        <strong>{{ chunkingStatus().estimatedChunks }} chunks</strong>
-      </div>
-    </div>
-  </section>
-
-  <!-- Model Recipe Loader -->
-  <section class="workbench-surface command-surface model-recipe-surface">
-    <div class="section-heading">
-      <div>
-        <h3>Model Recipe Loader</h3>
-        <p>Pick a real path. Required lanes warm before the backend runs.</p>
-      </div>
-      <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
-    </div>
-
-    <div class="recipe-grid recipe-picker">
-      <button *ngFor="let recipe of atlasRecipes" type="button" class="recipe-card"
-        [class.recipe-primary]="recipe.primary" [class.recipe-selected]="selectedRecipe() === recipe.id"
-        [disabled]="!!activeRecipe() && activeRecipe() !== recipe.id" (click)="selectRecipe(recipe.id)">
-        <span class="recipe-icon">
-          <ng-icon [name]="isRecipeBusy(recipe.id) ? 'lucideLoader2' : recipe.icon" class="h-3.5 w-3.5"
-            [class.animate-spin]="isRecipeBusy(recipe.id)"></ng-icon>
-        </span>
-        <span class="recipe-copy">
-          <strong>{{ recipe.label }}</strong>
-          <small>{{ recipe.subtitle }}</small>
-        </span>
-        <span class="recipe-output">{{ recipe.output }}</span>
       </button>
     </div>
 
     <div class="selected-recipe-panel">
       <div class="selected-recipe-copy">
-        <span class="section-kicker">Selected recipe</span>
-        <strong>{{ selectedRecipePlan().label }}</strong>
-        <small>{{ selectedRecipePlan().description }}</small>
+        <span class="section-kicker">Selected backend target</span>
+        <strong>{{ selectedCapability().label }}</strong>
+        <small>{{ selectedCapability().description }}</small>
       </div>
       <div class="recipe-lane-summary">
-        <span>Needs: {{ laneListLabel(selectedRecipePlan().requiredLanes) }}</span>
-        <span>Skips: {{ laneListLabel(selectedRecipePlan().skippedLanes) }}</span>
-        <span>Output: {{ selectedRecipePlan().outputLabel }}</span>
+        <span>Scope: {{ buildScopeLabel() }} / {{ scopedNotes().length }} notes</span>
+        <span>Models: {{ selectedCapabilityModelSummary() }}</span>
+        <span>Policy: {{ selectedCapabilityState().runPolicy }} / {{ selectedCapabilityState().mutationPolicy }}</span>
+        <span>Route: {{ selectedCapability().backendRoute }}</span>
+        <span>Inputs: {{ selectedCapability().inputs.join(' / ') }}</span>
+        <span>Outputs: {{ selectedCapability().outputs.join(' / ') }}</span>
+        <span>Service: {{ serviceRequirementLabel(selectedCapabilityState().requiredServices) }}</span>
+        <span>Proof: {{ selectedCapabilityState().outputProbe.detail }}</span>
+        <span *ngIf="selectedCapabilityState().blockedReason">Blocked: {{ selectedCapabilityState().blockedReason }}</span>
       </div>
     </div>
 
-    <div class="lifecycle-grid">
-      <div *ngFor="let step of recipeLifecycle()" class="lifecycle-step" [ngClass]="'step-' + step.status">
-        <span>{{ step.label }}</span>
-        <strong>{{ step.status }}</strong>
-        <small>{{ step.detail }}</small>
-      </div>
+    <div class="backend-map-head compact">
+      <span>Runtime models</span>
+      <strong>{{ capabilityWarmButtonLabel() }}</strong>
     </div>
-
     <div class="semantic-control model-config-grid">
       <label>
         <span class="section-kicker">Embedding model</span>
@@ -209,62 +184,99 @@
         </button>
       </div>
     </div>
-
     <div class="model-lane-grid">
       <button *ngFor="let lane of modelLaneViews()" type="button" class="model-lane-card"
-        [ngClass]="['lane-' + lane.status, activeLaneWarm() === lane.id ? 'lane-warming' : '']"
-        [disabled]="isLaneCardDisabled(lane.id)"
+        [ngClass]="'lane-' + lane.status" [disabled]="isLaneCardDisabled(lane.id)"
         (click)="warmModelLaneFromCard(lane.id)">
         <span>{{ lane.label }}</span>
-        <strong>{{ activeLaneWarm() === lane.id ? 'warming' : lane.status }}</strong>
+        <strong>{{ lane.status }}</strong>
         <small>{{ lane.detail }}</small>
         <em>{{ laneCardActionLabel(lane.id, lane.status) }}</em>
       </button>
     </div>
 
-    <div class="sidecar-grid">
-      <div *ngFor="let sidecar of sidecarMetrics()" class="sidecar-card">
-        <span>{{ sidecar.label }}</span>
-        <strong>{{ sidecar.detail }}</strong>
-        <small>{{ sidecar.source }}</small>
-      </div>
-    </div>
-
     <div class="recipe-actions">
-      <button type="button" class="primary-action" (click)="runSelectedRecipe()" [disabled]="isRecipeDisabled(selectedRecipe())">
-        <ng-icon [name]="isRecipeBusy(selectedRecipe()) ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
-          [class.animate-spin]="isRecipeBusy(selectedRecipe())"></ng-icon>
-        {{ selectedRecipePlan().actionLabel }}
+      <button type="button" class="primary-action" (click)="runSelectedCapability()"
+        [disabled]="isSelectedCapabilityDisabled()">
+        <ng-icon [name]="isCapabilityBusy(selectedCapabilityId()) ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
+          [class.animate-spin]="isCapabilityBusy(selectedCapabilityId())"></ng-icon>
+        {{ capabilityActionLabel() }}
       </button>
-      <button type="button" class="secondary-action warm-required-action" [ngClass]="warmButtonTone()"
-        (click)="warmSelectedRecipeModels()" [disabled]="isWarmDisabled()">
+      <button type="button" class="secondary-action warm-required-action" [ngClass]="capabilityWarmButtonTone()"
+        (click)="warmSelectedCapabilityModels()" [disabled]="isSelectedCapabilityWarmDisabled()">
         <ng-icon [name]="activeRecipeStep() === 'warm' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
           [class.animate-spin]="activeRecipeStep() === 'warm'"></ng-icon>
-        {{ warmButtonLabel() }}
+        {{ capabilityWarmButtonLabel() }}
+      </button>
+      <button type="button" class="secondary-action" (click)="runSelectedRecipe()"
+        [disabled]="isRecipeDisabled(selectedRecipe())">
+        <ng-icon [name]="isRecipeBusy(selectedRecipe()) ? 'lucideLoader2' : 'lucideSparkles'" class="h-3.5 w-3.5"
+          [class.animate-spin]="isRecipeBusy(selectedRecipe())"></ng-icon>
+        Run {{ selectedRecipePlan().label }}
+      </button>
+      <button type="button" class="secondary-action" (click)="openGraphLens()">
+        <ng-icon name="lucideLayers" class="h-3.5 w-3.5"></ng-icon>
+        Open Graph
       </button>
     </div>
 
     <div class="last-run">
       <span>Last run</span>
       <strong>{{ lastRunStatus().label }}</strong>
-      <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{ lastRunStatus().durationMs }} ms</ng-container></small>
+      <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
+          lastRunStatus().durationMs }} ms</ng-container></small>
     </div>
-
-    <app-semantic-workshop class="semantic-inline flex-shrink-0"></app-semantic-workshop>
   </section>
 
-  <!-- Audit -->
-  <section class="workbench-surface command-surface" *ngIf="staleDocuments() || duplicateEdgeSamples().length || orphanEdgeSamples().length">
+  <section class="workbench-surface command-surface search-surface">
+    <div class="section-heading">
+      <div>
+        <h3>Search</h3>
+        <p>Query-time sources. This does not build graph data.</p>
+      </div>
+    </div>
+
+    <label class="search-box">
+      <ng-icon name="lucideSearch" class="h-3.5 w-3.5 text-zinc-500"></ng-icon>
+      <input pInputText type="text" placeholder="Ask the graph, notes, and evidence..." [ngModel]="query()"
+        (ngModelChange)="query.set($event)" (keydown.enter)="handleSearch()" />
+      <button type="button" (click)="handleSearch()" [disabled]="isSearching()" class="inline-icon-button">
+        <ng-icon [name]="isSearching() ? 'lucideLoader2' : 'lucideSearch'" class="h-3.5 w-3.5"
+          [class.animate-spin]="isSearching()"></ng-icon>
+      </button>
+    </label>
+
+    <div class="source-lane-grid">
+      <button *ngFor="let lane of laneOptions" type="button" (click)="toggleLane(lane.id)"
+        [disabled]="lane.id === 'lexical'" class="source-lane"
+        [ngClass]="lanes()[lane.id] ? 'source-lane-active' : 'source-lane-muted'">
+        <span class="lane-icon">
+          <ng-icon [name]="lane.icon" class="h-3.5 w-3.5"></ng-icon>
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-[10px] font-semibold">{{ lane.label }}</span>
+          <span class="block truncate text-[9px] opacity-60">{{ laneSourceLabel(lane.id) }}</span>
+        </span>
+        <span class="source-status">{{ laneStatusLabel(lane.id) }}</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="workbench-surface command-surface"
+    *ngIf="staleDocuments() || duplicateEdgeSamples().length || orphanEdgeSamples().length">
     <div class="section-kicker text-amber-300">Audit / Health</div>
     <div class="audit-strip mt-2">
-      <div *ngIf="staleDocuments()" class="truncate">{{ staleDocuments() }} out-of-tree document id{{ staleDocuments() === 1 ? '' : 's' }} excluded</div>
-      <div *ngFor="let sample of visibleStaleDocumentSamples()" class="truncate">{{ sample.relation }}.{{ sample.field }} -> {{ sample.documentId }}</div>
-      <div *ngFor="let edge of duplicateEdgeSamples()" class="truncate">duplicate {{ edge.edgeType }} x{{ edge.count }}</div>
-      <div *ngFor="let edge of orphanEdgeSamples()" class="truncate">orphan {{ edge.edgeType }} {{ edge.sourceId }} -> {{ edge.targetId }}</div>
+      <div *ngIf="staleDocuments()" class="truncate">{{ staleDocuments() }} out-of-tree document id{{ staleDocuments()
+        === 1 ? '' : 's' }} excluded</div>
+      <div *ngFor="let sample of visibleStaleDocumentSamples()" class="truncate">{{ sample.relation }}.{{ sample.field
+        }} -> {{ sample.documentId }}</div>
+      <div *ngFor="let edge of duplicateEdgeSamples()" class="truncate">duplicate {{ edge.edgeType }} x{{ edge.count }}
+      </div>
+      <div *ngFor="let edge of orphanEdgeSamples()" class="truncate">orphan {{ edge.edgeType }} {{ edge.sourceId }} ->
+        {{ edge.targetId }}</div>
     </div>
   </section>
 
-  <!-- Feedback -->
   <div *ngIf="notice() || atlasMessage()" class="feedback-strip feedback-info">
     <ng-icon name="lucideSparkles" class="h-3.5 w-3.5 shrink-0"></ng-icon>
     <span>{{ notice() || atlasMessage() }}</span>
@@ -274,7 +286,6 @@
     <span>{{ error() }}</span>
   </div>
 
-  <!-- ═══════════════════════ RESULTS ═══════════════════════ -->
   <section class="results-shell">
     <div class="results-header">
       <span>{{ results().length }} results</span>
@@ -297,7 +308,8 @@
             <p class="mb-2.5 line-clamp-3 text-xs leading-relaxed text-zinc-400">{{ result.excerpt }}</p>
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-[9px] uppercase tracking-[0.14em] text-zinc-600">{{ result.meta }}</span>
-              <button type="button" (click)="showResultInGraph($event, result)" class="show-graph-button">Show in graph</button>
+              <button type="button" (click)="showResultInGraph($event, result)" class="show-graph-button">Show in
+                graph</button>
             </div>
           </button>
         </div>
@@ -315,5 +327,4 @@
       </ng-template>
     </div>
   </section>
-
 </div>

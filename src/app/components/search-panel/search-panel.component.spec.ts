@@ -10,12 +10,6 @@ import {
 import { BehaviorSubject } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../lib/embeddings/EmbeddingEngine', () => ({
-    EmbeddingEngine: {
-        isReady: vi.fn(() => false),
-    },
-}));
-
 import { SearchPanelComponent } from './search-panel.component';
 import { NotesService } from '../../lib/dexie/notes.service';
 import { NoteEditorStore } from '../../lib/store/note-editor.store';
@@ -24,6 +18,9 @@ import { NerService } from '../../services/ner.service';
 import { AtlasScanCoordinatorService } from '../../services/atlas-scan-coordinator.service';
 import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
+import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
+import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
+import { PhoenixBackendService } from '../../services/phoenix-backend.service';
 
 describe('SearchPanelComponent model recipe lifecycle', () => {
     let injector: EnvironmentInjector;
@@ -38,6 +35,7 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
         ner = createNerMock();
         atlasScan = createAtlasScanMock();
         nli = createNliMock();
+        const parentInjector = Injector.create({ providers: [] }) as unknown as EnvironmentInjector;
         injector = createEnvironmentInjector([
             { provide: NotesService, useValue: createNotesMock() },
             { provide: NoteEditorStore, useValue: createNoteStoreMock() },
@@ -46,7 +44,10 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             { provide: AtlasScanCoordinatorService, useValue: atlasScan },
             { provide: BlueprintHubService, useValue: { openPage: vi.fn() } },
             { provide: NliWorkerService, useValue: nli },
-        ], Injector.create({ providers: [] }));
+            { provide: PhoenixUiApiService, useValue: createPhoenixUiApiMock() },
+            { provide: PhoenixBackendService, useValue: createPhoenixBackendMock() },
+            AtlasCapabilityRuntimeService,
+        ], parentInjector);
         component = runInInjectionContext(injector, () => new SearchPanelComponent());
     });
 
@@ -55,8 +56,8 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
         vi.clearAllMocks();
     });
 
-    it('loads the semantic model before Semantic Atlas runs', async () => {
-        await component.runAtlasRecipe('semanticAtlas');
+    it('loads the semantic model before Semantic Graph runs', async () => {
+        await component.runAtlasRecipe('semanticGraph');
 
         expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
@@ -67,10 +68,12 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             .toBeLessThan(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0]);
     });
 
-    it('keeps text graph recipes out of embedding and NLI loaders', async () => {
-        await component.runAtlasRecipe('fastTextGraph');
-        await component.runAtlasRecipe('fullTextGraph');
+    it('keeps Text Graph out of embedding and NLI loaders', async () => {
+        await component.runAtlasRecipe('textGraph');
+        component.setBuildPolicy('force');
+        await component.runAtlasRecipe('textGraph');
 
+        expect(ner.warmProvider).not.toHaveBeenCalled();
         expect(machine.loadSemanticModel).not.toHaveBeenCalled();
         expect(nli.initialize).not.toHaveBeenCalled();
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -86,21 +89,41 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
     it('stops the run when required model warming fails', async () => {
         machine.loadSemanticModel.mockRejectedValueOnce(new Error('semantic load failed'));
 
-        await component.runAtlasRecipe('semanticAtlas');
+        await component.runAtlasRecipe('semanticGraph');
 
         expect(atlasScan.runRichEmbeddingScan).not.toHaveBeenCalled();
         expect(component.failedRecipeStep()).toBe('warm');
         expect(machine.error()).toBe('semantic load failed');
     });
 
-    it('warms the full stack without touching the unsupported GLiNER local worker', async () => {
-        await component.runAtlasRecipe('warmFullIndexStack');
+    it('offers whole-path presets and the full backend graph target map', () => {
+        expect(component.graphBuildRecipes.map((recipe) => recipe.id)).toEqual([
+            'textGraph',
+            'semanticGraph',
+            'adjudicatedSemanticGraph',
+        ]);
 
-        expect(ner.warmProvider).toHaveBeenCalledWith('dynamic_ner');
-        expect(ner.warmProvider).not.toHaveBeenCalledWith('gliner_local');
-        expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
-        expect(nli.initialize).toHaveBeenCalled();
-        expect(atlasScan.runRichEmbeddingScan).not.toHaveBeenCalled();
+        const targetIds = component.backendGraphTargets().map((target) => target.capability.id);
+        expect(targetIds).toEqual(expect.arrayContaining([
+            'dynamicSurface',
+            'dynamicChunking',
+            'dynamicNer',
+            'assertedKernel',
+            'relationGraph',
+            'temporalGraph',
+            'eventIdentity',
+            'memoryState',
+            'causalGraph',
+            'semanticAtlas',
+            'nliAdjudication',
+            'hopfProjection',
+            'lorentzForest',
+        ]));
+
+        component.selectCapability('causalGraph');
+        expect(component.selectedCapabilityState().status).toBe('blocked');
+        expect(component.capabilityActionLabel()).toBe('Not Wired');
+        expect(component.isSelectedCapabilityDisabled()).toBe(true);
     });
 
     it('exposes model review lanes from Atlas Command state', () => {
@@ -113,6 +136,80 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             'NLI',
             'Manifold Projection',
         ]);
+    });
+
+    it('exposes layered and sleeping capabilities from Atlas Command state', () => {
+        expect(component.capabilityLayers().map((layer) => layer.label)).toEqual([
+            'Text Surface',
+            'Entity + Mention Intelligence',
+            'Graph Commit',
+            'Reasoning Graphs',
+            'Semantic + Adjudication',
+            'Manifold / Geometry',
+            'Retrieval / Visualization',
+        ]);
+        expect(component.sleepingCapabilities().map((capability) => capability.id)).toContain('causalGraph');
+        expect(component.capabilityListLabel(['dynamicSurface', 'causalGraph'])).toBe('Dynamic Text Surface → Causal Graph');
+    });
+
+    it('surfaces runtime graph build plans and contextual warm labels', () => {
+        component.selectRecipe('textGraph');
+        const textPlan = component.selectedRecipePlan();
+
+        expect(textPlan.requiredModels).toEqual([]);
+        expect(component.modelRequirementLabel(textPlan.requiredModels)).toBe('none');
+        expect(component.warmButtonLabel()).toBe('No Warm Needed');
+        expect(textPlan.backendRoute).toContain('includeSemanticAtlas=false');
+        expect(component.expectedOutputLabel(textPlan.expectedOutputs)).toContain('graph delta counts');
+
+        component.selectRecipe('semanticGraph');
+        const semanticPlan = component.selectedRecipePlan();
+
+        expect(semanticPlan.requiredModels.map((model) => model.id)).toEqual(['semanticEmbedding']);
+        expect(component.warmButtonLabel()).toBe('Warm Embedding');
+        expect(component.serviceRequirementLabel(semanticPlan.requiredServices)).toContain('PhoenixMachineControlService.loadSemanticModel');
+        expect(component.expectedOutputLabel(semanticPlan.expectedOutputs)).toContain('relation candidates');
+
+        component.selectRecipe('adjudicatedSemanticGraph');
+        expect(component.warmButtonLabel()).toBe('Warm Embedding + NLI');
+        expect(component.selectedPipelineRail().map((stage) => stage.label)).toContain('NLI Adjudication');
+    });
+
+    it('drives the selected rail from the backend capability dependency chain', () => {
+        component.selectCapability('assertedKernel');
+
+        expect(component.selectedPipelineRail().map((stage) => stage.label)).toEqual(expect.arrayContaining([
+            'Global',
+            'Dynamic Text Surface',
+            'Dynamic Chunking',
+            'Dynamic NER',
+            'Mention / Co-occurrence Graph',
+            'Evidence Graph',
+            'Surface Graph',
+            'Asserted Kernel',
+        ]));
+
+        component.selectCapability('temporalGraph');
+        expect(component.selectedCapabilityState().operationKind).toBe('nativeStoreProbe');
+        expect(component.capabilityActionLabel()).toBe('Probe Temporal Graph');
+    });
+
+    it('passes selected multi-note source into graph build runtime options', async () => {
+        component.notes.set([
+            { id: 'note-a', title: 'A', content: 'Aella met Kai.', narrativeId: '', folderId: '', hasBody: true },
+            { id: 'note-b', title: 'B', content: 'Kai followed Ruby.', narrativeId: '', folderId: '', hasBody: true },
+        ]);
+        component.setBuildScopeMode('multiNote');
+        component.selectedBuildNoteIds.set([]);
+        component.toggleBuildNote('note-a');
+        component.toggleBuildNote('note-b');
+
+        await component.runAtlasRecipe('textGraph');
+
+        expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
+            noteIds: ['note-a', 'note-b'],
+            buildScope: { mode: 'multiNote', noteIds: ['note-a', 'note-b'] },
+        }));
     });
 });
 
@@ -189,7 +286,9 @@ function createNliMock() {
         isInitialized: signal(false),
         modelId: signal<string | null>(null),
         isProcessing: signal(false),
+        device: signal('wasm'),
         initialize: vi.fn(async () => undefined),
+        classifyStream: vi.fn(async () => undefined),
     };
 }
 
@@ -204,5 +303,17 @@ function createNoteStoreMock() {
     return {
         currentNote: signal(null),
         openNote: vi.fn(),
+    };
+}
+
+function createPhoenixUiApiMock() {
+    return {
+        loadManifoldAtlasSnapshot: vi.fn(async () => ({ nodes: [], edges: [] })),
+    };
+}
+
+function createPhoenixBackendMock() {
+    return {
+        storeCommand: vi.fn(async () => []),
     };
 }
