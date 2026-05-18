@@ -44,6 +44,9 @@ pub fn recommended_thread_count() -> usize {
 
 pub fn default_ort_dylib_path(project_root: &Path) -> Option<PathBuf> {
     [
+        PathBuf::from(
+            r"G:\phoenix-models\onnxruntime-1.20.1\pkg\runtimes\win-x64\native\onnxruntime.dll",
+        ),
         project_root
             .join("node_modules")
             .join("@huggingface")

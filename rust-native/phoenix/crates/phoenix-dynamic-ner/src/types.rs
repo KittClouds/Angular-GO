@@ -79,6 +79,26 @@ pub enum MentionStatus {
     Rejected,
 }
 
+impl MentionStatus {
+    #[inline]
+    pub fn is_accepted(self) -> bool {
+        matches!(self, Self::AcceptedKnown | Self::AcceptedNew)
+    }
+
+    #[inline]
+    pub fn is_exportable(self) -> bool {
+        matches!(
+            self,
+            Self::AcceptedKnown | Self::AcceptedNew | Self::AliasCandidate
+        )
+    }
+
+    #[inline]
+    pub fn is_rejected(self) -> bool {
+        matches!(self, Self::Rejected)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Vote evidence
 // ---------------------------------------------------------------------------
@@ -190,6 +210,36 @@ pub struct MentionPacket {
 
     pub confidence: f32,
     pub status: MentionStatus,
+}
+
+impl MentionPacket {
+    #[inline]
+    pub fn is_accepted(&self) -> bool {
+        self.status.is_accepted()
+    }
+
+    #[inline]
+    pub fn is_exportable(&self) -> bool {
+        self.status.is_exportable()
+    }
+
+    pub fn is_hint_eligible(&self) -> bool {
+        match self.status {
+            MentionStatus::AcceptedKnown | MentionStatus::AcceptedNew => true,
+            MentionStatus::AliasCandidate => {
+                self.confidence >= 0.45
+                    || self.source_votes.iter().any(|vote| {
+                        matches!(
+                            vote.source,
+                            MentionSourceKind::KnownLexicon
+                                | MentionSourceKind::ModelDiscovery
+                                | MentionSourceKind::ModelVerify
+                        )
+                    })
+            }
+            MentionStatus::NeedsAdjudication | MentionStatus::Rejected => false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -370,5 +420,16 @@ mod tests {
             let label = entity_kind_to_label(kind);
             assert!(!label.as_str().is_empty());
         }
+    }
+
+    #[test]
+    fn mention_status_export_contract_is_explicit() {
+        assert!(MentionStatus::AcceptedKnown.is_exportable());
+        assert!(MentionStatus::AcceptedNew.is_exportable());
+        assert!(MentionStatus::AliasCandidate.is_exportable());
+        assert!(!MentionStatus::NeedsAdjudication.is_exportable());
+        assert!(!MentionStatus::Rejected.is_exportable());
+        assert!(MentionStatus::AcceptedKnown.is_accepted());
+        assert!(!MentionStatus::AliasCandidate.is_accepted());
     }
 }

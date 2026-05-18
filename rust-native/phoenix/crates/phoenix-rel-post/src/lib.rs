@@ -14,6 +14,7 @@ mod gliner_bi_tensors;
 mod gliner_relex;
 mod gliner_relex_decode;
 mod gliner_seed;
+mod gliner_x;
 mod glirel;
 mod lens_consumer;
 mod nli;
@@ -63,6 +64,7 @@ pub use gliner_relex::{
     GlinerRelexPredictOptions, GlinerRelexPrediction,
 };
 pub use gliner_seed::{RelationMentionSeeder, RelationSeededSpan};
+pub use gliner_x::{GlinerXError, GlinerXMetadata, GlinerXModel, GlinerXPrediction};
 pub use glirel::{
     extract_heuristic_relations, finalize_relation_predictions, repair_relation_directions,
     seed_relation_pairs, split_sentence_windows, suppress_relation_conflicts, GlirelEntity,

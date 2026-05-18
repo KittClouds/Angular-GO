@@ -1,10 +1,7 @@
 export type AtlasManifoldMode = 'hybrid' | 'hopf' | 'lorentz';
 export type ManifoldProjectionSource =
     | 'real_snapshot_vectors'
-    | 'local_preview_vectors'
-    | 'hopf_preview_fallback'
-    | 'semantic_atlas_rows'
-    | 'synthetic_debug_vectors';
+    | 'semantic_atlas_rows';
 
 export type PhoenixMachineManifoldStatus = 'idle' | 'loading' | 'ready' | 'stale' | 'error';
 

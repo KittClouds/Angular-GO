@@ -244,8 +244,8 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                             <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
                                 <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
                             </button>
-                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning || isRefreshingProjections" (click)="runSemanticAtlasAction()" [title]="semanticAtlasActionTitle()">
-                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning || isRefreshingProjections"></lucide-icon>
+                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning || isRefreshingProjection" (click)="runSemanticAtlasAction()" [title]="semanticAtlasActionTitle()">
+                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning || isRefreshingProjection"></lucide-icon>
                                 <span class="scan-action-copy">
                                     <span class="scan-action-kicker">{{ semanticAtlasActionKicker() }}</span>
                                     <span class="scan-action-main">{{ semanticAtlasActionLabel() }}</span>
@@ -679,7 +679,7 @@ export class GraphAtlasPreviewComponent {
     settingsOpen = false;
     lensMenuOpen = false;
     controlsCollapsed = false;
-    isRefreshingProjections = false;
+    isRefreshingProjection = false;
     selectedEntityId: string | null = null;
     hoveredEntity: GalaxyRenderableNode | null = null;
     queryText = signal('');
@@ -731,7 +731,7 @@ export class GraphAtlasPreviewComponent {
             const context = this.currentReadContext();
             if (summary?.kind !== 'atlas-rich-scan' || !scanSummaryHasEmbeddings(summary)) return;
             untracked(() => {
-                void this.refreshProjectionViews(context);
+                void this.refreshCurrentProjectionView(context);
             });
         });
     }
@@ -812,18 +812,18 @@ export class GraphAtlasPreviewComponent {
 
     semanticAtlasActionLabel(): string {
         if (this.isScanning) return 'Indexing Semantic Atlas';
-        if (this.isRefreshingProjections) return 'Refreshing Projections';
-        return this.semanticAtlasIsCurrent() ? 'Refresh Projections' : 'Index Semantic Atlas';
+        if (this.isRefreshingProjection) return `Refreshing ${this.currentProjectionLabel()}`;
+        return this.canRefreshCurrentProjection() ? `Refresh ${this.currentProjectionLabel()}` : 'Index Semantic Atlas';
     }
 
     semanticAtlasActionKicker(): string {
-        if (this.semanticAtlasIsCurrent()) return 'Hybrid / Hopf / Lorentz';
+        if (this.canRefreshCurrentProjection()) return `${this.currentProjectionLabel()} projection`;
         return 'from rendered graph';
     }
 
     semanticAtlasActionTitle(): string {
-        if (this.semanticAtlasIsCurrent()) {
-            return 'Reload existing Semantic Atlas rows into the Hybrid, Hopf, and Lorentz projection views without running embeddings.';
+        if (this.canRefreshCurrentProjection()) {
+            return `Reload existing Semantic Atlas rows into the ${this.currentProjectionLabel()} projection without running embeddings.`;
         }
         return 'Committed graph leaves, documents, entities, and context lanes -> semantic vectors -> candidate links -> manifold projections.';
     }
@@ -835,8 +835,8 @@ export class GraphAtlasPreviewComponent {
     }
 
     runSemanticAtlasAction(): void {
-        if (this.semanticAtlasIsCurrent()) {
-            void this.refreshProjectionViews(this.currentReadContext());
+        if (this.canRefreshCurrentProjection()) {
+            void this.refreshCurrentProjectionView(this.currentReadContext());
             return;
         }
         this.scanRequested.emit(this.currentLensState());
@@ -1118,17 +1118,23 @@ export class GraphAtlasPreviewComponent {
         return !/preview|fallback|synthetic|not loaded|unavailable/.test(source);
     }
 
-    private async refreshProjectionViews(context: GraphAtlasReadContext): Promise<void> {
-        if (this.isRefreshingProjections) return;
-        this.isRefreshingProjections = true;
+    private canRefreshCurrentProjection(): boolean {
+        return this.semanticAtlasIsCurrent() && this.machine.vectorStatus() === 'ready';
+    }
+
+    private currentProjectionLabel(): string {
+        return manifoldAdapter(this.manifoldMode()).label;
+    }
+
+    private async refreshCurrentProjectionView(context: GraphAtlasReadContext): Promise<void> {
+        if (this.isRefreshingProjection) return;
+        this.isRefreshingProjection = true;
+        const mode = this.manifoldMode();
         try {
-            const modes: AtlasManifoldMode[] = ['hybrid', 'hopf', 'lorentz'];
-            for (const mode of modes) {
-                this.atlasLoadedKeys.delete(mode);
-                await this.refreshEmbeddingAtlas(context, mode, true);
-            }
+            this.atlasLoadedKeys.delete(mode);
+            await this.refreshEmbeddingAtlas(context, mode, true);
         } finally {
-            this.isRefreshingProjections = false;
+            this.isRefreshingProjection = false;
         }
     }
 

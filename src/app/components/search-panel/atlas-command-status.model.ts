@@ -310,7 +310,7 @@ function capabilityTone(
         case 'eventIdentity':
         case 'memoryState':
         case 'causalGraph':
-            return 'sleeping';
+            return counts.committedVertices ? 'idle' : 'sleeping';
     }
 }
 
@@ -362,7 +362,7 @@ function capabilityDetail(
         case 'eventIdentity':
         case 'memoryState':
         case 'causalGraph':
-            return `${capability.mutationPolicy}; sleeping capability detected in native runtime`;
+            return `${capability.mutationPolicy}; read-only native store probe registered`;
     }
 }
 

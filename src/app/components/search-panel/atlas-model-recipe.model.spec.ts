@@ -8,43 +8,54 @@ import {
 } from './atlas-model-recipe.model';
 
 describe('atlas model recipe model', () => {
-    it('keeps text graph recipes model-free without semantic, NER, or NLI warm lanes', () => {
-        for (const recipeId of ['fastTextGraph', 'fullTextGraph'] as const) {
-            const plan = getAtlasModelRecipePlan(recipeId);
+    it('requires entity anchors for Text Graph without semantic or NLI lanes', () => {
+        const plan = getAtlasModelRecipePlan('textGraph');
 
-            expect(plan.requiredLanes).toEqual([]);
-            expect(plan.skippedLanes).toContain('dynamicNer');
-            expect(plan.skippedLanes).toContain('coOccurrence');
-            expect(plan.skippedLanes).toContain('semanticEmbedding');
-            expect(plan.skippedLanes).toContain('nli');
-            expect(plan.outputLabel).toMatch(/graph|vertices/i);
-        }
+        expect(plan.requiredLanes).toEqual(['dynamicNer']);
+        expect(plan.optionalLanes).toEqual([]);
+        expect(plan.skippedLanes).toContain('semanticEmbedding');
+        expect(plan.skippedLanes).toContain('nli');
+        expect(plan.dependencyChain).toEqual(expect.arrayContaining([
+            'dynamicSurface',
+            'dynamicNer',
+            'assertedKernel',
+        ]));
+        expect(plan.outputLabel).toMatch(/graph/i);
     });
 
-    it('marks Semantic Atlas as embedding-backed and NER/NLI-free for required warm lanes', () => {
-        const plan = getAtlasModelRecipePlan('semanticAtlas');
+    it('marks Semantic Graph as NER plus embedding backed while leaving NLI out', () => {
+        const plan = getAtlasModelRecipePlan('semanticGraph');
 
-        expect(plan.requiredLanes).toEqual(['semanticEmbedding']);
-        expect(plan.optionalLanes).toContain('dynamicNer');
-        expect(plan.optionalLanes).toContain('manifoldProjection');
+        expect(plan.requiredLanes).toEqual(['dynamicNer', 'semanticEmbedding', 'manifoldProjection']);
+        expect(plan.optionalLanes).toEqual([]);
         expect(plan.skippedLanes).toEqual(['nli']);
-        expect(plan.actionLabel).toBe('Index Semantic Atlas');
+        expect(plan.actionLabel).toBe('Build Semantic Graph');
+        expect(plan.dependencyChain).toContain('dynamicNer');
         expect(plan.dependencyChain).toContain('semanticCandidate');
+        expect(plan.dependencyChain).toEqual(expect.arrayContaining([
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+        ]));
         expect(plan.mutationPolicy).toBe('dirty-only');
     });
 
-    it('keeps warm stack as a no-mutation model readiness recipe', () => {
-        const plan = getAtlasModelRecipePlan('warmFullIndexStack');
+    it('requires NER, embeddings, and NLI before reasoning graph probes', () => {
+        const plan = getAtlasModelRecipePlan('reasoningGraph');
 
-        expect(plan.requiredLanes).toEqual(['dynamicNer', 'semanticEmbedding', 'nli']);
-        expect(plan.outputLabel).toBe('ready model sidecars');
-    });
-
-    it('does not require model lanes for visualization', () => {
-        const plan = getAtlasModelRecipePlan('visualizeCurrentGraph');
-
-        expect(plan.requiredLanes).toEqual([]);
-        expect(plan.skippedLanes).toEqual(['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli']);
+        expect(plan.requiredLanes).toEqual(['dynamicNer', 'semanticEmbedding', 'manifoldProjection', 'nli']);
+        expect(plan.dependencyChain).toEqual(expect.arrayContaining([
+            'semanticCandidate',
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+            'nliAdjudication',
+            'relationGraph',
+            'temporalGraph',
+            'memoryState',
+            'causalGraph',
+        ]));
+        expect(plan.skippedCapabilities).toEqual([]);
     });
 
     it('normalizes model lane status into readable command-center lanes', () => {

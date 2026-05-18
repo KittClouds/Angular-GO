@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, DestroyRef, ElementRef, inject, OnInit, signal, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -16,7 +16,6 @@ import {
   lucideMicrochip,
   lucideMoreVertical,
   lucideSearch,
-  lucideSlidersHorizontal,
   lucideSparkles,
   lucideZap,
 } from '@ng-icons/lucide';
@@ -37,8 +36,8 @@ import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
 import type {
   AtlasCapabilityRuntimeState,
-  AtlasBuildAddOns,
   AtlasBuildScope,
+  AtlasBuildReceipt,
   AtlasExpectedOutput,
   AtlasModelRequirement,
   AtlasRunOptions,
@@ -117,7 +116,6 @@ type BuilderCapabilityGroup = {
     lucideMicrochip,
     lucideMoreVertical,
     lucideSearch,
-    lucideSlidersHorizontal,
     lucideSparkles,
     lucideZap,
   })],
@@ -125,6 +123,8 @@ type BuilderCapabilityGroup = {
   styleUrls: ['./search-panel.component.css', './search-panel.pipeline-map.css'],
 })
 export class SearchPanelComponent implements OnInit {
+  @ViewChild('workbenchScroll') private workbenchScroll?: ElementRef<HTMLElement>;
+
   private readonly destroyRef = inject(DestroyRef);
   private readonly notesService = inject(NotesService);
   private readonly noteStore = inject(NoteEditorStore);
@@ -158,9 +158,8 @@ export class SearchPanelComponent implements OnInit {
   readonly truncateDim = signal<TruncateDim>('full');
   readonly selectedRecipe = signal<AtlasRecipeId>('textGraph');
   readonly selectedCapabilityId = signal<AtlasCapabilityId>('assertedKernel');
-  readonly selectedCapabilityIds = signal<AtlasCapabilityId[]>(expandCapabilityChain('assertedKernel'));
+  readonly selectedCapabilityIds = signal<AtlasCapabilityId[]>(capabilityIdsForRecipe('textGraph'));
   readonly activeRecipe = signal<AtlasRecipeId | null>(null);
-  readonly activeCapability = signal<AtlasCapabilityId | null>(null);
   readonly activeLaneWarm = signal<AtlasModelLaneId | null>(null);
   readonly activeRecipeStep = signal<AtlasRecipeLifecycleId | null>(null);
   readonly completedRecipeSteps = signal<AtlasRecipeLifecycleId[]>([]);
@@ -174,21 +173,11 @@ export class SearchPanelComponent implements OnInit {
   readonly graphTargetQuery = signal('');
   readonly collapsedCapabilityGroups = signal<string[]>([]);
   readonly buildPolicy = signal<'dirty-only' | 'force'>('dirty-only');
-  readonly buildAddOns = signal<Required<AtlasBuildAddOns>>({
-    dynamicNer: false,
-    manifold: false,
-    visualization: false,
-  });
 
   readonly laneOptions = RETRIEVAL_LANE_OPTIONS;
   readonly models = EMBEDDING_MODELS;
   readonly truncateDims = TRUNCATE_DIMS;
   readonly buildScopeModes: AtlasBuildScope['mode'][] = ['global', 'folder', 'note', 'multiNote'];
-  readonly buildAddOnDefs: Array<{ id: keyof Required<AtlasBuildAddOns>; label: string; detail: string }> = [
-    { id: 'dynamicNer', label: 'Dynamic NER', detail: 'selected scope' },
-    { id: 'manifold', label: 'Manifold', detail: 'snapshot after build' },
-    { id: 'visualization', label: 'Open Graph', detail: 'focus graph view' },
-  ];
   readonly graphBuildRecipes = ATLAS_GRAPH_BUILD_RECIPE_IDS.map((id) => {
     const recipe = atlasRecipeDefinitionById(id);
     return {
@@ -346,14 +335,24 @@ export class SearchPanelComponent implements OnInit {
   readonly sleepingCapabilities = computed(() => this.commandStatus().sleepingCapabilities);
   readonly sidecarMetrics = computed(() => this.commandStatus().sidecars);
   readonly chunkingStatus = computed(() => this.commandStatus().chunking);
-  readonly lastRunStatus = computed(() => this.commandStatus().lastRun);
+  readonly lastRunStatus = computed(() => {
+    const receipt = this.atlasRuntime.lastBuildReceipt();
+    if (receipt) {
+      return {
+        label: receipt.label,
+        detail: buildReceiptDetail(receipt),
+        durationMs: receipt.durationMs,
+      };
+    }
+    return this.commandStatus().lastRun;
+  });
   readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
   readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
   readonly selectedCapabilityState = computed(() =>
     this.atlasRuntime.capabilityState(this.selectedCapabilityId(), this.atlasRunOptions())
   );
   readonly selectedCapabilityChain = computed(() =>
-    expandCapabilityChain(this.selectedCapabilityId()).map((id) => ({
+    this.selectedCapabilityIds().map((id) => ({
       capability: atlasCapabilityById(id),
       state: this.atlasRuntime.capabilityState(id, this.atlasRunOptions()),
     }))
@@ -519,14 +518,6 @@ export class SearchPanelComponent implements OnInit {
     this.buildPolicy.set(policy);
   }
 
-  toggleBuildAddOn(id: keyof Required<AtlasBuildAddOns>): void {
-    this.buildAddOns.update((addOns) => ({ ...addOns, [id]: !addOns[id] }));
-  }
-
-  isBuildAddOnDisabled(_id: keyof Required<AtlasBuildAddOns>): boolean {
-    return false;
-  }
-
   async loadVectorModel(): Promise<void> {
     try {
       await this.machine.loadSemanticModel(
@@ -556,10 +547,8 @@ export class SearchPanelComponent implements OnInit {
 
   async runAtlasRecipe(recipeId: AtlasRecipeId): Promise<void> {
     if (this.activeRecipe()) return;
-    this.selectedRecipe.set(recipeId);
-    this.selectedCapabilityId.set(capabilityForRecipe(recipeId));
+    this.applyRecipeSelection(recipeId);
     this.activeRecipe.set(recipeId);
-    this.resetRecipeProgress();
     this.error.set(null);
     try {
       const options = this.atlasRunOptions();
@@ -662,26 +651,23 @@ export class SearchPanelComponent implements OnInit {
     return ATLAS_CAPABILITY_REGISTRY.find((capability) => capability.id === state.capabilityId)?.label || state.capabilityId;
   }
 
-  selectCapability(capabilityId: AtlasCapabilityId): void {
-    if (this.activeRecipe() || this.activeCapability()) return;
-    this.selectedCapabilityId.set(capabilityId);
-    this.selectedCapabilityIds.update((ids) =>
-      ids.includes(capabilityId) ? ids : [...ids, capabilityId],
-    );
-    this.selectedRecipe.set(recipeForCapability(capabilityId));
-    this.resetRecipeProgress();
+  trackCapabilityGroup(_index: number, group: BuilderCapabilityGroup): string {
+    return group.id;
   }
 
-  toggleCapabilitySelection(event: Event, capabilityId: AtlasCapabilityId): void {
-    event.stopPropagation();
-    this.selectedCapabilityIds.update((ids) =>
-      ids.includes(capabilityId)
-        ? ids.filter((id) => id !== capabilityId)
-        : [...ids, capabilityId],
-    );
-    this.selectedCapabilityId.set(capabilityId);
-    this.selectedRecipe.set(recipeForCapability(capabilityId));
-    this.resetRecipeProgress();
+  trackCapabilityTarget(_index: number, target: BuilderCapabilityCard): AtlasCapabilityId {
+    return target.capability.id;
+  }
+
+  selectCapability(capabilityId: AtlasCapabilityId): void {
+    if (this.activeRecipe()) return;
+    this.preserveWorkbenchScroll(() => {
+      const recipeId = recipeForCapability(capabilityId);
+      this.selectedCapabilityId.set(capabilityId);
+      this.selectedRecipe.set(recipeId);
+      this.selectedCapabilityIds.set(capabilityIdsForRecipe(recipeId, capabilityId));
+      this.resetRecipeProgress();
+    });
   }
 
   isCapabilitySelected(capabilityId: AtlasCapabilityId): boolean {
@@ -689,61 +675,48 @@ export class SearchPanelComponent implements OnInit {
   }
 
   toggleCapabilityGroup(groupId: string): void {
-    this.collapsedCapabilityGroups.update((ids) =>
-      ids.includes(groupId) ? ids.filter((id) => id !== groupId) : [...ids, groupId],
-    );
+    this.preserveWorkbenchScroll(() => {
+      this.collapsedCapabilityGroups.update((ids) =>
+        ids.includes(groupId) ? ids.filter((id) => id !== groupId) : [...ids, groupId],
+      );
+    });
   }
 
   isCapabilityGroupCollapsed(groupId: string): boolean {
     return this.collapsedCapabilityGroups().includes(groupId);
   }
 
-  toggleFilteredCapabilitySelection(): void {
-    const visibleIds = this.filteredBackendGraphTargets().map((target) => target.capability.id);
-    if (!visibleIds.length) return;
-    const selected = new Set(this.selectedCapabilityIds());
-    const allVisibleSelected = visibleIds.every((id) => selected.has(id));
-    this.selectedCapabilityIds.set(allVisibleSelected
-      ? this.selectedCapabilityIds().filter((id) => !visibleIds.includes(id))
-      : Array.from(new Set([...this.selectedCapabilityIds(), ...visibleIds])));
-  }
-
   selectRecipe(recipeId: AtlasRecipeId): void {
     if (this.activeRecipe()) return;
+    this.preserveWorkbenchScroll(() => {
+      this.applyRecipeSelection(recipeId);
+    });
+  }
+
+  private applyRecipeSelection(recipeId: AtlasRecipeId): void {
     this.selectedRecipe.set(recipeId);
     this.selectedCapabilityId.set(capabilityForRecipe(recipeId));
+    this.selectedCapabilityIds.set(capabilityIdsForRecipe(recipeId));
     this.resetRecipeProgress();
+  }
+
+  private preserveWorkbenchScroll(update: () => void): void {
+    const scrollContainer = this.workbenchScroll?.nativeElement;
+    const scrollTop = scrollContainer?.scrollTop ?? 0;
+    update();
+    if (!scrollContainer) return;
+
+    const restore = () => {
+      scrollContainer.scrollTop = scrollTop;
+    };
+    queueMicrotask(restore);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(restore);
+    }
   }
 
   async runSelectedRecipe(): Promise<void> {
     await this.runAtlasRecipe(this.selectedRecipe());
-  }
-
-  async runSelectedCapability(): Promise<void> {
-    if (this.activeRecipe() || this.activeCapability()) return;
-    const capabilityId = this.selectedCapabilityId();
-    this.activeCapability.set(capabilityId);
-    this.resetRecipeProgress();
-    this.error.set(null);
-    try {
-      this.beginRecipeStep('scope');
-      this.completeRecipeStep('scope');
-      this.beginRecipeStep('warm');
-      await this.atlasRuntime.warmRequiredModels(this.selectedCapabilityState(), this.atlasRunOptions());
-      this.completeRecipeStep('warm');
-      this.beginRecipeStep('run');
-      await this.atlasRuntime.runCapability(capabilityId, { ...this.atlasRunOptions(), skipModelWarm: true });
-      this.completeRecipeStep('run');
-      this.beginRecipeStep('refresh');
-      await this.machine.refreshAuditSafe();
-      this.completeRecipeStep('refresh');
-    } catch (err) {
-      this.failRecipeStep(this.activeRecipeStep() || 'run');
-      this.error.set(this.toErrorMessage(err));
-    } finally {
-      this.activeCapability.set(null);
-      this.activeRecipeStep.set(null);
-    }
   }
 
   async warmSelectedRecipeModels(): Promise<void> {
@@ -764,27 +737,6 @@ export class SearchPanelComponent implements OnInit {
       this.error.set(this.toErrorMessage(err));
     } finally {
       this.activeRecipe.set(null);
-      this.activeRecipeStep.set(null);
-    }
-  }
-
-  async warmSelectedCapabilityModels(): Promise<void> {
-    if (this.activeRecipe() || this.activeCapability()) return;
-    const state = this.selectedCapabilityState();
-    if (!state.requiredModels.length) return;
-    this.activeCapability.set(state.capabilityId);
-    this.resetRecipeProgress();
-    this.error.set(null);
-    try {
-      this.beginRecipeStep('warm');
-      await this.atlasRuntime.warmRequiredModels(state, this.atlasRunOptions());
-      this.completeRecipeStep('warm');
-      this.notice.set(`${this.selectedCapability().label} required model lane is warm. No graph data was mutated.`);
-    } catch (err) {
-      this.failRecipeStep('warm');
-      this.error.set(this.toErrorMessage(err));
-    } finally {
-      this.activeCapability.set(null);
       this.activeRecipeStep.set(null);
     }
   }
@@ -838,10 +790,6 @@ export class SearchPanelComponent implements OnInit {
     return this.activeRecipe() === recipeId || (!!this.activeJob() && this.activeRecipe() === recipeId);
   }
 
-  isCapabilityBusy(capabilityId: AtlasCapabilityId): boolean {
-    return this.activeCapability() === capabilityId;
-  }
-
   capabilityStatusClass(state: AtlasCapabilityRuntimeState): string {
     return `capability-${state.status}`;
   }
@@ -893,33 +841,10 @@ export class SearchPanelComponent implements OnInit {
       .replace('modelWarm', 'Model');
   }
 
-  capabilityActionLabel(): string {
-    const state = this.selectedCapabilityState();
-    if (this.activeCapability() === state.capabilityId && this.activeRecipeStep() === 'run') return 'Running';
-    if (state.blockedReason) return 'Not Wired';
-    if (state.operationKind === 'nativeStoreProbe') return `Probe ${this.selectedCapability().label}`;
-    if (state.operationKind === 'modelWarm') return `Warm ${this.selectedCapability().label}`;
-    if (state.operationKind === 'graphVisualization') return 'Open Graph';
-    if (state.runPolicy === 'read-only') return `Run ${this.selectedCapability().label}`;
-    return `Build ${this.selectedCapability().label}`;
-  }
-
   isRecipeDisabled(recipeId: AtlasRecipeId): boolean {
-    if (recipeId === 'visualizeCurrentGraph') return false;
     const activeJob = this.activeJob();
     const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
     return !!this.activeRecipe() || !!blockingJob || this.isDynamicScanning() || !this.hasRunnableBuildScope();
-  }
-
-  isSelectedCapabilityDisabled(): boolean {
-    const activeJob = this.activeJob();
-    const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
-    const state = this.selectedCapabilityState();
-    return !!this.activeRecipe()
-      || !!this.activeCapability()
-      || !!blockingJob
-      || !state.runnable
-      || !this.hasRunnableBuildScope();
   }
 
   isWarmDisabled(): boolean {
@@ -928,36 +853,8 @@ export class SearchPanelComponent implements OnInit {
     return !!this.activeRecipe() || !!blockingJob || !this.selectedRecipePlan().requiredModels.length;
   }
 
-  isSelectedCapabilityWarmDisabled(): boolean {
-    const activeJob = this.activeJob();
-    const blockingJob = activeJob && activeJob !== 'manifold-load' && activeJob !== 'graph-focus';
-    return !!this.activeRecipe()
-      || !!this.activeCapability()
-      || !!blockingJob
-      || !this.selectedCapabilityState().requiredModels.length;
-  }
-
-  capabilityWarmButtonLabel(): string {
-    const required = this.selectedCapabilityState().requiredModels;
-    if (!required.length) return 'No Warm Needed';
-    if (this.activeCapability() === this.selectedCapabilityId() && this.activeRecipeStep() === 'warm') return 'Warming';
-    const ids = required.map((model) => model.id);
-    if (ids.includes('semanticEmbedding') && ids.includes('nli')) return 'Warm Embedding + NLI';
-    if (ids.includes('semanticEmbedding')) return 'Warm Embedding';
-    if (ids.includes('nli')) return 'Warm NLI';
-    if (ids.includes('dynamicNer')) return 'Warm Dynamic NER';
-    return 'Warm Required';
-  }
-
-  capabilityWarmButtonTone(): string {
-    const required = this.selectedCapabilityState().requiredModels;
-    if (!required.length) return 'warm-neutral';
-    if (this.activeCapability() === this.selectedCapabilityId() && this.activeRecipeStep() === 'warm') return 'warm-running';
-    return required.every((model) => model.readiness === 'ready') ? 'warm-ready' : 'warm-required';
-  }
-
   selectedCapabilityModelSummary(): string {
-    const models = this.selectedCapabilityState().requiredModels;
+    const models = this.selectedRecipePlan().requiredModels;
     const chain = this.selectedCapabilityChain().map((item) => item.capability.id);
     const labels = models.map((model) => model.dims ? `${model.label} ${model.dims}` : model.label);
     if (chain.includes('dynamicNer')) {
@@ -975,6 +872,7 @@ export class SearchPanelComponent implements OnInit {
     const ids = required.map((model) => model.id);
     if (ids.includes('semanticEmbedding') && ids.includes('nli')) return 'Warm Embedding + NLI';
     if (ids.includes('semanticEmbedding')) return 'Warm Embedding';
+    if (ids.includes('dynamicNer')) return 'Warm Dynamic NER';
     return 'Warm Required';
   }
 
@@ -1119,7 +1017,6 @@ export class SearchPanelComponent implements OnInit {
       scope: this.indexScope(),
       buildScope: this.selectedBuildScope(),
       buildPolicy: this.buildPolicy(),
-      addOns: this.buildAddOns(),
       noteIds: this.buildDocumentIdsForRun(),
       query: this.query().trim(),
     };
@@ -1277,34 +1174,54 @@ function expandCapabilityChain(id: AtlasCapabilityId, seen = new Set<AtlasCapabi
   return [...chain, id].filter((capabilityId, index, values) => values.indexOf(capabilityId) === index);
 }
 
+function capabilityIdsForRecipe(recipeId: AtlasRecipeId, focusCapabilityId?: AtlasCapabilityId): AtlasCapabilityId[] {
+  const recipe = atlasRecipeDefinitionById(recipeId);
+  const skipped = new Set(recipe.skippedCapabilities);
+  const requiredChain = recipe.requiredCapabilities.flatMap((id) => expandCapabilityChain(id));
+  const focusChain = focusCapabilityId ? expandCapabilityChain(focusCapabilityId) : [];
+  const selected = new Set(requiredChain.filter((id) => !skipped.has(id)));
+  for (const id of focusChain) {
+    if (!skipped.has(id)) selected.add(id);
+  }
+  return BUILDER_CAPABILITY_IDS.filter((id) => selected.has(id));
+}
+
 function layerLabelForCapability(id: AtlasCapabilityId): string {
   return ATLAS_CAPABILITY_LAYERS.find((layer) => layer.capabilityIds.includes(id))?.label || atlasCapabilityById(id).family;
 }
 
 function recipeForCapability(id: AtlasCapabilityId): AtlasRecipeId {
-  if (id === 'semanticEmbedding' || id === 'semanticAtlas' || id === 'semanticCandidate') return 'semanticGraph';
-  if (id === 'nliAdjudication') return 'adjudicatedSemanticGraph';
-  if (id === 'galaxyVisualization' || id === 'retrievalWalk' || id === 'hybridManifold' || id === 'hopfProjection' || id === 'lorentzForest') {
-    return 'visualizeCurrentGraph';
+  if (id === 'relationGraph' || id === 'temporalGraph' || id === 'eventIdentity' || id === 'memoryState' || id === 'causalGraph') {
+    return 'reasoningGraph';
   }
+  if (id === 'nliAdjudication') return 'adjudicatedSemanticGraph';
+  if (id === 'semanticEmbedding' || id === 'semanticAtlas' || id === 'semanticCandidate') return 'semanticGraph';
+  if (id === 'hybridManifold' || id === 'hopfProjection' || id === 'lorentzForest') return 'semanticGraph';
   return 'textGraph';
 }
 
 function capabilityForRecipe(id: AtlasRecipeId): AtlasCapabilityId {
   switch (id) {
     case 'semanticGraph':
-    case 'semanticAtlas':
       return 'semanticAtlas';
     case 'adjudicatedSemanticGraph':
       return 'nliAdjudication';
-    case 'visualizeCurrentGraph':
-      return 'galaxyVisualization';
+    case 'reasoningGraph':
+      return 'relationGraph';
     case 'runNer':
       return 'dynamicNer';
-    case 'fastTextGraph':
-    case 'fullTextGraph':
     case 'textGraph':
-    case 'warmFullIndexStack':
       return 'assertedKernel';
   }
+}
+
+function buildReceiptDetail(receipt: AtlasBuildReceipt): string {
+  const ranStages = receipt.stageReceipts.filter((stage) => stage.ran);
+  const countText = `${ranStages.length} stage${ranStages.length === 1 ? '' : 's'} ran`;
+  const proof = ranStages
+    .map((stage) => stage.summary)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' / ');
+  return proof ? `${receipt.policy}; ${countText}; ${proof}` : `${receipt.policy}; ${countText}`;
 }

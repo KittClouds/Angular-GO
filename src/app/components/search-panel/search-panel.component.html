@@ -1,4 +1,5 @@
 <div
+  #workbenchScroll
   class="workbench-scroll flex h-full w-full flex-col gap-2 overflow-y-auto overflow-x-hidden bg-sidebar-background p-2 custom-scrollbar">
 
   <section class="atlas-banner">
@@ -57,8 +58,8 @@
     </div>
 
     <div class="graph-target-head">
-      <span>Graph Targets</span>
-      <strong>{{ selectedCapabilityIds().length }} selected</strong>
+      <span>Contract Stages</span>
+      <strong>{{ selectedCapabilityIds().length }} staged</strong>
     </div>
 
     <div class="graph-target-toolbar">
@@ -67,14 +68,10 @@
         <input pInputText type="text" placeholder="Filter graphs..." [ngModel]="graphTargetQuery()"
           (ngModelChange)="graphTargetQuery.set($event)" />
       </label>
-      <button type="button" class="graph-target-tool" title="Toggle filtered target selection"
-        (click)="toggleFilteredCapabilitySelection()">
-        <ng-icon name="lucideSlidersHorizontal" class="h-3.5 w-3.5"></ng-icon>
-      </button>
     </div>
 
     <div class="graph-target-list">
-      <section *ngFor="let group of backendGraphTargetGroups()" class="graph-target-group">
+      <section *ngFor="let group of backendGraphTargetGroups(); trackBy: trackCapabilityGroup" class="graph-target-group">
         <button type="button" class="graph-target-group-head" (click)="toggleCapabilityGroup(group.id)">
           <span>{{ group.label }}</span>
           <em>{{ group.selectedCount }} / {{ group.count }}</em>
@@ -83,12 +80,11 @@
         </button>
 
         <div class="graph-target-rows" *ngIf="!isCapabilityGroupCollapsed(group.id)">
-          <div *ngFor="let target of group.targets" role="button" tabindex="0" class="graph-target-row"
+          <div *ngFor="let target of group.targets; trackBy: trackCapabilityTarget" role="button" tabindex="0" class="graph-target-row"
             [ngClass]="capabilityStatusClass(target.state)"
             [class.graph-target-row-active]="selectedCapabilityId() === target.capability.id"
             (click)="selectCapability(target.capability.id)">
-            <span class="target-check" [class.target-check-on]="isCapabilitySelected(target.capability.id)"
-              (click)="toggleCapabilitySelection($event, target.capability.id)">
+            <span class="target-check" [class.target-check-on]="isCapabilitySelected(target.capability.id)">
               <ng-icon *ngIf="isCapabilitySelected(target.capability.id)" name="lucideCheck" class="h-3 w-3"></ng-icon>
             </span>
             <span class="target-icon">
@@ -126,15 +122,6 @@
         (click)="setBuildPolicy('force')">Force Rebuild</button>
     </div>
 
-    <div class="builder-row add-on-row">
-      <button *ngFor="let addOn of buildAddOnDefs" type="button" class="builder-pill add-on-pill"
-        [class.builder-pill-active]="buildAddOns()[addOn.id]" [disabled]="isBuildAddOnDisabled(addOn.id)"
-        (click)="toggleBuildAddOn(addOn.id)">
-        <strong>{{ addOn.label }}</strong>
-        <small>{{ addOn.detail }}</small>
-      </button>
-    </div>
-
     <div class="selected-pipeline-rail">
       <button *ngFor="let stage of selectedPipelineRail(); let index = index" type="button" class="pipe-node"
         [ngClass]="'pipe-' + stage.status">
@@ -148,7 +135,7 @@
 
     <div class="selected-recipe-panel">
       <div class="selected-recipe-copy">
-        <span class="section-kicker">Selected backend target</span>
+        <span class="section-kicker">Selected contract focus</span>
         <strong>{{ selectedCapability().label }}</strong>
         <small>{{ selectedCapability().description }}</small>
       </div>
@@ -167,7 +154,7 @@
 
     <div class="backend-map-head compact">
       <span>Runtime models</span>
-      <strong>{{ capabilityWarmButtonLabel() }}</strong>
+      <strong>{{ warmButtonLabel() }}</strong>
     </div>
     <div class="semantic-control model-config-grid">
       <label>
@@ -196,23 +183,17 @@
     </div>
 
     <div class="recipe-actions">
-      <button type="button" class="primary-action" (click)="runSelectedCapability()"
-        [disabled]="isSelectedCapabilityDisabled()">
-        <ng-icon [name]="isCapabilityBusy(selectedCapabilityId()) ? 'lucideLoader2' : 'lucideZap'" class="h-3.5 w-3.5"
-          [class.animate-spin]="isCapabilityBusy(selectedCapabilityId())"></ng-icon>
-        {{ capabilityActionLabel() }}
-      </button>
-      <button type="button" class="secondary-action warm-required-action" [ngClass]="capabilityWarmButtonTone()"
-        (click)="warmSelectedCapabilityModels()" [disabled]="isSelectedCapabilityWarmDisabled()">
-        <ng-icon [name]="activeRecipeStep() === 'warm' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
-          [class.animate-spin]="activeRecipeStep() === 'warm'"></ng-icon>
-        {{ capabilityWarmButtonLabel() }}
-      </button>
-      <button type="button" class="secondary-action" (click)="runSelectedRecipe()"
+      <button type="button" class="primary-action" (click)="runSelectedRecipe()"
         [disabled]="isRecipeDisabled(selectedRecipe())">
         <ng-icon [name]="isRecipeBusy(selectedRecipe()) ? 'lucideLoader2' : 'lucideSparkles'" class="h-3.5 w-3.5"
           [class.animate-spin]="isRecipeBusy(selectedRecipe())"></ng-icon>
-        Run {{ selectedRecipePlan().label }}
+        {{ selectedRecipePlan().actionLabel }}
+      </button>
+      <button type="button" class="secondary-action warm-required-action" [ngClass]="warmButtonTone()"
+        (click)="warmSelectedRecipeModels()" [disabled]="isWarmDisabled()">
+        <ng-icon [name]="activeRecipeStep() === 'warm' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
+          [class.animate-spin]="activeRecipeStep() === 'warm'"></ng-icon>
+        {{ warmButtonLabel() }}
       </button>
       <button type="button" class="secondary-action" (click)="openGraphLens()">
         <ng-icon name="lucideLayers" class="h-3.5 w-3.5"></ng-icon>

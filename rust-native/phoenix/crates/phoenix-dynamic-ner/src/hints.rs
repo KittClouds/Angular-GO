@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::graph::{MentionEdgeKind, MentionGraph};
 use crate::types::{MentionKind, MentionPacket, MentionSourceKind, NerNeedVector, VoteReason};
 
+const MAX_ENTITY_PAIR_HINTS_PER_SENTENCE: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChunkHintKind {
@@ -86,7 +88,9 @@ fn add_sentence_region_hints(
     for sentence in sentences {
         let sentence_packets = packets
             .iter()
-            .filter(|packet| packet.sentence_index == sentence.index as u32)
+            .filter(|packet| {
+                packet.sentence_index == sentence.index as u32 && packet.is_hint_eligible()
+            })
             .collect::<Vec<_>>();
         if sentence_packets.is_empty() {
             continue;
@@ -154,6 +158,9 @@ fn add_sentence_region_hints(
 fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[MentionPacket]) {
     let mut by_sentence = BTreeMap::<u32, Vec<&MentionPacket>>::new();
     for packet in packets {
+        if !packet.is_hint_eligible() && !is_ambiguous_reference(packet) {
+            continue;
+        }
         by_sentence
             .entry(packet.sentence_index)
             .or_default()
@@ -166,23 +173,29 @@ fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[Menti
         let entities = sentence_packets
             .iter()
             .copied()
-            .filter(|packet| packet.mention_kind == MentionKind::Named)
+            .filter(|packet| packet.mention_kind == MentionKind::Named && packet.is_hint_eligible())
             .collect::<Vec<_>>();
-        for (left_index, left) in entities.iter().enumerate() {
-            for right in entities.iter().skip(left_index + 1) {
-                if left.normalized == right.normalized {
-                    continue;
-                }
-                push_hint(
-                    drafts,
-                    ChunkHintKind::EntityPair,
-                    ChunkHintSource::MentionWorkspace,
-                    merge_ranges(left.range, right.range),
-                    sentence_index,
-                    sentence_index + 1,
-                    &[*left, *right],
-                    700,
-                );
+        let mut emitted_pairs = 0usize;
+        for pair in entities.windows(2) {
+            let [left, right] = pair else {
+                continue;
+            };
+            if left.normalized == right.normalized {
+                continue;
+            }
+            push_hint(
+                drafts,
+                ChunkHintKind::EntityPair,
+                ChunkHintSource::MentionWorkspace,
+                merge_ranges(left.range, right.range),
+                sentence_index,
+                sentence_index + 1,
+                &[*left, *right],
+                700,
+            );
+            emitted_pairs += 1;
+            if emitted_pairs >= MAX_ENTITY_PAIR_HINTS_PER_SENTENCE {
+                break;
             }
         }
 
@@ -201,6 +214,7 @@ fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[Menti
             if nearby_entities.is_empty() {
                 nearby_entities.extend(packets.iter().filter(|packet| {
                     packet.mention_kind == MentionKind::Named
+                        && packet.is_hint_eligible()
                         && packet.sentence_index < sentence_index
                         && sentence_index.saturating_sub(packet.sentence_index) <= 1
                 }));
@@ -239,6 +253,9 @@ fn add_graph_hints(
         else {
             continue;
         };
+        if !left.is_hint_eligible() || !right.is_hint_eligible() {
+            continue;
+        }
         match edge.kind {
             MentionEdgeKind::SameNormalizedSurface
             | MentionEdgeKind::KnownAliasMatch
@@ -282,6 +299,9 @@ fn add_role_alias_dialogue_hints(
     packets: &[MentionPacket],
 ) {
     for packet in packets {
+        if !packet.is_hint_eligible() {
+            continue;
+        }
         if packet.source_votes.iter().any(|vote| {
             matches!(
                 vote.reason,
@@ -357,6 +377,14 @@ fn add_role_alias_dialogue_hints(
             );
         }
     }
+}
+
+fn is_ambiguous_reference(packet: &MentionPacket) -> bool {
+    !packet.status.is_rejected()
+        && matches!(
+            packet.mention_kind,
+            MentionKind::Pronoun | MentionKind::Nominal
+        )
 }
 
 fn push_hint(
@@ -587,5 +615,50 @@ mod tests {
             .map(|hint| hint.id.clone())
             .collect::<BTreeSet<_>>();
         assert_eq!(unique.len(), hints.len());
+    }
+
+    #[test]
+    fn weak_mentions_do_not_emit_hints() {
+        let text = "Output Summary. Aella waited.";
+        let packets = vec![MentionPacket {
+            mention_id: LocalMentionId(1),
+            document_id: CompactString::from("doc"),
+            chunk_id: None,
+            sentence_index: 0,
+            range: TextRange { start: 0, end: 14 },
+            surface: CompactString::from("Output Summary"),
+            normalized: CompactString::from("output summary"),
+            mention_kind: MentionKind::Named,
+            label_distribution: SmallVec::new(),
+            entity_ref: None,
+            source_votes: smallvec![MentionVote {
+                source: MentionSourceKind::NativeDiscovery,
+                label: None,
+                entity_ref: None,
+                confidence: 0.32,
+                reason: VoteReason::CapSpan,
+            }],
+            context: MentionContext::default(),
+            syntax: None,
+            semantics: MentionSemantics::default(),
+            confidence: 0.32,
+            status: MentionStatus::NeedsAdjudication,
+        }];
+        let graph = MentionGraphBuilder::build(&packets);
+        let sentences = vec![SentenceSpan {
+            index: 0,
+            range: TextRange {
+                start: 0,
+                end: text.len() as u32,
+            },
+        }];
+        let hints = build_chunk_hints(
+            text,
+            &sentences,
+            &packets,
+            &graph,
+            &[NerNeedVector::default()],
+        );
+        assert!(hints.is_empty());
     }
 }

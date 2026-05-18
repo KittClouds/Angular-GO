@@ -1,15 +1,12 @@
 import type { GraphAuditSnapshot } from '../../services/graph-audit.model';
 import type { RetrievalLane } from '../../services/retrieval-workbench-state.service';
 import {
-    ATLAS_CAPABILITY_PRESETS,
     ATLAS_CAPABILITY_REGISTRY,
     type AtlasCapabilityCost,
     type AtlasGraphTargetId,
-    type AtlasPresetId,
-    type AtlasPresetPolicy,
 } from './atlas-capability.model';
 
-export type { AtlasGraphTargetId, AtlasPresetId } from './atlas-capability.model';
+export type { AtlasGraphTargetId } from './atlas-capability.model';
 
 export type SearchMode = 'notes' | 'vector' | 'graph';
 export type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
@@ -23,15 +20,6 @@ export interface AtlasGraphTarget {
     cost: AtlasCapabilityCost;
     subsystems: number;
     desc: string;
-}
-
-export interface AtlasPreset {
-    id: AtlasPresetId;
-    label: string;
-    desc: string;
-    target: AtlasGraphTargetId;
-    policy: AtlasPresetPolicy;
-    stages: string[];
 }
 
 export interface SearchPanelNote {
@@ -103,8 +91,6 @@ export const ATLAS_GRAPH_TARGETS: AtlasGraphTarget[] = ATLAS_CAPABILITY_REGISTRY
         subsystems: capability.subsystems,
         desc: capability.description,
     }));
-
-export const ATLAS_PRESETS: AtlasPreset[] = ATLAS_CAPABILITY_PRESETS.map((preset) => ({ ...preset }));
 
 export function buildGraphPreview(snapshot: GraphAuditSnapshot | null): RetrievalGraphPreview {
     if (!snapshot?.sampleNodes.length) {

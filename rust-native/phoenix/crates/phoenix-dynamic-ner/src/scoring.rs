@@ -6,6 +6,7 @@
 
 use compact_str::CompactString;
 use phoenix_types::MentionEntityRef;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::known_lane::KnownCandidate;
@@ -47,7 +48,7 @@ impl Default for ScoreTable {
             auto_alias: 0.90,
             fuzzy_anchor: 0.78,
             title_pattern: 0.70,
-            cap_span: 0.68,
+            cap_span: 0.42,
             nominal_role: 0.52,
             repeated_surface: 0.08,
             dependency_role: 0.10,
@@ -101,6 +102,12 @@ struct WorkspaceEntry {
     entity_ref: Option<MentionEntityRef>,
     votes: SmallVec<[MentionVote; 6]>,
     sentence_index: u32,
+}
+
+#[derive(Clone, Debug)]
+struct LabelHint {
+    label: EntityLabel,
+    confidence: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +218,8 @@ impl MentionWorkspace {
 
     /// Finalize all entries into scored MentionPackets.
     pub fn finalize_packets(mut self) -> Vec<MentionPacket> {
-        let entries = std::mem::take(&mut self.entries);
+        let mut entries = std::mem::take(&mut self.entries);
+        Self::propagate_model_labels(&mut entries);
         let mut packets = Vec::with_capacity(entries.len());
 
         for entry in entries {
@@ -243,10 +251,61 @@ impl MentionWorkspace {
         packets
     }
 
+    fn propagate_model_labels(entries: &mut [WorkspaceEntry]) {
+        let mut hints = FxHashMap::<CompactString, LabelHint>::default();
+        for entry in entries.iter() {
+            for vote in &entry.votes {
+                let Some(label) = vote.label.as_ref() else {
+                    continue;
+                };
+                if !is_surface_label_source(vote.source) || !is_entity_label(label.as_str()) {
+                    continue;
+                }
+                let score = vote.confidence
+                    + if vote.source == MentionSourceKind::KnownLexicon {
+                        0.25
+                    } else {
+                        0.0
+                    };
+                let replace = hints
+                    .get(entry.normalized.as_str())
+                    .is_none_or(|hint| score > hint.confidence);
+                if replace {
+                    hints.insert(
+                        entry.normalized.clone(),
+                        LabelHint {
+                            label: label.clone(),
+                            confidence: score,
+                        },
+                    );
+                }
+            }
+        }
+
+        for entry in entries.iter_mut() {
+            if entry.mention_kind != MentionKind::Named
+                || entry.votes.iter().any(|vote| vote.label.is_some())
+            {
+                continue;
+            }
+            let Some(hint) = hints.get(entry.normalized.as_str()) else {
+                continue;
+            };
+            entry.votes.push(MentionVote {
+                source: MentionSourceKind::ModelVerify,
+                label: Some(hint.label.clone()),
+                entity_ref: None,
+                confidence: hint.confidence.clamp(0.55, 0.72),
+                reason: VoteReason::ModelLabel,
+            });
+        }
+    }
+
     fn score_entry(&self, entry: &WorkspaceEntry) -> (f32, MentionStatus) {
         let mut score = 0.0_f32;
         let mut has_known = false;
         let mut has_model = false;
+        let mut max_model_confidence = 0.0_f32;
         let mut has_contradiction = false;
 
         for vote in &entry.votes {
@@ -259,6 +318,7 @@ impl MentionWorkspace {
                 MentionSourceKind::ModelDiscovery | MentionSourceKind::ModelVerify
             ) {
                 has_model = true;
+                max_model_confidence = max_model_confidence.max(vote.confidence);
             }
             if vote.reason == VoteReason::NliContradiction {
                 has_contradiction = true;
@@ -273,7 +333,7 @@ impl MentionWorkspace {
             MentionStatus::AcceptedKnown
         } else if confidence >= 0.65 {
             MentionStatus::AcceptedNew
-        } else if has_model || confidence >= 0.45 {
+        } else if (has_model && max_model_confidence >= 0.55) || confidence >= 0.45 {
             MentionStatus::AliasCandidate
         } else {
             MentionStatus::NeedsAdjudication
@@ -304,6 +364,35 @@ impl MentionWorkspace {
         }
         labels
     }
+}
+
+fn is_surface_label_source(source: MentionSourceKind) -> bool {
+    matches!(
+        source,
+        MentionSourceKind::KnownLexicon
+            | MentionSourceKind::ModelDiscovery
+            | MentionSourceKind::ModelVerify
+    )
+}
+
+fn is_entity_label(label: &str) -> bool {
+    matches!(
+        label.to_ascii_lowercase().as_str(),
+        "character"
+            | "person"
+            | "npc"
+            | "organization"
+            | "faction"
+            | "location"
+            | "region"
+            | "landmark"
+            | "event"
+            | "artifact"
+            | "item"
+            | "weapon"
+            | "ability"
+            | "spell"
+    )
 }
 
 #[cfg(test)]
@@ -433,6 +522,87 @@ mod tests {
         });
         let packets = ws.finalize_packets();
         assert_eq!(packets[0].status, MentionStatus::Rejected);
+    }
+
+    #[test]
+    fn weak_native_cap_span_needs_adjudication() {
+        let mut ws = MentionWorkspace::new("doc1", 0);
+        ws.entries.push(WorkspaceEntry {
+            id: LocalMentionId(0),
+            range: phoenix_types::TextRange { start: 0, end: 7 },
+            surface: CompactString::from("Output"),
+            normalized: CompactString::from("output"),
+            mention_kind: MentionKind::Named,
+            entity_ref: None,
+            votes: SmallVec::from_elem(
+                MentionVote {
+                    source: MentionSourceKind::NativeDiscovery,
+                    label: None,
+                    entity_ref: None,
+                    confidence: 0.78,
+                    reason: VoteReason::CapSpan,
+                },
+                1,
+            ),
+            sentence_index: 0,
+        });
+        let packets = ws.finalize_packets();
+        assert_eq!(packets[0].status, MentionStatus::NeedsAdjudication);
+        assert!(packets[0].confidence < 0.45);
+    }
+
+    #[test]
+    fn model_label_propagates_to_same_surface_native_mentions() {
+        let mut ws = MentionWorkspace::new("doc1", 0);
+        ws.entries.push(WorkspaceEntry {
+            id: LocalMentionId(0),
+            range: phoenix_types::TextRange { start: 0, end: 4 },
+            surface: CompactString::from("Ryan"),
+            normalized: CompactString::from("ryan"),
+            mention_kind: MentionKind::Named,
+            entity_ref: None,
+            votes: SmallVec::from_elem(
+                MentionVote {
+                    source: MentionSourceKind::ModelDiscovery,
+                    label: Some(EntityLabel::new("Character")),
+                    entity_ref: None,
+                    confidence: 0.82,
+                    reason: VoteReason::ModelLabel,
+                },
+                1,
+            ),
+            sentence_index: 0,
+        });
+        ws.entries.push(WorkspaceEntry {
+            id: LocalMentionId(1),
+            range: phoenix_types::TextRange { start: 20, end: 24 },
+            surface: CompactString::from("Ryan"),
+            normalized: CompactString::from("ryan"),
+            mention_kind: MentionKind::Named,
+            entity_ref: None,
+            votes: SmallVec::from_elem(
+                MentionVote {
+                    source: MentionSourceKind::NativeDiscovery,
+                    label: None,
+                    entity_ref: None,
+                    confidence: 0.78,
+                    reason: VoteReason::CapSpan,
+                },
+                1,
+            ),
+            sentence_index: 1,
+        });
+
+        let packets = ws.finalize_packets();
+        let propagated = packets
+            .iter()
+            .find(|packet| packet.mention_id == LocalMentionId(1))
+            .unwrap();
+        assert!(propagated
+            .label_distribution
+            .iter()
+            .any(|(label, _)| label.as_str() == "Character"));
+        assert_eq!(propagated.status, MentionStatus::AliasCandidate);
     }
 
     #[test]

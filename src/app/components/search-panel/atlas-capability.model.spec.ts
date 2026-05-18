@@ -40,14 +40,19 @@ describe('atlas capability registry', () => {
         expect(layerIds.sort()).toEqual(registryIds.sort());
     });
 
-    it('documents the causal graph as non-runnable until a safe build binding exists', () => {
-        const sleeping = ATLAS_CAPABILITY_REGISTRY.filter((capability) => capability.uiCoverage === 'sleeping');
+    it('documents native reasoning graph probes as read-only partial coverage', () => {
+        const reasoning = ATLAS_CAPABILITY_REGISTRY.filter((capability) => capability.family === 'reasoning');
 
-        expect(sleeping.map((capability) => capability.id)).toEqual([
+        expect(reasoning.map((capability) => capability.id)).toEqual([
+            'relationGraph',
+            'temporalGraph',
+            'eventIdentity',
+            'memoryState',
             'causalGraph',
         ]);
-        expect(sleeping.every((capability) => !capability.runnable)).toBe(true);
-        expect(sleeping.every((capability) => capability.mutationPolicy === 'native-only')).toBe(true);
+        expect(reasoning.every((capability) => capability.runnable)).toBe(true);
+        expect(reasoning.every((capability) => capability.mutationPolicy === 'read-only')).toBe(true);
+        expect(reasoning.every((capability) => capability.uiCoverage === 'partial')).toBe(true);
     });
 
     it('requires every recipe to expose dependencies, skips, outputs, cost, and mutation policy', () => {
@@ -58,6 +63,45 @@ describe('atlas capability registry', () => {
             expect(recipe.mutationPolicy.length).toBeGreaterThan(0);
             expect(recipe.dependencyChain.length + recipe.optionalCapabilities.length + recipe.skippedCapabilities.length).toBeGreaterThan(0);
         }
+    });
+
+    it('keeps graph recipes as dependency-complete contracts instead of independent toggles', () => {
+        const byId = new Map(ATLAS_CAPABILITY_RECIPES.map((recipe) => [recipe.id, recipe]));
+
+        expect(byId.get('textGraph')?.requiredCapabilities).toEqual(expect.arrayContaining([
+            'dynamicNer',
+            'assertedKernel',
+        ]));
+        expect(byId.get('semanticGraph')?.requiredCapabilities).toEqual(expect.arrayContaining([
+            'dynamicNer',
+            'semanticEmbedding',
+            'semanticAtlas',
+            'semanticCandidate',
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+        ]));
+        expect(byId.get('semanticGraph')?.optionalCapabilities).toEqual([]);
+        expect(byId.get('adjudicatedSemanticGraph')?.requiredCapabilities).toEqual(expect.arrayContaining([
+            'semanticCandidate',
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+            'nliAdjudication',
+        ]));
+        expect(byId.get('reasoningGraph')?.requiredCapabilities).toEqual(expect.arrayContaining([
+            'dynamicNer',
+            'semanticEmbedding',
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+            'nliAdjudication',
+            'relationGraph',
+            'temporalGraph',
+            'memoryState',
+            'causalGraph',
+        ]));
+        expect(byId.get('reasoningGraph')?.skippedCapabilities).toEqual([]);
     });
 
     it('keeps model lane labels in the same registry used by recipe plans', () => {

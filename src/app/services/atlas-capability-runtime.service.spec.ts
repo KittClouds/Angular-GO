@@ -105,29 +105,207 @@ describe('AtlasCapabilityRuntimeService', () => {
         vi.clearAllMocks();
     });
 
-    it('plans Text Graph as the model-free build preset', async () => {
+    it('plans Text Graph as an entity-anchored graph build preset', async () => {
         const plan = service.recipePlan('textGraph', {
-            buildScope: { mode: 'multiNote', noteIds: ['note-a', 'note-b'] },
+            buildScope: { mode: 'multiNote', noteIds: ['note-2', 'note-3'] },
             buildPolicy: 'dirty-only',
         });
 
-        expect(plan.requiredModels).toEqual([]);
-        expect(plan.operations.map((operation) => operation.kind)).toEqual(['richTextGraphScan']);
+        expect(plan.requiredModels.map((model) => model.id)).toEqual(['dynamicNer']);
+        expect(plan.operations.map((operation) => operation.kind)).toEqual(['warmModel', 'dynamicNerScan', 'richTextGraphScan']);
         expect(plan.backendRoute).toContain('includeSemanticAtlas=false');
 
-        await service.runRecipe('textGraph', {
-            buildScope: { mode: 'multiNote', noteIds: ['note-a', 'note-b'] },
+        const result = await service.runRecipe('textGraph', {
+            buildScope: { mode: 'multiNote', noteIds: ['note-2', 'note-3'] },
             buildPolicy: 'dirty-only',
         });
 
+        expect(result.contract).toEqual(expect.objectContaining({
+            recipeId: 'textGraph',
+            scope: { mode: 'multiNote', noteIds: ['note-2', 'note-3'] },
+            policy: 'dirty-only',
+            requiredStages: expect.arrayContaining(['dynamicNer', 'assertedKernel']),
+            exportableMentionStatuses: ['AcceptedKnown', 'AcceptedNew', 'AliasCandidate'],
+            modelLanes: ['dynamicNer'],
+        }));
+        expect(result.contract.bridgeCommands).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                stageId: 'dynamicNer',
+                backendCommand: 'scanDiscovery',
+                backendRoute: expect.stringContaining('scan_json'),
+            }),
+            expect.objectContaining({
+                stageId: 'assertedKernel',
+                backendCommand: 'atlasRichScan',
+                backendRoute: expect.stringContaining('includeSemanticAtlas=false'),
+            }),
+        ]));
+        expect(result.receipt.stageReceipts.map((stage) => stage.stageId)).toEqual(expect.arrayContaining([
+            'dynamicNer',
+            'assertedKernel',
+        ]));
+        expect(result.receipt.stageReceipts.find((stage) => stage.stageId === 'dynamicNer' && stage.operationKind === 'dynamicNerScan'))
+            .toEqual(expect.objectContaining({
+                frontendService: 'NerService.runDynamicScan',
+                backendCommand: 'scanDiscovery',
+                commandKind: 'native',
+                counts: expect.objectContaining({
+                    exportableMentions: 1,
+                    suggestions: 1,
+                }),
+            }));
+        expect(result.receipt.stageReceipts.find((stage) => stage.stageId === 'assertedKernel'))
+            .toEqual(expect.objectContaining({
+                frontendService: 'AtlasScanCoordinatorService.runRichEmbeddingScan',
+                backendCommand: 'atlasRichScan',
+                backendRoute: expect.stringContaining('atlas_rich_scan_json'),
+            }));
+        expect(result.receipt.stageReceipts.find((stage) => stage.stageId === 'assertedKernel')?.counts)
+            .toEqual(expect.objectContaining({
+                processedDocuments: 2,
+                'graph.vertices': 3,
+            }));
+        expect(service.lastBuildContract()).toBe(result.contract);
+        expect(service.lastBuildReceipt()).toBe(result.receipt);
+        expect(ner.warmProvider).toHaveBeenCalledWith('dynamic_ner');
+        expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
+            noteTitle: '2 selected notes',
+            plainText: expect.stringContaining('Branna crossed the bridge'),
+        }));
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
             includeSemanticAtlas: false,
             policy: 'dirty-only',
-            noteIds: ['note-a', 'note-b'],
-            buildScope: { mode: 'multiNote', noteIds: ['note-a', 'note-b'] },
+            noteIds: ['note-2', 'note-3'],
+            buildScope: { mode: 'multiNote', noteIds: ['note-2', 'note-3'] },
         }));
         expect(machine.loadSemanticModel).not.toHaveBeenCalled();
         expect(nli.initialize).not.toHaveBeenCalled();
+    });
+
+    it('builds one explicit contract for semantic graph handoff', () => {
+        const contract = service.buildRecipeContract('semanticGraph', {
+            selectedModel: 'mongodb-leaf',
+            selectedModelLabel: 'MDBR Leaf',
+            dimensionLabel: '384d',
+            buildScope: { mode: 'folder', folderId: 'folder-1' },
+            buildPolicy: 'force',
+        });
+
+        expect(contract).toEqual(expect.objectContaining({
+            recipeId: 'semanticGraph',
+            scope: { mode: 'folder', folderId: 'folder-1' },
+            noteIds: [],
+            policy: 'force',
+            exportableMentionStatuses: ['AcceptedKnown', 'AcceptedNew', 'AliasCandidate'],
+            modelLanes: ['dynamicNer', 'semanticEmbedding'],
+            embeddingModel: {
+                id: 'mongodb-leaf',
+                label: 'MDBR Leaf',
+                dimensionLabel: '384d',
+            },
+            requiredStages: expect.arrayContaining([
+                'dynamicNer',
+                'semanticEmbedding',
+                'semanticAtlas',
+                'semanticCandidate',
+                'hybridManifold',
+                'hopfProjection',
+                'lorentzForest',
+            ]),
+            optionalStages: [],
+            expectedOutputs: expect.arrayContaining([
+                expect.objectContaining({ key: 'embeddingCounts' }),
+                expect.objectContaining({ key: 'relationCandidateCount' }),
+                expect.objectContaining({ key: 'manifoldSnapshot.hybrid' }),
+                expect.objectContaining({ key: 'manifoldSnapshot.hopf' }),
+                expect.objectContaining({ key: 'manifoldSnapshot.lorentz' }),
+            ]),
+        }));
+        expect(contract.operations.map((operation) => operation.kind)).toEqual([
+            'warmModel',
+            'dynamicNerScan',
+            'warmModel',
+            'semanticAtlasScan',
+            'manifoldSnapshot',
+            'manifoldSnapshot',
+            'manifoldSnapshot',
+        ]);
+        expect(contract.operations.filter((operation) => operation.kind === 'manifoldSnapshot').map((operation) => operation.manifold)).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
+        expect(contract.bridgeCommands).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                stageId: 'dynamicNer',
+                backendCommand: 'scanDiscovery',
+            }),
+            expect.objectContaining({
+                stageId: 'semanticEmbedding',
+                frontendService: 'PhoenixMachineControlService.loadSemanticModel',
+                backendCommand: 'none',
+                backendRoute: expect.stringContaining('atlasRichScan embeds'),
+            }),
+            expect.objectContaining({
+                stageId: 'semanticAtlas',
+                backendCommand: 'atlasRichScan',
+                backendRoute: expect.stringContaining('includeSemanticAtlas=true'),
+            }),
+            expect.objectContaining({
+                stageId: 'hybridManifold',
+                backendCommand: 'manifoldSnapshot(hybrid)',
+            }),
+            expect.objectContaining({
+                stageId: 'hopfProjection',
+                backendCommand: 'manifoldSnapshot(hopf)',
+            }),
+            expect.objectContaining({
+                stageId: 'lorentzForest',
+                backendCommand: 'manifoldSnapshot(lorentz)',
+            }),
+        ]));
+    });
+
+    it('audits the backend command path for reasoning graph before Rust debugging', () => {
+        const audit = service.recipeBridgeAudit('reasoningGraph', {
+            buildScope: { mode: 'note', noteId: 'note-1' },
+        });
+
+        expect(audit).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                stageId: 'dynamicNer',
+                backendCommand: 'scanDiscovery',
+            }),
+            expect.objectContaining({
+                stageId: 'semanticAtlas',
+                backendCommand: 'atlasRichScan',
+            }),
+            expect.objectContaining({
+                stageId: 'nliAdjudication',
+                backendCommand: 'semantic:listNliJudgmentInputs -> semantic:applyNliJudgments',
+                commandKind: 'mixed',
+            }),
+            expect.objectContaining({
+                stageId: 'relationGraph',
+                backendCommand: 'relation:list',
+                backendRoute: expect.stringContaining('graph_candidate_edges'),
+            }),
+            expect.objectContaining({
+                stageId: 'temporalGraph',
+                backendCommand: 'relation:list',
+                backendRoute: expect.stringContaining('graph_edges'),
+            }),
+            expect.objectContaining({
+                stageId: 'memoryState',
+                backendCommand: 'relation:list',
+                backendRoute: expect.stringContaining('memories'),
+            }),
+            expect.objectContaining({
+                stageId: 'causalGraph',
+                backendCommand: 'relation:list',
+                backendRoute: expect.stringContaining('causal_link'),
+            }),
+        ]));
     });
 
     it('plans Semantic Graph with embedding warm and explicit folder scope', async () => {
@@ -140,16 +318,25 @@ describe('AtlasCapabilityRuntimeService', () => {
         };
 
         const plan = service.recipePlan('semanticGraph', options);
-        expect(plan.requiredModels.map((model) => model.id)).toEqual(['semanticEmbedding']);
+        expect(plan.requiredModels.map((model) => model.id)).toEqual(['dynamicNer', 'semanticEmbedding']);
 
         await service.runRecipe('semanticGraph', options);
 
+        expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
+            noteTitle: 'Folder scope (3 notes)',
+            plainText: expect.stringContaining('Branna crossed the bridge'),
+        }));
         expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
             includeSemanticAtlas: true,
             policy: 'force',
             buildScope: { mode: 'folder', folderId: 'folder-1' },
         }));
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls.map((call) => call[0])).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
     });
 
     it('plans Adjudicated Semantic Graph as semantic build followed by native NLI apply', async () => {
@@ -160,11 +347,20 @@ describe('AtlasCapabilityRuntimeService', () => {
             buildScope: { mode: 'note', noteId: 'note-1' },
         });
 
+        expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
+            noteId: 'note-1',
+            plainText: expect.stringContaining('Aella'),
+        }));
         expect(machine.loadSemanticModel).toHaveBeenCalled();
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
             includeSemanticAtlas: true,
             noteIds: ['note-1'],
         }));
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls.map((call) => call[0])).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
         expect(nli.initialize).toHaveBeenCalledWith('onnx-community/ModernBERT-base-nli-ONNX');
         expect(phoenix.storeCommand).toHaveBeenNthCalledWith(1, 'semantic:listNliJudgmentInputs', {
             documentIds: ['note-1'],
@@ -172,45 +368,21 @@ describe('AtlasCapabilityRuntimeService', () => {
         expect(phoenix.storeCommand).toHaveBeenNthCalledWith(2, 'semantic:applyNliJudgments', expect.any(Object));
     });
 
-    it('runs Fast and Full Text Graph as no-model rich text graph scans', async () => {
-        const fastPlan = service.recipePlan('fastTextGraph');
-        const fullPlan = service.recipePlan('fullTextGraph');
-
-        expect(fastPlan.requiredModels).toEqual([]);
-        expect(fullPlan.requiredModels).toEqual([]);
-        expect(service.modelRequirementLabel(fastPlan.requiredModels)).toBe('none');
-        expect(fastPlan.backendRoute).toContain('includeSemanticAtlas=false');
-        expect(fullPlan.backendRoute).toContain('policy=force');
-
-        await service.runRecipe('fastTextGraph');
-        await service.runRecipe('fullTextGraph');
-
-        expect(atlasScan.runRichEmbeddingScan).toHaveBeenNthCalledWith(1, expect.objectContaining({
-            includeSemanticAtlas: false,
-            policy: 'dirty-only',
-        }));
-        expect(atlasScan.runRichEmbeddingScan).toHaveBeenNthCalledWith(2, expect.objectContaining({
-            includeSemanticAtlas: false,
-            policy: 'force',
-        }));
-        expect(ner.warmProvider).not.toHaveBeenCalled();
-        expect(machine.loadSemanticModel).not.toHaveBeenCalled();
-        expect(nli.initialize).not.toHaveBeenCalled();
-    });
-
-    it('loads the selected embedding model before running Semantic Atlas', async () => {
+    it('loads the selected embedding model inside the Semantic Graph contract', async () => {
         const options = {
             selectedModel: 'mongodb-leaf' as const,
             selectedModelLabel: 'MDBR Leaf',
             dimensionLabel: '384d',
+            buildScope: { mode: 'note' as const, noteId: 'note-1' },
         };
 
-        const plan = service.recipePlan('semanticAtlas', options);
-        expect(plan.requiredModels.map((model) => model.id)).toEqual(['semanticEmbedding']);
+        const plan = service.recipePlan('semanticGraph', options);
+        expect(plan.requiredModels.map((model) => model.id)).toEqual(['dynamicNer', 'semanticEmbedding']);
         expect(plan.requiredServices.map((route) => route.service)).toContain('PhoenixMachineControlService.loadSemanticModel');
 
-        await service.runRecipe('semanticAtlas', options);
+        await service.runRecipe('semanticGraph', options);
 
+        expect(ner.warmProvider).toHaveBeenCalledWith('dynamic_ner');
         expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
             includeSemanticAtlas: true,
@@ -219,24 +391,53 @@ describe('AtlasCapabilityRuntimeService', () => {
             dimensionLabel: '384d',
             policy: 'dirty-only',
         }));
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot).toHaveBeenCalledTimes(3);
         expect(machine.loadSemanticModel.mock.invocationCallOrder[0])
             .toBeLessThan(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0]);
-        expect(ner.warmProvider).not.toHaveBeenCalled();
+        expect(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0])
+            .toBeLessThan(phoenixUiApi.loadManifoldAtlasSnapshot.mock.invocationCallOrder[0]);
         expect(nli.initialize).not.toHaveBeenCalled();
     });
 
-    it('warms the full index stack without mutating graph state', async () => {
-        await service.runRecipe('warmFullIndexStack', {
+    it('runs Reasoning Graph only after entity, semantic, and NLI prerequisites', async () => {
+        await service.runRecipe('reasoningGraph', {
             selectedModel: 'mongodb-leaf',
             selectedModelLabel: 'MDBR Leaf',
             dimensionLabel: '384d',
+            buildScope: { mode: 'note', noteId: 'note-1' },
         });
 
         expect(ner.warmProvider).toHaveBeenCalledWith('dynamic_ner');
+        expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
+            noteId: 'note-1',
+        }));
         expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
         expect(nli.initialize).toHaveBeenCalledWith('onnx-community/ModernBERT-base-nli-ONNX');
-        expect(atlasScan.runRichEmbeddingScan).not.toHaveBeenCalled();
-        expect(machine.setNotice).toHaveBeenCalledWith(expect.stringContaining('No graph data was mutated'));
+        expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
+            includeSemanticAtlas: true,
+            noteIds: ['note-1'],
+        }));
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls.map((call) => call[0])).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.invocationCallOrder[2])
+            .toBeLessThan(nli.classifyStream.mock.invocationCallOrder[0]);
+        expect(phoenix.storeCommand).toHaveBeenCalledWith('relation:list', expect.objectContaining({
+            relation: 'graph_candidate_edges',
+        }));
+        expect(phoenix.storeCommand).toHaveBeenCalledWith('relation:list', expect.objectContaining({
+            relation: 'graph_edges',
+            filter: expect.objectContaining({ edge_type: 'active_during' }),
+        }));
+        expect(phoenix.storeCommand).toHaveBeenCalledWith('relation:list', expect.objectContaining({
+            relation: 'memories',
+        }));
+        expect(phoenix.storeCommand).toHaveBeenCalledWith('relation:list', expect.objectContaining({
+            relation: 'graph_edges',
+            filter: expect.objectContaining({ edge_type: 'causal_link' }),
+        }));
     });
 
     it('runs Dynamic NER through NerService using the open note when no scope is provided', async () => {
@@ -271,21 +472,21 @@ describe('AtlasCapabilityRuntimeService', () => {
         expect(machine.setNotice).toHaveBeenCalledWith(expect.stringContaining('2 documents'));
     });
 
-    it('keeps Dynamic NER add-ons available for folder graph builds', () => {
+    it('keeps Dynamic NER required for folder graph builds without add-ons', () => {
         const plan = service.recipePlan('textGraph', {
             buildScope: { mode: 'folder', folderId: 'folder-1' },
-            addOns: { dynamicNer: true },
         });
 
+        expect(plan.requiredModels.map((model) => model.id)).toEqual(['dynamicNer']);
         expect(plan.dependencyChain).toContain('dynamicNer');
         expect(plan.operations.map((operation) => operation.kind)).toEqual([
-            'richTextGraphScan',
             'warmModel',
             'dynamicNerScan',
+            'richTextGraphScan',
         ]);
     });
 
-    it('reports text graph capabilities as runnable with no required models', () => {
+    it('reports text graph capabilities as runnable while Dynamic NER owns the model lane', () => {
         const textGraphCapabilities: AtlasCapabilityId[] = [
             'dynamicSurface',
             'dynamicChunking',
@@ -303,6 +504,11 @@ describe('AtlasCapabilityRuntimeService', () => {
             expect(state.requiredModels).toEqual([]);
             expect(service.modelRequirementLabel(state.requiredModels)).toBe('none');
         }
+
+        const nerState = service.capabilityState('dynamicNer');
+        expect(nerState.runnable).toBe(true);
+        expect(nerState.operationKind).toBe('dynamicNerScan');
+        expect(nerState.requiredModels.map((model) => model.id)).toEqual(['dynamicNer']);
     });
 
     it('exposes native reasoning store probes as read-only runnable commands', async () => {
@@ -311,6 +517,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             'temporalGraph',
             'eventIdentity',
             'memoryState',
+            'causalGraph',
         ];
 
         for (const capabilityId of probeCapabilities) {
@@ -339,14 +546,74 @@ describe('AtlasCapabilityRuntimeService', () => {
         expect(machine.setNotice).toHaveBeenCalledWith(expect.stringContaining('No graph data was mutated'));
     });
 
-    it('keeps causal graph blocked until a native pass or safe probe exists', () => {
+    it('exposes causal graph through the safe read-only native probe', () => {
         const state = service.capabilityState('causalGraph');
 
-        expect(state.runnable).toBe(false);
-        expect(state.operationKind).toBe('notWired');
-        expect(state.status).toBe('blocked');
-        expect(state.blockedReason).toContain('no Search Panel runtime operation binding or read-only probe');
-        expect(state.requiredServices[0].ready).toBe(false);
+        expect(state.runnable).toBe(true);
+        expect(state.operationKind).toBe('nativeStoreProbe');
+        expect(state.status).toBe('ready');
+        expect(state.runPolicy).toBe('read-only');
+        expect(state.mutationPolicy).toBe('read-only');
+        expect(state.readinessProbe.detail).toContain('graph_edges');
+    });
+
+    it('keeps Hybrid, Hopf, and Lorentz as separate read-only manifold commands', async () => {
+        const capabilities: Array<[AtlasCapabilityId, string]> = [
+            ['hybridManifold', 'hybrid'],
+            ['hopfProjection', 'hopf'],
+            ['lorentzForest', 'lorentz'],
+        ];
+
+        for (const [capabilityId, mode] of capabilities) {
+            const state = service.capabilityState(capabilityId);
+            expect(state.operationKind).toBe('manifoldSnapshot');
+            expect(state.runPolicy).toBe('read-only');
+            expect(state.mutationPolicy).toBe('read-only');
+            expect(state.requiredServices[0].backendRoute).toContain(mode);
+
+            const result = await service.runCapability(capabilityId, {
+                buildScope: { mode: 'note', noteId: 'note-1' },
+            });
+
+            expect(result.capabilityId).toBe(capabilityId);
+            expect(result.operationKind).toBe('manifoldSnapshot');
+            expect(result.rawResult).toEqual(expect.objectContaining({ manifold: mode }));
+        }
+
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls.map((call) => call[0])).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls[0][1]).toEqual({ mode: 'note', noteId: 'note-1' });
+    });
+
+    it('runs all embedding projections before native reasoning probes', () => {
+        const semantic = service.recipePlan('semanticGraph');
+        const reasoning = service.recipePlan('reasoningGraph');
+
+        expect(semantic.operations.some((operation) => operation.kind === 'nativeStoreProbe')).toBe(false);
+        expect(semantic.operations.filter((operation) => operation.kind === 'manifoldSnapshot').map((operation) => operation.manifold)).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
+        expect(reasoning.operations.filter((operation) => operation.kind === 'manifoldSnapshot').map((operation) => operation.manifold)).toEqual([
+            'hybrid',
+            'hopf',
+            'lorentz',
+        ]);
+        expect(reasoning.requiredCapabilities).toEqual(expect.arrayContaining([
+            'hybridManifold',
+            'hopfProjection',
+            'lorentzForest',
+            'relationGraph',
+            'eventIdentity',
+            'temporalGraph',
+            'memoryState',
+            'causalGraph',
+        ]));
+        expect(reasoning.optionalCapabilities).toEqual([]);
     });
 
     it('runs NLI adjudication through the native queue and apply commands', async () => {
@@ -374,6 +641,9 @@ describe('AtlasCapabilityRuntimeService', () => {
 function createMachineMock() {
     const notice = signal<string | null>(null);
     const graphFocus = signal<unknown>(null);
+    const manifoldStatuses = signal<any>({ hybrid: 'idle', hopf: 'idle', lorentz: 'idle' });
+    let manifoldLoadSeq = 0;
+    const loadIds: Record<string, number> = { hybrid: 0, hopf: 0, lorentz: 0 };
     return {
         query: signal(''),
         scope: signal('global'),
@@ -381,7 +651,7 @@ function createMachineMock() {
         graphStatus: signal<any>('idle'),
         graphAudit: signal(null),
         manifoldStatus: signal<any>('idle'),
-        manifoldStatuses: signal<any>({ hybrid: 'idle', hopf: 'idle', lorentz: 'idle' }),
+        manifoldStatuses,
         notice,
         graphFocus,
         activeLanes: computed(() => ['lexical']),
@@ -392,6 +662,23 @@ function createMachineMock() {
         loadSemanticModel: vi.fn(async () => undefined),
         search: vi.fn(async () => []),
         requestGraphFocus: vi.fn((focus: unknown) => graphFocus.set(focus)),
+        beginManifoldLoad: vi.fn((mode = 'hybrid') => {
+            const loadId = ++manifoldLoadSeq;
+            loadIds[mode] = loadId;
+            manifoldStatuses.update((statuses: Record<string, string>) => ({ ...statuses, [mode]: 'loading' }));
+            return { mode, startedAt: performance.now(), loadId };
+        }),
+        isCurrentManifoldLoad: vi.fn((load: { mode: string; loadId: number }) => loadIds[load.mode] === load.loadId),
+        finishManifoldLoad: vi.fn((load: { mode: string; loadId: number }) => {
+            if (loadIds[load.mode] !== load.loadId) return;
+            loadIds[load.mode] = 0;
+            manifoldStatuses.update((statuses: Record<string, string>) => ({ ...statuses, [load.mode]: 'ready' }));
+        }),
+        failManifoldLoad: vi.fn((load: { mode: string; loadId: number }) => {
+            if (loadIds[load.mode] !== load.loadId) return;
+            loadIds[load.mode] = 0;
+            manifoldStatuses.update((statuses: Record<string, string>) => ({ ...statuses, [load.mode]: 'error' }));
+        }),
     };
 }
 
@@ -416,7 +703,24 @@ function createAtlasScanMock() {
     return {
         lastResult: signal(null),
         running: computed(() => false),
-        runRichEmbeddingScan: vi.fn(async () => ({ mode: 'rich-embeddings' })),
+        runRichEmbeddingScan: vi.fn(async () => ({
+            mode: 'rich-embeddings',
+            indexedDocuments: 2,
+            candidateSuggestions: 1,
+            exportableMentions: 1,
+            relationCandidates: 8,
+            nativeResult: {
+                scanId: 'scan-1',
+                processedDocuments: 2,
+                skippedDocuments: 0,
+                stageSummaries: [],
+                lensChunkCounts: {},
+                graphDeltaCounts: { vertices: 3, candidateEdges: 4 },
+                embeddingCounts: { leaf: 5, entity: 6, lens: 7 },
+                relationCandidateCount: 8,
+                candidateSuggestions: [],
+            },
+        })),
     };
 }
 
@@ -459,6 +763,7 @@ function createNoteStoreMock() {
             title: 'Runtime Note',
             content: 'Aella met Kai near the harbor.',
             markdownContent: '',
+            folderId: 'folder-1',
         }),
         openNote: vi.fn(),
     };
@@ -466,7 +771,22 @@ function createNoteStoreMock() {
 
 function createPhoenixUiApiMock() {
     return {
-        loadManifoldAtlasSnapshot: vi.fn(async () => ({ nodes: [], edges: [] })),
+        loadManifoldAtlasSnapshot: vi.fn(async (manifold: 'hybrid' | 'hopf' | 'lorentz') => ({
+            manifold,
+            geometryVersion: `${manifold}_test_v1`,
+            sourceLabel: `${manifold} test snapshot`,
+            capabilities: { ann: true, anchors: true, fibers: manifold === 'hopf', phase: manifold === 'hopf', cones: manifold !== 'hybrid' },
+            payload: {
+                nodes: [{ id: `${manifold}:node` }],
+                edges: [{ id: `${manifold}:edge` }],
+                cells: manifold === 'hopf' ? [{ id: 'cell-1' }] : [],
+                charts: [],
+                coneTraces: manifold === 'hopf' ? [{ id: 'cone-1' }] : [],
+                anchorProjections: manifold === 'hopf' ? [{ id: 'anchor-1' }] : [],
+                lorentzTrees: manifold === 'lorentz' ? [{ treeId: 'identity' }] : [],
+                lorentzMemberships: manifold === 'lorentz' ? [{ treeId: 'identity', nodeId: 'node-1' }] : [],
+            },
+        })),
     };
 }
 

@@ -742,7 +742,7 @@ export class PhoenixUiApiService {
             sourceLabel: isHopf
                 ? 'backend semantic atlas -> hopf adapter'
                 : isLorentz
-                  ? 'backend semantic atlas -> lorentz sidecar fallback'
+                  ? 'backend semantic atlas -> lorentz tree adapter'
                 : payload.sourceLabel,
             capabilities: isHopf
                 ? HOPF_MANIFOLD_CAPABILITIES

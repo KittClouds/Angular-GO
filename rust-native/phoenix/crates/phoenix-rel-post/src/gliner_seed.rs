@@ -1,12 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use gliner::model::input::text::TextInput;
-use gliner::model::params::Parameters;
-use gliner::model::pipeline::span::SpanMode;
-use gliner::model::GLiNER;
-use gliner::text::span::Span;
-use orp::params::RuntimeParameters;
+use crate::gliner_x::{GlinerXModel, GlinerXPrediction};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RelationSeededSpan {
@@ -19,41 +14,13 @@ pub struct RelationSeededSpan {
 }
 
 pub struct RelationMentionSeeder {
-    model: GLiNER<SpanMode>,
+    model: GlinerXModel,
     threshold: f32,
 }
 
-const RELATION_SEED_BATCH_SIZE: usize = 4;
-
 impl RelationMentionSeeder {
     pub fn load(model_root: &Path, threshold: f32) -> Result<Self, String> {
-        let tokenizer_path =
-            find_existing_asset(model_root, &["tokenizer.json", "onnx\\tokenizer.json"])?;
-        let model_path = find_existing_asset(
-            model_root,
-            &[
-                "model_quantized.onnx",
-                "onnx\\model_quantized.onnx",
-                "model.onnx",
-                "onnx\\model.onnx",
-            ],
-        )?;
-        let model = GLiNER::<SpanMode>::new(
-            Parameters::default().with_threshold(threshold),
-            RuntimeParameters::default(),
-            tokenizer_path
-                .to_str()
-                .ok_or_else(|| "gliner tokenizer path contains invalid utf-8".to_owned())?,
-            model_path
-                .to_str()
-                .ok_or_else(|| "gliner model path contains invalid utf-8".to_owned())?,
-        )
-        .map_err(|error| {
-            format!(
-                "failed to load gliner x-small from {}: {error}",
-                model_root.display()
-            )
-        })?;
+        let model = GlinerXModel::load(model_root, threshold).map_err(|error| error.to_string())?;
         Ok(Self { model, threshold })
     }
 
@@ -66,56 +33,54 @@ impl RelationMentionSeeder {
         }
         let labels = relation_seed_labels();
         let mut seeded = Vec::new();
-        for batch in inputs.chunks(RELATION_SEED_BATCH_SIZE) {
-            let texts = batch
-                .iter()
-                .map(|(_, text)| text.as_str())
-                .collect::<Vec<_>>();
-            let output = self
-                .model
-                .inference(TextInput::from_str(&texts, &labels).map_err(|error| error.to_string())?)
-                .map_err(|error| error.to_string())?;
-            for ((input_id, _), sequence) in batch.iter().zip(output.spans.into_iter()) {
-                for span in filter_seed_sequence(sequence, self.threshold) {
-                    seeded.push(RelationSeededSpan {
-                        input_id: input_id.clone(),
-                        surface: span.text().trim().to_owned(),
-                        label: span.class().to_owned(),
-                        probability: span.probability(),
-                        span_start: span.offsets().0,
-                        span_end: span.offsets().1,
-                    });
-                }
+        let texts = inputs
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>();
+        let predictions = self
+            .model
+            .predict_texts(&texts, &labels)
+            .map_err(|error| error.to_string())?;
+        let mut by_sequence = BTreeMap::<usize, Vec<GlinerXPrediction>>::new();
+        for prediction in predictions {
+            by_sequence
+                .entry(prediction.sequence)
+                .or_default()
+                .push(prediction);
+        }
+        for (sequence, spans) in by_sequence {
+            let Some((input_id, _)) = inputs.get(sequence) else {
+                continue;
+            };
+            for span in filter_seed_sequence(spans, self.threshold) {
+                seeded.push(RelationSeededSpan {
+                    input_id: input_id.clone(),
+                    surface: span.text.trim().to_owned(),
+                    label: span.label,
+                    probability: span.score,
+                    span_start: span.span_start,
+                    span_end: span.span_end,
+                });
             }
         }
         Ok(seeded)
     }
 }
 
-fn find_existing_asset(model_root: &Path, candidates: &[&str]) -> Result<PathBuf, String> {
-    for candidate in candidates {
-        let path = model_root.join(candidate);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-    Err(format!(
-        "missing required GLiNER asset under {}",
-        model_root.display()
-    ))
-}
-
 fn relation_seed_labels() -> Vec<&'static str> {
     vec!["person", "organization", "location"]
 }
 
-fn filter_seed_sequence(sequence: Vec<Span>, threshold: f32) -> Vec<Span> {
-    let mut best_by_surface = BTreeMap::<String, Span>::new();
+fn filter_seed_sequence(
+    sequence: Vec<GlinerXPrediction>,
+    threshold: f32,
+) -> Vec<GlinerXPrediction> {
+    let mut best_by_surface = BTreeMap::<String, GlinerXPrediction>::new();
     for span in sequence {
         if !relation_seed_span_allowed(&span, threshold) {
             continue;
         }
-        let key = normalize_surface(span.text());
+        let key = normalize_surface(&span.text);
         match best_by_surface.get(&key) {
             Some(current) if !prefer_seed_span(&span, current) => {}
             _ => {
@@ -126,11 +91,11 @@ fn filter_seed_sequence(sequence: Vec<Span>, threshold: f32) -> Vec<Span> {
     best_by_surface.into_values().collect()
 }
 
-fn relation_seed_span_allowed(span: &Span, threshold: f32) -> bool {
-    if span.probability() < threshold {
+fn relation_seed_span_allowed(span: &GlinerXPrediction, threshold: f32) -> bool {
+    if span.score < threshold {
         return false;
     }
-    let surface = span.text().trim();
+    let surface = span.text.trim();
     if surface.is_empty() || is_structural_surface(surface) || is_generic_relation_surface(surface)
     {
         return false;
@@ -138,29 +103,27 @@ fn relation_seed_span_allowed(span: &Span, threshold: f32) -> bool {
     if !surface.chars().any(|value| value.is_alphabetic()) {
         return false;
     }
-    match span.class() {
+    match span.label.as_str() {
         "person" | "organization" => true,
-        "location" => {
-            surface.split_whitespace().count() >= 2 || span.probability() >= threshold.max(0.8)
-        }
+        "location" => surface.split_whitespace().count() >= 2 || span.score >= threshold.max(0.8),
         _ => false,
     }
 }
 
-fn prefer_seed_span(candidate: &Span, current: &Span) -> bool {
-    let probability_gap = candidate.probability() - current.probability();
+fn prefer_seed_span(candidate: &GlinerXPrediction, current: &GlinerXPrediction) -> bool {
+    let probability_gap = candidate.score - current.score;
     if probability_gap.abs() >= 0.05 {
         return probability_gap > 0.0;
     }
-    let candidate_priority = label_priority(candidate.class());
-    let current_priority = label_priority(current.class());
+    let candidate_priority = label_priority(&candidate.label);
+    let current_priority = label_priority(&current.label);
     if candidate_priority != current_priority {
         return candidate_priority > current_priority;
     }
-    if candidate.text().len() != current.text().len() {
-        return candidate.text().len() > current.text().len();
+    if candidate.text.len() != current.text.len() {
+        return candidate.text.len() > current.text.len();
     }
-    candidate.probability() > current.probability()
+    candidate.score > current.score
 }
 
 fn label_priority(label: &str) -> i32 {
@@ -234,32 +197,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_prefers_root_quantized_model_layout() {
-        let root = unique_test_dir("gliner-seed-assets");
-        std::fs::create_dir_all(root.join("onnx")).expect("create asset tree");
-        std::fs::write(root.join("tokenizer.json"), b"tokenizer").expect("write tokenizer");
-        std::fs::write(root.join("model_quantized.onnx"), b"quantized").expect("write model");
-        std::fs::write(root.join("onnx").join("model.onnx"), b"nested")
-            .expect("write nested model");
-        let resolved = find_existing_asset(
-            &root,
-            &[
-                "model_quantized.onnx",
-                "onnx\\model_quantized.onnx",
-                "model.onnx",
-                "onnx\\model.onnx",
-            ],
-        )
-        .expect("resolve model asset");
-        assert_eq!(resolved, root.join("model_quantized.onnx"));
-        let _ = std::fs::remove_dir_all(root);
+    fn seed_filter_keeps_best_named_surface() {
+        let spans = vec![
+            pred("New Rome", "location", 0.72),
+            pred("New Rome", "organization", 0.71),
+            pred("guard", "person", 0.99),
+        ];
+        let filtered = filter_seed_sequence(spans, 0.55);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].label, "organization");
+        assert_eq!(filtered[0].text, "New Rome");
     }
 
-    fn unique_test_dir(label: &str) -> PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("unix time")
-            .as_nanos();
-        std::env::temp_dir().join(format!("phoenix-rel-post-{label}-{stamp}"))
+    fn pred(text: &str, label: &str, score: f32) -> GlinerXPrediction {
+        GlinerXPrediction {
+            sequence: 0,
+            text: text.to_owned(),
+            label: label.to_owned(),
+            score,
+            span_start: 0,
+            span_end: text.len(),
+        }
     }
 }

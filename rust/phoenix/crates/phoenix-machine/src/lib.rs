@@ -989,6 +989,7 @@ fn native_refinement_mentions(
                 }
             }
             if last > index {
+                let end = trim_possessive_suffix_end(text, token.range.start, end);
                 let range = TextRange {
                     start: token.range.start,
                     end,
@@ -1029,16 +1030,32 @@ fn native_refinement_mentions(
             }
             let range = TextRange {
                 start: token.range.start,
-                end,
+                end: trim_possessive_suffix_end(text, token.range.start, end),
             };
             let surface = safe_text_slice(text, range).to_owned();
+            let inferred_kind =
+                infer_seed_kind(&surface, resolver_seed).or_else(|| infer_heuristic_kind(&surface));
+            let character_context = inferred_kind.is_none()
+                && looks_like_native_character_mention(
+                    text,
+                    range,
+                    tokens,
+                    normalized_tokens,
+                    index,
+                    last,
+                );
+            let type_hint =
+                inferred_kind.or_else(|| character_context.then_some(EntityKind::Character));
+            if type_hint.is_none() {
+                index = last + 1;
+                continue;
+            }
             mentions.push(DetectedMention {
                 range,
                 surface: surface.clone(),
                 normalized: normalize_surface(&surface),
                 mention_kind: DetectedMentionKind::Named,
-                type_hint: infer_seed_kind(&surface, resolver_seed)
-                    .or_else(|| infer_heuristic_kind(&surface)),
+                type_hint,
                 entity_ref: infer_seed_entity_ref(&surface, resolver_seed)
                     .or_else(|| Some(MentionEntityRef::Speculative(normalize_surface(&surface)))),
                 source: DetectedMentionSourceKind::NativeHeuristic,
@@ -1088,8 +1105,132 @@ fn infer_heuristic_kind(surface: &str) -> Option<EntityKind> {
     {
         Some(EntityKind::Organization)
     } else {
-        Some(EntityKind::Character)
+        None
     }
+}
+
+fn looks_like_native_character_mention(
+    text: &str,
+    range: TextRange,
+    tokens: &[TokenSpan],
+    normalized_tokens: &[String],
+    start: usize,
+    end: usize,
+) -> bool {
+    let surface = normalize_surface(safe_text_slice(text, range));
+    if !is_character_candidate_surface(&surface) {
+        return false;
+    }
+    if surface_followed_by_possessive(text, range) {
+        return true;
+    }
+    normalized_tokens
+        .get(end + 1)
+        .is_some_and(|token| person_like_action_token(token))
+        || start
+            .checked_sub(1)
+            .and_then(|ix| normalized_tokens.get(ix))
+            .is_some_and(|token| person_like_action_token(token))
+        || start
+            .checked_sub(2)
+            .and_then(|ix| normalized_tokens.get(ix))
+            .is_some_and(|token| person_like_action_token(token))
+        || tokens
+            .get(start.saturating_sub(1)..=end.min(tokens.len().saturating_sub(1)))
+            .is_some_and(|window| {
+                window
+                    .iter()
+                    .any(|token| matches!(safe_text_slice(text, token.range), "\"" | "'"))
+            })
+}
+
+fn is_character_candidate_surface(normalized: &str) -> bool {
+    let mut count = 0usize;
+    for word in normalized.split_whitespace() {
+        count += 1;
+        if count > 2 || native_capitalized_noise(word) {
+            return false;
+        }
+    }
+    count > 0
+}
+
+fn native_capitalized_noise(value: &str) -> bool {
+    matches!(
+        value,
+        "a" | "an"
+            | "and"
+            | "accepted"
+            | "access"
+            | "accurate"
+            | "again"
+            | "already"
+            | "because"
+            | "boundary"
+            | "but"
+            | "enough"
+            | "interlude"
+            | "problem"
+            | "that"
+            | "the"
+            | "then"
+            | "this"
+    )
+}
+
+fn surface_followed_by_possessive(text: &str, range: TextRange) -> bool {
+    text.get(range.end as usize..).is_some_and(|tail| {
+        tail.starts_with("'s") || tail.as_bytes().starts_with(&[0xE2, 0x80, 0x99, b's'])
+    })
+}
+
+fn trim_possessive_suffix_end(text: &str, start: u32, end: u32) -> u32 {
+    let Some(slice) = text.get(start as usize..end as usize) else {
+        return end;
+    };
+    if slice.ends_with("'s") {
+        end.saturating_sub(2)
+    } else if slice.as_bytes().ends_with(&[0xE2, 0x80, 0x99, b's']) {
+        end.saturating_sub(4)
+    } else {
+        end
+    }
+}
+
+fn person_like_action_token(value: &str) -> bool {
+    matches!(
+        value,
+        "asked"
+            | "answered"
+            | "called"
+            | "crossed"
+            | "disliked"
+            | "followed"
+            | "forced"
+            | "glanced"
+            | "kept"
+            | "laughed"
+            | "looked"
+            | "meet"
+            | "meets"
+            | "met"
+            | "moved"
+            | "muttered"
+            | "replied"
+            | "responded"
+            | "said"
+            | "set"
+            | "sighed"
+            | "smiled"
+            | "stood"
+            | "took"
+            | "turned"
+            | "walked"
+            | "wanted"
+            | "watched"
+            | "went"
+            | "whispered"
+    )
 }
 
 fn mention_source_for_detected(
@@ -1614,4 +1755,69 @@ fn trim_start_offset(text: &str, start: usize, end: usize) -> usize {
 fn trim_end_offset(text: &str, start: usize, end: usize) -> usize {
     let slice = &text[start..end];
     start + slice.trim_end().len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn native_only_compiler() -> SurfaceCompiler {
+        SurfaceCompiler::new(MachineConfig {
+            extraction: MachineExtractionConfig {
+                enable_scirs2_rule_ner: false,
+                enable_scirs2_pattern_ner: false,
+                enable_native_refinement: true,
+            },
+        })
+    }
+
+    #[test]
+    fn native_refinement_does_not_flatten_unknown_caps_to_character() {
+        let text = concat!(
+            "Interlude -- The Problem Already Moved, continued.\n\n",
+            "Accepted access stayed accurate. Already the Boundary shifted. ",
+            "Because accurate notes matter. Kai said nothing. ",
+            "Tempiris's smile widened."
+        );
+        let scan = native_only_compiler().scan_parts(text, &ScopeKey::default(), &[]);
+        let character_surfaces = scan
+            .mentions
+            .iter()
+            .filter(|mention| mention.kind == Some(EntityKind::Character))
+            .map(|mention| normalize_surface(&mention.surface))
+            .collect::<Vec<_>>();
+
+        assert!(character_surfaces.iter().any(|surface| surface == "kai"));
+        assert!(character_surfaces
+            .iter()
+            .any(|surface| surface == "tempiris"));
+        for noisy in [
+            "accepted",
+            "access",
+            "accurate",
+            "already",
+            "because",
+            "boundary",
+            "interlude",
+            "the problem already moved",
+        ] {
+            assert!(
+                !character_surfaces.iter().any(|surface| surface == noisy),
+                "{noisy} should not be typed as a character"
+            );
+        }
+    }
+
+    #[test]
+    fn heuristic_kind_keeps_places_and_groups_but_leaves_unknowns_untyped() {
+        assert_eq!(
+            infer_heuristic_kind("Mistral Harbor"),
+            Some(EntityKind::Location)
+        );
+        assert_eq!(
+            infer_heuristic_kind("Silver Crew"),
+            Some(EntityKind::Organization)
+        );
+        assert_eq!(infer_heuristic_kind("Already"), None);
+    }
 }

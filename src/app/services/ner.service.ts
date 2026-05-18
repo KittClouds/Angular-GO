@@ -83,17 +83,19 @@ const PERSON_LIKE_ACTIONS = [
     'said', 'says', 'asked', 'asks', 'answered', 'answers', 'replied', 'replies',
     'murmured', 'whispered', 'called', 'shouted', 'laughed', 'smiled', 'sighed',
     'huffed', 'glanced', 'looked', 'watched', 'turned', 'lifted', 'rolled',
-    'stood', 'sat', 'walked', 'crossed', 'dragged', 'muttered', 'moved',
-    'held', 'gave', 'took',
+    'stood', 'sat', 'walked', 'crossed', 'dragged', 'muttered', 'moved', 'met', 'meet', 'meets',
+    'held', 'gave', 'took', 'disliked', 'followed', 'forced', 'kept',
+    'responded', 'set', 'wanted', 'went',
 ];
 
 const PHOENIX_DISCOVERY_STOPWORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'above', 'absolute', 'absolutely',
-    'again', 'all', 'almost', 'also', 'any', 'around',
-    'behind', 'better', 'bigger', 'black', 'built', 'but', 'by', 'can',
+    'accepted', 'access', 'accurate', 'again', 'all', 'almost', 'already',
+    'also', 'any', 'around',
+    'because', 'behind', 'better', 'bigger', 'black', 'boundary', 'built', 'but', 'by', 'can',
     'came', 'could', 'did', 'do', 'does', 'down', 'every', 'for', 'from',
-    'get', 'got', 'had', 'has', 'have', 'he', 'her', 'here', 'him', 'his',
-    'i', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
+    'enough', 'get', 'got', 'had', 'has', 'have', 'he', 'her', 'here', 'him', 'his',
+    'i', 'if', 'in', 'interlude', 'into', 'is', 'it', 'its', 'just',
     'many', 'more', 'no', 'not', 'of', 'off', 'on', 'or', 'our', 'out',
     'over', 'really', 'said', 'same', 'she', 'should', 'so', 'some',
     'still', 'that', 'the', 'their', 'them', 'then', 'there', 'these',
@@ -103,9 +105,10 @@ const PHOENIX_DISCOVERY_STOPWORDS = new Set([
 ]);
 
 const COMMON_SENTENCE_STARTERS = new Set([
-    'all', 'air', 'aye', 'before', 'do', 'everyone', 'hearing', 'life',
-    'looks', 'no', 'not', 'only', 'somewhere', 'that', 'then', 'their',
-    'they', 'this', 'when', 'well', 'yes',
+    'accepted', 'access', 'accurate', 'all', 'air', 'already', 'aye',
+    'because', 'before', 'do', 'enough', 'everyone', 'hearing', 'interlude',
+    'life', 'looks', 'no', 'not', 'only', 'somewhere', 'that', 'then',
+    'their', 'they', 'this', 'when', 'well', 'yes',
 ]);
 
 function resolvePhoenixScanKind(candidate: PhoenixDiscoveryCandidate, text: string): string {
@@ -153,6 +156,9 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
     if (kind === 'CHARACTER') {
         return isLikelyCharacterName(label, text);
     }
+    if (kind === 'UNKNOWN') {
+        return isLikelyCharacterName(label, text);
+    }
 
     if (words.length === 1) {
         return /^[\p{Lu}][\p{L}'-]{1,31}$/u.test(label);
@@ -180,8 +186,8 @@ function isLikelyCharacterName(label: string, text: string): boolean {
         return true;
     }
 
-    const mentions = text.match(new RegExp(`\\b${escaped}\\b`, 'gu'))?.length ?? 0;
-    return mentions >= 2;
+    const possessivePattern = new RegExp(`\\b${escaped}\\b(?:'|\\u2019)s\\b`, 'iu');
+    return possessivePattern.test(text);
 }
 
 function escapeRegExp(value: string): string {

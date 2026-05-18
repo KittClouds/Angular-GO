@@ -24,6 +24,7 @@ export interface AtlasScanResult {
     durationMs: number;
     scannedNoteId?: string;
     candidateSuggestions: number;
+    exportableMentions: number;
     indexedDocuments: number;
     relationCandidates: number;
     nativeResult: NativeAtlasRichScanResult;
@@ -129,6 +130,7 @@ export class AtlasScanCoordinatorService {
                 durationMs: Math.round(completedAt - startedAt),
                 scannedNoteId: options.noteIds?.[0] ?? activeNote?.noteId,
                 candidateSuggestions: this.nerService.suggestions().length,
+                exportableMentions: this.nerService.suggestions().length,
                 indexedDocuments: nativeResult.processedDocuments,
                 relationCandidates: nativeResult.relationCandidateCount || 0,
                 nativeResult,

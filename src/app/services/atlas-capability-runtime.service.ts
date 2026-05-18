@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 
 import { parseContentToPlainText } from '../lib/analytics';
 import { db } from '../lib/dexie/db';
@@ -22,6 +22,7 @@ import {
 import { AtlasScanCoordinatorService } from './atlas-scan-coordinator.service';
 import { NerService } from './ner.service';
 import { PhoenixBackendService } from './phoenix-backend.service';
+import { ATLAS_EXPORTABLE_MENTION_STATUSES } from './atlas-capability-runtime.model';
 import {
     PhoenixMachineControlService,
     type PhoenixMachineModelId,
@@ -32,6 +33,10 @@ import type {
     AtlasCapabilityRunPolicy,
     AtlasCapabilityRunResult,
     AtlasCapabilityRuntimeState,
+    AtlasBuildContract,
+    AtlasBuildReceipt,
+    AtlasBuildStageReceipt,
+    AtlasBridgeCommand,
     AtlasBuildScope,
     AtlasExpectedOutput,
     AtlasModelRequirement,
@@ -51,6 +56,7 @@ const NLI_MODEL_ID = 'onnx-community/ModernBERT-base-nli-ONNX';
 const TEXT_GRAPH_CAPABILITIES: AtlasCapabilityId[] = [
     'dynamicSurface',
     'dynamicChunking',
+    'dynamicNer',
     'mentionGraph',
     'evidenceGraph',
     'surfaceGraph',
@@ -67,6 +73,7 @@ const NATIVE_STORE_PROBE_CAPABILITIES: AtlasCapabilityId[] = [
     'temporalGraph',
     'eventIdentity',
     'memoryState',
+    'causalGraph',
 ];
 
 const MANIFOLD_CAPABILITIES: Partial<Record<AtlasCapabilityId, AtlasManifoldMode>> = {
@@ -75,9 +82,23 @@ const MANIFOLD_CAPABILITIES: Partial<Record<AtlasCapabilityId, AtlasManifoldMode
     lorentzForest: 'lorentz',
 };
 
-const NOT_WIRED_REASONING_CAPABILITIES: AtlasCapabilityId[] = [
-    'causalGraph',
+const MANIFOLD_PROJECTION_CAPABILITIES: AtlasCapabilityId[] = [
+    'hybridManifold',
+    'hopfProjection',
+    'lorentzForest',
 ];
+
+const MANIFOLD_PROJECTION_OPERATIONS: AtlasRuntimeOperation[] = [
+    { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'hybrid' },
+    { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'hopf' },
+    { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'lorentz' },
+];
+
+const MANIFOLD_MODE_CAPABILITIES: Record<AtlasManifoldMode, AtlasCapabilityId> = {
+    hybrid: 'hybridManifold',
+    hopf: 'hopfProjection',
+    lorentz: 'lorentzForest',
+};
 
 type NativeStoreProbeConfig = {
     relation: string;
@@ -108,6 +129,12 @@ const NATIVE_STORE_PROBES: Partial<Record<AtlasCapabilityId, NativeStoreProbeCon
         relation: 'memories',
         label: 'Memory/state store probe',
         rowLabel: 'memory row',
+    },
+    causalGraph: {
+        relation: 'graph_edges',
+        filter: { edge_type: 'causal_link' },
+        label: 'Causal graph causal-link edge probe',
+        rowLabel: 'causal edge row',
     },
 };
 
@@ -156,6 +183,9 @@ export class AtlasCapabilityRuntimeService {
     private readonly noteStore = inject(NoteEditorStore);
     private readonly phoenixUiApi = inject(PhoenixUiApiService);
     private readonly phoenix = inject(PhoenixBackendService);
+
+    readonly lastBuildContract = signal<AtlasBuildContract | null>(null);
+    readonly lastBuildReceipt = signal<AtlasBuildReceipt | null>(null);
 
     capabilityState(id: AtlasCapabilityId, options: AtlasRunOptions = {}): AtlasCapabilityRuntimeState {
         const binding = this.capabilityBinding(id, options);
@@ -250,6 +280,42 @@ export class AtlasCapabilityRuntimeService {
         };
     }
 
+    buildRecipeContract(id: AtlasRecipeId, options: AtlasRunOptions = {}): AtlasBuildContract {
+        const plan = this.recipePlan(id, options);
+        const scope = this.contractScope(options);
+        const noteIds = uniqueIds(options.noteIds?.length ? options.noteIds : noteIdsFromBuildScope(scope));
+        const embedding = plan.requiredModels.find((model) => model.id === 'semanticEmbedding');
+        return {
+            contractId: `${id}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
+            recipeId: id,
+            label: plan.label,
+            scope,
+            noteIds,
+            policy: contractPolicy(plan.runPolicy),
+            requiredStages: plan.requiredCapabilities,
+            optionalStages: plan.optionalCapabilities,
+            skippedStages: plan.skippedCapabilities,
+            exportableMentionStatuses: [...ATLAS_EXPORTABLE_MENTION_STATUSES],
+            modelLanes: plan.requiredModels.map((model) => model.laneId),
+            requiredModels: plan.requiredModels,
+            ...(embedding ? {
+                embeddingModel: {
+                    id: embedding.selectedModelId || this.embeddingModelId(options),
+                    label: embedding.selectedModelLabel || this.embeddingModelLabel(options),
+                    dimensionLabel: embedding.dims || this.embeddingDimensionLabel(options),
+                },
+            } : {}),
+            operations: plan.operations,
+            bridgeCommands: plan.operations.map((operation) => bridgeCommandForOperation(operation)),
+            expectedOutputs: plan.expectedOutputs,
+            backendRoute: plan.backendRoute,
+        };
+    }
+
+    recipeBridgeAudit(id: AtlasRecipeId, options: AtlasRunOptions = {}): AtlasBridgeCommand[] {
+        return this.buildRecipeContract(id, options).bridgeCommands;
+    }
+
     async warmRequiredModels(target: RuntimeTarget, options: AtlasRunOptions = {}): Promise<void> {
         for (const model of target.requiredModels) {
             await this.warmModel(model.id, options);
@@ -295,34 +361,68 @@ export class AtlasCapabilityRuntimeService {
     }
 
     async runRecipe(id: AtlasRecipeId, options: AtlasRunOptions = {}): Promise<AtlasRecipeRunResult> {
-        const plan = this.recipePlan(id, options);
-        if (!plan.runnable) {
-            throw new Error(plan.blockedReason || `${plan.label} is not wired.`);
-        }
-        const warmedBeforeRun = !options.skipModelWarm;
-        if (!options.skipModelWarm) {
-            await this.warmRequiredModels(plan, options);
-        }
-
-        const operationResults: AtlasCapabilityRunResult[] = [];
-        for (const operation of plan.operations) {
-            if (operation.kind === 'warmModel' && (options.skipModelWarm || warmedBeforeRun)) continue;
-            const result = await this.executeRecipeOperation(operation, plan, options);
-            if (result) operationResults.push(result);
-        }
-
-        if (id === 'warmFullIndexStack') {
-            this.machine.setNotice(`${this.embeddingModelLabel(options)}, BI small Dynamic NER, and NLI are warm. No graph data was mutated.`);
-        }
+        const contract = this.buildRecipeContract(id, options);
+        const receipt = await this.runAtlasBuild(contract, options);
+        const recipe = atlasRecipeDefinitionById(id);
 
         return {
             recipeId: id,
-            label: plan.label,
-            mutationPolicy: plan.mutationPolicy,
-            runPolicy: plan.runPolicy,
+            label: contract.label,
+            contract,
+            receipt,
+            mutationPolicy: recipe.mutationPolicy,
+            runPolicy: receipt.policy,
             outputProof: this.recipeOutputProof(id),
+            operationResults: receipt.operationResults,
+        };
+    }
+
+    async runAtlasBuild(contract: AtlasBuildContract, options: AtlasRunOptions = {}): Promise<AtlasBuildReceipt> {
+        const plan = this.recipePlan(contract.recipeId, options);
+        if (!plan.runnable) {
+            throw new Error(plan.blockedReason || `${plan.label} is not wired.`);
+        }
+
+        const executionOptions = this.optionsFromContract(contract, options);
+        const startedAt = performance.now();
+        const stageReceipts: AtlasBuildStageReceipt[] = [];
+        const operationResults: AtlasCapabilityRunResult[] = [];
+        const warmedBeforeRun = !executionOptions.skipModelWarm;
+
+        this.lastBuildContract.set(contract);
+        if (!executionOptions.skipModelWarm) {
+            for (const model of contract.requiredModels) {
+                await this.warmModel(model.id, executionOptions);
+                stageReceipts.push(modelWarmReceipt(model));
+            }
+        }
+
+        for (const operation of contract.operations) {
+            if (operation.kind === 'warmModel' && (executionOptions.skipModelWarm || warmedBeforeRun)) {
+                stageReceipts.push(skippedWarmReceipt(operation));
+                continue;
+            }
+            const result = await this.executeBuildOperation(operation, contract, executionOptions);
+            if (!result) continue;
+            operationResults.push(result);
+            stageReceipts.push(stageReceiptFromResult(result, operation));
+        }
+
+        const completedAt = performance.now();
+        const receipt: AtlasBuildReceipt = {
+            contractId: contract.contractId,
+            recipeId: contract.recipeId,
+            label: contract.label,
+            scope: contract.scope,
+            policy: contract.policy,
+            startedAt,
+            completedAt,
+            durationMs: Math.round(completedAt - startedAt),
+            stageReceipts,
             operationResults,
         };
+        this.lastBuildReceipt.set(receipt);
+        return receipt;
     }
 
     modelRequirementLabel(models: AtlasModelRequirement[]): string {
@@ -339,9 +439,9 @@ export class AtlasCapabilityRuntimeService {
         return outputs.length ? outputs.map((output) => output.label).join(' / ') : 'none';
     }
 
-    private async executeRecipeOperation(
+    private async executeBuildOperation(
         operation: AtlasRuntimeOperation,
-        plan: AtlasRecipeExecutionPlan,
+        contract: AtlasBuildContract,
         options: AtlasRunOptions,
     ): Promise<AtlasCapabilityRunResult | null> {
         switch (operation.kind) {
@@ -352,46 +452,47 @@ export class AtlasCapabilityRuntimeService {
                 return null;
             case 'dynamicNerScan': {
                 const rawResult = await this.runDynamicNerScan(options);
-                return this.recipeOperationResult(plan, 'dynamicNer', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'dynamicNer', operation.kind, rawResult);
             }
             case 'richTextGraphScan': {
                 const rawResult = await this.runTextGraphScan(operation.policy === 'force' ? 'force' : 'dirty-only', options);
-                return this.recipeOperationResult(plan, 'assertedKernel', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'assertedKernel', operation.kind, rawResult);
             }
             case 'semanticAtlasScan': {
                 const rawResult = await this.runSemanticAtlasScan(options, operation.policy === 'force' ? 'force' : 'dirty-only');
-                return this.recipeOperationResult(plan, 'semanticAtlas', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'semanticAtlas', operation.kind, rawResult);
             }
             case 'nativeStoreProbe': {
                 const capabilityId = operation.args?.['capabilityId'] as AtlasCapabilityId | undefined;
                 if (!capabilityId) return null;
                 const rawResult = await this.runNativeStoreProbe(capabilityId);
-                return this.recipeOperationResult(plan, capabilityId, operation.kind, rawResult);
+                return this.buildOperationResult(contract, capabilityId, operation.kind, rawResult);
             }
             case 'nliAdjudication': {
                 const rawResult = await this.runNliAdjudication(options);
-                return this.recipeOperationResult(plan, 'nliAdjudication', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'nliAdjudication', operation.kind, rawResult);
             }
             case 'graphVisualization': {
                 const rawResult = this.openGraphVisualization(options);
-                return this.recipeOperationResult(plan, 'galaxyVisualization', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'galaxyVisualization', operation.kind, rawResult);
             }
             case 'manifoldSnapshot': {
-                const rawResult = await this.runManifoldSnapshot(operation.manifold || 'hybrid', options);
-                return this.recipeOperationResult(plan, 'hybridManifold', operation.kind, rawResult);
+                const manifold = operation.manifold || 'hybrid';
+                const rawResult = await this.runManifoldSnapshot(manifold, options);
+                return this.buildOperationResult(contract, capabilityForManifoldMode(manifold), operation.kind, rawResult);
             }
             case 'retrievalWalk': {
                 const rawResult = await this.runRetrievalWalk(options);
-                return this.recipeOperationResult(plan, 'retrievalWalk', operation.kind, rawResult);
+                return this.buildOperationResult(contract, 'retrievalWalk', operation.kind, rawResult);
             }
             case 'nativeReasoningPass':
             case 'notWired':
-                throw new Error(plan.blockedReason || `${plan.label} has no runtime binding.`);
+                throw new Error(`${contract.label} has no runtime binding.`);
         }
     }
 
-    private recipeOperationResult(
-        plan: AtlasRecipeExecutionPlan,
+    private buildOperationResult(
+        contract: AtlasBuildContract,
         capabilityId: AtlasCapabilityId,
         operationKind: AtlasCapabilityOperationKind,
         rawResult: unknown,
@@ -399,9 +500,9 @@ export class AtlasCapabilityRuntimeService {
         return {
             capabilityId,
             operationKind,
-            mutationPolicy: plan.mutationPolicy,
-            runPolicy: plan.runPolicy,
-            outputProof: this.recipeOutputProof(plan.id),
+            mutationPolicy: this.mutationPolicyForCapability(capabilityId, atlasRecipeDefinitionById(contract.recipeId).mutationPolicy),
+            runPolicy: this.runPolicyForCapability(capabilityId),
+            outputProof: this.recipeOutputProof(contract.recipeId),
             rawResult,
         };
     }
@@ -458,7 +559,7 @@ export class AtlasCapabilityRuntimeService {
         }
     }
 
-    private async runDynamicNerScan(options: AtlasRunOptions): Promise<{ suggestions: number; documents: number }> {
+    private async runDynamicNerScan(options: AtlasRunOptions): Promise<{ suggestions: number; documents: number; exportableMentions: number }> {
         const scopeScan = await this.buildScopedNerScanRequest(options);
         if (!scopeScan) {
             throw new Error('Choose an Atlas scope with rendered note text before running Dynamic NER.');
@@ -466,8 +567,8 @@ export class AtlasCapabilityRuntimeService {
         await this.ner.runDynamicScan(scopeScan.request);
         const suggestions = this.ner.suggestions().length;
         const documentLabel = scopeScan.documentCount === 1 ? '1 document' : `${scopeScan.documentCount} documents`;
-        this.machine.setNotice(`Dynamic NER scan complete for ${documentLabel}. ${suggestions} candidate${suggestions === 1 ? '' : 's'} available for review.`);
-        return { suggestions, documents: scopeScan.documentCount };
+        this.machine.setNotice(`Dynamic NER scan complete for ${documentLabel}. ${suggestions} exportable candidate${suggestions === 1 ? '' : 's'} available for review.`);
+        return { suggestions, documents: scopeScan.documentCount, exportableMentions: suggestions };
     }
 
     private runTextGraphScan(policy: 'dirty-only' | 'force', options: AtlasRunOptions): Promise<unknown> {
@@ -494,7 +595,19 @@ export class AtlasCapabilityRuntimeService {
     }
 
     private async runManifoldSnapshot(manifold: AtlasManifoldMode, options: AtlasRunOptions): Promise<unknown> {
-        return this.phoenixUiApi.loadManifoldAtlasSnapshot(manifold, this.searchScope(options));
+        const load = this.machine.beginManifoldLoad(manifold);
+        try {
+            const snapshot = await this.phoenixUiApi.loadManifoldAtlasSnapshot(manifold, this.searchScope(options));
+            if (this.machine.isCurrentManifoldLoad(load)) {
+                this.machine.finishManifoldLoad(load, `${manifoldModeLabel(manifold)} projection ready`, manifoldSnapshotDetails(snapshot));
+            }
+            return snapshot;
+        } catch (error) {
+            if (this.machine.isCurrentManifoldLoad(load)) {
+                this.machine.failManifoldLoad(load, error);
+            }
+            throw error;
+        }
     }
 
     private async runRetrievalWalk(options: AtlasRunOptions): Promise<unknown> {
@@ -690,80 +803,113 @@ export class AtlasCapabilityRuntimeService {
 
     private runtimeRecipeDefinition(id: AtlasRecipeId, options: AtlasRunOptions): AtlasRuntimeRecipeDefinition {
         const dynamicNer = this.dynamicNerRequirement(true);
-        const dynamicNerOptional = this.dynamicNerRequirement(false);
         const semantic = this.semanticEmbeddingRequirement(options, true);
         const nli = this.nliRequirement(true);
         const buildPolicy = options.buildPolicy === 'force' ? 'force' : 'dirty-only';
         const buildMutationPolicy = buildPolicy === 'force' ? 'force rebuild' : 'dirty-only';
-        const addOnOperations = this.graphBuildAddOnOperations(options);
-        const addOnCapabilities = this.graphBuildAddOnCapabilities(options);
+        const semanticCoreCapabilities: AtlasCapabilityId[] = [
+            ...TEXT_GRAPH_CAPABILITIES,
+            'semanticEmbedding',
+            'semanticAtlas',
+            'semanticCandidate',
+        ];
+        const semanticCapabilities: AtlasCapabilityId[] = [
+            ...semanticCoreCapabilities,
+            ...MANIFOLD_PROJECTION_CAPABILITIES,
+        ];
+        const adjudicatedCapabilities: AtlasCapabilityId[] = [
+            ...semanticCapabilities,
+            'nliAdjudication',
+        ];
+        const reasoningCapabilities: AtlasCapabilityId[] = [
+            ...adjudicatedCapabilities,
+            'relationGraph',
+            'eventIdentity',
+            'temporalGraph',
+            'memoryState',
+            'causalGraph',
+        ];
+        const entityAnchorOperations: AtlasRuntimeOperation[] = [
+            warmOperation('dynamicNer'),
+            { kind: 'dynamicNerScan', service: 'NerService.runDynamicScan', policy: 'read-only' },
+        ];
+        const semanticOperations: AtlasRuntimeOperation[] = [
+            ...entityAnchorOperations,
+            warmOperation('semanticEmbedding'),
+            { kind: 'semanticAtlasScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy: buildPolicy },
+            ...MANIFOLD_PROJECTION_OPERATIONS,
+        ];
+        const adjudicationOperations: AtlasRuntimeOperation[] = [
+            ...semanticOperations,
+            warmOperation('nli'),
+            { kind: 'nliAdjudication', service: 'PhoenixBackendService.storeCommand + NliWorkerService.classifyStream', policy: 'native-only' },
+        ];
 
         switch (id) {
             case 'textGraph':
                 return {
                     requiredCapabilities: TEXT_GRAPH_CAPABILITIES,
-                    optionalCapabilities: ['dynamicNer', 'hybridManifold', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...NOT_WIRED_REASONING_CAPABILITIES] as AtlasCapabilityId[],
-                    dependencyChain: [...TEXT_GRAPH_CAPABILITIES, ...addOnCapabilities] as AtlasCapabilityId[],
-                    requiredModels: [],
-                    optionalModels: [dynamicNerOptional],
+                    optionalCapabilities: [] as AtlasCapabilityId[],
+                    skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', 'hybridManifold', 'hopfProjection', 'lorentzForest', 'retrievalWalk', 'galaxyVisualization', 'relationGraph', 'temporalGraph', 'eventIdentity', 'memoryState', 'causalGraph'] as AtlasCapabilityId[],
+                    dependencyChain: TEXT_GRAPH_CAPABILITIES,
+                    requiredModels: [dynamicNer],
+                    optionalModels: [],
                     operations: [
+                        ...entityAnchorOperations,
                         { kind: 'richTextGraphScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy: buildPolicy },
-                        ...addOnOperations,
                     ] as AtlasRuntimeOperation[],
                     expectedOutputs: [
+                        expected('candidateSuggestions', 'entity anchors', 'NerService.suggestions()'),
                         expected('graphDeltaCounts', 'graph delta counts', 'AtlasRichScanResult.graphDeltaCounts'),
                         expected('graphAudit.graphNodes', 'graph nodes', 'PhoenixMachineControlService.graphAudit'),
                         expected('graphAudit.graphEdges', 'graph edges', 'PhoenixMachineControlService.graphAudit'),
                     ],
                     mutationPolicy: buildMutationPolicy as AtlasCapabilityMutationPolicy,
                     runPolicy: buildPolicy as AtlasCapabilityRunPolicy,
-                    backendRoute: `AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=false, policy=${buildPolicy})`,
+                    backendRoute: `NerService.runDynamicScan -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=false, policy=${buildPolicy})`,
                     runnable: true,
-                    skippedLanes: ['semanticEmbedding', 'nli'] as AtlasModelLaneId[],
+                    skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'] as AtlasModelLaneId[],
                 };
             case 'semanticGraph':
                 return {
-                    requiredCapabilities: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas'] as AtlasCapabilityId[],
-                    optionalCapabilities: ['dynamicNer', 'semanticCandidate', 'hybridManifold', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    skippedCapabilities: ['nliAdjudication', ...NOT_WIRED_REASONING_CAPABILITIES] as AtlasCapabilityId[],
-                    dependencyChain: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', ...addOnCapabilities] as AtlasCapabilityId[],
-                    requiredModels: [semantic],
-                    optionalModels: [dynamicNerOptional],
-                    operations: [
-                        warmOperation('semanticEmbedding'),
-                        { kind: 'semanticAtlasScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy: buildPolicy },
-                        ...addOnOperations,
-                    ] as AtlasRuntimeOperation[],
+                    requiredCapabilities: semanticCapabilities,
+                    optionalCapabilities: [] as AtlasCapabilityId[],
+                    skippedCapabilities: ['nliAdjudication', 'relationGraph', 'temporalGraph', 'eventIdentity', 'memoryState', 'causalGraph'] as AtlasCapabilityId[],
+                    dependencyChain: semanticCapabilities,
+                    requiredModels: [dynamicNer, semantic],
+                    optionalModels: [],
+                    operations: semanticOperations,
                     expectedOutputs: [
+                        expected('candidateSuggestions', 'entity anchors', 'NerService.suggestions()'),
                         expected('embeddingCounts', 'leaf/entity/lens vectors', 'AtlasRichScanResult.embeddingCounts'),
-                        expected('graphDeltaCounts', 'semantic graph deltas', 'AtlasRichScanResult.graphDeltaCounts'),
+                        expected('graphDeltaCounts.candidateEdges', 'candidate links', 'AtlasRichScanResult.graphDeltaCounts.candidateEdges'),
                         expected('relationCandidateCount', 'relation candidates', 'AtlasRichScanResult.relationCandidateCount'),
+                        expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
+                        expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
+                        expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
                     ],
                     mutationPolicy: buildMutationPolicy as AtlasCapabilityMutationPolicy,
                     runPolicy: buildPolicy as AtlasCapabilityRunPolicy,
-                    backendRoute: `PhoenixMachineControlService.loadSemanticModel -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true, policy=${buildPolicy})`,
+                    backendRoute: `NerService.runDynamicScan -> PhoenixMachineControlService.loadSemanticModel -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true, policy=${buildPolicy}) -> manifoldSnapshot(hybrid/hopf/lorentz)`,
                     runnable: true,
                     skippedLanes: ['nli'] as AtlasModelLaneId[],
                 };
             case 'adjudicatedSemanticGraph':
                 return {
-                    requiredCapabilities: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication'] as AtlasCapabilityId[],
-                    optionalCapabilities: ['dynamicNer', 'hybridManifold', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    skippedCapabilities: NOT_WIRED_REASONING_CAPABILITIES,
-                    dependencyChain: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...addOnCapabilities] as AtlasCapabilityId[],
-                    requiredModels: [semantic, nli],
-                    optionalModels: [dynamicNerOptional],
-                    operations: [
-                        warmOperation('semanticEmbedding'),
-                        { kind: 'semanticAtlasScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy: buildPolicy },
-                        warmOperation('nli'),
-                        { kind: 'nliAdjudication', service: 'PhoenixBackendService.storeCommand + NliWorkerService.classifyStream', policy: 'native-only' },
-                        ...addOnOperations,
-                    ] as AtlasRuntimeOperation[],
+                    requiredCapabilities: adjudicatedCapabilities,
+                    optionalCapabilities: [] as AtlasCapabilityId[],
+                    skippedCapabilities: ['relationGraph', 'temporalGraph', 'eventIdentity', 'memoryState', 'causalGraph'] as AtlasCapabilityId[],
+                    dependencyChain: adjudicatedCapabilities,
+                    requiredModels: [dynamicNer, semantic, nli],
+                    optionalModels: [],
+                    operations: adjudicationOperations,
                     expectedOutputs: [
+                        expected('candidateSuggestions', 'entity anchors', 'NerService.suggestions()'),
                         expected('embeddingCounts', 'leaf/entity/lens vectors', 'AtlasRichScanResult.embeddingCounts'),
                         expected('relationCandidateCount', 'candidate relations', 'AtlasRichScanResult.relationCandidateCount'),
+                        expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
+                        expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
+                        expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
                         expected('nliJudgments', 'NLI candidate-edge judgments', 'semantic:applyNliJudgments'),
                     ],
                     mutationPolicy: buildMutationPolicy as AtlasCapabilityMutationPolicy,
@@ -772,11 +918,43 @@ export class AtlasCapabilityRuntimeService {
                     runnable: true,
                     skippedLanes: [] as AtlasModelLaneId[],
                 };
+            case 'reasoningGraph':
+                return {
+                    requiredCapabilities: reasoningCapabilities,
+                    optionalCapabilities: [] as AtlasCapabilityId[],
+                    skippedCapabilities: [] as AtlasCapabilityId[],
+                    dependencyChain: reasoningCapabilities,
+                    requiredModels: [dynamicNer, semantic, nli],
+                    optionalModels: [],
+                    operations: [
+                        ...adjudicationOperations,
+                        { kind: 'nativeStoreProbe', service: 'PhoenixBackendService.storeCommand', policy: 'read-only', args: { capabilityId: 'relationGraph' } },
+                        { kind: 'nativeStoreProbe', service: 'PhoenixBackendService.storeCommand', policy: 'read-only', args: { capabilityId: 'eventIdentity' } },
+                        { kind: 'nativeStoreProbe', service: 'PhoenixBackendService.storeCommand', policy: 'read-only', args: { capabilityId: 'temporalGraph' } },
+                        { kind: 'nativeStoreProbe', service: 'PhoenixBackendService.storeCommand', policy: 'read-only', args: { capabilityId: 'memoryState' } },
+                        { kind: 'nativeStoreProbe', service: 'PhoenixBackendService.storeCommand', policy: 'read-only', args: { capabilityId: 'causalGraph' } },
+                    ] as AtlasRuntimeOperation[],
+                    expectedOutputs: [
+                        expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
+                        expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
+                        expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
+                        expected('nliJudgments', 'NLI candidate-edge judgments', 'semantic:applyNliJudgments'),
+                        expected('graph_candidate_edges', 'relation rows', 'relation:list(graph_candidate_edges)'),
+                        expected('graph_edges.active_during', 'temporal rows', 'relation:list(graph_edges, active_during)'),
+                        expected('memories', 'memory rows', 'relation:list(memories)'),
+                        expected('graph_edges.causal_link', 'causal rows', 'relation:list(graph_edges, causal_link)'),
+                    ],
+                    mutationPolicy: 'native-only' as AtlasCapabilityMutationPolicy,
+                    runPolicy: 'native-only' as AtlasCapabilityRunPolicy,
+                    backendRoute: 'Adjudicated semantic graph -> relation/event/temporal/memory/causal native probes',
+                    runnable: true,
+                    skippedLanes: [] as AtlasModelLaneId[],
+                };
             case 'runNer':
                 return {
-                    requiredCapabilities: ['dynamicNer'] as AtlasCapabilityId[],
-                    optionalCapabilities: ['mentionGraph'] as AtlasCapabilityId[],
-                    skippedCapabilities: this.allExcept(['dynamicNer', 'mentionGraph']),
+                    requiredCapabilities: ['dynamicSurface', 'dynamicNer'] as AtlasCapabilityId[],
+                    optionalCapabilities: [] as AtlasCapabilityId[],
+                    skippedCapabilities: this.allExcept(['dynamicSurface', 'dynamicNer']),
                     dependencyChain: ['dynamicSurface', 'dynamicNer'] as AtlasCapabilityId[],
                     requiredModels: [dynamicNer],
                     optionalModels: [],
@@ -791,96 +969,6 @@ export class AtlasCapabilityRuntimeService {
                     runnable: true,
                     skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'] as AtlasModelLaneId[],
                 };
-            case 'fastTextGraph':
-                return textGraphRecipe('dirty-only', [dynamicNerOptional]);
-            case 'fullTextGraph':
-                return textGraphRecipe('force', [dynamicNerOptional]);
-            case 'semanticAtlas':
-                return {
-                    requiredCapabilities: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas'] as AtlasCapabilityId[],
-                    optionalCapabilities: ['dynamicNer', 'semanticCandidate', 'hybridManifold', 'hopfProjection', 'lorentzForest'] as AtlasCapabilityId[],
-                    skippedCapabilities: ['nliAdjudication', ...NOT_WIRED_REASONING_CAPABILITIES] as AtlasCapabilityId[],
-                    dependencyChain: [...TEXT_GRAPH_CAPABILITIES, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate'] as AtlasCapabilityId[],
-                    requiredModels: [semantic],
-                    optionalModels: [dynamicNerOptional],
-                    operations: [
-                        warmOperation('semanticEmbedding'),
-                        { kind: 'semanticAtlasScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy: 'dirty-only' },
-                    ] as AtlasRuntimeOperation[],
-                    expectedOutputs: [
-                        expected('embeddingCounts', 'leaf/entity/lens vectors', 'AtlasRichScanResult.embeddingCounts'),
-                        expected('graphDeltaCounts', 'semantic graph deltas', 'AtlasRichScanResult.graphDeltaCounts'),
-                        expected('relationCandidateCount', 'relation candidates', 'AtlasRichScanResult.relationCandidateCount'),
-                    ],
-                    mutationPolicy: 'dirty-only' as AtlasCapabilityMutationPolicy,
-                    runPolicy: 'dirty-only' as AtlasCapabilityRunPolicy,
-                    backendRoute: 'PhoenixMachineControlService.loadSemanticModel -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true, policy=dirty-only)',
-                    runnable: true,
-                    skippedLanes: ['nli'] as AtlasModelLaneId[],
-                };
-            case 'warmFullIndexStack':
-                return {
-                    requiredCapabilities: ['dynamicNer', 'semanticEmbedding', 'nliAdjudication'] as AtlasCapabilityId[],
-                    optionalCapabilities: ['mentionGraph'] as AtlasCapabilityId[],
-                    skippedCapabilities: ['evidenceGraph', 'surfaceGraph', 'assertedKernel', ...NOT_WIRED_REASONING_CAPABILITIES, 'semanticAtlas', 'semanticCandidate', 'retrievalWalk', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    dependencyChain: ['dynamicNer', 'semanticEmbedding', 'nliAdjudication'] as AtlasCapabilityId[],
-                    requiredModels: [dynamicNer, semantic, nli],
-                    optionalModels: [],
-                    operations: [
-                        warmOperation('dynamicNer'),
-                        warmOperation('semanticEmbedding'),
-                        warmOperation('nli'),
-                    ] as AtlasRuntimeOperation[],
-                    expectedOutputs: [expected('modelReadiness', 'ready model sidecars', 'NerService + native semantic runner + NliWorkerService')],
-                    mutationPolicy: 'model warm' as AtlasCapabilityMutationPolicy,
-                    runPolicy: 'warm-only' as AtlasCapabilityRunPolicy,
-                    backendRoute: 'NerService.warmProvider + PhoenixMachineControlService.loadSemanticModel + NliWorkerService.initialize',
-                    runnable: true,
-                    skippedLanes: ['manifoldProjection'] as AtlasModelLaneId[],
-                };
-            case 'visualizeCurrentGraph':
-                return {
-                    requiredCapabilities: [] as AtlasCapabilityId[],
-                    optionalCapabilities: ['hybridManifold', 'hopfProjection', 'lorentzForest', 'retrievalWalk', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    skippedCapabilities: ['dynamicNer', 'mentionGraph', 'evidenceGraph', 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...NOT_WIRED_REASONING_CAPABILITIES] as AtlasCapabilityId[],
-                    dependencyChain: ['assertedKernel', 'galaxyVisualization'] as AtlasCapabilityId[],
-                    requiredModels: [] as AtlasModelRequirement[],
-                    optionalModels: [] as AtlasModelRequirement[],
-                    operations: [
-                        { kind: 'graphVisualization', service: 'PhoenixMachineControlService.requestGraphFocus + BlueprintHubService.openPage', policy: 'read-only' },
-                    ] as AtlasRuntimeOperation[],
-                    expectedOutputs: [expected('graphFocus', 'current graph snapshot view', 'Blueprint graph tab')],
-                    mutationPolicy: 'read-only' as AtlasCapabilityMutationPolicy,
-                    runPolicy: 'read-only' as AtlasCapabilityRunPolicy,
-                    backendRoute: 'PhoenixMachineControlService.requestGraphFocus + BlueprintHubService.openPage(graph)',
-                    runnable: true,
-                    skippedLanes: ['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli'] as AtlasModelLaneId[],
-                };
-        }
-
-        function textGraphRecipe(policy: 'dirty-only' | 'force', optionalModels: AtlasModelRequirement[]) {
-            return {
-                requiredCapabilities: TEXT_GRAPH_CAPABILITIES,
-                optionalCapabilities: ['dynamicNer'] as AtlasCapabilityId[],
-                skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...NOT_WIRED_REASONING_CAPABILITIES, 'hybridManifold', 'hopfProjection', 'lorentzForest'] as AtlasCapabilityId[],
-                dependencyChain: TEXT_GRAPH_CAPABILITIES,
-                requiredModels: [] as AtlasModelRequirement[],
-                optionalModels,
-                operations: [
-                    { kind: 'richTextGraphScan', service: 'AtlasScanCoordinatorService.runRichEmbeddingScan', policy },
-                ] as AtlasRuntimeOperation[],
-                expectedOutputs: [
-                    expected('stageSummaries.surface', 'surface stage summary', 'AtlasRichScanResult.stageSummaries'),
-                    expected('graphDeltaCounts', 'graph delta counts', 'AtlasRichScanResult.graphDeltaCounts'),
-                    expected('graphAudit.graphNodes', 'graph audit nodes', 'PhoenixMachineControlService.graphAudit'),
-                    expected('graphAudit.graphEdges', 'graph audit edges', 'PhoenixMachineControlService.graphAudit'),
-                ],
-                mutationPolicy: (policy === 'force' ? 'force rebuild' : 'dirty-only') as AtlasCapabilityMutationPolicy,
-                runPolicy: policy as AtlasCapabilityRunPolicy,
-                backendRoute: `AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=false, policy=${policy}) / atlas_rich_scan_json`,
-                runnable: true,
-                skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'] as AtlasModelLaneId[],
-            };
         }
     }
 
@@ -935,8 +1023,10 @@ export class AtlasCapabilityRuntimeService {
                 ];
             case 'modelWarm':
                 return [service('semantic-model', 'Semantic model loader', 'PhoenixMachineControlService.loadSemanticModel', this.embeddingModelLabel(options), true)];
-            case 'manifoldSnapshot':
-                return [service('manifold-snapshot', 'Manifold snapshot', 'PhoenixUiApiService.loadManifoldAtlasSnapshot', 'manifold_snapshot_json', true)];
+            case 'manifoldSnapshot': {
+                const mode = manifoldModeForCapability(id);
+                return [service('manifold-snapshot', `${manifoldModeLabel(mode)} snapshot`, 'PhoenixUiApiService.loadManifoldAtlasSnapshot', `manifold_snapshot_json(${mode})`, true)];
+            }
             case 'graphVisualization':
                 return [service('graph-focus', 'Graph focus', 'PhoenixMachineControlService.requestGraphFocus', 'BlueprintHubService.openPage(graph)', true)];
             case 'retrievalWalk':
@@ -967,14 +1057,11 @@ export class AtlasCapabilityRuntimeService {
         if (id === 'semanticEmbedding') return 'model warm';
         if (id === 'nliAdjudication') return 'native-only';
         if (SEMANTIC_SCAN_CAPABILITIES.includes(id) || TEXT_GRAPH_CAPABILITIES.includes(id)) return 'dirty-only';
-        if (NOT_WIRED_REASONING_CAPABILITIES.includes(id)) return 'native-only';
         return fallback;
     }
 
     private blockedReasonForCapability(id: AtlasCapabilityId): string | undefined {
-        if (NOT_WIRED_REASONING_CAPABILITIES.includes(id)) {
-            return 'Phoenix causal types are present, but no Search Panel runtime operation binding or read-only probe is registered for the causal graph pass yet.';
-        }
+        void id;
         return undefined;
     }
 
@@ -1055,8 +1142,10 @@ export class AtlasCapabilityRuntimeService {
                 return output('NLI candidate-edge judgments', 'semantic:applyNliJudgments', 'classified entailment/contradiction rows applied to native candidate graph', this.nli.isInitialized() ? 'worker ready' : 'worker cold');
             case 'modelWarm':
                 return output('Model readiness', 'PhoenixMachineControlService.vectorStatus', this.machine.vectorStatus(), this.machine.vectorStatus());
-            case 'manifoldSnapshot':
-                return output('Manifold snapshot', 'PhoenixUiApiService.loadManifoldAtlasSnapshot', 'snapshot payload / topology rows', this.machine.manifoldStatus());
+            case 'manifoldSnapshot': {
+                const mode = manifoldModeForCapability(id);
+                return output(`${manifoldModeLabel(mode)} snapshot`, 'PhoenixUiApiService.loadManifoldAtlasSnapshot', `${mode} payload / topology rows`, this.machine.manifoldStatuses()[mode]);
+            }
             case 'graphVisualization':
                 return output('Graph lens focus', 'PhoenixMachineControlService.graphFocus', this.machine.graphFocus() ? 'focus requested' : 'graph tab opens current snapshot', this.machine.graphFocus() ? 'focused' : 'idle');
             case 'retrievalWalk':
@@ -1072,27 +1161,35 @@ export class AtlasCapabilityRuntimeService {
             case 'textGraph':
                 return [this.outputProbeForCapability('assertedKernel', 'richTextGraphScan')];
             case 'semanticGraph':
-                return [this.outputProbeForCapability('semanticAtlas', 'semanticAtlasScan')];
+                return [
+                    this.outputProbeForCapability('semanticAtlas', 'semanticAtlasScan'),
+                    this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
+                ];
             case 'adjudicatedSemanticGraph':
                 return [
                     this.outputProbeForCapability('semanticAtlas', 'semanticAtlasScan'),
+                    this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
                     this.outputProbeForCapability('nliAdjudication', 'nliAdjudication'),
+                ];
+            case 'reasoningGraph':
+                return [
+                    this.outputProbeForCapability('semanticAtlas', 'semanticAtlasScan'),
+                    this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('nliAdjudication', 'nliAdjudication'),
+                    this.outputProbeForCapability('relationGraph', 'nativeStoreProbe'),
+                    this.outputProbeForCapability('eventIdentity', 'nativeStoreProbe'),
+                    this.outputProbeForCapability('temporalGraph', 'nativeStoreProbe'),
+                    this.outputProbeForCapability('memoryState', 'nativeStoreProbe'),
+                    this.outputProbeForCapability('causalGraph', 'nativeStoreProbe'),
                 ];
             case 'runNer':
                 return [this.outputProbeForCapability('dynamicNer', 'dynamicNerScan')];
-            case 'fastTextGraph':
-            case 'fullTextGraph':
-                return [this.outputProbeForCapability('assertedKernel', 'richTextGraphScan')];
-            case 'semanticAtlas':
-                return [this.outputProbeForCapability('semanticAtlas', 'semanticAtlasScan')];
-            case 'warmFullIndexStack':
-                return [
-                    output('Dynamic NER readiness', 'NerService.providerStatuses.dynamic_ner', this.dynamicNerRequirement(true).statusLabel),
-                    output('Embedding readiness', 'PhoenixMachineControlService.vectorStatus', this.semanticEmbeddingRequirement({}, true).statusLabel),
-                    output('NLI readiness', 'NliWorkerService.isInitialized', this.nliRequirement(true).statusLabel),
-                ];
-            case 'visualizeCurrentGraph':
-                return [this.outputProbeForCapability('galaxyVisualization', 'graphVisualization')];
         }
     }
 
@@ -1188,27 +1285,31 @@ export class AtlasCapabilityRuntimeService {
         };
     }
 
-    private graphBuildAddOnOperations(options: AtlasRunOptions): AtlasRuntimeOperation[] {
-        const operations: AtlasRuntimeOperation[] = [];
-        if (options.addOns?.dynamicNer) {
-            operations.push(warmOperation('dynamicNer'));
-            operations.push({ kind: 'dynamicNerScan', service: 'NerService.runDynamicScan', policy: 'read-only' });
-        }
-        if (options.addOns?.manifold) {
-            operations.push({ kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'hybrid' });
-        }
-        if (options.addOns?.visualization) {
-            operations.push({ kind: 'graphVisualization', service: 'PhoenixMachineControlService.requestGraphFocus + BlueprintHubService.openPage', policy: 'read-only' });
-        }
-        return operations;
+    private contractScope(options: AtlasRunOptions): AtlasBuildScope {
+        if (options.buildScope) return options.buildScope;
+        const noteIds = uniqueIds(options.noteIds || []);
+        if (noteIds.length === 1) return { mode: 'note', noteId: noteIds[0] };
+        if (noteIds.length > 1) return { mode: 'multiNote', noteIds };
+        const active = this.activeNerDocument();
+        if (active) return { mode: 'note', noteId: active.id };
+        const scope = options.scope || this.machine.scope();
+        return scope && scope !== 'global'
+            ? { mode: 'folder', folderId: scope }
+            : { mode: 'global' };
     }
 
-    private graphBuildAddOnCapabilities(options: AtlasRunOptions): AtlasCapabilityId[] {
-        const capabilities: AtlasCapabilityId[] = [];
-        if (options.addOns?.dynamicNer) capabilities.push('dynamicNer');
-        if (options.addOns?.manifold) capabilities.push('hybridManifold');
-        if (options.addOns?.visualization) capabilities.push('galaxyVisualization');
-        return capabilities;
+    private optionsFromContract(contract: AtlasBuildContract, options: AtlasRunOptions): AtlasRunOptions {
+        return {
+            ...options,
+            buildScope: contract.scope,
+            noteIds: contract.noteIds,
+            buildPolicy: contract.policy === 'force' ? 'force' : 'dirty-only',
+            ...(contract.embeddingModel ? {
+                selectedModel: contract.embeddingModel.id as PhoenixMachineModelId,
+                selectedModelLabel: contract.embeddingModel.label,
+                dimensionLabel: contract.embeddingModel.dimensionLabel,
+            } : {}),
+        };
     }
 
     private allExcept(kept: AtlasCapabilityId[]): AtlasCapabilityId[] {
@@ -1217,6 +1318,262 @@ export class AtlasCapabilityRuntimeService {
             .flatMap((recipe) => [...recipe.requiredCapabilities, ...recipe.optionalCapabilities, ...recipe.skippedCapabilities])
             .filter((id, index, ids): id is AtlasCapabilityId => !!id && ids.indexOf(id) === index && !keep.has(id));
     }
+}
+
+function contractPolicy(runPolicy: AtlasCapabilityRunPolicy): AtlasBuildContract['policy'] {
+    if (runPolicy === 'force') return 'force';
+    if (runPolicy === 'native-only') return 'native-only';
+    if (runPolicy === 'dirty-only') return 'dirty-only';
+    return 'read-only';
+}
+
+function modelWarmReceipt(model: AtlasModelRequirement): AtlasBuildStageReceipt {
+    const capabilityId = modelCapabilityId(model.id);
+    const bridge = bridgeCommandForModel(model);
+    return {
+        stageId: model.id,
+        ...(capabilityId ? { capabilityId } : {}),
+        operationKind: 'warmModel',
+        frontendService: bridge.frontendService,
+        backendCommand: bridge.backendCommand,
+        backendRoute: bridge.backendRoute,
+        commandKind: bridge.commandKind,
+        status: 'ran',
+        ran: true,
+        source: bridge.frontendService,
+        summary: `${model.label} warm requested`,
+        counts: {},
+    };
+}
+
+function skippedWarmReceipt(operation: AtlasRuntimeOperation): AtlasBuildStageReceipt {
+    const bridge = bridgeCommandForOperation(operation);
+    return {
+        stageId: bridge.stageId,
+        ...(bridge.capabilityId ? { capabilityId: bridge.capabilityId } : {}),
+        operationKind: 'warmModel',
+        frontendService: bridge.frontendService,
+        backendCommand: bridge.backendCommand,
+        backendRoute: bridge.backendRoute,
+        commandKind: bridge.commandKind,
+        status: 'skipped',
+        ran: false,
+        source: bridge.frontendService,
+        summary: 'Model warm was handled before this operation.',
+        counts: {},
+    };
+}
+
+function stageReceiptFromResult(
+    result: AtlasCapabilityRunResult,
+    operation: AtlasRuntimeOperation,
+): AtlasBuildStageReceipt {
+    const counts = receiptCounts(result.rawResult);
+    const bridge = bridgeCommandForOperation(operation, result.capabilityId);
+    return {
+        stageId: result.capabilityId,
+        capabilityId: result.capabilityId,
+        operationKind: result.operationKind,
+        frontendService: bridge.frontendService,
+        backendCommand: bridge.backendCommand,
+        backendRoute: bridge.backendRoute,
+        commandKind: bridge.commandKind,
+        status: 'ran',
+        ran: true,
+        source: bridge.frontendService,
+        summary: receiptSummary(result.capabilityId, counts),
+        counts,
+    };
+}
+
+function bridgeCommandForModel(model: AtlasModelRequirement): AtlasBridgeCommand {
+    const operation = warmOperation(model.id);
+    return bridgeCommandForOperation(operation, modelCapabilityId(model.id));
+}
+
+function bridgeCommandForOperation(
+    operation: AtlasRuntimeOperation,
+    capabilityOverride?: AtlasCapabilityId,
+): AtlasBridgeCommand {
+    const capabilityId = capabilityOverride || operationCapabilityId(operation);
+    const stageId = String(capabilityId || operation.model || operation.kind);
+
+    switch (operation.kind) {
+        case 'dynamicNerScan':
+            return bridge(stageId, capabilityId, operation, 'NerService.runDynamicScan', 'scanDiscovery', 'PhoenixUiApi.scanDiscovery -> PhoenixBackendService.scanDiscovery -> scan_json', 'native');
+        case 'richTextGraphScan':
+            return bridge(stageId, capabilityId, operation, 'AtlasScanCoordinatorService.runRichEmbeddingScan', 'atlasRichScan', `PhoenixUiApi.atlasRichScan(includeSemanticAtlas=false, policy=${operation.policy || 'dirty-only'}) -> atlas_rich_scan_json`, 'native');
+        case 'semanticAtlasScan':
+            return bridge(stageId, capabilityId, operation, 'AtlasScanCoordinatorService.runRichEmbeddingScan', 'atlasRichScan', `PhoenixUiApi.atlasRichScan(includeSemanticAtlas=true, policy=${operation.policy || 'dirty-only'}) -> atlas_rich_scan_json`, 'native');
+        case 'nliAdjudication':
+            return bridge(stageId, capabilityId, operation, 'PhoenixBackendService.storeCommand + NliWorkerService.classifyStream', 'semantic:listNliJudgmentInputs -> semantic:applyNliJudgments', 'native queue -> browser NLI worker -> native apply', 'mixed');
+        case 'nativeStoreProbe': {
+            const config = capabilityId ? NATIVE_STORE_PROBES[capabilityId] : undefined;
+            const route = config
+                ? `PhoenixBackendService.storeCommand('relation:list', relation=${config.relation}${config.filter ? `, filter=${JSON.stringify(config.filter)}` : ''})`
+                : "PhoenixBackendService.storeCommand('relation:list')";
+            return bridge(stageId, capabilityId, operation, 'PhoenixBackendService.storeCommand', 'relation:list', route, 'native');
+        }
+        case 'manifoldSnapshot': {
+            const mode = operation.manifold || manifoldModeForCapability(capabilityId);
+            return bridge(stageId, capabilityId, operation, 'PhoenixUiApiService.loadManifoldAtlasSnapshot', `manifoldSnapshot(${mode})`, `PhoenixBackendService.manifoldSnapshot(manifold=${mode}) -> semantic_atlas_rows adapter`, 'native');
+        }
+        case 'graphVisualization':
+            return bridge(stageId, capabilityId, operation, 'PhoenixMachineControlService.requestGraphFocus', 'none', 'frontend graph lens focus only', 'frontend');
+        case 'retrievalWalk':
+            return bridge(stageId, capabilityId, operation, 'PhoenixMachineControlService.search', 'query', 'PhoenixUiApi.searchScoped -> native query', 'native');
+        case 'warmModel':
+        case 'modelWarm':
+            if (operation.model === 'dynamicNer') {
+                return bridge(stageId, capabilityId, operation, 'NerService.warmProvider(dynamic_ner)', 'none', 'provider readiness only; scanDiscovery runs during Dynamic NER scan', 'frontend');
+            }
+            if (operation.model === 'semanticEmbedding') {
+                return bridge(stageId, capabilityId, operation, 'PhoenixMachineControlService.loadSemanticModel', 'none', 'selects native Rust semantic runner options; atlasRichScan embeds during graph build', 'frontend');
+            }
+            if (operation.model === 'nli') {
+                return bridge(stageId, capabilityId, operation, 'NliWorkerService.initialize', 'none', 'browser ONNX worker warm; native queue/apply run during NLI adjudication', 'worker');
+            }
+            return bridge(stageId, capabilityId, operation, operation.service, 'none', 'warm-only frontend operation', 'frontend');
+        case 'nativeReasoningPass':
+        case 'notWired':
+            return bridge(stageId, capabilityId, operation, operation.service, 'not wired', 'no backend command registered', 'frontend');
+    }
+}
+
+function operationCapabilityId(operation: AtlasRuntimeOperation): AtlasCapabilityId | undefined {
+    if (operation.model) return modelCapabilityId(operation.model);
+    if (operation.kind === 'dynamicNerScan') return 'dynamicNer';
+    if (operation.kind === 'richTextGraphScan') return 'assertedKernel';
+    if (operation.kind === 'semanticAtlasScan') return 'semanticAtlas';
+    if (operation.kind === 'nliAdjudication') return 'nliAdjudication';
+    if (operation.kind === 'manifoldSnapshot') return capabilityForManifoldMode(operation.manifold || 'hybrid');
+    if (operation.kind === 'graphVisualization') return 'galaxyVisualization';
+    if (operation.kind === 'retrievalWalk') return 'retrievalWalk';
+    if (operation.kind === 'nativeStoreProbe') return operation.args?.['capabilityId'] as AtlasCapabilityId | undefined;
+    return undefined;
+}
+
+function capabilityForManifoldMode(mode: AtlasManifoldMode): AtlasCapabilityId {
+    return MANIFOLD_MODE_CAPABILITIES[mode];
+}
+
+function manifoldModeForCapability(id: AtlasCapabilityId | undefined): AtlasManifoldMode {
+    return id ? MANIFOLD_CAPABILITIES[id] || 'hybrid' : 'hybrid';
+}
+
+function manifoldModeLabel(mode: AtlasManifoldMode): string {
+    if (mode === 'hopf') return 'Hopf';
+    if (mode === 'lorentz') return 'Lorentz';
+    return 'Hybrid';
+}
+
+function manifoldSnapshotDetails(snapshot: unknown): Record<string, unknown> {
+    if (!isRecord(snapshot)) return {};
+    const payload = isRecord(snapshot['payload']) ? snapshot['payload'] : snapshot;
+    return {
+        manifold: snapshot['manifold'],
+        geometryVersion: snapshot['geometryVersion'] ?? snapshot['geometry_version'],
+        nodes: Array.isArray(payload['nodes']) ? payload['nodes'].length : 0,
+        edges: Array.isArray(payload['edges']) ? payload['edges'].length : 0,
+        cells: Array.isArray(payload['cells']) ? payload['cells'].length : 0,
+        lorentzTrees: Array.isArray(payload['lorentzTrees']) ? payload['lorentzTrees'].length : 0,
+        lorentzMemberships: Array.isArray(payload['lorentzMemberships']) ? payload['lorentzMemberships'].length : 0,
+        sourceLabel: snapshot['sourceLabel'] ?? snapshot['source_label'],
+    };
+}
+
+function bridge(
+    stageId: string,
+    capabilityId: AtlasCapabilityId | undefined,
+    operation: AtlasRuntimeOperation,
+    frontendService: string,
+    backendCommand: string,
+    backendRoute: string,
+    commandKind: AtlasBridgeCommand['commandKind'],
+): AtlasBridgeCommand {
+    return {
+        stageId,
+        ...(capabilityId ? { capabilityId } : {}),
+        operationKind: operation.kind,
+        frontendService,
+        backendCommand,
+        backendRoute,
+        commandKind,
+    };
+}
+
+function modelCapabilityId(id: AtlasRuntimeModelRequirementId): AtlasCapabilityId | undefined {
+    if (id === 'dynamicNer') return 'dynamicNer';
+    if (id === 'semanticEmbedding') return 'semanticEmbedding';
+    if (id === 'nli') return 'nliAdjudication';
+    return undefined;
+}
+
+function receiptSummary(capabilityId: AtlasCapabilityId, counts: Record<string, number>): string {
+    const label = atlasCapabilityById(capabilityId).label;
+    const entries = Object.entries(counts).filter(([, value]) => Number.isFinite(value));
+    if (!entries.length) return `${label} completed`;
+    return `${label}: ${entries.slice(0, 4).map(([key, value]) => `${key}=${value}`).join(', ')}`;
+}
+
+function receiptCounts(rawResult: unknown): Record<string, number> {
+    const counts: Record<string, number> = {};
+    if (!isRecord(rawResult)) return counts;
+
+    setNumber(counts, 'documents', rawResult['documents']);
+    setNumber(counts, 'suggestions', rawResult['suggestions']);
+    setNumber(counts, 'exportableMentions', rawResult['exportableMentions']);
+    setNumber(counts, 'inputCount', rawResult['inputCount']);
+    setNumber(counts, 'resultCount', rawResult['resultCount']);
+    setNumber(counts, 'rows', rawResult['count']);
+    if (rawResult['opened'] === true) counts['opened'] = 1;
+
+    const manifoldPayload = isRecord(rawResult['payload']) ? rawResult['payload'] : rawResult;
+    setArrayLength(counts, 'manifold.nodes', manifoldPayload['nodes']);
+    setArrayLength(counts, 'manifold.edges', manifoldPayload['edges']);
+    setArrayLength(counts, 'manifold.cells', manifoldPayload['cells']);
+    setArrayLength(counts, 'manifold.charts', manifoldPayload['charts']);
+    setArrayLength(counts, 'manifold.coneTraces', manifoldPayload['coneTraces']);
+    setArrayLength(counts, 'manifold.anchorProjections', manifoldPayload['anchorProjections']);
+    setArrayLength(counts, 'manifold.lorentzTrees', manifoldPayload['lorentzTrees']);
+    setArrayLength(counts, 'manifold.lorentzMemberships', manifoldPayload['lorentzMemberships']);
+
+    setNumber(counts, 'indexedDocuments', rawResult['indexedDocuments']);
+    setNumber(counts, 'candidateSuggestions', rawResult['candidateSuggestions']);
+    setNumber(counts, 'relationCandidates', rawResult['relationCandidates']);
+
+    const nativeResult = rawResult['nativeResult'];
+    if (isRecord(nativeResult)) {
+        setNumber(counts, 'processedDocuments', nativeResult['processedDocuments']);
+        setNumber(counts, 'skippedDocuments', nativeResult['skippedDocuments']);
+        setNumber(counts, 'relationCandidateCount', nativeResult['relationCandidateCount']);
+        copyCountRecord(counts, 'graph', nativeResult['graphDeltaCounts']);
+        copyCountRecord(counts, 'embedding', nativeResult['embeddingCounts']);
+    }
+    return counts;
+}
+
+function copyCountRecord(target: Record<string, number>, prefix: string, value: unknown): void {
+    if (!isRecord(value)) return;
+    for (const [key, count] of Object.entries(value)) {
+        setNumber(target, `${prefix}.${key}`, count);
+    }
+}
+
+function setArrayLength(target: Record<string, number>, key: string, value: unknown): void {
+    if (Array.isArray(value)) {
+        target[key] = value.length;
+    }
+}
+
+function setNumber(target: Record<string, number>, key: string, value: unknown): void {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        target[key] = value;
+    }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object';
 }
 
 function warmOperation(model: AtlasRuntimeModelRequirementId): AtlasRuntimeOperation {

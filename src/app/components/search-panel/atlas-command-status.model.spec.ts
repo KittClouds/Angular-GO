@@ -155,7 +155,8 @@ describe('atlas command status model', () => {
             'nliAdjudication',
             'lorentzForest',
         ]);
-        expect(status.sleepingCapabilities.find((capability) => capability.id === 'temporalGraph')?.status).toBe('sleeping');
+        expect(status.sleepingCapabilities.find((capability) => capability.id === 'temporalGraph')?.status).toBe('idle');
+        expect(status.sleepingCapabilities.find((capability) => capability.id === 'causalGraph')?.detail).toContain('read-only native store probe');
         expect(status.sleepingCapabilities.find((capability) => capability.id === 'relationGraph')?.status).toBe('ready');
         expect(status.sleepingCapabilities.find((capability) => capability.id === 'semanticCandidate')?.status).toBe('ready');
     });

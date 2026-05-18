@@ -8,6 +8,7 @@ use compact_str::CompactString;
 use memchr::memmem;
 use phoenix_alex::normalize_raw;
 use phoenix_types::{MentionEntityRef, PosTag, SentenceSpan, TextRange, TokenClass, TokenSpan};
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::known_lane::locate_sentence;
@@ -29,6 +30,27 @@ pub struct NativeCandidate {
 /// The native discovery scanner.
 pub struct NativeDiscoveryLane;
 
+#[derive(Clone, Copy, Debug, Default)]
+struct CapSurfaceStats {
+    total: u16,
+    mid_sentence: u16,
+}
+
+impl CapSurfaceStats {
+    #[inline]
+    fn bump(&mut self, sentence_initial: bool) {
+        self.total = self.total.saturating_add(1);
+        if !sentence_initial {
+            self.mid_sentence = self.mid_sentence.saturating_add(1);
+        }
+    }
+
+    #[inline]
+    fn has_mid_sentence(self) -> bool {
+        self.mid_sentence > 0
+    }
+}
+
 impl NativeDiscoveryLane {
     /// Run the full native discovery pass over tokenized text.
     pub fn discover(
@@ -39,6 +61,9 @@ impl NativeDiscoveryLane {
         id_base: u64,
     ) -> Vec<NativeCandidate> {
         let mut candidates = Vec::new();
+        let protected_ranges = markdown_protected_ranges(text);
+        let cap_surface_stats =
+            collect_cap_surface_stats(text, tokens, sentences, known_ranges, &protected_ranges);
         let mut next_id = id_base;
         let mut idx = 0usize;
 
@@ -46,7 +71,9 @@ impl NativeDiscoveryLane {
             let token = &tokens[idx];
 
             // Skip tokens already covered by known-lane matches.
-            if range_overlaps_any(token.range, known_ranges) {
+            if range_overlaps_any(token.range, known_ranges)
+                || range_overlaps_any(token.range, &protected_ranges)
+            {
                 idx += 1;
                 continue;
             }
@@ -83,6 +110,10 @@ impl NativeDiscoveryLane {
             // --- Title + name pattern ---
             if is_title_token(token_text) {
                 if let Some((end_idx, range)) = extend_title_span(text, tokens, idx) {
+                    if range_overlaps_any(range, &protected_ranges) {
+                        idx = end_idx + 1;
+                        continue;
+                    }
                     let surface = safe_slice(text, range);
                     candidates.push(NativeCandidate {
                         mention_id: LocalMentionId(next_id),
@@ -115,26 +146,46 @@ impl NativeDiscoveryLane {
             if token.capitalized && matches!(token.token_class, Some(TokenClass::Word)) {
                 let (end_idx, range) = extend_cap_span(text, tokens, idx);
                 let surface = safe_slice(text, range);
-                if !surface.is_empty() {
+                let normalized = CompactString::from(normalize_raw(surface));
+                let stats = cap_surface_stats
+                    .get(&normalized)
+                    .copied()
+                    .unwrap_or_default();
+                if !surface.is_empty()
+                    && !range_overlaps_any(range, &protected_ranges)
+                    && should_keep_cap_span(
+                        surface,
+                        is_sentence_initial_range(text, range, sentences),
+                        stats,
+                    )
+                {
+                    let mut votes = SmallVec::new();
+                    votes.push(MentionVote {
+                        source: MentionSourceKind::NativeDiscovery,
+                        label: None,
+                        entity_ref: None,
+                        confidence: 0.78,
+                        reason: VoteReason::CapSpan,
+                    });
+                    if stats.total > 1 {
+                        votes.push(MentionVote {
+                            source: MentionSourceKind::NativeDiscovery,
+                            label: None,
+                            entity_ref: None,
+                            confidence: (0.55 + f32::from(stats.total.min(5)) * 0.05).min(0.80),
+                            reason: VoteReason::RepeatedSurface,
+                        });
+                    }
                     candidates.push(NativeCandidate {
                         mention_id: LocalMentionId(next_id),
                         range,
                         surface: CompactString::from(surface),
-                        normalized: CompactString::from(normalize_raw(surface)),
+                        normalized,
                         mention_kind: MentionKind::Named,
                         entity_ref: Some(MentionEntityRef::Speculative(
                             normalize_raw(surface).to_string(),
                         )),
-                        votes: SmallVec::from_elem(
-                            MentionVote {
-                                source: MentionSourceKind::NativeDiscovery,
-                                label: None,
-                                entity_ref: None,
-                                confidence: 0.78,
-                                reason: VoteReason::CapSpan,
-                            },
-                            1,
-                        ),
+                        votes,
                         sentence_index: sent_idx,
                     });
                     next_id += 1;
@@ -210,10 +261,31 @@ fn extend_title_span(text: &str, tokens: &[TokenSpan], start: usize) -> Option<(
     let mut last = start;
     let mut end = tokens[start].range.end;
     while let Some(next) = tokens.get(last + 1) {
+        let clean_gap = if last == start {
+            gap_allows_title_join(text, end, next.range.start)
+        } else {
+            gap_allows_entity_join(text, end, next.range.start)
+        };
+        if !clean_gap {
+            break;
+        }
         let next_text = safe_slice(text, next.range);
-        if looks_like_entity_token(next_text) || is_connective(next_text) {
+        if looks_like_entity_token(next_text) {
             end = next.range.end;
             last += 1;
+        } else if is_connective(next_text) {
+            let Some(after) = tokens.get(last + 2) else {
+                break;
+            };
+            if !gap_allows_entity_join(text, next.range.end, after.range.start) {
+                break;
+            }
+            if looks_like_entity_token(safe_slice(text, after.range)) {
+                end = after.range.end;
+                last += 2;
+            } else {
+                break;
+            }
         } else {
             break;
         }
@@ -235,12 +307,26 @@ fn extend_cap_span(text: &str, tokens: &[TokenSpan], start: usize) -> (usize, Te
     let mut last = start;
     let mut end = tokens[start].range.end;
     while let Some(next) = tokens.get(last + 1) {
+        if !gap_allows_entity_join(text, end, next.range.start) {
+            break;
+        }
         let next_text = safe_slice(text, next.range);
-        if (next.capitalized && matches!(next.token_class, Some(TokenClass::Word)))
-            || is_connective(next_text)
-        {
+        if next.capitalized && matches!(next.token_class, Some(TokenClass::Word)) {
             end = next.range.end;
             last += 1;
+        } else if is_connective(next_text) {
+            let Some(after) = tokens.get(last + 2) else {
+                break;
+            };
+            if !gap_allows_entity_join(text, next.range.end, after.range.start) {
+                break;
+            }
+            if after.capitalized && matches!(after.token_class, Some(TokenClass::Word)) {
+                end = after.range.end;
+                last += 2;
+            } else {
+                break;
+            }
         } else {
             break;
         }
@@ -324,6 +410,474 @@ fn looks_like_entity_token(value: &str) -> bool {
         && value.chars().any(|ch| ch.is_alphabetic())
 }
 
+fn should_keep_cap_span(surface: &str, sentence_initial: bool, stats: CapSurfaceStats) -> bool {
+    let cleaned = surface.trim_matches(|ch: char| {
+        !(ch.is_alphanumeric()
+            || ch == '-'
+            || ch == '\''
+            || ch == '\u{2019}'
+            || ch == '&'
+            || ch.is_whitespace())
+    });
+    if cleaned.len() < 2 {
+        return false;
+    }
+    if cleaned.contains('_') || cleaned.contains('/') || cleaned.contains('\\') {
+        return false;
+    }
+    if has_span_boundary_noise(cleaned) {
+        return false;
+    }
+
+    let mut word_count = 0usize;
+    let mut doc_word_count = 0usize;
+    let mut first_word = "";
+    for word in cleaned.split_whitespace() {
+        if word_count == 0 {
+            first_word = word;
+        }
+        word_count += 1;
+        if is_doc_control_word(word) {
+            doc_word_count += 1;
+        }
+    }
+    if word_count == 0 {
+        return false;
+    }
+    if is_common_sentence_starter(first_word) || is_native_single_word_noise(first_word) {
+        return false;
+    }
+    if sentence_initial && !stats.has_mid_sentence() {
+        return false;
+    }
+    if word_count == 1 {
+        if is_all_caps_acronym(first_word) || is_doc_control_word(first_word) {
+            return false;
+        }
+        return true;
+    }
+    if word_count > 4 && doc_word_count * 2 >= word_count {
+        return false;
+    }
+    doc_word_count < word_count
+}
+
+fn collect_cap_surface_stats(
+    text: &str,
+    tokens: &[TokenSpan],
+    sentences: &[SentenceSpan],
+    known_ranges: &[TextRange],
+    protected_ranges: &[TextRange],
+) -> FxHashMap<CompactString, CapSurfaceStats> {
+    let mut stats = FxHashMap::<CompactString, CapSurfaceStats>::default();
+    let mut idx = 0usize;
+    while idx < tokens.len() {
+        let token = &tokens[idx];
+        if !token.capitalized
+            || !matches!(token.token_class, Some(TokenClass::Word))
+            || range_overlaps_any(token.range, known_ranges)
+            || range_overlaps_any(token.range, protected_ranges)
+        {
+            idx += 1;
+            continue;
+        }
+
+        let (end_idx, range) = extend_cap_span(text, tokens, idx);
+        if !range_overlaps_any(range, protected_ranges) {
+            let surface = safe_slice(text, range);
+            if !surface.is_empty() && !has_span_boundary_noise(surface) {
+                let normalized = CompactString::from(normalize_raw(surface));
+                stats
+                    .entry(normalized)
+                    .or_default()
+                    .bump(is_sentence_initial_range(text, range, sentences));
+            }
+        }
+        idx = end_idx + 1;
+    }
+    stats
+}
+
+fn gap_allows_entity_join(text: &str, left_end: u32, right_start: u32) -> bool {
+    if right_start < left_end {
+        return false;
+    }
+    let Some(gap) = text.get(left_end as usize..right_start as usize) else {
+        return false;
+    };
+    !gap.is_empty() && gap.chars().all(char::is_whitespace)
+}
+
+fn gap_allows_title_join(text: &str, left_end: u32, right_start: u32) -> bool {
+    if right_start < left_end {
+        return false;
+    }
+    let Some(gap) = text.get(left_end as usize..right_start as usize) else {
+        return false;
+    };
+    !gap.is_empty()
+        && gap.chars().all(|ch| ch.is_whitespace() || ch == '.')
+        && gap.chars().any(char::is_whitespace)
+}
+
+fn is_sentence_initial_range(text: &str, range: TextRange, sentences: &[SentenceSpan]) -> bool {
+    let sentence_index = locate_sentence(sentences, range);
+    let Some(sentence) = sentences.get(sentence_index as usize) else {
+        return false;
+    };
+    let prefix = safe_slice(
+        text,
+        TextRange {
+            start: sentence.range.start,
+            end: range.start,
+        },
+    );
+    !prefix.chars().any(|ch| ch.is_alphanumeric())
+}
+
+fn has_span_boundary_noise(surface: &str) -> bool {
+    surface.chars().any(|ch| {
+        matches!(
+            ch,
+            '\n' | '\r' | ',' | '.' | ';' | ':' | '!' | '?' | '"' | '\u{201c}' | '\u{201d}'
+        )
+    })
+}
+
+fn is_native_single_word_noise(value: &str) -> bool {
+    matches!(
+        value
+            .trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '\'')
+            .to_ascii_lowercase()
+            .as_str(),
+        "i" | "i'm"
+            | "i've"
+            | "he"
+            | "she"
+            | "her"
+            | "him"
+            | "his"
+            | "they"
+            | "them"
+            | "we"
+            | "you"
+            | "your"
+            | "me"
+            | "my"
+            | "our"
+            | "their"
+            | "ah"
+            | "aha"
+            | "aww"
+            | "eh"
+            | "hey"
+            | "hello"
+            | "hi"
+            | "mmm"
+            | "nope"
+            | "nah"
+            | "italian"
+            | "french"
+            | "english"
+            | "arabic"
+            | "turkish"
+            | "latin"
+            | "korean"
+            | "japanese"
+            | "chinese"
+            | "greek"
+            | "roman"
+            | "german"
+            | "spanish"
+            | "black"
+            | "blue"
+            | "green"
+            | "orange"
+            | "red"
+            | "violet"
+            | "white"
+            | "yellow"
+    )
+}
+
+fn is_common_sentence_starter(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "a" | "an"
+            | "about"
+            | "according"
+            | "actually"
+            | "after"
+            | "all"
+            | "already"
+            | "alright"
+            | "also"
+            | "although"
+            | "always"
+            | "among"
+            | "and"
+            | "the"
+            | "this"
+            | "that"
+            | "these"
+            | "those"
+            | "it"
+            | "if"
+            | "are"
+            | "as"
+            | "at"
+            | "because"
+            | "before"
+            | "both"
+            | "but"
+            | "by"
+            | "can"
+            | "come"
+            | "could"
+            | "did"
+            | "does"
+            | "driving"
+            | "especially"
+            | "even"
+            | "everyone"
+            | "finally"
+            | "good"
+            | "have"
+            | "having"
+            | "here"
+            | "how"
+            | "however"
+            | "in"
+            | "instead"
+            | "is"
+            | "just"
+            | "last"
+            | "like"
+            | "look"
+            | "made"
+            | "man"
+            | "may"
+            | "maybe"
+            | "neither"
+            | "never"
+            | "nobody"
+            | "not"
+            | "nothing"
+            | "now"
+            | "of"
+            | "oh"
+            | "okay"
+            | "one"
+            | "or"
+            | "probably"
+            | "since"
+            | "so"
+            | "some"
+            | "someone"
+            | "sorry"
+            | "still"
+            | "sure"
+            | "thankfully"
+            | "there"
+            | "though"
+            | "three"
+            | "to"
+            | "too"
+            | "unfortunately"
+            | "very"
+            | "wait"
+            | "well"
+            | "what"
+            | "whatever"
+            | "when"
+            | "where"
+            | "while"
+            | "who"
+            | "why"
+            | "with"
+            | "without"
+            | "yeah"
+            | "yes"
+            | "yet"
+            | "for"
+            | "each"
+            | "every"
+            | "once"
+            | "then"
+            | "no"
+            | "do"
+            | "use"
+            | "run"
+            | "allow"
+            | "require"
+            | "expected"
+            | "missing"
+            | "failure"
+            | "purpose"
+            | "test"
+            | "add"
+            | "compare"
+            | "generate"
+    )
+}
+
+fn is_doc_control_word(value: &str) -> bool {
+    matches!(
+        value
+            .trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '-')
+            .to_ascii_lowercase()
+            .as_str(),
+        "assertion"
+            | "assertions"
+            | "baseline"
+            | "benchmark"
+            | "boundary-cell"
+            | "chart"
+            | "charts"
+            | "chunk"
+            | "chunking"
+            | "cli"
+            | "command"
+            | "cone"
+            | "cones"
+            | "coverage"
+            | "decision"
+            | "determinism"
+            | "embedding"
+            | "embeddings"
+            | "expected"
+            | "fail"
+            | "gate"
+            | "gates"
+            | "geometry"
+            | "hash"
+            | "hashes"
+            | "ids"
+            | "manifold"
+            | "metric"
+            | "metrics"
+            | "output"
+            | "pass"
+            | "performance"
+            | "phase"
+            | "plan"
+            | "projection"
+            | "regression"
+            | "report"
+            | "reports"
+            | "rss"
+            | "seam"
+            | "seams"
+            | "smoke"
+            | "test"
+            | "topology"
+            | "trace"
+            | "traces"
+            | "vector"
+            | "vectors"
+            | "warning"
+            | "warnings"
+    )
+}
+
+fn is_all_caps_acronym(value: &str) -> bool {
+    let mut alpha_count = 0usize;
+    let mut has_lower = false;
+    for ch in value.chars().filter(|ch| ch.is_alphabetic()) {
+        alpha_count += 1;
+        if ch.is_lowercase() {
+            has_lower = true;
+        }
+    }
+    (2..=8).contains(&alpha_count) && !has_lower
+}
+
+fn markdown_protected_ranges(text: &str) -> Vec<TextRange> {
+    let mut ranges = Vec::new();
+    let mut offset = 0usize;
+    let mut fence_start: Option<usize> = None;
+
+    for line in text.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = offset + line.len();
+        let line_no_newline = line.trim_end_matches(|ch| ch == '\r' || ch == '\n');
+        let trimmed = line_no_newline.trim_start();
+        let is_fence = trimmed.starts_with("```");
+
+        if let Some(start) = fence_start {
+            if is_fence {
+                push_protected_range(&mut ranges, start, line_end);
+                fence_start = None;
+            }
+            offset = line_end;
+            continue;
+        }
+
+        if is_fence {
+            fence_start = Some(line_start);
+            offset = line_end;
+            continue;
+        }
+
+        if is_markdown_heading(trimmed) || is_markdown_label_line(trimmed) {
+            push_protected_range(&mut ranges, line_start, line_end);
+        } else {
+            add_inline_code_ranges(&mut ranges, line, line_start);
+        }
+
+        offset = line_end;
+    }
+
+    if let Some(start) = fence_start {
+        push_protected_range(&mut ranges, start, text.len());
+    }
+
+    ranges
+}
+
+fn is_markdown_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    hashes > 0 && hashes <= 6 && trimmed.as_bytes().get(hashes) == Some(&b' ')
+}
+
+fn is_markdown_label_line(trimmed: &str) -> bool {
+    if trimmed.len() > 80 || !trimmed.ends_with(':') || trimmed.contains('.') {
+        return false;
+    }
+    trimmed.chars().any(|ch| ch.is_alphabetic())
+        && !trimmed.starts_with('-')
+        && !trimmed.starts_with('*')
+}
+
+fn add_inline_code_ranges(ranges: &mut Vec<TextRange>, line: &str, line_start: usize) {
+    let bytes = line.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] != b'`' {
+            idx += 1;
+            continue;
+        }
+        let start = idx;
+        idx += 1;
+        while idx < bytes.len() && bytes[idx] != b'`' {
+            idx += 1;
+        }
+        if idx < bytes.len() {
+            push_protected_range(ranges, line_start + start, line_start + idx + 1);
+            idx += 1;
+        }
+    }
+}
+
+fn push_protected_range(ranges: &mut Vec<TextRange>, start: usize, end: usize) {
+    if start < end {
+        ranges.push(TextRange {
+            start: start as u32,
+            end: end as u32,
+        });
+    }
+}
+
 fn range_overlaps_any(r: TextRange, ranges: &[TextRange]) -> bool {
     ranges
         .iter()
@@ -369,6 +923,61 @@ mod tests {
     }
 
     #[test]
+    fn markdown_ranges_protect_headings_code_and_inline_code() {
+        let text = "# CLI Shape\nUse `novel_full` now.\n```text\nPASS\n```\nAella waited.";
+        let protected = markdown_protected_ranges(text);
+        let heading = TextRange { start: 2, end: 5 };
+        let inline = TextRange { start: 17, end: 27 };
+        let fenced = TextRange { start: 43, end: 47 };
+        let prose = TextRange { start: 52, end: 57 };
+        assert!(range_overlaps_any(heading, &protected));
+        assert!(range_overlaps_any(inline, &protected));
+        assert!(range_overlaps_any(fenced, &protected));
+        assert!(!range_overlaps_any(prose, &protected));
+    }
+
+    #[test]
+    fn cap_span_guard_keeps_names_not_doc_terms() {
+        let mid = CapSurfaceStats {
+            total: 2,
+            mid_sentence: 1,
+        };
+        assert!(should_keep_cap_span("Aella", false, mid));
+        assert!(should_keep_cap_span("New Rome", false, mid));
+        assert!(!should_keep_cap_span(
+            "Aella",
+            true,
+            CapSurfaceStats::default()
+        ));
+        assert!(!should_keep_cap_span("CLI", false, mid));
+        assert!(!should_keep_cap_span("The", false, mid));
+        assert!(!should_keep_cap_span("Actually, I", false, mid));
+        assert!(!should_keep_cap_span("Projection Assertions", false, mid));
+        assert!(!should_keep_cap_span(
+            "novel_full_manifold_smoke_v1",
+            false,
+            mid
+        ));
+    }
+
+    #[test]
+    fn cap_span_extension_stops_at_punctuation() {
+        let text = "A-bomb. As Ryan reached New Rome.";
+        let tokens = test_tokens(text);
+
+        let (first_end, first_range) = extend_cap_span(text, &tokens, 0);
+        assert_eq!(first_end, 0);
+        assert_eq!(safe_slice(text, first_range), "A-bomb");
+
+        let new_index = tokens
+            .iter()
+            .position(|token| safe_slice(text, token.range) == "New")
+            .unwrap();
+        let (_, new_range) = extend_cap_span(text, &tokens, new_index);
+        assert_eq!(safe_slice(text, new_range), "New Rome");
+    }
+
+    #[test]
     fn dialogue_cue_detection() {
         let span = SentenceSpan {
             index: 0,
@@ -394,5 +1003,39 @@ mod tests {
         assert!(range_overlaps_any(r, &others));
         let others2 = [TextRange { start: 10, end: 15 }];
         assert!(!range_overlaps_any(r, &others2));
+    }
+
+    fn test_tokens(text: &str) -> Vec<TokenSpan> {
+        let mut tokens = Vec::new();
+        let mut start = None;
+        for (idx, ch) in text.char_indices() {
+            if ch.is_alphanumeric() || ch == '\'' || ch == '-' {
+                start.get_or_insert(idx);
+            } else if let Some(token_start) = start.take() {
+                tokens.push(TokenSpan {
+                    range: TextRange {
+                        start: token_start as u32,
+                        end: idx as u32,
+                    },
+                    capitalized: text[token_start..].starts_with(char::is_uppercase),
+                    pos: None,
+                    token_class: Some(TokenClass::Word),
+                    masked: false,
+                });
+            }
+        }
+        if let Some(token_start) = start {
+            tokens.push(TokenSpan {
+                range: TextRange {
+                    start: token_start as u32,
+                    end: text.len() as u32,
+                },
+                capitalized: text[token_start..].starts_with(char::is_uppercase),
+                pos: None,
+                token_class: Some(TokenClass::Word),
+                masked: false,
+            });
+        }
+        tokens
     }
 }

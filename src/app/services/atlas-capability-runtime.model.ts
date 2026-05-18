@@ -35,12 +35,6 @@ export type AtlasBuildScope =
     | { mode: 'note'; noteId: string }
     | { mode: 'multiNote'; noteIds: string[] };
 
-export interface AtlasBuildAddOns {
-    dynamicNer?: boolean;
-    manifold?: boolean;
-    visualization?: boolean;
-}
-
 export type AtlasCapabilityRuntimeStatus =
     | 'idle'
     | 'warming'
@@ -163,10 +157,78 @@ export interface AtlasRunOptions {
     scope?: 'global' | string;
     buildScope?: AtlasBuildScope;
     buildPolicy?: 'dirty-only' | 'force';
-    addOns?: AtlasBuildAddOns;
     query?: string;
     noteIds?: string[];
     skipModelWarm?: boolean;
+}
+
+export type AtlasBuildReceiptStatus = 'ran' | 'skipped' | 'error';
+export type AtlasBridgeCommandKind = 'frontend' | 'worker' | 'native' | 'mixed';
+export const ATLAS_EXPORTABLE_MENTION_STATUSES = ['AcceptedKnown', 'AcceptedNew', 'AliasCandidate'] as const;
+export type AtlasExportableMentionStatus = typeof ATLAS_EXPORTABLE_MENTION_STATUSES[number];
+
+export interface AtlasBuildEmbeddingModel {
+    id: PhoenixMachineModelId | string;
+    label: string;
+    dimensionLabel: string;
+}
+
+export interface AtlasBuildContract {
+    contractId: string;
+    recipeId: AtlasRecipeId;
+    label: string;
+    scope: AtlasBuildScope;
+    noteIds: string[];
+    policy: 'dirty-only' | 'force' | 'read-only' | 'native-only';
+    requiredStages: AtlasCapabilityId[];
+    optionalStages: AtlasCapabilityId[];
+    skippedStages: AtlasCapabilityId[];
+    exportableMentionStatuses: AtlasExportableMentionStatus[];
+    modelLanes: AtlasModelLaneId[];
+    requiredModels: AtlasModelRequirement[];
+    embeddingModel?: AtlasBuildEmbeddingModel;
+    operations: AtlasRuntimeOperation[];
+    bridgeCommands: AtlasBridgeCommand[];
+    expectedOutputs: AtlasExpectedOutput[];
+    backendRoute: string;
+}
+
+export interface AtlasBridgeCommand {
+    stageId: string;
+    capabilityId?: AtlasCapabilityId;
+    operationKind: AtlasRuntimeOperationKind;
+    frontendService: string;
+    backendCommand: string;
+    backendRoute: string;
+    commandKind: AtlasBridgeCommandKind;
+}
+
+export interface AtlasBuildStageReceipt {
+    stageId: string;
+    capabilityId?: AtlasCapabilityId;
+    operationKind: AtlasRuntimeOperationKind;
+    frontendService: string;
+    backendCommand: string;
+    backendRoute: string;
+    commandKind: AtlasBridgeCommandKind;
+    status: AtlasBuildReceiptStatus;
+    ran: boolean;
+    source: string;
+    summary: string;
+    counts: Record<string, number>;
+}
+
+export interface AtlasBuildReceipt {
+    contractId: string;
+    recipeId: AtlasRecipeId;
+    label: string;
+    scope: AtlasBuildScope;
+    policy: AtlasBuildContract['policy'];
+    startedAt: number;
+    completedAt: number;
+    durationMs: number;
+    stageReceipts: AtlasBuildStageReceipt[];
+    operationResults: AtlasCapabilityRunResult[];
 }
 
 export interface AtlasCapabilityRunResult {
@@ -181,6 +243,8 @@ export interface AtlasCapabilityRunResult {
 export interface AtlasRecipeRunResult {
     recipeId: AtlasRecipeId;
     label: string;
+    contract: AtlasBuildContract;
+    receipt: AtlasBuildReceipt;
     mutationPolicy: AtlasCapabilityMutationPolicy;
     runPolicy: AtlasCapabilityRunPolicy;
     outputProof: AtlasOutputProbe[];

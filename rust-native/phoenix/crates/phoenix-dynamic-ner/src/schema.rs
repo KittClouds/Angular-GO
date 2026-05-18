@@ -68,7 +68,7 @@ impl DynamicSchemaBuilder {
         // Check known entity kinds for domain signal.
         let mut fantasy_score = 0u16;
         let mut corporate_score = 0u16;
-        let technical_score = 0u16;
+        let mut technical_score = 0u16;
 
         for c in known {
             match c.type_hint.as_ref() {
@@ -86,6 +86,9 @@ impl DynamicSchemaBuilder {
             if c.mention_kind == MentionKind::Nominal {
                 fantasy_score += 1;
             }
+            if is_technical_surface(c.surface.as_str()) {
+                technical_score += 2;
+            }
         }
 
         if fantasy_score > corporate_score && fantasy_score > technical_score {
@@ -96,7 +99,7 @@ impl DynamicSchemaBuilder {
             }
         } else if corporate_score > fantasy_score {
             DomainProfile::Corporate
-        } else if technical_score > 0 {
+        } else if technical_score >= 3 {
             DomainProfile::Technical
         } else {
             self.default_domain
@@ -187,6 +190,21 @@ impl DynamicSchemaBuilder {
     }
 }
 
+fn is_technical_surface(surface: &str) -> bool {
+    let lower = surface.to_ascii_lowercase();
+    lower.contains('_')
+        || lower.contains("cli")
+        || lower.contains("benchmark")
+        || lower.contains("chunk")
+        || lower.contains("embedding")
+        || lower.contains("geometry")
+        || lower.contains("manifold")
+        || lower.contains("projection")
+        || lower.contains("vector")
+        || lower.contains("hash")
+        || lower.contains("assertion")
+}
+
 const UNIVERSAL_CORE: &[&str] = &["Character", "Organization", "Location", "Event", "Artifact"];
 
 #[cfg(test)]
@@ -251,5 +269,50 @@ mod tests {
         let builder = DynamicSchemaBuilder::default();
         let domain = builder.detect_domain(&known, &[]);
         assert_eq!(domain, DomainProfile::Fantasy);
+    }
+
+    #[test]
+    fn technical_domain_detected_from_native_surfaces() {
+        use crate::types::{LocalMentionId, MentionSourceKind, MentionVote, VoteReason};
+        use compact_str::CompactString;
+        use phoenix_types::TextRange;
+        use smallvec::SmallVec;
+
+        let native = vec![
+            NativeCandidate {
+                mention_id: LocalMentionId(0),
+                range: TextRange::default(),
+                surface: CompactString::from("CLI Shape"),
+                normalized: CompactString::from("cli shape"),
+                mention_kind: MentionKind::Named,
+                entity_ref: None,
+                votes: SmallVec::from_elem(
+                    MentionVote {
+                        source: MentionSourceKind::NativeDiscovery,
+                        label: None,
+                        entity_ref: None,
+                        confidence: 0.7,
+                        reason: VoteReason::CapSpan,
+                    },
+                    1,
+                ),
+                sentence_index: 0,
+            },
+            NativeCandidate {
+                mention_id: LocalMentionId(1),
+                range: TextRange::default(),
+                surface: CompactString::from("Vector Hashes"),
+                normalized: CompactString::from("vector hashes"),
+                mention_kind: MentionKind::Named,
+                entity_ref: None,
+                votes: SmallVec::new(),
+                sentence_index: 0,
+            },
+        ];
+        let builder = DynamicSchemaBuilder::default();
+        assert_eq!(
+            builder.detect_domain(&[], &native),
+            DomainProfile::Technical
+        );
     }
 }

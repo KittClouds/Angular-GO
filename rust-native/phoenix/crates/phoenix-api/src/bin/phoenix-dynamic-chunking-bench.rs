@@ -37,6 +37,7 @@ enum FixtureSelection {
 #[serde(rename_all = "camelCase")]
 struct DynamicChunkingBenchReport {
     cases: Vec<BenchCaseReport>,
+    graph_layer_audit: GraphLayerAudit,
     regression_targets: RegressionTargets,
 }
 
@@ -78,6 +79,24 @@ struct RegressionTargets {
     no_duplicate_candidate_explosion: bool,
     no_accepted_rejected_loss: bool,
     no_manual_edge_deletion: bool,
+    graph_layer_audit_pass: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphLayerAudit {
+    pass: bool,
+    checks: Vec<GraphLayerCheck>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphLayerCheck {
+    name: String,
+    passed: bool,
+    actual: usize,
+    minimum: usize,
+    detail: String,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +137,7 @@ fn run(config: Config) -> Result<DynamicChunkingBenchReport, String> {
     for case in cases {
         reports.push(run_case(case)?);
     }
+    let graph_layer_audit = audit_graph_layers(&reports);
 
     let shortrun = reports
         .iter()
@@ -132,7 +152,9 @@ fn run(config: Config) -> Result<DynamicChunkingBenchReport, String> {
             no_accepted_rejected_loss: shortrun.accepted_preservation_count == 0
                 && shortrun.rejected_preservation_count == 0,
             no_manual_edge_deletion: shortrun.manual_edge_deletion_count == 0,
+            graph_layer_audit_pass: graph_layer_audit.pass,
         },
+        graph_layer_audit,
         cases: reports,
     })
 }
@@ -163,17 +185,27 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
     let dynamic_ner_ms = ner_started.elapsed().as_millis();
 
     let rich_started = Instant::now();
-    let lens_mentions = ner_output
+    let active_mentions = ner_output
         .mentions
         .iter()
+        .filter(|mention| mention.is_exportable())
+        .collect::<Vec<_>>();
+    let active_mention_ids = active_mentions
+        .iter()
+        .map(|mention| mention.mention_id.0)
+        .collect::<BTreeSet<_>>();
+    let lens_mentions = active_mentions
+        .iter()
+        .copied()
         .map(to_lens_mention)
         .collect::<Vec<_>>();
     let lens_hints = ner_output
         .chunk_hints
         .iter()
+        .filter(|hint| hint_mentions_overlap_active(hint, &active_mention_ids))
         .map(to_lens_hint)
         .collect::<Vec<_>>();
-    let lens_graph = to_lens_graph(&ner_output.mention_graph);
+    let lens_graph = to_lens_graph(&ner_output.mention_graph, &active_mention_ids);
     let lens_chunks = build_lens_chunks(
         &LensChunkInput {
             text: &case.text,
@@ -187,13 +219,11 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
     let graph_deltas = run_phase6_consumers(&case.name, &lens_chunks);
     let rich_graph_ms = rich_started.elapsed().as_millis();
 
-    let grounded_entities = ner_output
-        .mentions
+    let grounded_entities = active_mentions
         .iter()
         .filter(|mention| mention.entity_ref.is_some())
         .count();
-    let entity_mentions = ner_output
-        .mentions
+    let entity_mentions = active_mentions
         .iter()
         .filter(|mention| mention.mention_kind != MentionKind::Pronoun)
         .count();
@@ -211,8 +241,12 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         lens_chunk_count_by_lens: lens_counts(&lens_chunks),
         avg_lens_size_bytes: avg_lens_size(&lens_chunks),
         entity_grounding_ratio: ratio(grounded_entities, entity_mentions),
-        orphan_entity_count: orphan_entity_count(&ner_output.mentions, &ner_output.mention_graph),
-        co_mention_pair_count: ner_output.mention_graph.edge_count(),
+        orphan_entity_count: orphan_entity_count(
+            &active_mentions,
+            &ner_output.mention_graph,
+            &active_mention_ids,
+        ),
+        co_mention_pair_count: active_edge_count(&ner_output.mention_graph, &active_mention_ids),
         relationship_candidate_count: edge_count_for_lens(&graph_deltas, LensKind::Relationship),
         temporal_edge_count: edge_count_for_lens(&graph_deltas, LensKind::Temporal),
         causal_edge_count: edge_count_for_lens(&graph_deltas, LensKind::Causal),
@@ -221,13 +255,18 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         accepted_preservation_count: 0,
         rejected_preservation_count: 0,
         manual_edge_deletion_count: 0,
-        graph_connectedness: graph_connectedness(&ner_output.mentions, &ner_output.mention_graph),
-        largest_component_ratio: largest_component_ratio(
-            &ner_output.mentions,
+        graph_connectedness: graph_connectedness(
+            &active_mentions,
             &ner_output.mention_graph,
+            &active_mention_ids,
         ),
-        mention_count: ner_output.mentions.len(),
-        chunk_hint_count: ner_output.chunk_hints.len(),
+        largest_component_ratio: largest_component_ratio(
+            &active_mentions,
+            &ner_output.mention_graph,
+            &active_mention_ids,
+        ),
+        mention_count: active_mentions.len(),
+        chunk_hint_count: lens_hints.len(),
         graph_deltas,
     })
 }
@@ -266,7 +305,159 @@ fn print_text_report(report: &DynamicChunkingBenchReport) {
             case.largest_component_ratio
         );
     }
+    println!("graphLayerAudit pass={}", report.graph_layer_audit.pass);
+    for check in &report.graph_layer_audit.checks {
+        println!(
+            "  {} passed={} actual={} min={} {}",
+            check.name, check.passed, check.actual, check.minimum, check.detail
+        );
+    }
     println!("regressionTargets={:?}", report.regression_targets);
+}
+
+fn audit_graph_layers(cases: &[BenchCaseReport]) -> GraphLayerAudit {
+    let mut checks = Vec::new();
+    if let Some(case) = find_case(cases, "docs/shortrun.md") {
+        for lens in [
+            "entity",
+            "relationship",
+            "event",
+            "temporal",
+            "causal",
+            "attribute",
+            "worldbuilding",
+            "evidence",
+        ] {
+            checks.push(layer_check(
+                format!("shortrun lens {lens}"),
+                lens_count(case, lens),
+                1,
+                "broad fixture should exercise every rich graph lens",
+            ));
+        }
+        checks.push(layer_check(
+            "shortrun relationship candidates",
+            case.relationship_candidate_count,
+            1,
+            "semantic/relation graph candidate layer should stay populated",
+        ));
+        checks.push(layer_check(
+            "shortrun temporal edges",
+            case.temporal_edge_count,
+            1,
+            "temporal graph layer should emit active-during edges",
+        ));
+        checks.push(layer_check(
+            "shortrun causal edges",
+            case.causal_edge_count,
+            1,
+            "causal graph layer should emit causal-link edges",
+        ));
+        checks.push(layer_check(
+            "shortrun event identities",
+            case.event_identity_count,
+            1,
+            "event identity layer should materialize event nodes",
+        ));
+    } else {
+        checks.push(layer_check(
+            "shortrun fixture present",
+            0,
+            1,
+            "missing docs/shortrun.md audit case",
+        ));
+    }
+
+    if let Some(case) = find_case(cases, "temporal scene") {
+        checks.push(layer_check(
+            "temporal fixture temporal edges",
+            case.temporal_edge_count,
+            1,
+            "temporal cue fixture should generate temporal graph edges",
+        ));
+    } else {
+        checks.push(layer_check(
+            "temporal fixture present",
+            0,
+            1,
+            "missing temporal scene audit case",
+        ));
+    }
+
+    if let Some(case) = find_case(cases, "causal scene") {
+        checks.push(layer_check(
+            "causal fixture causal edges",
+            case.causal_edge_count,
+            1,
+            "causal cue fixture should generate causal graph edges",
+        ));
+        checks.push(layer_check(
+            "causal fixture event identities",
+            case.event_identity_count,
+            1,
+            "causal fixture endpoints should materialize event identities",
+        ));
+    } else {
+        checks.push(layer_check(
+            "causal fixture present",
+            0,
+            1,
+            "missing causal scene audit case",
+        ));
+    }
+
+    if let Some(case) = find_case(cases, "worldbuilding section") {
+        checks.push(layer_check(
+            "worldbuilding fixture worldbuilding lens",
+            lens_count(case, "worldbuilding"),
+            1,
+            "worldbuilding fixture should route through the worldbuilding lens",
+        ));
+        checks.push(layer_check(
+            "worldbuilding fixture attribute lens",
+            lens_count(case, "attribute"),
+            1,
+            "worldbuilding fixture should preserve attribute/state chunks",
+        ));
+    } else {
+        checks.push(layer_check(
+            "worldbuilding fixture present",
+            0,
+            1,
+            "missing worldbuilding section audit case",
+        ));
+    }
+
+    GraphLayerAudit {
+        pass: checks.iter().all(|check| check.passed),
+        checks,
+    }
+}
+
+fn find_case<'a>(cases: &'a [BenchCaseReport], name: &str) -> Option<&'a BenchCaseReport> {
+    cases.iter().find(|case| case.name == name)
+}
+
+fn lens_count(case: &BenchCaseReport, lens: &str) -> usize {
+    case.lens_chunk_count_by_lens
+        .get(lens)
+        .copied()
+        .unwrap_or(0)
+}
+
+fn layer_check(
+    name: impl Into<String>,
+    actual: usize,
+    minimum: usize,
+    detail: &str,
+) -> GraphLayerCheck {
+    GraphLayerCheck {
+        name: name.into(),
+        passed: actual >= minimum,
+        actual,
+        minimum,
+        detail: detail.to_owned(),
+    }
 }
 
 fn run_phase6_consumers(case_name: &str, lens_chunks: &[LensChunk]) -> Vec<GraphDelta> {
@@ -364,6 +555,12 @@ fn to_lens_mention(mention: &MentionPacket) -> LensMention {
     }
 }
 
+fn hint_mentions_overlap_active(hint: &ChunkHint, active_mention_ids: &BTreeSet<u64>) -> bool {
+    hint.mention_ids
+        .iter()
+        .any(|mention_id| active_mention_ids.contains(mention_id))
+}
+
 fn to_lens_hint(hint: &ChunkHint) -> LensChunkHint {
     LensChunkHint {
         id: hint.id.to_string(),
@@ -393,11 +590,18 @@ fn to_lens_hint(hint: &ChunkHint) -> LensChunkHint {
     }
 }
 
-fn to_lens_graph(graph: &phoenix_dynamic_ner::MentionGraph) -> LensMentionGraph {
+fn to_lens_graph(
+    graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
+) -> LensMentionGraph {
     LensMentionGraph {
         edges: graph
             .edges
             .iter()
+            .filter(|edge| {
+                active_mention_ids.contains(&edge.left.0)
+                    && active_mention_ids.contains(&edge.right.0)
+            })
             .map(|edge| LensMentionEdge {
                 left: edge.left.0,
                 right: edge.right.0,
@@ -479,14 +683,39 @@ fn avg_lens_size(chunks: &[LensChunk]) -> f64 {
 }
 
 fn orphan_entity_count(
-    mentions: &[MentionPacket],
+    mentions: &[&MentionPacket],
     graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
 ) -> usize {
     mentions
         .iter()
         .filter(|mention| mention.mention_kind != MentionKind::Pronoun)
-        .filter(|mention| graph.edges_for(mention.mention_id).is_empty())
+        .filter(|mention| !has_active_edge(graph, mention.mention_id.0, active_mention_ids))
         .count()
+}
+
+fn active_edge_count(
+    graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
+) -> usize {
+    graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            active_mention_ids.contains(&edge.left.0) && active_mention_ids.contains(&edge.right.0)
+        })
+        .count()
+}
+
+fn has_active_edge(
+    graph: &phoenix_dynamic_ner::MentionGraph,
+    mention_id: u64,
+    active_mention_ids: &BTreeSet<u64>,
+) -> bool {
+    graph.edges.iter().any(|edge| {
+        (edge.left.0 == mention_id && active_mention_ids.contains(&edge.right.0))
+            || (edge.right.0 == mention_id && active_mention_ids.contains(&edge.left.0))
+    })
 }
 
 fn unique_candidate_keys(chunks: &[LensChunk]) -> BTreeSet<String> {
@@ -505,20 +734,22 @@ fn unique_candidate_keys(chunks: &[LensChunk]) -> BTreeSet<String> {
 }
 
 fn graph_connectedness(
-    mentions: &[MentionPacket],
+    mentions: &[&MentionPacket],
     graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
 ) -> f64 {
     let n = mentions.len();
     if n < 2 {
         return 1.0;
     }
     let possible = n.saturating_mul(n.saturating_sub(1)) / 2;
-    ratio(graph.edge_count(), possible)
+    ratio(active_edge_count(graph, active_mention_ids), possible)
 }
 
 fn largest_component_ratio(
-    mentions: &[MentionPacket],
+    mentions: &[&MentionPacket],
     graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
 ) -> f64 {
     if mentions.is_empty() {
         return 0.0;
@@ -531,7 +762,9 @@ fn largest_component_ratio(
     for id in &ids {
         adjacency.entry(*id).or_default();
     }
-    for edge in &graph.edges {
+    for edge in graph.edges.iter().filter(|edge| {
+        active_mention_ids.contains(&edge.left.0) && active_mention_ids.contains(&edge.right.0)
+    }) {
         adjacency.entry(edge.left.0).or_default().push(edge.right.0);
         adjacency.entry(edge.right.0).or_default().push(edge.left.0);
     }

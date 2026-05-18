@@ -219,11 +219,20 @@ impl PhoenixNerEngine {
                                         confidence: span.confidence,
                                         reason: crate::types::VoteReason::ModelLabel,
                                     };
+                                    let doc_range = phoenix_types::TextRange {
+                                        start: doc_start,
+                                        end: doc_end,
+                                    };
+                                    if !Self::accept_model_span(
+                                        input.text,
+                                        doc_range,
+                                        span.surface.as_str(),
+                                        span.label.as_str(),
+                                    ) {
+                                        continue;
+                                    }
                                     workspace.add_discovered_span(
-                                        phoenix_types::TextRange {
-                                            start: doc_start,
-                                            end: doc_end,
-                                        },
+                                        doc_range,
                                         span.surface.clone(),
                                         sent_idx,
                                         vote,
@@ -348,6 +357,221 @@ impl PhoenixNerEngine {
             _ => ("", 0),
         }
     }
+
+    fn accept_model_span(text: &str, range: TextRange, surface: &str, label: &str) -> bool {
+        if range.start >= range.end || surface.trim().len() < 2 {
+            return false;
+        }
+        if surface_noise(surface) {
+            return false;
+        }
+        if matches!(
+            label.to_ascii_lowercase().as_str(),
+            "attribute" | "role" | "object" | "state" | "goal" | "emotion"
+        ) {
+            return false;
+        }
+        if is_named_entity_label(label) && !has_named_surface_shape(surface) {
+            return false;
+        }
+        let start = range.start as usize;
+        let line_start = text[..start.min(text.len())]
+            .rfind('\n')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let line_end = text[start.min(text.len())..]
+            .find('\n')
+            .map(|idx| start.min(text.len()) + idx)
+            .unwrap_or(text.len());
+        let line = text.get(line_start..line_end).unwrap_or("").trim_start();
+        if line.starts_with('#') || line.starts_with("```") {
+            return false;
+        }
+        true
+    }
+}
+
+fn is_named_entity_label(label: &str) -> bool {
+    matches!(
+        label.to_ascii_lowercase().as_str(),
+        "character"
+            | "person"
+            | "npc"
+            | "organization"
+            | "faction"
+            | "location"
+            | "region"
+            | "landmark"
+            | "creature"
+    )
+}
+
+fn has_named_surface_shape(surface: &str) -> bool {
+    surface
+        .split_whitespace()
+        .any(|word| word.chars().next().is_some_and(char::is_uppercase))
+}
+
+fn surface_noise(surface: &str) -> bool {
+    let trimmed = surface.trim();
+    if trimmed.contains('_') || trimmed.contains('/') || trimmed.contains('\\') {
+        return true;
+    }
+    if trimmed.chars().any(|ch| {
+        matches!(
+            ch,
+            '\n' | '\r' | ',' | '.' | ';' | ':' | '!' | '?' | '"' | '\u{201c}' | '\u{201d}'
+        )
+    }) {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains(" hash") || lower.ends_with("hashes") || lower.ends_with("_ids") {
+        return true;
+    }
+    let words = lower.split_whitespace().collect::<Vec<_>>();
+    if words.first().is_some_and(|word| is_control_starter(word)) {
+        return true;
+    }
+    if !words.is_empty() && words.iter().all(|word| is_control_surface_word(word)) {
+        return true;
+    }
+    matches!(
+        lower.as_str(),
+        "do" | "for"
+            | "he"
+            | "she"
+            | "they"
+            | "them"
+            | "we"
+            | "you"
+            | "your"
+            | "i"
+            | "i'm"
+            | "i've"
+            | "for the"
+            | "run"
+            | "run the"
+            | "use"
+            | "use the"
+            | "regression"
+            | "needle"
+            | "novel snapshot"
+            | "seam candidates"
+            | "cli"
+            | "pass"
+            | "fail"
+            | "nan"
+            | "rss"
+            | "chunk"
+            | "chunks"
+            | "vector"
+            | "vectors"
+            | "chart"
+            | "charts"
+            | "cone"
+            | "cones"
+            | "seam"
+            | "seams"
+            | "test"
+            | "smoke"
+            | "benchmark"
+            | "output"
+            | "expected"
+            | "assertions"
+            | "deterministic"
+            | "queryable"
+            | "traceable"
+            | "bounded"
+            | "normalized"
+            | "finite values"
+            | "model dimension"
+            | "vector dimension"
+    )
+}
+
+fn is_control_starter(word: &str) -> bool {
+    matches!(
+        word,
+        "a" | "an"
+            | "the"
+            | "this"
+            | "that"
+            | "these"
+            | "those"
+            | "it"
+            | "if"
+            | "for"
+            | "each"
+            | "every"
+            | "once"
+            | "then"
+            | "no"
+            | "use"
+            | "run"
+            | "do"
+            | "allow"
+            | "require"
+            | "expected"
+            | "missing"
+            | "failure"
+            | "regression"
+    )
+}
+
+fn is_control_surface_word(word: &str) -> bool {
+    matches!(
+        word.trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '-'),
+        "assertion"
+            | "assertions"
+            | "baseline"
+            | "benchmark"
+            | "chart"
+            | "charts"
+            | "chunk"
+            | "chunks"
+            | "chunking"
+            | "cli"
+            | "command"
+            | "cone"
+            | "cones"
+            | "decision"
+            | "embedding"
+            | "embeddings"
+            | "expected"
+            | "fail"
+            | "gate"
+            | "gates"
+            | "geometry"
+            | "hash"
+            | "hashes"
+            | "manifold"
+            | "metric"
+            | "metrics"
+            | "needle"
+            | "novel"
+            | "output"
+            | "pass"
+            | "performance"
+            | "phase"
+            | "plan"
+            | "projection"
+            | "regression"
+            | "report"
+            | "reports"
+            | "seam"
+            | "seams"
+            | "smoke"
+            | "snapshot"
+            | "test"
+            | "topology"
+            | "trace"
+            | "traces"
+            | "vector"
+            | "vectors"
+            | "warning"
+            | "warnings"
+    )
 }
 
 #[cfg(test)]
@@ -529,6 +753,47 @@ mod tests {
         let result = engine.extract_mentions(&input).unwrap();
         assert!(!result.chunk_hints.is_empty());
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn model_span_guard_rejects_markdown_noise() {
+        let text = "# CLI Shape\nUse `novel_full` now.\nAella waited.";
+        assert!(!PhoenixNerEngine::accept_model_span(
+            text,
+            TextRange { start: 2, end: 5 },
+            "CLI",
+            "Object"
+        ));
+        assert!(!PhoenixNerEngine::accept_model_span(
+            text,
+            TextRange { start: 17, end: 27 },
+            "novel_full",
+            "Artifact"
+        ));
+        assert!(!PhoenixNerEngine::accept_model_span(
+            "the courier waited.",
+            TextRange { start: 4, end: 11 },
+            "courier",
+            "Character"
+        ));
+        assert!(!PhoenixNerEngine::accept_model_span(
+            "Ryan addressed a barman.",
+            TextRange { start: 17, end: 23 },
+            "barman",
+            "Creature"
+        ));
+        assert!(PhoenixNerEngine::accept_model_span(
+            text,
+            TextRange { start: 33, end: 38 },
+            "Aella",
+            "Character"
+        ));
+        assert!(PhoenixNerEngine::accept_model_span(
+            "Ghoul waited behind the counter.",
+            TextRange { start: 0, end: 5 },
+            "Ghoul",
+            "Creature"
+        ));
     }
 
     fn test_lexicon(names: &[&str]) -> (Lexicon, ScopeKey) {

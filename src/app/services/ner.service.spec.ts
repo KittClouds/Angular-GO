@@ -245,7 +245,43 @@ describe('NerService provider orchestration', () => {
         aliases: [],
       },
       {
+        label: 'Already',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'Arcadia',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'Because',
+        kind: 'CHARACTER',
+        confidence: 'medium',
+        rawScore: 0.78,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
         label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 'high',
+        rawScore: 0.91,
+        reasoning: '',
+        evidence: '',
+        aliases: [],
+      },
+      {
+        label: 'Tempiris',
         kind: 'CHARACTER',
         confidence: 'high',
         rawScore: 0.91,
@@ -258,12 +294,22 @@ describe('NerService provider orchestration', () => {
     await service.runManualScan('fst', {
       noteId: 'note-1',
       noteTitle: 'Untitled Note',
-      plainText: 'Above the room, Kai watched. And then Kai laughed.',
+      plainText: [
+        'Above the room, Kai watched. And then Kai laughed.',
+        'Already the door moved. Because the room changed.',
+        'Arcadia opened once. Arcadia closed once.',
+        "Tempiris's smile widened.",
+      ].join(' '),
     });
 
     expect(service.suggestions()).toEqual([
       expect.objectContaining({
         label: 'Kai',
+        kind: 'CHARACTER',
+        source: 'fst',
+      }),
+      expect.objectContaining({
+        label: 'Tempiris',
         kind: 'CHARACTER',
         source: 'fst',
       }),

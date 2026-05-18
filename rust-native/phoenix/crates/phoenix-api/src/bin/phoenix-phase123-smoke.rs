@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -150,17 +150,27 @@ fn run(config: Config) -> Result<Phase123SmokeReport, String> {
         .map_err(|error| format!("dynamic NER failed: {error}"))?;
     validate_phase2(&ner_output.mentions, &ner_output.chunk_hints)?;
 
-    let lens_mentions = ner_output
+    let active_mentions = ner_output
         .mentions
         .iter()
+        .filter(|mention| mention.is_exportable())
+        .collect::<Vec<_>>();
+    let active_mention_ids = active_mentions
+        .iter()
+        .map(|mention| mention.mention_id.0)
+        .collect::<BTreeSet<_>>();
+    let lens_mentions = active_mentions
+        .iter()
+        .copied()
         .map(to_lens_mention)
         .collect::<Vec<_>>();
     let lens_hints = ner_output
         .chunk_hints
         .iter()
+        .filter(|hint| hint_mentions_overlap_active(hint, &active_mention_ids))
         .map(to_lens_hint)
         .collect::<Vec<_>>();
-    let lens_graph = to_lens_graph(&ner_output.mention_graph);
+    let lens_graph = to_lens_graph(&ner_output.mention_graph, &active_mention_ids);
     let lens_chunks = build_lens_chunks(
         &LensChunkInput {
             text: &text,
@@ -344,6 +354,12 @@ fn to_lens_mention(mention: &MentionPacket) -> LensMention {
     }
 }
 
+fn hint_mentions_overlap_active(hint: &ChunkHint, active_mention_ids: &BTreeSet<u64>) -> bool {
+    hint.mention_ids
+        .iter()
+        .any(|mention_id| active_mention_ids.contains(mention_id))
+}
+
 fn to_lens_hint(hint: &ChunkHint) -> LensChunkHint {
     LensChunkHint {
         id: hint.id.to_string(),
@@ -373,11 +389,18 @@ fn to_lens_hint(hint: &ChunkHint) -> LensChunkHint {
     }
 }
 
-fn to_lens_graph(graph: &phoenix_dynamic_ner::MentionGraph) -> LensMentionGraph {
+fn to_lens_graph(
+    graph: &phoenix_dynamic_ner::MentionGraph,
+    active_mention_ids: &BTreeSet<u64>,
+) -> LensMentionGraph {
     LensMentionGraph {
         edges: graph
             .edges
             .iter()
+            .filter(|edge| {
+                active_mention_ids.contains(&edge.left.0)
+                    && active_mention_ids.contains(&edge.right.0)
+            })
             .map(|edge| LensMentionEdge {
                 left: edge.left.0,
                 right: edge.right.0,

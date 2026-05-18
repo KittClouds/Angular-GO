@@ -27,7 +27,6 @@ export type AtlasCapabilityMutationPolicy =
     | 'not wired';
 
 export type AtlasCapabilityUiCoverage = 'wired' | 'partial' | 'sleeping';
-export type AtlasPresetPolicy = 'dirty-only' | 'force' | 'read-only';
 
 export type AtlasGraphTargetId =
     | 'mention'
@@ -43,17 +42,12 @@ export type AtlasGraphTargetId =
     | 'semanticCandidate'
     | 'galaxy';
 
-export type AtlasPresetId = 'fastScan' | 'fullAtlas' | 'semanticAtlas' | 'deepReasoning' | 'visualizationOnly';
 export type AtlasRecipeId =
     | 'textGraph'
     | 'semanticGraph'
     | 'adjudicatedSemanticGraph'
-    | 'runNer'
-    | 'fastTextGraph'
-    | 'fullTextGraph'
-    | 'semanticAtlas'
-    | 'warmFullIndexStack'
-    | 'visualizeCurrentGraph';
+    | 'reasoningGraph'
+    | 'runNer';
 
 export type AtlasModelLaneId =
     | 'dynamicNer'
@@ -98,6 +92,7 @@ export const ATLAS_GRAPH_BUILD_RECIPE_IDS: AtlasRecipeId[] = [
     'textGraph',
     'semanticGraph',
     'adjudicatedSemanticGraph',
+    'reasoningGraph',
 ];
 
 export interface AtlasCapability {
@@ -150,15 +145,6 @@ export interface AtlasCapabilityRecipeDefinition {
     requiredLanes: AtlasModelLaneId[];
     optionalLanes: AtlasModelLaneId[];
     skippedLanes: AtlasModelLaneId[];
-}
-
-export interface AtlasCapabilityPresetDefinition {
-    id: AtlasPresetId;
-    label: string;
-    desc: string;
-    target: AtlasGraphTargetId;
-    policy: AtlasPresetPolicy;
-    stages: string[];
 }
 
 export const ATLAS_MODEL_LANE_LABELS: Record<AtlasModelLaneId, string> = {
@@ -324,14 +310,14 @@ export const ATLAS_CAPABILITY_REGISTRY: AtlasCapability[] = [
         id: 'relationGraph',
         label: 'Relation Graph',
         family: 'reasoning',
-        description: 'Read-only native candidate-edge probe for entity-to-entity relation rows after graph commit; full relation extraction remains outside Search Panel recipes.',
+        description: 'Read-only native candidate-edge probe for entity-to-entity relation rows after Semantic Atlas and NLI adjudication.',
         cost: 'Medium',
         subsystems: 6,
         statusSource: 'AtlasRichScanResult.relationCandidateCount + relation sidecar stores',
         backendRoute: 'PhoenixBackendService.storeCommand relation:list(graph_candidate_edges)',
-        inputs: ['asserted kernel', 'mentions', 'sentence syntax'],
+        inputs: ['NLI judgments', 'semantic candidates', 'sentence syntax'],
         outputs: ['candidate edge rows', 'relation probe samples'],
-        dependencies: ['assertedKernel'],
+        dependencies: ['nliAdjudication'],
         skips: [],
         mutationPolicy: 'read-only',
         uiCoverage: 'partial',
@@ -412,23 +398,23 @@ export const ATLAS_CAPABILITY_REGISTRY: AtlasCapability[] = [
         id: 'causalGraph',
         label: 'Causal Graph',
         family: 'reasoning',
-        description: 'Cause/effect chains, invalidations, motivation links, causal candidates, causal links, and causal memory cards.',
+        description: 'Read-only native graph edge probe for causal-link rows after event identity and temporal graph passes.',
         cost: 'High',
         subsystems: 9,
-        statusSource: 'CausalScopeSidecar + CausalCandidate/CausalLink records',
-        backendRoute: 'PhoenixCausalPatchStore / causal substrate runtime',
-        inputs: ['semantic nodes', 'temporal graph', 'state transitions'],
-        outputs: ['causal candidates', 'causal links', 'review cards'],
+        statusSource: 'PhoenixBackendService.storeCommand relation:list(graph_edges edge_type=causal_link)',
+        backendRoute: 'PhoenixBackendService.storeCommand relation:list(graph_edges, edge_type=causal_link)',
+        inputs: ['graph_edges relation', 'causal_link edge type'],
+        outputs: ['causal edge rows', 'probe samples'],
         dependencies: ['eventIdentity', 'temporalGraph', 'memoryState'],
         skips: [],
-        mutationPolicy: 'native-only',
-        uiCoverage: 'sleeping',
-        runnable: false,
+        mutationPolicy: 'read-only',
+        uiCoverage: 'partial',
+        runnable: true,
         graphTargetId: 'causal',
         graphTargetLabel: 'Causal Graph',
         stageSummaryKeys: ['causal', 'causality'],
         testRefs: ['atlas-capability.model.spec.ts'],
-        docRefs: ['rust/phoenix/crates/phoenix-types/src/deterministic.rs', 'rust-native/phoenix/crates/phoenix-store-native-core/src/scope_runtime.rs'],
+        docRefs: ['rust-native/phoenix/crates/phoenix-causal-post/src/api.rs', 'rust-native/phoenix/crates/phoenix-graph-post/src/compile.rs'],
     },
     {
         id: 'semanticEmbedding',
@@ -484,7 +470,7 @@ export const ATLAS_CAPABILITY_REGISTRY: AtlasCapability[] = [
         backendRoute: 'AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true) / semantic:refreshCandidateGraphEdges',
         inputs: ['semantic atlas vectors', 'hybrid manifold', 'relation candidates'],
         outputs: ['candidate semantic edges', 'candidate relation edges'],
-        dependencies: ['semanticAtlas', 'hybridManifold'],
+        dependencies: ['semanticAtlas'],
         skips: [],
         mutationPolicy: 'dirty-only',
         uiCoverage: 'partial',
@@ -566,7 +552,7 @@ export const ATLAS_CAPABILITY_REGISTRY: AtlasCapability[] = [
         cost: 'Very high',
         subsystems: 9,
         statusSource: 'PhoenixMachineManifoldStatusMap.lorentz + LorentzForestBuildResponse',
-        backendRoute: 'lorentzForestBuild / LorentzForestQuery',
+        backendRoute: 'manifoldSnapshot(lorentz) / Lorentz forest sidecar query',
         inputs: ['semantic atlas vectors', 'graph target kinds'],
         outputs: ['Lorentz trees', 'memberships', 'hierarchical query hits'],
         dependencies: ['semanticAtlas', 'semanticCandidate'],
@@ -671,6 +657,7 @@ export const ATLAS_CAPABILITY_LAYERS: AtlasCapabilityLayer[] = [
 const TEXT_GRAPH_CHAIN: AtlasCapabilityId[] = [
     'dynamicSurface',
     'dynamicChunking',
+    'dynamicNer',
     'mentionGraph',
     'evidenceGraph',
     'surfaceGraph',
@@ -678,6 +665,21 @@ const TEXT_GRAPH_CHAIN: AtlasCapabilityId[] = [
 ];
 
 const RUN_NER_CHAIN: AtlasCapabilityId[] = ['dynamicSurface', 'dynamicNer'];
+
+const SEMANTIC_GRAPH_CHAIN: AtlasCapabilityId[] = [
+    ...TEXT_GRAPH_CHAIN,
+    'semanticEmbedding',
+    'semanticAtlas',
+    'semanticCandidate',
+];
+
+const MANIFOLD_CAPABILITIES: AtlasCapabilityId[] = ['hybridManifold', 'hopfProjection', 'lorentzForest'];
+
+const ADJUDICATED_SEMANTIC_CHAIN: AtlasCapabilityId[] = [
+    ...SEMANTIC_GRAPH_CHAIN,
+    ...MANIFOLD_CAPABILITIES,
+    'nliAdjudication',
+];
 
 const REASONING_CAPABILITIES: AtlasCapabilityId[] = [
     'relationGraph',
@@ -694,47 +696,56 @@ const SEMANTIC_CAPABILITIES: AtlasCapabilityId[] = [
     'nliAdjudication',
 ];
 
-const MANIFOLD_CAPABILITIES: AtlasCapabilityId[] = ['hybridManifold', 'hopfProjection', 'lorentzForest'];
+const RETRIEVAL_CAPABILITIES: AtlasCapabilityId[] = ['retrievalWalk', 'galaxyVisualization'];
+
+const REASONING_GRAPH_CHAIN: AtlasCapabilityId[] = [
+    ...ADJUDICATED_SEMANTIC_CHAIN,
+    'relationGraph',
+    'eventIdentity',
+    'temporalGraph',
+    'memoryState',
+    'causalGraph',
+];
 
 export const ATLAS_CAPABILITY_RECIPES: AtlasCapabilityRecipeDefinition[] = [
     {
         id: 'textGraph',
         label: 'Text Graph',
-        subtitle: 'no model warm',
-        description: 'Build the deterministic surface, mention, evidence, and committed graph path for the selected documents.',
+        subtitle: 'entity anchors required',
+        description: 'Build the deterministic surface, entity anchoring, mention, evidence, and committed graph path for the selected documents.',
         actionLabel: 'Build Text Graph',
         icon: 'lucideZap',
         primary: true,
         outputLabel: 'committed text graph',
         mutationPolicy: 'dirty-only',
         cost: 'Low-Med',
-        backendRoute: 'atlas_rich_scan(includeSemanticAtlas=false)',
+        backendRoute: 'dynamic_ner -> atlas_rich_scan(includeSemanticAtlas=false)',
         dependencyChain: TEXT_GRAPH_CHAIN,
         requiredCapabilities: TEXT_GRAPH_CHAIN,
-        optionalCapabilities: ['dynamicNer', 'hybridManifold', 'galaxyVisualization'],
-        skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...REASONING_CAPABILITIES],
-        requiredLanes: [],
-        optionalLanes: ['dynamicNer', 'manifoldProjection'],
-        skippedLanes: ['semanticEmbedding', 'nli'],
+        optionalCapabilities: [],
+        skippedCapabilities: [...SEMANTIC_CAPABILITIES, ...MANIFOLD_CAPABILITIES, ...REASONING_CAPABILITIES, ...RETRIEVAL_CAPABILITIES],
+        requiredLanes: ['dynamicNer'],
+        optionalLanes: [],
+        skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
     },
     {
         id: 'semanticGraph',
         label: 'Semantic Graph',
-        subtitle: 'embedding sidecar',
-        description: 'Build the selected documents through the text graph path and semantic atlas sidecar.',
+        subtitle: 'vectors + candidate links',
+        description: 'Build the selected documents through text graph, semantic embeddings, atlas rows, and semantic candidate links.',
         actionLabel: 'Build Semantic Graph',
         icon: 'lucideSparkles',
         primary: true,
         outputLabel: 'graph + vectors',
         mutationPolicy: 'dirty-only',
         cost: 'High',
-        backendRoute: 'load embedding -> atlas_rich_scan(includeSemanticAtlas=true)',
-        dependencyChain: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate'],
-        requiredCapabilities: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas'],
-        optionalCapabilities: ['dynamicNer', 'semanticCandidate', 'hybridManifold', 'galaxyVisualization'],
+        backendRoute: 'dynamic_ner -> load embedding -> atlas_rich_scan(includeSemanticAtlas=true) -> manifoldSnapshot(hybrid/hopf/lorentz)',
+        dependencyChain: [...SEMANTIC_GRAPH_CHAIN, ...MANIFOLD_CAPABILITIES],
+        requiredCapabilities: [...SEMANTIC_GRAPH_CHAIN, ...MANIFOLD_CAPABILITIES],
+        optionalCapabilities: [],
         skippedCapabilities: ['nliAdjudication', ...REASONING_CAPABILITIES],
-        requiredLanes: ['semanticEmbedding'],
-        optionalLanes: ['dynamicNer', 'manifoldProjection'],
+        requiredLanes: ['dynamicNer', 'semanticEmbedding', 'manifoldProjection'],
+        optionalLanes: [],
         skippedLanes: ['nli'],
     },
     {
@@ -747,13 +758,32 @@ export const ATLAS_CAPABILITY_RECIPES: AtlasCapabilityRecipeDefinition[] = [
         outputLabel: 'judged candidate graph',
         mutationPolicy: 'dirty-only',
         cost: 'Very high',
-        backendRoute: 'semantic graph -> semantic:listNliJudgmentInputs -> semantic:applyNliJudgments',
-        dependencyChain: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication'],
-        requiredCapabilities: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication'],
-        optionalCapabilities: ['dynamicNer', 'hybridManifold', 'galaxyVisualization'],
+        backendRoute: 'semantic graph -> warm NLI -> semantic:listNliJudgmentInputs -> semantic:applyNliJudgments',
+        dependencyChain: ADJUDICATED_SEMANTIC_CHAIN,
+        requiredCapabilities: ADJUDICATED_SEMANTIC_CHAIN,
+        optionalCapabilities: [],
         skippedCapabilities: REASONING_CAPABILITIES,
-        requiredLanes: ['semanticEmbedding', 'nli'],
-        optionalLanes: ['dynamicNer', 'manifoldProjection'],
+        requiredLanes: ['dynamicNer', 'semanticEmbedding', 'manifoldProjection', 'nli'],
+        optionalLanes: [],
+        skippedLanes: [],
+    },
+    {
+        id: 'reasoningGraph',
+        label: 'Reasoning Graph',
+        subtitle: 'semantic + NLI first',
+        description: 'Run the semantic/adjudication contract, then expose the native relation, event, temporal, memory, and causal reasoning probes.',
+        actionLabel: 'Build Reasoning Graph',
+        icon: 'lucideLayers',
+        outputLabel: 'reasoning graph probes',
+        mutationPolicy: 'native-only',
+        cost: 'Very high',
+        backendRoute: 'adjudicated semantic graph -> native relation/event/temporal/memory/causal probes',
+        dependencyChain: REASONING_GRAPH_CHAIN,
+        requiredCapabilities: REASONING_GRAPH_CHAIN,
+        optionalCapabilities: [],
+        skippedCapabilities: [],
+        requiredLanes: ['dynamicNer', 'semanticEmbedding', 'manifoldProjection', 'nli'],
+        optionalLanes: [],
         skippedLanes: [],
     },
     {
@@ -768,152 +798,12 @@ export const ATLAS_CAPABILITY_RECIPES: AtlasCapabilityRecipeDefinition[] = [
         cost: 'Medium',
         backendRoute: 'NerService.runDynamicScan',
         dependencyChain: RUN_NER_CHAIN,
-        requiredCapabilities: ['dynamicNer'],
-        optionalCapabilities: ['mentionGraph'],
-        skippedCapabilities: [...TEXT_GRAPH_CHAIN.filter((id) => !['dynamicSurface', 'mentionGraph'].includes(id)), ...SEMANTIC_CAPABILITIES, ...MANIFOLD_CAPABILITIES, ...REASONING_CAPABILITIES],
+        requiredCapabilities: RUN_NER_CHAIN,
+        optionalCapabilities: [],
+        skippedCapabilities: [...TEXT_GRAPH_CHAIN.filter((id) => !RUN_NER_CHAIN.includes(id)), ...SEMANTIC_CAPABILITIES, ...MANIFOLD_CAPABILITIES, ...REASONING_CAPABILITIES, ...RETRIEVAL_CAPABILITIES],
         requiredLanes: ['dynamicNer'],
-        optionalLanes: ['coOccurrence'],
+        optionalLanes: [],
         skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
-    },
-    {
-        id: 'fastTextGraph',
-        label: 'Fast Text Graph',
-        subtitle: 'dirty-only, no embeddings',
-        description: 'Dirty-only dynamic surface, chunking, NER/co-occurrence, evidence graph, and graph commit.',
-        actionLabel: 'Run Fast Text Graph',
-        icon: 'lucideZap',
-        primary: true,
-        outputLabel: 'vertices + evidence edges',
-        mutationPolicy: 'dirty-only',
-        cost: 'Low-Med',
-        backendRoute: 'atlas_rich_scan(includeSemanticAtlas=false, policy=dirty-only)',
-        dependencyChain: TEXT_GRAPH_CHAIN,
-        requiredCapabilities: TEXT_GRAPH_CHAIN,
-        optionalCapabilities: ['dynamicNer'],
-        skippedCapabilities: [...SEMANTIC_CAPABILITIES, ...MANIFOLD_CAPABILITIES, ...REASONING_CAPABILITIES],
-        requiredLanes: [],
-        optionalLanes: [],
-        skippedLanes: ['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli', 'manifoldProjection'],
-    },
-    {
-        id: 'fullTextGraph',
-        label: 'Full Text Graph',
-        subtitle: 'force, no embeddings',
-        description: 'Force rebuild the deterministic text graph path from current scope data without embeddings.',
-        actionLabel: 'Run Full Text Graph',
-        icon: 'lucideLayers',
-        outputLabel: 'fresh committed graph',
-        mutationPolicy: 'force rebuild',
-        cost: 'Medium',
-        backendRoute: 'atlas_rich_scan(includeSemanticAtlas=false, policy=force)',
-        dependencyChain: TEXT_GRAPH_CHAIN,
-        requiredCapabilities: TEXT_GRAPH_CHAIN,
-        optionalCapabilities: ['dynamicNer'],
-        skippedCapabilities: [...SEMANTIC_CAPABILITIES, ...MANIFOLD_CAPABILITIES, ...REASONING_CAPABILITIES],
-        requiredLanes: [],
-        optionalLanes: [],
-        skippedLanes: ['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli', 'manifoldProjection'],
-    },
-    {
-        id: 'semanticAtlas',
-        label: 'Semantic Atlas',
-        subtitle: 'embeddings on',
-        description: 'Run the rich scan with text graph dependencies, embedding sidecars, and semantic candidate output.',
-        actionLabel: 'Index Semantic Atlas',
-        icon: 'lucideSparkles',
-        primary: true,
-        outputLabel: 'vectors + candidate links',
-        mutationPolicy: 'dirty-only',
-        cost: 'High',
-        backendRoute: 'atlas_rich_scan(includeSemanticAtlas=true, policy=dirty-only)',
-        dependencyChain: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate'],
-        requiredCapabilities: [...TEXT_GRAPH_CHAIN, 'semanticEmbedding', 'semanticAtlas'],
-        optionalCapabilities: ['dynamicNer', 'semanticCandidate', ...MANIFOLD_CAPABILITIES],
-        skippedCapabilities: ['nliAdjudication', ...REASONING_CAPABILITIES],
-        requiredLanes: ['semanticEmbedding'],
-        optionalLanes: ['dynamicNer', 'manifoldProjection'],
-        skippedLanes: ['nli'],
-    },
-    {
-        id: 'warmFullIndexStack',
-        label: 'Warm Full Index Stack',
-        subtitle: 'no graph mutation',
-        description: 'Load embedding, BI-small Dynamic NER, and NLI model lanes only; graph state is not mutated.',
-        actionLabel: 'Warm Full Index Stack',
-        icon: 'lucideMicrochip',
-        outputLabel: 'ready model sidecars',
-        mutationPolicy: 'model warm',
-        cost: 'High',
-        backendRoute: 'model warm only: native semantic runner + dynamic NER + NLI worker',
-        dependencyChain: ['dynamicNer', 'semanticEmbedding', 'nliAdjudication'],
-        requiredCapabilities: ['dynamicNer', 'semanticEmbedding', 'nliAdjudication'],
-        optionalCapabilities: ['mentionGraph'],
-        skippedCapabilities: ['evidenceGraph', 'surfaceGraph', 'assertedKernel', ...REASONING_CAPABILITIES, ...MANIFOLD_CAPABILITIES, 'semanticAtlas', 'semanticCandidate', 'retrievalWalk', 'galaxyVisualization'],
-        requiredLanes: ['dynamicNer', 'semanticEmbedding', 'nli'],
-        optionalLanes: ['coOccurrence'],
-        skippedLanes: ['manifoldProjection'],
-    },
-    {
-        id: 'visualizeCurrentGraph',
-        label: 'Visualize Current Graph',
-        subtitle: 'read-only',
-        description: 'Open the current graph lens and galaxy snapshot without warming models or mutating data.',
-        actionLabel: 'Visualize Current Graph',
-        icon: 'lucideSearch',
-        outputLabel: 'current snapshot view',
-        mutationPolicy: 'read-only',
-        cost: 'Render',
-        backendRoute: 'graph lens / galaxy view read path',
-        dependencyChain: ['assertedKernel', 'galaxyVisualization'],
-        requiredCapabilities: [],
-        optionalCapabilities: ['hybridManifold', 'hopfProjection', 'lorentzForest', 'retrievalWalk', 'galaxyVisualization'],
-        skippedCapabilities: ['dynamicNer', 'mentionGraph', 'evidenceGraph', 'semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', ...REASONING_CAPABILITIES],
-        requiredLanes: [],
-        optionalLanes: ['manifoldProjection'],
-        skippedLanes: ['dynamicNer', 'coOccurrence', 'semanticEmbedding', 'nli'],
-    },
-];
-
-export const ATLAS_CAPABILITY_PRESETS: AtlasCapabilityPresetDefinition[] = [
-    {
-        id: 'fastScan',
-        label: 'Fast Scan',
-        desc: 'Run the native Atlas surface and evidence graph pipeline on dirty scope data.',
-        target: 'evidence',
-        policy: 'dirty-only',
-        stages: ['Surface scan', 'Mention graph', 'Evidence graph'],
-    },
-    {
-        id: 'fullAtlas',
-        label: 'Full Atlas',
-        desc: 'Update dirty notes through the committed graph lane.',
-        target: 'kernel',
-        policy: 'dirty-only',
-        stages: ['Surface scan', 'Evidence graph', 'Asserted kernel', 'OverGraph commit'],
-    },
-    {
-        id: 'semanticAtlas',
-        label: 'Embedding Atlas Scan',
-        desc: 'Build the rich graph: hierarchy, surface candidates, backend embeddings, and candidate relations.',
-        target: 'semanticAtlas',
-        policy: 'dirty-only',
-        stages: ['Surface scan', 'Leaf embeddings', 'Entity context vectors', 'Candidate relations'],
-    },
-    {
-        id: 'deepReasoning',
-        label: 'Deep Reasoning',
-        desc: 'Force rebuild for richer temporal, memory, and causal passes.',
-        target: 'causal',
-        policy: 'force',
-        stages: ['Full rebuild', 'Temporal', 'Event identity', 'Memory/state', 'Causal review'],
-    },
-    {
-        id: 'visualizationOnly',
-        label: 'Visualization Only',
-        desc: 'Open the graph view without mutating backend state.',
-        target: 'galaxy',
-        policy: 'read-only',
-        stages: ['Load snapshot', 'Compile galaxy scene'],
     },
 ];
 

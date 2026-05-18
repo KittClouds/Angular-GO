@@ -6,17 +6,26 @@ import type {
 } from './atlas-capability-runtime.model';
 
 describe('atlas capability runtime model', () => {
-    it('allows executable recipe plans to represent model-free graph scans', () => {
+    it('allows executable recipe plans to represent entity-anchored text graph scans', () => {
         const plan: AtlasRecipeExecutionPlan = {
             id: 'textGraph',
             label: 'Text Graph',
-            description: 'Dirty-only text graph scan',
+            description: 'Dirty-only text graph scan with required entity anchors',
             actionLabel: 'Build Text Graph',
-            requiredCapabilities: ['dynamicSurface', 'dynamicChunking', 'mentionGraph', 'evidenceGraph', 'surfaceGraph', 'assertedKernel'],
-            optionalCapabilities: ['dynamicNer'],
+            requiredCapabilities: ['dynamicSurface', 'dynamicChunking', 'dynamicNer', 'mentionGraph', 'evidenceGraph', 'surfaceGraph', 'assertedKernel'],
+            optionalCapabilities: [],
             skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication'],
-            dependencyChain: ['dynamicSurface', 'dynamicChunking', 'mentionGraph', 'evidenceGraph', 'surfaceGraph', 'assertedKernel'],
-            requiredModels: [],
+            dependencyChain: ['dynamicSurface', 'dynamicChunking', 'dynamicNer', 'mentionGraph', 'evidenceGraph', 'surfaceGraph', 'assertedKernel'],
+            requiredModels: [{
+                id: 'dynamicNer',
+                laneId: 'dynamicNer',
+                label: 'BI-small Dynamic NER',
+                provider: 'dynamic_ner',
+                service: 'NerService.warmProvider(dynamic_ner)',
+                required: true,
+                readiness: 'ready',
+                statusLabel: 'ready',
+            }],
             optionalModels: [],
             requiredServices: [{
                 id: 'rich-text-graph',
@@ -26,6 +35,10 @@ describe('atlas capability runtime model', () => {
                 ready: true,
             }],
             operations: [{
+                kind: 'dynamicNerScan',
+                service: 'NerService.runDynamicScan',
+                policy: 'read-only',
+            }, {
                 kind: 'richTextGraphScan',
                 service: 'AtlasScanCoordinatorService.runRichEmbeddingScan',
                 policy: 'dirty-only',
@@ -40,49 +53,47 @@ describe('atlas capability runtime model', () => {
             cost: 'Low-Med',
             backendRoute: 'AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=false, policy=dirty-only)',
             runnable: true,
-            requiredLanes: [],
+            requiredLanes: ['dynamicNer'],
             optionalLanes: [],
-            skippedLanes: ['dynamicNer', 'semanticEmbedding', 'nli', 'manifoldProjection'],
+            skippedLanes: ['semanticEmbedding', 'nli', 'manifoldProjection'],
         };
 
-        expect(plan.requiredModels).toEqual([]);
-        expect(plan.operations[0].kind).toBe('richTextGraphScan');
+        expect(plan.requiredModels.map((model) => model.id)).toEqual(['dynamicNer']);
+        expect(plan.operations.map((operation) => operation.kind)).toEqual(['dynamicNerScan', 'richTextGraphScan']);
         expect(plan.backendRoute).toContain('includeSemanticAtlas=false');
     });
 
-    it('allows blocked capability bindings to expose the exact missing runtime contract', () => {
+    it('allows native reasoning probes to expose read-only runtime contracts', () => {
         const binding: AtlasCapabilityRuntimeBinding = {
             capabilityId: 'causalGraph',
-            runnable: false,
-            operationKind: 'notWired',
+            runnable: true,
+            operationKind: 'nativeStoreProbe',
             requiredModels: [],
             requiredServices: [{
-                id: 'missing-runtime-binding',
-                label: 'Missing runtime binding',
-                service: 'not registered',
-                backendRoute: 'not wired',
-                ready: false,
-                detail: 'No Search Panel runtime operation binding is registered.',
+                id: 'native-store-probe',
+                label: 'Causal graph causal-link edge probe',
+                service: 'PhoenixBackendService.storeCommand',
+                backendRoute: 'relation:list(graph_edges)',
+                ready: true,
             }],
-            mutationPolicy: 'native-only',
-            runPolicy: 'native-only',
+            mutationPolicy: 'read-only',
+            runPolicy: 'read-only',
             readinessProbe: {
-                label: 'Not wired',
-                status: 'blocked',
-                source: 'AtlasCapabilityRuntimeService',
-                detail: 'No Search Panel runtime operation binding is registered.',
+                label: 'Causal graph causal-link edge probe',
+                status: 'ready',
+                source: 'PhoenixBackendService.storeCommand',
+                detail: 'read-only relation:list probe for graph_edges',
             },
             outputProbe: {
-                label: 'No output',
-                source: 'not wired',
-                detail: 'runtime binding missing',
+                label: 'Read-only native store rows',
+                source: 'relation:list(graph_edges)',
+                detail: 'Causal graph causal-link edge probe; no mutation',
                 lastValue: null,
             },
-            blockedReason: 'No Search Panel runtime operation binding is registered.',
         };
 
-        expect(binding.runnable).toBe(false);
-        expect(binding.operationKind).toBe('notWired');
-        expect(binding.requiredServices[0].ready).toBe(false);
+        expect(binding.runnable).toBe(true);
+        expect(binding.operationKind).toBe('nativeStoreProbe');
+        expect(binding.requiredServices[0].ready).toBe(true);
     });
 });
