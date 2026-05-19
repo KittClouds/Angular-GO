@@ -31,6 +31,7 @@ import {
 } from './graph-galaxy-engine';
 import type { GraphLensMode, GraphLensState } from '../graph-lens';
 import { buildGraphAtlasReadContext, graphLensState, type GraphAtlasReadContext } from './graph-atlas-read-context';
+import { projectionSummaryRequestsRefresh } from './graph-atlas-refresh-summary';
 
 export interface AtlasPreviewEdge extends GalaxyInputEdge {}
 
@@ -728,10 +729,13 @@ export class GraphAtlasPreviewComponent {
         effect(() => {
             const summary = this.machine.lastSummary();
             this.readContextEpoch();
+            const manifold = this.manifoldMode();
             const context = this.currentReadContext();
-            if (summary?.kind !== 'atlas-rich-scan' || !scanSummaryHasEmbeddings(summary)) return;
+            if (!projectionSummaryRequestsRefresh(summary, manifold)) return;
             untracked(() => {
+                this.atlasLoadedKeys.delete(manifold);
                 void this.refreshCurrentProjectionView(context);
+                void this.refreshGraphInventory(context);
             });
         });
     }
@@ -1301,7 +1305,7 @@ export class GraphAtlasPreviewComponent {
 
     private async refreshEmbeddingAtlas(context: GraphAtlasReadContext, manifold: AtlasManifoldMode, force = false): Promise<void> {
         const requestKey = `${manifold}:${context.key}`;
-        if (this.atlasLoadingKeys.get(manifold) === requestKey) return;
+        if (!force && this.atlasLoadingKeys.get(manifold) === requestKey) return;
         if (!force && this.atlasLoadedKeys.get(manifold) === requestKey && this.machine.manifoldStatuses()[manifold] === 'ready') return;
 
         this.atlasLoadingKeys.set(manifold, requestKey);
@@ -1316,6 +1320,7 @@ export class GraphAtlasPreviewComponent {
                     this.queryTrace.set(adapter.trace(this.queryText(), atlas));
                 }
                 this.machine.finishManifoldLoad(load, `${adapter.label} manifold ready`, {
+                    owner: 'graph-atlas-preview',
                     nodes: atlas.nodes.length,
                     edges: atlas.edges.length,
                     sourceLabel: atlas.sourceLabel,
@@ -1345,12 +1350,6 @@ function emptyEmbeddingAtlas(sourceLabel: string): EmbeddingAtlasData {
 
 function graphLeavesFromAudit(audit: { nodeKinds: Array<{ key: string; count: number }> } | null): number | null {
     return audit?.nodeKinds.find((bucket) => ['leaf', 'chunk'].includes(bucket.key))?.count ?? null;
-}
-
-function scanSummaryHasEmbeddings(summary: { details?: Record<string, unknown> } | null): boolean {
-    const counts = summary?.details?.['embeddingCounts'];
-    if (!counts || typeof counts !== 'object') return false;
-    return Object.values(counts as Record<string, unknown>).some((value) => Number(value) > 0);
 }
 
 function graphInventoryFromDelta(delta: PhoenixGraphDeltaBinaryResult): GraphInventory {
