@@ -1,0 +1,18 @@
+[package]
+name = "phoenix-graph-rebuild"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+compact_str.workspace = true
+hashbrown.workspace = true
+memchr.workspace = true
+phoenix-alex = { path = "../phoenix-alex" }
+phoenix-chunker = { path = "../phoenix-chunker" }
+phoenix-types = { path = "../phoenix-types" }
+serde.workspace = true
+serde_json.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true

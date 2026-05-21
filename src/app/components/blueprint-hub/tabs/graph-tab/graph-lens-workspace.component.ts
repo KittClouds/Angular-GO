@@ -5,7 +5,10 @@ import { FormsModule } from '@angular/forms';
 import type { RegisteredEntity } from '../../../../lib/registry';
 import { db } from '../../../../lib/dexie/db';
 import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
-import { GraphAtlasPreviewComponent, type AtlasMode, type AtlasPreviewEdge } from './graph-atlas-preview/graph-atlas-preview.component';
+import { GraphRebuildService } from '../../../../graph-rebuild/graph-rebuild.service';
+import type { GraphRebuildSnapshot } from '../../../../graph-rebuild/graph-rebuild-snapshot';
+import { entityColorStore } from '../../../../lib/store/entityColorStore';
+import { GraphAtlasPreviewComponent, EMPTY_GRAPH_INVENTORY, type AtlasMode, type AtlasPreviewEdge, type GraphInventory } from './graph-atlas-preview/graph-atlas-preview.component';
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 import {
     DEFAULT_GRAPH_LENS,
@@ -61,6 +64,8 @@ import {
             <app-graph-atlas-preview class="block min-h-0 flex-1"
                 [entities]="lensedGraph().entities"
                 [edges]="lensedGraph().edges"
+                [committedGraphInventory]="graphRebuildInventory()"
+                [graphCounters]="graphRebuildCounters()"
                 [sourceLabel]="lensedGraph().sourceLabel"
                 [lensMode]="lens().mode"
                 [primaryNoteId]="lens().primaryNoteId"
@@ -81,11 +86,17 @@ import {
 })
 export class GraphLensWorkspaceComponent implements OnDestroy {
     private readonly projection = inject(PhoenixProjectionService);
+    private readonly graphRebuild = inject(GraphRebuildService);
     private readonly narrativeEntitiesSignal = signal<RegisteredEntity[]>([]);
     private readonly narrativeEdgesSignal = signal<AtlasPreviewEdge[]>([]);
+    private readonly candidateCountSignal = signal(0);
+    private readonly graphRebuildSnapshotSignal = signal<GraphRebuildSnapshot | null>(null);
+    private readonly anchorRevision = signal(0);
     private readonly memberships = signal<GraphLensMembership[]>([]);
     private membershipToken = 0;
     private noteToken = 0;
+    private graphBuildToken = 0;
+    private removeAnchorListeners: (() => void) | null = null;
 
     @Input() set narrativeEntities(value: RegisteredEntity[] | null | undefined) {
         this.narrativeEntitiesSignal.set(value ?? []);
@@ -104,6 +115,9 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     @Input() atlasSearch = '';
     @Input() isScanning = false;
     @Input() activeProvider: EntitySuggestionProviderId | null = null;
+    @Input() set candidateCount(value: number | null | undefined) {
+        this.candidateCountSignal.set(Math.max(0, Number(value || 0)));
+    }
 
     @Output() entitySelected = new EventEmitter<RegisteredEntity>();
     @Output() addEntityRequested = new EventEmitter<void>();
@@ -141,6 +155,8 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         narrativeEdges: this.narrativeEdgesSignal(),
         memberships: this.memberships(),
     }));
+    readonly graphRebuildInventory = computed(() => graphInventoryFromSnapshot(this.graphRebuildSnapshotSignal()));
+    readonly graphRebuildCounters = computed(() => this.graphRebuildSnapshotSignal()?.counters ?? null);
     readonly filteredNotes = computed(() => {
         const query = this.noteQuery().trim().toLowerCase();
         if (!query) return this.notes();
@@ -149,11 +165,19 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
 
     constructor() {
         void this.refreshNotes();
+        this.bindAnchorEvents();
         effect(() => void this.refreshMemberships(this.lens()));
+        effect(() => {
+            this.anchorRevision();
+            const lens = this.lens();
+            const entities = this.anchorEntitiesForLens(lens);
+            const candidateCount = this.candidateCountSignal();
+            void this.refreshAnchorGraph(lens, entities, candidateCount);
+        });
     }
 
     ngOnDestroy(): void {
-        // No local subscriptions; projection signals own the graph read model.
+        this.removeAnchorListeners?.();
     }
 
     usesNotes(): boolean {
@@ -237,4 +261,128 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
             occurrenceCount: row.occurrenceCount,
         })));
     }
+
+    private async refreshAnchorGraph(
+        lens: GraphLensState,
+        entities: RegisteredEntity[],
+        candidateCount: number,
+    ): Promise<void> {
+        const token = ++this.graphBuildToken;
+        const normalized = normalizeGraphLensForBuild(lens);
+        try {
+            const snapshot = await this.graphRebuild.buildAndPersistSnapshot({
+                scopeKind: normalized.scopeKind,
+                scopeId: normalized.scopeId,
+                noteIds: normalized.noteIds,
+                entities,
+                candidateCount,
+            });
+            if (token === this.graphBuildToken) {
+                this.graphRebuildSnapshotSignal.set(snapshot);
+            }
+        } catch (error) {
+            console.warn('[GraphLensWorkspace] Failed to rebuild graph snapshot', error);
+        }
+    }
+
+    private anchorEntitiesForLens(lens: GraphLensState): RegisteredEntity[] {
+        if (lens.mode === 'narrative' && this.narrativeEntitiesSignal().length) {
+            return this.narrativeEntitiesSignal();
+        }
+        if (lens.mode === 'note' || lens.mode === 'multiNote') {
+            return this.narrativeEntitiesSignal().length ? this.narrativeEntitiesSignal() : this.globalEntities();
+        }
+        return this.globalEntities();
+    }
+
+    private bindAnchorEvents(): void {
+        if (typeof window === 'undefined') return;
+        const bump = () => this.anchorRevision.update((value) => value + 1);
+        window.addEventListener('graph-rebuild-anchors-changed', bump);
+        window.addEventListener('entities-changed', bump);
+        this.removeAnchorListeners = () => {
+            window.removeEventListener('graph-rebuild-anchors-changed', bump);
+            window.removeEventListener('entities-changed', bump);
+        };
+    }
+}
+
+function normalizeGraphLensForBuild(lens: GraphLensState): {
+    scopeKind: GraphRebuildSnapshot['scopeKind'];
+    scopeId: string;
+    noteIds: string[];
+} {
+    if (lens.mode === 'note') {
+        const noteId = lens.primaryNoteId || lens.selectedNoteIds[0] || '';
+        return { scopeKind: 'note', scopeId: noteId ? `note:${noteId}` : 'note:none', noteIds: noteId ? [noteId] : [] };
+    }
+    if (lens.mode === 'multiNote') {
+        const noteIds = lens.selectedNoteIds.length ? lens.selectedNoteIds : (lens.primaryNoteId ? [lens.primaryNoteId] : []);
+        return { scopeKind: 'multiNote', scopeId: `multi:${noteIds.join('|') || 'none'}`, noteIds };
+    }
+    if (lens.mode === 'narrative') {
+        return { scopeKind: 'narrative', scopeId: 'narrative:active', noteIds: [] };
+    }
+    return { scopeKind: 'global', scopeId: 'global', noteIds: [] };
+}
+
+function graphInventoryFromSnapshot(snapshot: GraphRebuildSnapshot | null): GraphInventory {
+    if (!snapshot) return EMPTY_GRAPH_INVENTORY;
+    const nodes = snapshot.nodes.map((node, index) => ({
+        id: node.id,
+        label: node.label,
+        kind: node.kind,
+        aliases: node.aliases,
+        totalMentions: node.totalMentions,
+        ...stablePoint(node.id, index),
+        colorHsl: entityColorStore.getRawHsl(node.kind as any),
+        metadata: {
+            sourceType: 'graph-rebuild',
+            sourceEntityId: node.entityId,
+            graphKind: 'entity',
+            anchorIds: node.anchorIds,
+            noteIds: node.noteIds,
+        },
+    }));
+    return {
+        nodes,
+        edges: snapshot.edges.map((edge) => ({
+            id: edge.id,
+            sourceId: edge.sourceId,
+            targetId: edge.targetId,
+            type: edge.type,
+            confidence: Math.max(0.25, Math.min(1.8, edge.confidence + edge.weight * 0.08)),
+        })),
+        kindCounts: graphKindCounts(nodes),
+        sourceLabel: 'graph rebuild snapshot',
+    };
+}
+
+function graphKindCounts(nodes: GraphInventory['nodes']): Array<{ kind: string; count: number }> {
+    const counts = new Map<string, number>();
+    for (const node of nodes) {
+        const kind = String(node.kind || 'unknown').toLowerCase();
+        counts.set(kind, (counts.get(kind) || 0) + 1);
+    }
+    return [...counts.entries()].map(([kind, count]) => ({ kind, count }));
+}
+
+function stablePoint(id: string, index: number): { atlasX: number; atlasY: number; atlasZ: number } {
+    const angle = index * 2.399963229728653 + hashUnit(id);
+    const y = 1 - ((index % 89) / 88) * 2;
+    const radius = Math.sqrt(Math.max(0, 1 - y * y)) * 0.92;
+    return {
+        atlasX: Math.cos(angle) * radius,
+        atlasY: y * 0.7,
+        atlasZ: Math.sin(angle) * radius,
+    };
+}
+
+function hashUnit(value: string): number {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 4294967295;
 }

@@ -2738,6 +2738,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-graph-rebuild"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "hashbrown 0.15.5",
+ "memchr",
+ "phoenix-alex",
+ "phoenix-chunker",
+ "phoenix-types",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "phoenix-hyperbolic"
 version = "0.1.0"
 dependencies = [

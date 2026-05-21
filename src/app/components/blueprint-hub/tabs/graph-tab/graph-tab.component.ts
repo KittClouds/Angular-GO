@@ -12,6 +12,7 @@ import { GraphLensWorkspaceComponent } from './graph-lens-workspace.component';
 import { EntityCreatorDialogComponent, EntityCreatorData } from './entity-creator-dialog/entity-creator-dialog.component';
 import { ScopeService } from '../../../../lib/services/scope.service';
 import { NoteEditorStore } from '../../../../lib/store/note-editor.store';
+import { parseContentToPlainText } from '../../../../lib/analytics';
 import { NerService } from '../../../../services/ner.service';
 import { PhoenixProjectionService } from '../../../../services/phoenix-projection.service';
 import { PhoenixMachineControlService } from '../../../../services/phoenix-machine-control.service';
@@ -53,7 +54,7 @@ export class GraphTabComponent {
     editingEntity = signal<EntityCreatorData | undefined>(undefined);
     isStyleDrawerOpen = signal(false);
     atlasSearch = signal('');
-    atlasMode = signal<AtlasMode>('entities');
+    atlasMode = signal<AtlasMode>('graph');
 
     // Scope state — driven by ScopeService
     scopeLabel = this.scopeService.scopeLabel;
@@ -213,6 +214,14 @@ export class GraphTabComponent {
 
     async runSuggestionScan(source: 'sidebar' | 'canvas' = 'sidebar', lens?: GraphLensState) {
         if (this.atlasMode() !== 'embeddings') {
+            const currentNote = this.noteStore.currentNote();
+            if (!currentNote) return;
+            const plainText = parseContentToPlainText(currentNote.content || currentNote.markdownContent || '');
+            await this.nerService.runDynamicScan({
+                noteId: currentNote.id,
+                noteTitle: currentNote.title || 'Untitled Note',
+                plainText,
+            });
             return;
         }
         try {

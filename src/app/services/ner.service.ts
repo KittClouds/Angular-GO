@@ -29,6 +29,7 @@ import {
     recordSuggestionAccepted,
     recordSuggestionRejected,
 } from '../lib/entity-learning/entity-feedback';
+import { recordAcceptedEntityAnchor } from '../graph-rebuild/entity-anchor-acceptance';
 
 class PhoenixScanEntitySuggestionProvider implements EntitySuggestionProviderApi {
     readonly id = 'dynamic_ner' as const;
@@ -385,6 +386,17 @@ export class NerService {
             noteId,
             { source: 'user' }
         );
+        await recordAcceptedEntityAnchor({
+            noteId,
+            entity: registration.entity,
+            surface: suggestion.label,
+            plainText: this.currentText || currentNote?.markdownContent || '',
+            confidence: suggestion.confidence,
+            generation: currentNote?.version || currentNote?.updatedAt || Date.now(),
+            context: suggestion.context,
+        }).catch(error => {
+            console.warn('[NerService] Failed to record accepted graph anchor:', error);
+        });
         await recordSuggestionAccepted({
             entityId: registration.entity.id,
             label: registration.entity.label,

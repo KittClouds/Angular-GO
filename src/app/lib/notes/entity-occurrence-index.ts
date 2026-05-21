@@ -59,7 +59,8 @@ async function syncNoteEntityOccurrences(
         .filter((item): item is EntityOccurrence => !!item);
 
     const machine = await scanMachineOccurrences(note, text, lookup, generation, now, scanner);
-    const occurrences = selectBestOccurrences([...explicit, ...machine], text);
+    const accepted = await loadAcceptedSuggestionAnchors(note, text, generation, now);
+    const occurrences = selectBestOccurrences([...explicit, ...machine, ...accepted], text);
     const summaries = summarizeOccurrences(occurrences);
 
     await db.transaction('rw', db.entityOccurrences, db.entityNoteIndex, async () => {
@@ -72,6 +73,7 @@ async function syncNoteEntityOccurrences(
             await db.entityNoteIndex.bulkPut(summaries);
         }
     });
+    dispatchAnchorEvent(note.id);
 }
 
 export async function syncLiveNoteEntityOccurrences(
@@ -108,6 +110,7 @@ export async function deleteNoteEntityOccurrences(noteId: string): Promise<void>
         await db.entityOccurrences.where('noteId').equals(noteId).delete();
         await db.entityNoteIndex.where('noteId').equals(noteId).delete();
     });
+    dispatchAnchorEvent(noteId);
 }
 
 async function scanMachineOccurrences(
@@ -132,6 +135,30 @@ async function scanMachineOccurrences(
     return spans
         .map(span => spanToOccurrence(note, span, lookup, generation, now, text))
         .filter((item): item is EntityOccurrence => !!item);
+}
+
+async function loadAcceptedSuggestionAnchors(
+    note: Note,
+    text: string,
+    generation: number,
+    now: number,
+): Promise<EntityOccurrence[]> {
+    const rows = await db.entityOccurrences
+        .where('[noteId+source]')
+        .equals([note.id, 'machine_suggestion'])
+        .toArray()
+        .catch(() => []);
+    return rows
+        .filter((row) => row.sourceStart >= 0 && row.sourceEnd > row.sourceStart && row.sourceEnd <= text.length)
+        .filter((row) => text.slice(row.sourceStart, row.sourceEnd).toLocaleLowerCase() === row.surface.toLocaleLowerCase())
+        .map((row) => ({
+            ...row,
+            worldId: note.worldId,
+            narrativeId: note.narrativeId,
+            folderId: note.folderId,
+            generation: Math.max(row.generation || 0, generation),
+            updatedAt: now,
+        }));
 }
 
 function explicitMarkToOccurrence(
@@ -465,6 +492,12 @@ function canUseEntityOccurrenceTables(): boolean {
     return typeof db.entityOccurrences?.where === 'function'
         && typeof db.entityNoteIndex?.where === 'function'
         && typeof db.entities?.toArray === 'function';
+}
+
+function dispatchAnchorEvent(noteId: string): void {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('graph-rebuild-anchors-changed', { detail: { noteId } }));
+    }
 }
 
 export const entityOccurrenceIndexTestHooks = {

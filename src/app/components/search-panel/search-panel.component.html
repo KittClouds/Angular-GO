@@ -8,8 +8,8 @@
         <ng-icon name="lucideSparkles" class="h-3.5 w-3.5"></ng-icon>
       </div>
       <div class="banner-titles">
-        <h2>Graph Builder</h2>
-        <span class="banner-sub">{{ buildScopeLabel() }}</span>
+        <h2>Graph Rebuild</h2>
+        <span class="banner-sub">{{ buildScopeLabel() }} / active lane</span>
       </div>
     </div>
     <div class="banner-right">
@@ -25,7 +25,7 @@
     <div class="section-heading">
       <div>
         <h3>Build Graph</h3>
-        <p>{{ scopedNotes().length }} notes / {{ chunkingStatus().estimatedChunks }} chunks</p>
+        <p>{{ scopedNotes().length }} notes / {{ chunkingStatus().estimatedChunks }} expected chunks</p>
       </div>
       <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
     </div>
@@ -57,10 +57,17 @@
       </div>
     </div>
 
-    <div class="graph-target-head">
-      <span>Contract Stages</span>
-      <strong>{{ selectedCapabilityIds().length }} staged</strong>
+    <div class="graph-rebuild-active-card">
+      <span>Active spine</span>
+      <strong>Alex anchors -> graph snapshot -> embeddings -> Hybrid / Hopf / Lorentz</strong>
+      <small>Legacy staged contracts are preserved below for reference, but the graph tab now reads the explicit graph-rebuild snapshot.</small>
     </div>
+
+    <details class="legacy-pipeline">
+      <summary class="graph-target-head">
+      <span>Contract Stages</span>
+        <strong>{{ selectedCapabilityIds().length }} legacy staged</strong>
+      </summary>
 
     <div class="graph-target-toolbar">
       <label class="graph-target-filter">
@@ -207,6 +214,7 @@
       <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
           lastRunStatus().durationMs }} ms</ng-container></small>
     </div>
+    </details>
   </section>
 
   <section class="workbench-surface command-surface search-surface">

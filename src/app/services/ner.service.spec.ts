@@ -23,11 +23,16 @@ vi.mock('../lib/entity-learning/entity-feedback', () => ({
   recordSuggestionRejected: vi.fn(async () => undefined),
 }));
 
+vi.mock('../graph-rebuild/entity-anchor-acceptance', () => ({
+  recordAcceptedEntityAnchor: vi.fn(async () => undefined),
+}));
+
 vi.mock('uuid', () => ({
   v4: vi.fn(() => 'uuid-1'),
 }));
 
 import { smartGraphRegistry } from '../lib/registry';
+import { recordAcceptedEntityAnchor } from '../graph-rebuild/entity-anchor-acceptance';
 import { NerService } from './ner.service';
 
 describe('NerService provider orchestration', () => {
@@ -74,6 +79,47 @@ describe('NerService provider orchestration', () => {
       };
     };
   }
+
+  it('accepting a suggestion feeds Alex and writes an accepted graph anchor', async () => {
+    vi.mocked(smartGraphRegistry.registerEntity).mockReturnValue({
+      entity: {
+        id: 'entity-kai',
+        label: 'Kai',
+        kind: 'CHARACTER',
+        aliases: [],
+        firstNote: 'note-1',
+        mentionsByNote: new Map(),
+        totalMentions: 1,
+        lastSeenDate: new Date(1),
+        createdAt: new Date(1),
+        createdBy: 'user',
+        registeredAt: 1,
+      },
+      isNew: true,
+      wasMerged: false,
+    } as any);
+    const service = makeService();
+    (service as any).currentText = 'Kai crossed the room.';
+    service.suggestions.set([
+      {
+        id: 's-1',
+        label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 0.91,
+        source: 'dynamic_ner',
+      },
+    ] as any);
+
+    await service.acceptSuggestion('s-1');
+
+    expect(smartGraphRegistry.registerEntity).toHaveBeenCalledWith('Kai', 'CHARACTER', 'note-1', { source: 'user' });
+    expect(recordAcceptedEntityAnchor).toHaveBeenCalledWith(expect.objectContaining({
+      noteId: 'note-1',
+      surface: 'Kai',
+      plainText: 'Kai crossed the room.',
+      confidence: 0.91,
+    }));
+  });
 
   it('analyzeNote still routes through the Phoenix scan provider', async () => {
     const service = makeService();

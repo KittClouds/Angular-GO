@@ -1,0 +1,190 @@
+use std::{env, fs, process};
+
+use phoenix_graph_rebuild::{build_graph_rebuild_snapshot, GraphRebuildInput, GraphScopeKind};
+use phoenix_types::{EntityId, EntityKind, LexiconEntry, ScopeKey};
+
+fn main() {
+    let args = Args::parse(env::args().skip(1).collect());
+    let text = args.text.unwrap_or_else(|| {
+        eprintln!("graph_rebuild_probe requires --text or --text-file");
+        process::exit(2);
+    });
+    let entities = if args.entities.is_empty() {
+        sample_entities()
+    } else {
+        args.entities
+    };
+    let snapshot = build_graph_rebuild_snapshot(GraphRebuildInput {
+        scope_kind: GraphScopeKind::Note,
+        scope_id: &format!("note:{}", args.note_id),
+        note_id: &args.note_id,
+        text: &text,
+        scope: ScopeKey::default(),
+        entities: &entities,
+        candidate_count: 0,
+        built_at: Some(1),
+    })
+    .unwrap_or_else(|error| {
+        eprintln!("graph rebuild failed: {error}");
+        process::exit(1);
+    });
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot).expect("snapshot json")
+        );
+        return;
+    }
+
+    println!("graph_rebuild_probe");
+    println!("schema={}", snapshot.schema_version);
+    println!("note_id={}", args.note_id);
+    println!("chunks={}", snapshot.counters.chunks);
+    println!("candidates={}", snapshot.counters.candidates);
+    println!("mentions={}", snapshot.counters.mentions);
+    println!("accepted_anchors={}", snapshot.counters.accepted_anchors);
+    println!("relationships={}", snapshot.counters.relationships);
+    println!("events={}", snapshot.counters.events);
+    println!("episodes={}", snapshot.counters.episodes);
+    println!("temporal_edges={}", snapshot.counters.temporal_edges);
+    println!("causal_edges={}", snapshot.counters.causal_edges);
+    println!("memory_state={}", snapshot.counters.memory_state);
+    println!("embedding_targets={}", snapshot.counters.embedding_targets);
+    println!("nodes={}", snapshot.counters.nodes);
+    println!("edges={}", snapshot.counters.edges);
+    println!("persisted_rows=0");
+    println!("frontend_payload_rows={}", frontend_payload_rows(&snapshot));
+    println!(
+        "drop_missing_entity={}",
+        snapshot.counters.drop_reasons.missing_entity
+    );
+    println!(
+        "drop_invalid_span={}",
+        snapshot.counters.drop_reasons.invalid_span
+    );
+    println!(
+        "drop_duplicate_anchor={}",
+        snapshot.counters.drop_reasons.duplicate_anchor
+    );
+    println!(
+        "drop_singleton_bucket={}",
+        snapshot.counters.drop_reasons.singleton_bucket
+    );
+    println!(
+        "drop_missing_chunk={}",
+        snapshot.counters.drop_reasons.missing_chunk
+    );
+}
+
+struct Args {
+    note_id: String,
+    text: Option<String>,
+    entities: Vec<LexiconEntry>,
+    json: bool,
+}
+
+impl Args {
+    fn parse(args: Vec<String>) -> Self {
+        let mut parsed = Args {
+            note_id: "probe-note".to_owned(),
+            text: None,
+            entities: Vec::new(),
+            json: false,
+        };
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--note-id" => {
+                    index += 1;
+                    parsed.note_id = args.get(index).cloned().unwrap_or(parsed.note_id);
+                }
+                "--text" => {
+                    index += 1;
+                    parsed.text = args.get(index).cloned();
+                }
+                "--text-file" => {
+                    index += 1;
+                    let path = args.get(index).cloned().unwrap_or_default();
+                    parsed.text = Some(fs::read_to_string(&path).unwrap_or_else(|error| {
+                        eprintln!("failed to read {path}: {error}");
+                        process::exit(2);
+                    }));
+                }
+                "--entity" => {
+                    index += 1;
+                    if let Some(raw) = args.get(index) {
+                        parsed.entities.push(parse_entity(raw));
+                    }
+                }
+                "--json" => parsed.json = true,
+                "--help" | "-h" => print_help_and_exit(),
+                other => {
+                    eprintln!("unknown argument: {other}");
+                    print_help_and_exit();
+                }
+            }
+            index += 1;
+        }
+        parsed
+    }
+}
+
+fn parse_entity(raw: &str) -> LexiconEntry {
+    let mut parts = raw.split('|');
+    let id = parts.next().unwrap_or("entity").trim();
+    let label = parts.next().unwrap_or(id).trim();
+    let kind = parts.next().unwrap_or("character").trim();
+    let aliases = parts
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty())
+        .map(str::to_owned)
+        .collect();
+    LexiconEntry {
+        entity_id: EntityId(id.to_owned()),
+        label: label.to_owned(),
+        aliases,
+        kind: Some(parse_kind(kind)),
+        scope: ScopeKey::default(),
+        ..LexiconEntry::default()
+    }
+}
+
+fn parse_kind(kind: &str) -> EntityKind {
+    match kind.to_ascii_lowercase().as_str() {
+        "location" => EntityKind::Location,
+        "item" => EntityKind::Item,
+        "faction" => EntityKind::Faction,
+        "organization" => EntityKind::Organization,
+        "event" => EntityKind::Event,
+        "concept" => EntityKind::Concept,
+        "npc" => EntityKind::Npc,
+        _ => EntityKind::Character,
+    }
+}
+
+fn sample_entities() -> Vec<LexiconEntry> {
+    vec![
+        parse_entity("e-kai|Kai|character|Captain Kai"),
+        parse_entity("e-hazel|Hazel|character|"),
+        parse_entity("e-rift|Rift|character|"),
+    ]
+}
+
+fn frontend_payload_rows(snapshot: &phoenix_graph_rebuild::GraphRebuildSnapshot) -> usize {
+    snapshot.chunks.len()
+        + snapshot.mentions.len()
+        + snapshot.entity_anchors.len()
+        + snapshot.relationships.len()
+        + snapshot.embedding_targets.len()
+        + snapshot.nodes.len()
+        + snapshot.edges.len()
+}
+
+fn print_help_and_exit() -> ! {
+    println!("Usage: graph_rebuild_probe --text-file note.txt [--entity id|label|kind|alias1,alias2] [--json]");
+    process::exit(0);
+}

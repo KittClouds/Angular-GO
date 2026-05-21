@@ -57,6 +57,7 @@
                     [atlasSearch]="atlasSearch()"
                     [isScanning]="isScanningSuggestions()"
                     [activeProvider]="activeSuggestionProvider()"
+                    [candidateCount]="suggestions().length"
                     (entitySelected)="selectEntity($event)"
                     (addEntityRequested)="openCreator()"
                     (scanRequested)="runSuggestionScan('canvas', $event)"

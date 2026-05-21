@@ -13,6 +13,7 @@ import { PhoenixMachineControlService } from '../../../../../services/phoenix-ma
 import type { AtlasManifoldMode } from '../../../../../services/manifold-atlas.types';
 import { buildAtlasCountReconciliation } from '../../../../../services/atlas-count-ledger.model';
 import { BlueprintHubService } from '../../../blueprint-hub.service';
+import type { GraphRebuildCounters } from '../../../../../graph-rebuild/graph-rebuild-snapshot';
 import { type EmbeddingAtlasData, type EmbeddingQueryTrace, type EmbeddingSourcePreview } from './graph-embedding-atlas';
 import { manifoldAdapter } from './graph-manifold-atlas';
 import { GraphGalaxyCanvasComponent } from './graph-galaxy-canvas.component';
@@ -49,14 +50,14 @@ interface ActiveAtlasGraph {
 
 export type AtlasMode = 'entities' | 'graph' | 'embeddings';
 
-interface GraphInventory {
+export interface GraphInventory {
     nodes: GalaxyRenderableNode[];
     edges: AtlasPreviewEdge[];
     kindCounts: Array<{ kind: string; count: number }>;
     sourceLabel: string;
 }
 
-const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts: [], sourceLabel: 'graph inventory' };
+export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts: [], sourceLabel: 'graph rebuild snapshot' };
 
 @Component({
     selector: 'app-graph-atlas-preview',
@@ -90,6 +91,11 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                         <span class="rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">{{ primaryCountLabel() }} {{ activeNodeCount() }}</span>
                         <span class="rounded-full border border-violet-400/15 bg-violet-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-100">{{ secondaryCountLabel() }} {{ activeEdgeCount() }}</span>
                         <span class="rounded-full border border-amber-300/15 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100">Source: {{ dataSourceLabel() }}</span>
+                        @if (atlasMode === 'graph') {
+                        <span class="rounded-full border border-emerald-300/15 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100">Anchors {{ graphAnchorCount() }}</span>
+                        <span class="rounded-full border border-sky-300/15 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-100">Chunks {{ graphChunkCount() }}</span>
+                        <span class="rounded-full border border-rose-300/15 bg-rose-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-100">Drops {{ graphDropCount() }}</span>
+                        }
                         @if (atlasMode === 'embeddings') {
                         <span class="rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">Input graph: {{ semanticGraphAvailabilityLabel() }}</span>
                         }
@@ -264,6 +270,9 @@ const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts
                         <div class="atlas-canvas-actions">
                             <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
                                 <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
+                            </button>
+                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning" (click)="scanRequested.emit(currentLensState())" title="Run Dynamic NER as Alex candidate input">
+                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning"></lucide-icon>Scan
                             </button>
                         </div>
                     </div>
@@ -647,6 +656,11 @@ export class GraphAtlasPreviewComponent {
     @Input() entities: GalaxyRenderableNode[] = [];
     @Input() edges: AtlasPreviewEdge[] = [];
     @Input() sourceLabel = 'registry graph';
+    @Input() graphCounters: GraphRebuildCounters | null = null;
+    @Input() set committedGraphInventory(value: GraphInventory | null | undefined) {
+        this.graphInventory.set(value ?? EMPTY_GRAPH_INVENTORY);
+        this.activeGraphCache = null;
+    }
     @Input() set lensMode(value: GraphLensMode | null | undefined) {
         this._lensMode = value || 'global';
         this.bumpReadContext();
@@ -675,7 +689,7 @@ export class GraphAtlasPreviewComponent {
     @ViewChild('galaxyCanvas') private galaxyCanvas?: GraphGalaxyCanvasComponent;
 
     viewMode: '3d' | 'map' = '3d';
-    atlasMode: AtlasMode = 'entities';
+    atlasMode: AtlasMode = 'graph';
     settings: GalaxyRenderSettings = { ...DEFAULT_GALAXY_SETTINGS };
     settingsOpen = false;
     lensMenuOpen = false;
@@ -697,13 +711,13 @@ export class GraphAtlasPreviewComponent {
     graphKindFilter = signal('all');
     graphKindCounts = computed(() => this.graphInventory().kindCounts.slice(0, 4));
     graphCountReconciliation = computed(() => buildAtlasCountReconciliation({
-        committedVertices: this.machine.graphNodes(),
-        committedEvidenceEdges: this.machine.graphEdges(),
-        committedLeaves: graphLeavesFromAudit(this.machine.graphAudit()),
+        committedVertices: this.graphCounters?.nodes ?? this.graphInventory().nodes.length,
+        committedEvidenceEdges: this.graphCounters?.edges ?? this.graphInventory().edges.length,
+        committedLeaves: this.graphCounters?.acceptedAnchors ?? null,
         renderedVertices: this.graphInventory().nodes.length,
         renderedLinks: this.graphInventory().edges.length,
         renderedKinds: this.graphInventory().kindCounts,
-        sourceLabel: 'Committed Graph Delta',
+        sourceLabel: 'Graph Rebuild Snapshot',
     }));
     readonly PlusIcon = Plus;
     readonly SearchIcon = Search;
@@ -722,8 +736,7 @@ export class GraphAtlasPreviewComponent {
             const manifold = this.manifoldMode();
             const context = this.currentReadContext();
             untracked(() => {
-                void this.refreshEmbeddingAtlas(context, manifold);
-                void this.refreshGraphInventory(context);
+                if (this.atlasMode === 'embeddings') void this.refreshEmbeddingAtlas(context, manifold);
             });
         });
         effect(() => {
@@ -731,11 +744,11 @@ export class GraphAtlasPreviewComponent {
             this.readContextEpoch();
             const manifold = this.manifoldMode();
             const context = this.currentReadContext();
+            if (this.atlasMode !== 'embeddings') return;
             if (!projectionSummaryRequestsRefresh(summary, manifold)) return;
             untracked(() => {
                 this.atlasLoadedKeys.delete(manifold);
                 void this.refreshCurrentProjectionView(context);
-                void this.refreshGraphInventory(context);
             });
         });
     }
@@ -757,6 +770,7 @@ export class GraphAtlasPreviewComponent {
             if (this.settings.layoutMode === 'single' || this.settings.layoutMode !== layoutMode && this.manifoldMode() !== 'hybrid') {
                 this.updateSettings({ layoutMode });
             }
+            void this.refreshEmbeddingAtlas(this.currentReadContext(), this.manifoldMode());
         }
     }
 
@@ -834,7 +848,11 @@ export class GraphAtlasPreviewComponent {
 
     semanticGraphAvailabilityLabel(): string {
         const inventory = this.graphInventory();
-        if (!inventory.nodes.length) return 'unavailable';
+        const counters = this.graphCounters;
+        if (!inventory.nodes.length && !counters?.embeddingTargets) return 'unavailable';
+        if (counters?.embeddingTargets) {
+            return `${counters.embeddingTargets} targets / ${counters.chunks} chunks / ${counters.nodes} entities`;
+        }
         return `${this.graphKindTotal('leaf', 'chunk')} leaves / ${this.graphKindTotal('document')} documents / ${this.graphKindTotal('entity')} entities`;
     }
 
@@ -1026,22 +1044,35 @@ export class GraphAtlasPreviewComponent {
 
     primaryCountLabel(): string {
         if (this.atlasMode === 'entities') return 'registry entities';
-        if (this.atlasMode === 'graph') return 'rendered vertices';
+        if (this.atlasMode === 'graph') return 'graph nodes';
         return this.manifoldMode() === 'lorentz' ? 'forest nodes' : 'semantic vectors';
     }
 
     secondaryCountLabel(): string {
         if (this.atlasMode === 'entities') return 'registry links';
-        if (this.atlasMode === 'graph') return 'rendered links';
+        if (this.atlasMode === 'graph') return 'graph edges';
         return this.manifoldMode() === 'lorentz' ? 'tree links' : 'candidate links';
     }
 
     dataSourceLabel(): string {
         if (this.atlasMode === 'entities') return 'Registry';
-        if (this.atlasMode === 'graph') return 'Committed Graph Delta';
+        if (this.atlasMode === 'graph') return 'Graph Rebuild Snapshot';
         if (this.manifoldMode() === 'lorentz') return 'Lorentz Forest Sidecar';
         if (this.manifoldMode() === 'hopf') return 'Semantic Atlas -> Hopf Projection';
         return 'Semantic Atlas -> Hybrid Space';
+    }
+
+    graphAnchorCount(): number {
+        return this.graphCounters?.acceptedAnchors ?? 0;
+    }
+
+    graphChunkCount(): number {
+        return this.graphCounters?.chunks ?? 0;
+    }
+
+    graphDropCount(): number {
+        const drops = this.graphCounters?.dropReasons;
+        return drops ? drops.missingEntity + drops.invalidSpan + drops.duplicateAnchor + drops.singletonBucket : 0;
     }
 
     isAtlasSurfaceActive(): boolean {
@@ -1051,7 +1082,7 @@ export class GraphAtlasPreviewComponent {
     }
 
     emptyTitle(): string {
-        if (this.atlasMode === 'graph') return 'No graph inventory yet';
+        if (this.atlasMode === 'graph') return 'No accepted graph anchors yet';
         if (this.atlasMode === 'entities') return 'No entities yet';
         if (this.manifoldMode() === 'hopf') return 'No Hopf manifold yet';
         if (this.manifoldMode() === 'lorentz') return 'No Lorentz forest yet';
@@ -1059,11 +1090,20 @@ export class GraphAtlasPreviewComponent {
     }
 
     emptyMessage(): string {
-        if (this.atlasMode === 'graph') return 'Run Atlas Command or rebuild the graph lane, then this view will show leaves, mentions, entities, and graph edges.';
+        if (this.atlasMode === 'graph') return this.graphEmptyMessage();
         if (this.atlasMode === 'entities') return 'Add or extract entities and the atlas will start drawing the scope.';
         if (this.manifoldMode() === 'hopf') return 'Index the Semantic Atlas from the rendered graph, then project the existing vectors into Hopf space.';
         if (this.manifoldMode() === 'lorentz') return 'Index the Semantic Atlas from the rendered graph, then refresh the Lorentz forest sidecar only when the native cache exists.';
         return 'Index the Semantic Atlas from rendered leaves, documents, entities, and context lanes. A local preview is shown only when native vectors are unavailable.';
+    }
+
+    private graphEmptyMessage(): string {
+        const counters = this.graphCounters;
+        if (!counters || counters.entities === 0) return 'Alex has no registered entities in this lens yet.';
+        if (counters.chunks === 0) return 'Graph rebuild has no chunks for this lens yet. Dynamic chunking or note-block projection must run before projection.';
+        if (counters.acceptedAnchors === 0) return 'NER or dictionary matching produced no accepted Alex anchors in this lens.';
+        if (counters.nodes < 2) return 'Only one Alex entity has anchors in this lens, so no relationship edge can be formed yet.';
+        return 'Anchors exist, but no two entities share a note or chunk bucket yet.';
     }
 
     canvasQueryFocus() {
@@ -1100,7 +1140,7 @@ export class GraphAtlasPreviewComponent {
         this.activeGraphCache = null;
     }
 
-    private currentLensState(): GraphLensState {
+    currentLensState(): GraphLensState {
         return graphLensState(this._lensMode, this._primaryNoteId, this._selectedNoteIds);
     }
 

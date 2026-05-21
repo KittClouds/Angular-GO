@@ -9,6 +9,49 @@
   border-color: rgba(var(--phthalo-rgb), 0.28);
 }
 
+.graph-rebuild-active-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(var(--phthalo-rgb), 0.28);
+  border-radius: 8px;
+  background: rgba(var(--phthalo-rgb), 0.08);
+}
+
+.graph-rebuild-active-card span,
+.legacy-pipeline summary span {
+  color: #67e8f9;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.graph-rebuild-active-card strong {
+  color: #f4f4f5;
+  font-size: 11px;
+}
+
+.graph-rebuild-active-card small {
+  color: #a1a1aa;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.legacy-pipeline {
+  margin-top: 8px;
+}
+
+.legacy-pipeline summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.legacy-pipeline summary::-webkit-details-marker {
+  display: none;
+}
+
 .builder-row {
   display: flex;
   flex-wrap: wrap;
