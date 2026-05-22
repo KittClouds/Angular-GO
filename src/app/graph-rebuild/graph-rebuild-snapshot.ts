@@ -73,6 +73,16 @@ export interface GraphRebuildRelationship {
     decisionEvidence: string[];
 }
 
+export interface GraphRebuildRelationshipHint {
+    sourceId: string;
+    targetId: string;
+    relationType?: string;
+    status: GraphRebuildAdjudicationStatus;
+    confidence: number;
+    source: string;
+    evidence?: string[];
+}
+
 export interface GraphRebuildEvent {
     id: string;
     noteId: string;
@@ -285,6 +295,7 @@ export interface BuildGraphRebuildSnapshotInput {
     entities: RegisteredEntity[];
     occurrences: EntityOccurrence[];
     chunks?: GraphRebuildChunk[];
+    relationshipHints?: GraphRebuildRelationshipHint[];
     candidateCount?: number;
     builtAt?: number;
 }

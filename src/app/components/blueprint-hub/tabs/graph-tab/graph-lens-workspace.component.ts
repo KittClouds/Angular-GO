@@ -330,16 +330,53 @@ function graphInventoryFromSnapshot(snapshot: GraphRebuildSnapshot | null): Grap
             noteIds: node.noteIds,
         },
     }));
+    const chunkMentionCounts = new Map<string, number>();
+    for (const anchor of snapshot.entityAnchors) {
+        if (!anchor.chunkId) continue;
+        chunkMentionCounts.set(anchor.chunkId, (chunkMentionCounts.get(anchor.chunkId) || 0) + 1);
+    }
+    const chunkNodes = snapshot.chunks.map((chunk, index) => ({
+        id: chunkNodeId(chunk.id),
+        label: `Chunk ${chunk.ordinal + 1}`,
+        kind: 'chunk',
+        totalMentions: Math.max(1, chunkMentionCounts.get(chunk.id) || 0),
+        ...stablePoint(chunk.id, nodes.length + index),
+        colorHsl: graphKindHsl('chunk'),
+        metadata: {
+            sourceType: 'graph-rebuild',
+            graphKind: 'chunk',
+            chunkId: chunk.id,
+            noteId: chunk.noteId,
+            start: chunk.start,
+            end: chunk.end,
+            source: chunk.source,
+        },
+    }));
+    const inventoryNodes = [...nodes, ...chunkNodes];
+    const entityIds = new Set(snapshot.nodes.map((node) => node.id));
+    const chunkIds = new Set(snapshot.chunks.map((chunk) => chunk.id));
+    const anchorEdges = snapshot.entityAnchors
+        .filter((anchor) => anchor.chunkId && entityIds.has(anchor.entityId) && chunkIds.has(anchor.chunkId))
+        .map((anchor) => ({
+            id: `anchor:${anchor.id}`,
+            sourceId: chunkNodeId(anchor.chunkId!),
+            targetId: anchor.entityId,
+            type: 'entity_anchor',
+            confidence: Math.max(0.25, Math.min(1.2, anchor.confidence)),
+        }));
     return {
-        nodes,
-        edges: snapshot.edges.map((edge) => ({
-            id: edge.id,
-            sourceId: edge.sourceId,
-            targetId: edge.targetId,
-            type: edge.type,
-            confidence: Math.max(0.25, Math.min(1.8, edge.confidence + edge.weight * 0.08)),
-        })),
-        kindCounts: graphKindCounts(nodes),
+        nodes: inventoryNodes,
+        edges: [
+            ...snapshot.edges.map((edge) => ({
+                id: edge.id,
+                sourceId: edge.sourceId,
+                targetId: edge.targetId,
+                type: edge.type,
+                confidence: Math.max(0.25, Math.min(1.8, edge.confidence + edge.weight * 0.08)),
+            })),
+            ...anchorEdges,
+        ],
+        kindCounts: graphKindCounts(inventoryNodes),
         sourceLabel: 'graph rebuild snapshot',
     };
 }
@@ -362,6 +399,19 @@ function stablePoint(id: string, index: number): { atlasX: number; atlasY: numbe
         atlasY: y * 0.7,
         atlasZ: Math.sin(angle) * radius,
     };
+}
+
+function chunkNodeId(chunkId: string): string {
+    return `chunk:${chunkId}`;
+}
+
+function graphKindHsl(kind: string): string {
+    switch (String(kind || '').toLowerCase()) {
+        case 'chunk': return '176 70% 46%';
+        case 'event': return '25 90% 55%';
+        case 'memory': return '188 76% 52%';
+        default: return '220 10% 54%';
+    }
 }
 
 function hashUnit(value: string): number {

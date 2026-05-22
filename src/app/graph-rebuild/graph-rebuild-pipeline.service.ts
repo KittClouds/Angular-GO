@@ -17,12 +17,18 @@ import type {
     GraphIndexStageReceipt,
     GraphRebuildCounters,
     GraphRebuildDropReasons,
+    GraphRebuildRelationshipHint,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
 
 const FULL_INDEX_CAPABILITIES: AtlasCapabilityId[] = [
     'semanticAtlas',
     'nliAdjudication',
+    'relationGraph',
+    'temporalGraph',
+    'eventIdentity',
+    'memoryState',
+    'causalGraph',
 ];
 
 const PROJECTION_CAPABILITIES: Array<{ capability: AtlasCapabilityId; mode: GraphIndexProjectionMode }> = [
@@ -96,6 +102,7 @@ export class GraphRebuildPipelineService {
         const stageReceipts: GraphIndexStageReceipt[] = [];
         const projectionReceipts: GraphIndexProjectionReceipt[] = [];
         let snapshot: GraphRebuildSnapshot | null = null;
+        let relationshipHints: GraphRebuildRelationshipHint[] = [];
 
         try {
             const docs = await this.loadScopedDocuments(request.scope.noteIds);
@@ -112,6 +119,16 @@ export class GraphRebuildPipelineService {
             stageReceipts.push(nerStage);
             assertStageCompleted(nerStage);
 
+            for (const capability of FULL_INDEX_CAPABILITIES) {
+                const receipt = await this.runCapabilityStage(capability, options, capability === 'nliAdjudication'
+                    ? (rawResult) => {
+                        relationshipHints = relationshipHintsFromNliResult(rawResult);
+                    }
+                    : undefined);
+                stageReceipts.push(receipt);
+                assertStageCompleted(receipt);
+            }
+
             const graphStage = await this.runStage('graphSnapshot', 'Graph Rebuild Snapshot', async () => {
                 snapshot = await this.graphRebuild.buildAndPersistSnapshot({
                     scopeKind: scope.kind,
@@ -120,6 +137,7 @@ export class GraphRebuildPipelineService {
                     entities: smartGraphRegistry.getAllEntities().length
                         ? smartGraphRegistry.getAllEntities()
                         : request.entities,
+                    relationshipHints,
                     candidateCount: nerStage.counters['candidates'] || 0,
                 });
                 return {
@@ -129,6 +147,10 @@ export class GraphRebuildPipelineService {
                         anchors: snapshot.counters.acceptedAnchors,
                         nodes: snapshot.counters.nodes,
                         edges: snapshot.counters.edges,
+                        acceptedRelationships: snapshot.counters.acceptedRelationships,
+                        reviewRelationships: snapshot.counters.reviewRelationships,
+                        rejectedRelationships: snapshot.counters.rejectedRelationships,
+                        nliHints: relationshipHints.length,
                     },
                     message: `${snapshot.counters.nodes} nodes / ${snapshot.counters.edges} edges`,
                 };
@@ -136,11 +158,6 @@ export class GraphRebuildPipelineService {
             stageReceipts.push(graphStage);
             assertStageCompleted(graphStage);
 
-            for (const capability of FULL_INDEX_CAPABILITIES) {
-                const receipt = await this.runCapabilityStage(capability, options);
-                stageReceipts.push(receipt);
-                assertStageCompleted(receipt);
-            }
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, snapshot));
             }
@@ -227,9 +244,14 @@ export class GraphRebuildPipelineService {
         return { documents: docs.length, candidates, acceptedAnchors, dropped };
     }
 
-    private async runCapabilityStage(capability: AtlasCapabilityId, options: AtlasRunOptions): Promise<GraphIndexStageReceipt> {
+    private async runCapabilityStage(
+        capability: AtlasCapabilityId,
+        options: AtlasRunOptions,
+        onRawResult?: (result: unknown) => void,
+    ): Promise<GraphIndexStageReceipt> {
         return this.runStage(capability, capabilityLabel(capability), async () => {
             const result = await this.atlasRuntime.runCapability(capability, { ...options, skipModelWarm: true });
+            onRawResult?.(result.rawResult);
             const counters = numberCounts(result.rawResult);
             return {
                 outputCount: sumCounts(counters),
@@ -371,6 +393,11 @@ function capabilityLabel(id: AtlasCapabilityId): string {
     switch (id) {
         case 'semanticAtlas': return 'Semantic Atlas';
         case 'nliAdjudication': return 'NLI Adjudication';
+        case 'relationGraph': return 'Relationship Rows';
+        case 'temporalGraph': return 'Temporal Rows';
+        case 'eventIdentity': return 'Event Identity Rows';
+        case 'memoryState': return 'Memory/State Rows';
+        case 'causalGraph': return 'Causal Rows';
         case 'hybridManifold': return 'Hybrid Projection';
         case 'hopfProjection': return 'Hopf Projection';
         case 'lorentzForest': return 'Lorentz Forest';
@@ -396,6 +423,56 @@ function numberCounts(value: unknown, prefix = ''): Record<string, number> {
 
 function sumCounts(counts: Record<string, number>): number {
     return Object.values(counts).reduce((sum, value) => sum + value, 0);
+}
+
+function relationshipHintsFromNliResult(rawResult: unknown): GraphRebuildRelationshipHint[] {
+    const judgments = arrayField(rawResult, 'judgments');
+    return judgments
+        .map((row): GraphRebuildRelationshipHint | null => {
+            if (!row || typeof row !== 'object') return null;
+            const record = row as Record<string, unknown>;
+            const sourceId = stringField(record, 'sourceId', 'source_id');
+            const targetId = stringField(record, 'targetId', 'target_id');
+            const predictedLabel = stringField(record, 'predictedLabel', 'predicted_label');
+            if (!sourceId || !targetId || !predictedLabel) return null;
+            const hint: GraphRebuildRelationshipHint = {
+                sourceId,
+                targetId,
+                relationType: stringField(record, 'edgeType', 'edge_type') || undefined,
+                status: nliStatus(predictedLabel),
+                confidence: numberField(record, 'confidence'),
+                source: 'nli:modernbert',
+                evidence: [
+                    `judgment:${stringField(record, 'judgmentId', 'judgment_id') || 'unknown'}`,
+                    `label:${predictedLabel}`,
+                ],
+            };
+            return hint;
+        })
+        .filter((row): row is GraphRebuildRelationshipHint => !!row);
+}
+
+function nliStatus(label: string): GraphRebuildRelationshipHint['status'] {
+    const normalized = label.trim().toLowerCase();
+    if (normalized === 'entailment' || normalized === 'entails' || normalized === 'support') return 'accepted';
+    if (normalized === 'contradiction' || normalized === 'contradicts') return 'rejected';
+    return 'review';
+}
+
+function arrayField(value: unknown, key: string): unknown[] {
+    return value && typeof value === 'object' && Array.isArray((value as Record<string, unknown>)[key])
+        ? ((value as Record<string, unknown>)[key] as unknown[])
+        : [];
+}
+
+function stringField(record: Record<string, unknown>, primary: string, fallback?: string): string {
+    const value = record[primary] ?? (fallback ? record[fallback] : undefined);
+    return typeof value === 'string' ? value : '';
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+    const value = record[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function assertStageCompleted(receipt: GraphIndexStageReceipt): void {

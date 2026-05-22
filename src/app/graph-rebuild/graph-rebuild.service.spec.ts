@@ -6,10 +6,31 @@ import {
     graphRebuildSnapshotToScopedDocument,
     scopedDocumentToGraphIndexReceipt,
     scopedDocumentToGraphRebuildSnapshot,
+    dynamicChunksForNote,
 } from './graph-rebuild.service';
 import type { GraphIndexRunReceipt, GraphRebuildSnapshot } from './graph-rebuild-snapshot';
 
 describe('GraphRebuildService persistence helpers', () => {
+    it('uses the Full Atlas dynamic chunking contract instead of note-block lines', () => {
+        const text = Array.from({ length: 70 }, (_, index) =>
+            `Sentence ${index} keeps Kai and Hazel inside a realistic narrative beat for chunk packing.`,
+        ).join(' ');
+        const chunks = dynamicChunksForNote({ id: 'note-1', markdownContent: text, content: '' });
+
+        expect(chunks.length).toBeGreaterThan(1);
+        expect(chunks.length).toBeLessThan(8);
+        expect(chunks.every((chunk) => chunk.source === 'dynamic-chunking')).toBe(true);
+        expect(chunks[0].id).toBe('note-1:chunk:0');
+    });
+
+    it('keeps a 5.5k-word narrative smoke near the 22-chunk target', () => {
+        const text = smokeNarrative(5563);
+        const chunks = dynamicChunksForNote({ id: 'release-terms', markdownContent: text, content: '' });
+
+        expect(chunks.length).toBeGreaterThanOrEqual(18);
+        expect(chunks.length).toBeLessThanOrEqual(28);
+    });
+
     it('roundtrips explicit graph snapshots through Overgraph scoped documents', () => {
         const snapshot: GraphRebuildSnapshot = {
             schemaVersion: 'phoenix-graph-rebuild/v1',
@@ -141,3 +162,13 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(scopedDocumentToGraphIndexReceipt(document)).toEqual(receipt);
     });
 });
+
+function smokeNarrative(wordCount: number): string {
+    const terms = ['Kai', 'Hazel', 'Tempest', 'Nereus', 'Nemo', 'packet', 'release', 'terms', 'family', 'command'];
+    const words = Array.from({ length: wordCount }, (_, index) => terms[index % terms.length]);
+    const sentences: string[] = [];
+    for (let index = 0; index < words.length; index += 18) {
+        sentences.push(`${words.slice(index, index + 18).join(' ')}.`);
+    }
+    return sentences.join(' ');
+}

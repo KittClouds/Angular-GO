@@ -86,6 +86,44 @@ describe('Phoenix graph rebuild builder', () => {
         });
     });
 
+    it('upgrades matching relationship candidates with explicit NLI hints', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:one',
+            noteIds: ['note-1'],
+            entities: [
+                entity('e-kai', 'Kai', []),
+                entity('e-hazel', 'Hazel', []),
+            ],
+            chunks: [
+                { id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 80, ordinal: 0, source: 'dynamic-chunking' },
+            ],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3),
+                occurrence('note-1', 'e-hazel', 'Hazel', 10, 15),
+            ],
+            relationshipHints: [{
+                sourceId: 'entity:e-kai',
+                targetId: 'entity:e-hazel',
+                relationType: 'supports',
+                status: 'accepted',
+                confidence: 0.94,
+                source: 'nli:modernbert',
+                evidence: ['judgment:j-1'],
+            }],
+            builtAt: 12,
+        });
+
+        expect(snapshot.relationships).toHaveLength(1);
+        expect(snapshot.relationships[0]).toMatchObject({
+            relationType: 'supports',
+            status: 'accepted',
+            adjudicationSource: 'nli:modernbert',
+        });
+        expect(snapshot.counters.acceptedRelationships).toBe(1);
+        expect(snapshot.counters.reviewRelationships).toBe(0);
+    });
+
     it('reports exact missing upstream reasons instead of silent empty output', () => {
         const snapshot = buildGraphRebuildSnapshot({
             scopeKind: 'global',

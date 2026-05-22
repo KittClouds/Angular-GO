@@ -87,7 +87,7 @@ describe('GraphRebuildPipelineService', () => {
         expect(graphRebuild.buildAndPersistSnapshot).not.toHaveBeenCalled();
     });
 
-    it('runs NER deltas, builds one snapshot, and persists a receipt from the button pipeline', async () => {
+    it('runs full atlas stages, then builds the final snapshot from NLI hints', async () => {
         await service.buildFullAtlas(request());
 
         expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
@@ -100,9 +100,19 @@ describe('GraphRebuildPipelineService', () => {
             scopeId: 'note:note-1',
             noteIds: ['note-1'],
             candidateCount: 2,
+            relationshipHints: [expect.objectContaining({
+                sourceId: 'entity-kai',
+                targetId: 'entity-hazel',
+                status: 'accepted',
+            })],
         }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('semanticAtlas', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('relationGraph', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('temporalGraph', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('eventIdentity', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('memoryState', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('causalGraph', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hybridManifold', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hopfProjection', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('lorentzForest', expect.objectContaining({ skipModelWarm: true }));
@@ -170,7 +180,18 @@ function createAtlasRuntimeMock() {
         warmModelLane: vi.fn(async () => undefined),
         runCapability: vi.fn(async (capability: string) => ({
             rawResult: capability === 'nliAdjudication'
-                ? { inputCount: 2, resultCount: 2 }
+                ? {
+                    inputCount: 2,
+                    resultCount: 2,
+                    judgments: [{
+                        judgmentId: 'j-1',
+                        sourceId: 'entity-kai',
+                        targetId: 'entity-hazel',
+                        edgeType: 'supports',
+                        predictedLabel: 'entailment',
+                        confidence: 0.93,
+                    }],
+                }
                 : { payload: { nodes: [1, 2], edges: [1] } },
         })),
     };

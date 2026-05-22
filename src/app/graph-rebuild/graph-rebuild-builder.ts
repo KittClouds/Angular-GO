@@ -11,6 +11,7 @@ import type {
     GraphRebuildMention,
     GraphRebuildNode,
     GraphRebuildRelationship,
+    GraphRebuildRelationshipHint,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
 
@@ -96,7 +97,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
 
     const nodes = buildNodes(entityAnchors, entitiesById);
     const edges = buildEdges(entityAnchors, drops);
-    const relationships = edges.map(edgeToRelationship);
+    const relationships = applyRelationshipHints(edges.map(edgeToRelationship), input.relationshipHints || []);
     const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
     const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
     const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
@@ -261,6 +262,40 @@ function edgeToRelationship(edge: GraphRebuildEdge): GraphRebuildRelationship {
     };
 }
 
+function applyRelationshipHints(
+    relationships: GraphRebuildRelationship[],
+    hints: GraphRebuildRelationshipHint[],
+): GraphRebuildRelationship[] {
+    if (!hints.length || !relationships.length) return relationships;
+    const byPair = new Map<string, GraphRebuildRelationshipHint>();
+    for (const hint of hints) {
+        for (const key of pairKeyVariants(hint.sourceId, hint.targetId)) {
+            const current = byPair.get(key);
+            if (!current || hint.confidence > current.confidence) byPair.set(key, hint);
+        }
+    }
+    return relationships.map((relationship) => {
+        const hint = byPair.get(pairKey(relationship.sourceEntityId, relationship.targetEntityId));
+        if (!hint) return relationship;
+        const relationType = hint.relationType || relationship.relationType;
+        const confidence = clamp(hint.confidence, 0, 1);
+        return {
+            ...relationship,
+            relationType,
+            confidence,
+            status: hint.status,
+            adjudicationSource: hint.source,
+            adjudicationScore: confidence,
+            rationale: `${hint.status}: NLI adjudication matched this candidate pair`,
+            decisionEvidence: unique([
+                ...relationship.decisionEvidence,
+                ...(hint.evidence || []),
+                `nli_confidence:${confidence.toFixed(3)}`,
+            ]),
+        };
+    });
+}
+
 function adjudicateEdge(edge: GraphRebuildEdge): { status: 'accepted' | 'review' | 'rejected'; score: number; rationale: string; evidence: string[] } {
     const evidenceCount = edge.evidenceAnchorIds.length;
     const scopeCount = edge.scopeKeys.length;
@@ -277,6 +312,30 @@ function adjudicateEdge(edge: GraphRebuildEdge): { status: 'accepted' | 'review'
         rationale,
         evidence: [`weight:${edge.weight}`, `scope_count:${scopeCount}`, `anchor_evidence_count:${evidenceCount}`],
     };
+}
+
+function pairKeyVariants(left: string, right: string): string[] {
+    const leftIds = idVariants(left);
+    const rightIds = idVariants(right);
+    const keys: string[] = [];
+    for (const source of leftIds) {
+        for (const target of rightIds) keys.push(pairKey(source, target));
+    }
+    return unique(keys);
+}
+
+function pairKey(left: string, right: string): string {
+    return [left, right].sort().join('\u0000');
+}
+
+function idVariants(value: string): string[] {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+    const variants = [raw];
+    if (raw.startsWith('entity:')) variants.push(raw.slice('entity:'.length));
+    const parts = raw.split(':').filter(Boolean);
+    if (parts.length > 1) variants.push(parts[parts.length - 1]);
+    return unique(variants);
 }
 
 function buildEmbeddingTargets(

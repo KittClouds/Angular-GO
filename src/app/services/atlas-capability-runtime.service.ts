@@ -664,9 +664,26 @@ export class AtlasCapabilityRuntimeService {
             results,
         });
         this.machine.setNotice(`NLI adjudication classified ${results.length} pair${results.length === 1 ? '' : 's'} and applied native candidate-edge judgments.`);
+        const labelCounts = results.reduce((counts, result) => {
+            counts[result.predictedLabel] = (counts[result.predictedLabel] || 0) + 1;
+            return counts;
+        }, {} as Record<string, number>);
         return {
             inputCount: inputs.length,
             resultCount: results.length,
+            labelCounts,
+            judgments: results.map((result) => ({
+                judgmentId: result.judgmentId,
+                groupId: result.groupId,
+                sourceId: result.sourceId,
+                targetId: result.targetId,
+                edgeType: result.edgeType,
+                predictedLabel: result.predictedLabel,
+                confidence: result.confidence,
+                entailment: result.entailment,
+                neutral: result.neutral,
+                contradiction: result.contradiction,
+            })),
             applied,
         };
     }
