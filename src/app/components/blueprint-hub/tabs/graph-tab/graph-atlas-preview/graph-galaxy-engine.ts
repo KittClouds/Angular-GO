@@ -955,7 +955,31 @@ function prioritizeEntities(entities: GalaxyRenderableNode[]): GalaxyRenderableN
 
 function entityPriority(entity: GalaxyRenderableNode): number {
     const mentions = Math.max(1, Number(entity.totalMentions || 1));
-    return (hasAtlasSeed(entity) ? 100000 : 0) + mentions;
+    return semanticNodePriority(entity) + (hasAtlasSeed(entity) ? 100000 : 0) + mentions;
+}
+
+const ENTITY_RENDER_KINDS = new Set([
+    'character',
+    'location',
+    'npc',
+    'item',
+    'faction',
+    'organization',
+    'event',
+    'concept',
+    'entity',
+]);
+
+function semanticNodePriority(entity: GalaxyRenderableNode): number {
+    const kind = normalizeRenderKind(String(entity.metadata?.['graphKind'] || entity.kind || ''));
+    if (kind === 'chunk' || kind === 'leaf') return 0;
+    if (kind === 'mention' || kind === 'anchor') return 30000;
+    if (ENTITY_RENDER_KINDS.has(kind) || entity.metadata?.sourceEntityId) return 200000;
+    return 80000;
+}
+
+function normalizeRenderKind(kind: string): string {
+    return kind.trim().toLowerCase().replace(/[_\s]+/g, '-');
 }
 
 export function hslToRgb(rawHsl: string): Rgb {
