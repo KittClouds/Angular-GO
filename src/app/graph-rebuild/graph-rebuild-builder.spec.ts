@@ -65,6 +65,9 @@ describe('Phoenix graph rebuild builder', () => {
             ['e-kai', 'e-rift'],
         ]);
         expect(snapshot.relationships).toHaveLength(3);
+        expect(snapshot.relationships.every((row) => row.adjudicationSource === 'graph-rebuild-cooccurrence-policy')).toBe(true);
+        expect(snapshot.counters.relationshipCandidates).toBe(3);
+        expect(snapshot.counters.acceptedRelationships + snapshot.counters.reviewRelationships).toBe(3);
         expect(snapshot.embeddingTargets.map((target) => target.kind)).toEqual(expect.arrayContaining([
             'note',
             'chunk',

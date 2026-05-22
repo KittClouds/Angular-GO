@@ -4,6 +4,7 @@
 //! identity, text chunks, accepted anchors, graph facts, embedding targets, and
 //! projection consumers. It does not call the legacy staged orchestrator.
 
+mod adjudication;
 mod builder;
 #[cfg(test)]
 mod tests;

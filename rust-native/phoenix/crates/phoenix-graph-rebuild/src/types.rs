@@ -88,6 +88,11 @@ pub struct GraphRelationship {
     pub relation_type: CompactString,
     pub evidence_anchor_ids: Vec<CompactString>,
     pub confidence: f32,
+    pub status: CompactString,
+    pub adjudication_source: CompactString,
+    pub adjudication_score: f32,
+    pub rationale: CompactString,
+    pub decision_evidence: Vec<CompactString>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -175,7 +180,11 @@ pub struct GraphCounters {
     pub mentions: usize,
     pub accepted_anchors: usize,
     pub chunks: usize,
+    pub relationship_candidates: usize,
     pub relationships: usize,
+    pub accepted_relationships: usize,
+    pub review_relationships: usize,
+    pub rejected_relationships: usize,
     pub events: usize,
     pub episodes: usize,
     pub temporal_edges: usize,

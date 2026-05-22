@@ -94,6 +94,8 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                         @if (atlasMode === 'graph') {
                         <span class="rounded-full border border-emerald-300/15 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100">Anchors {{ graphAnchorCount() }}</span>
                         <span class="rounded-full border border-sky-300/15 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-100">Chunks {{ graphChunkCount() }}</span>
+                        <span class="rounded-full border border-teal-300/15 bg-teal-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-100">Accepted {{ graphAcceptedRelationshipCount() }}</span>
+                        <span class="rounded-full border border-fuchsia-300/15 bg-fuchsia-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-fuchsia-100">Review {{ graphReviewRelationshipCount() }}</span>
                         <span class="rounded-full border border-rose-300/15 bg-rose-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-100">Drops {{ graphDropCount() }}</span>
                         }
                         @if (atlasMode === 'embeddings') {
@@ -1068,6 +1070,14 @@ export class GraphAtlasPreviewComponent {
 
     graphChunkCount(): number {
         return this.graphCounters?.chunks ?? 0;
+    }
+
+    graphAcceptedRelationshipCount(): number {
+        return this.graphCounters?.acceptedRelationships ?? 0;
+    }
+
+    graphReviewRelationshipCount(): number {
+        return this.graphCounters?.reviewRelationships ?? 0;
     }
 
     graphDropCount(): number {

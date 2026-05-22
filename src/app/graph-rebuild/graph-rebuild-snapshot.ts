@@ -5,6 +5,7 @@ export type GraphRebuildScopeKind = 'global' | 'narrative' | 'note' | 'multiNote
 export type GraphRebuildAnchorSource = EntityOccurrence['source'] | 'accepted_suggestion';
 export type GraphRebuildEdgeType = 'anchored-cooccurrence' | 'relationship' | 'temporal' | 'causal';
 export type GraphRebuildEmbeddingTargetKind = 'note' | 'chunk' | 'entity' | 'anchor' | 'graphFact';
+export type GraphRebuildAdjudicationStatus = 'accepted' | 'review' | 'rejected';
 
 export interface GraphRebuildChunk {
     id: string;
@@ -65,6 +66,11 @@ export interface GraphRebuildRelationship {
     relationType: string;
     evidenceAnchorIds: string[];
     confidence: number;
+    status: GraphRebuildAdjudicationStatus;
+    adjudicationSource: string;
+    adjudicationScore: number;
+    rationale: string;
+    decisionEvidence: string[];
 }
 
 export interface GraphRebuildEvent {
@@ -145,7 +151,11 @@ export interface GraphRebuildCounters {
     mentions: number;
     acceptedAnchors: number;
     chunks: number;
+    relationshipCandidates: number;
     relationships: number;
+    acceptedRelationships: number;
+    reviewRelationships: number;
+    rejectedRelationships: number;
     events: number;
     episodes: number;
     temporalEdges: number;

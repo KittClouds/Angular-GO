@@ -8,6 +8,7 @@ use phoenix_types::{EntityId, KnownMatch, LexiconEntry, ScopeKey};
 use smallvec::SmallVec;
 use thiserror::Error;
 
+use crate::adjudication::adjudicate_cooccurrence_edges;
 use crate::types::{
     GraphAnchor, GraphChunk, GraphCounters, GraphDropReasons, GraphEdge, GraphEmbeddingTarget,
     GraphMention, GraphNode, GraphRebuildSnapshot, GraphRelationship, GraphScopeKind,
@@ -115,19 +116,10 @@ pub fn build_graph_rebuild_snapshot(
 
     let nodes = build_nodes(&anchors, input.entities);
     let edges = build_edges(&anchors, &mut drops);
-    let relationships = edges
-        .iter()
-        .map(|edge| GraphRelationship {
-            id: format_compact!("relationship:{}", edge.id),
-            source_entity_id: edge.source_id.clone(),
-            target_entity_id: edge.target_id.clone(),
-            relation_type: "co_occurs_with".into(),
-            evidence_anchor_ids: edge.evidence_anchor_ids.clone(),
-            confidence: edge.confidence,
-        })
-        .collect::<Vec<_>>();
+    let relationship_candidates = edges.len();
+    let (relationships, adjudication_counts) = adjudicate_cooccurrence_edges(&edges);
     let embedding_targets =
-        build_embedding_targets(input.note_id, &chunks, &anchors, &nodes, &edges);
+        build_embedding_targets(input.note_id, &chunks, &anchors, &nodes, &relationships);
     let counters = GraphCounters {
         entities: input.entities.len(),
         aliases: input.entities.iter().map(|entry| entry.aliases.len()).sum(),
@@ -135,7 +127,11 @@ pub fn build_graph_rebuild_snapshot(
         mentions: mentions.len(),
         accepted_anchors: anchors.len(),
         chunks: chunks.len(),
+        relationship_candidates,
         relationships: relationships.len(),
+        accepted_relationships: adjudication_counts.accepted,
+        review_relationships: adjudication_counts.review,
+        rejected_relationships: adjudication_counts.rejected,
         embedding_targets: embedding_targets.len(),
         nodes: nodes.len(),
         edges: edges.len(),
@@ -379,10 +375,10 @@ fn build_embedding_targets(
     chunks: &[GraphChunk],
     anchors: &[GraphAnchor],
     nodes: &[GraphNode],
-    edges: &[GraphEdge],
+    relationships: &[GraphRelationship],
 ) -> Vec<GraphEmbeddingTarget> {
     let mut targets =
-        Vec::with_capacity(chunks.len() + anchors.len() + nodes.len() + edges.len() + 1);
+        Vec::with_capacity(chunks.len() + anchors.len() + nodes.len() + relationships.len() + 1);
     targets.push(GraphEmbeddingTarget {
         id: format_compact!("embed:note:{note_id}"),
         kind: "note".into(),
@@ -427,27 +423,33 @@ fn build_embedding_targets(
         text: anchor.surface.clone(),
         evidence_ids: vec![anchor.id.clone()],
     }));
-    targets.extend(edges.iter().map(|edge| GraphEmbeddingTarget {
-        id: format_compact!("embed:graph-fact:{}", edge.id),
-        kind: "graphFact".into(),
-        source_id: edge.id.clone(),
-        note_id: edge.note_ids.first().cloned(),
-        chunk_id: None,
-        entity_id: None,
-        label: format_compact!(
-            "{} {} {}",
-            edge.source_id.0,
-            edge.edge_type,
-            edge.target_id.0
-        ),
-        text: format_compact!(
-            "{} {} {}",
-            edge.source_id.0,
-            edge.edge_type,
-            edge.target_id.0
-        ),
-        evidence_ids: edge.evidence_anchor_ids.clone(),
-    }));
+    targets.extend(
+        relationships
+            .iter()
+            .filter(|relationship| relationship.status != "rejected")
+            .map(|relationship| GraphEmbeddingTarget {
+                id: format_compact!("embed:graph-fact:{}", relationship.id),
+                kind: "graphFact".into(),
+                source_id: relationship.id.clone(),
+                note_id: None,
+                chunk_id: None,
+                entity_id: None,
+                label: format_compact!(
+                    "{} {} {}",
+                    relationship.source_entity_id.0,
+                    relationship.relation_type,
+                    relationship.target_entity_id.0
+                ),
+                text: format_compact!(
+                    "{} {} {} [{}]",
+                    relationship.source_entity_id.0,
+                    relationship.relation_type,
+                    relationship.target_entity_id.0,
+                    relationship.status
+                ),
+                evidence_ids: relationship.evidence_anchor_ids.clone(),
+            }),
+    );
     targets
 }
 

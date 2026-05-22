@@ -97,7 +97,10 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const nodes = buildNodes(entityAnchors, entitiesById);
     const edges = buildEdges(entityAnchors, drops);
     const relationships = edges.map(edgeToRelationship);
-    const embeddingTargets = buildEmbeddingTargets(input, chunks, entityAnchors, nodes, edges);
+    const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
+    const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
+    const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
+    const embeddingTargets = buildEmbeddingTargets(input, chunks, entityAnchors, nodes, relationships);
     const noteIds = input.noteIds ? [...input.noteIds] : unique([
         ...chunks.map((chunk) => chunk.noteId),
         ...entityAnchors.map((anchor) => anchor.noteId),
@@ -132,7 +135,11 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             mentions: mentions.length,
             acceptedAnchors: entityAnchors.length,
             chunks: chunks.length,
+            relationshipCandidates: edges.length,
             relationships: relationships.length,
+            acceptedRelationships,
+            reviewRelationships,
+            rejectedRelationships,
             events: 0,
             episodes: 0,
             temporalEdges: 0,
@@ -238,13 +245,37 @@ function upsertEdge(
 }
 
 function edgeToRelationship(edge: GraphRebuildEdge): GraphRebuildRelationship {
+    const adjudication = adjudicateEdge(edge);
     return {
         id: `relationship:${edge.id}`,
         sourceEntityId: edge.sourceId,
         targetEntityId: edge.targetId,
         relationType: edge.type === 'anchored-cooccurrence' ? 'co_occurs_with' : edge.type,
         evidenceAnchorIds: edge.evidenceAnchorIds,
-        confidence: edge.confidence,
+        confidence: adjudication.score,
+        status: adjudication.status,
+        adjudicationSource: 'graph-rebuild-cooccurrence-policy',
+        adjudicationScore: adjudication.score,
+        rationale: adjudication.rationale,
+        decisionEvidence: adjudication.evidence,
+    };
+}
+
+function adjudicateEdge(edge: GraphRebuildEdge): { status: 'accepted' | 'review' | 'rejected'; score: number; rationale: string; evidence: string[] } {
+    const evidenceCount = edge.evidenceAnchorIds.length;
+    const scopeCount = edge.scopeKeys.length;
+    const score = Math.min(1, Math.min(edge.weight / 5, 0.65) + Math.min(evidenceCount / 24, 0.25) + Math.min(scopeCount / 12, 0.1));
+    const status = edge.weight >= 3 || score >= 0.62 ? 'accepted' : evidenceCount >= 2 && scopeCount >= 1 ? 'review' : 'rejected';
+    const rationale = status === 'accepted'
+        ? `accepted: co-occurrence repeated across ${scopeCount} bucket(s) with ${evidenceCount} anchor evidence refs`
+        : status === 'review'
+            ? 'review: one or two co-occurrence buckets; needs typed relation/NLI confirmation'
+            : 'rejected: insufficient anchor evidence for a relationship candidate';
+    return {
+        status,
+        score,
+        rationale,
+        evidence: [`weight:${edge.weight}`, `scope_count:${scopeCount}`, `anchor_evidence_count:${evidenceCount}`],
     };
 }
 
@@ -253,7 +284,7 @@ function buildEmbeddingTargets(
     chunks: GraphRebuildChunk[],
     anchors: GraphRebuildEntityAnchor[],
     nodes: GraphRebuildNode[],
-    edges: GraphRebuildEdge[],
+    relationships: GraphRebuildRelationship[],
 ): GraphRebuildEmbeddingTarget[] {
     const targets: GraphRebuildEmbeddingTarget[] = [];
     const noteIds = input.noteIds?.length ? input.noteIds : unique([
@@ -307,14 +338,15 @@ function buildEmbeddingTargets(
             evidenceIds: [anchor.id],
         });
     }
-    for (const edge of edges) {
+    for (const relationship of relationships) {
+        if (relationship.status === 'rejected') continue;
         targets.push({
-            id: `embed:graph-fact:${edge.id}`,
+            id: `embed:graph-fact:${relationship.id}`,
             kind: 'graphFact',
-            sourceId: edge.id,
-            label: `${edge.sourceId} ${edge.type} ${edge.targetId}`,
-            text: `${edge.sourceId} ${edge.type} ${edge.targetId}`,
-            evidenceIds: edge.evidenceAnchorIds,
+            sourceId: relationship.id,
+            label: `${relationship.sourceEntityId} ${relationship.relationType} ${relationship.targetEntityId}`,
+            text: `${relationship.sourceEntityId} ${relationship.relationType} ${relationship.targetEntityId} [${relationship.status}]`,
+            evidenceIds: relationship.evidenceAnchorIds,
         });
     }
     return targets;

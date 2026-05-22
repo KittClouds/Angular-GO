@@ -27,6 +27,15 @@ fn builds_chunks_anchors_edges_and_embedding_targets() {
     assert_eq!(snapshot.counters.accepted_anchors, 6);
     assert_eq!(snapshot.counters.nodes, 3);
     assert_eq!(snapshot.counters.edges, 3);
+    assert_eq!(snapshot.counters.relationship_candidates, 3);
+    assert_eq!(snapshot.counters.relationships, 3);
+    assert_eq!(
+        snapshot.counters.accepted_relationships + snapshot.counters.review_relationships,
+        3
+    );
+    assert!(snapshot.relationships.iter().all(
+        |relationship| relationship.adjudication_source == "graph-rebuild-cooccurrence-policy"
+    ));
     assert!(snapshot.counters.embedding_targets >= snapshot.counters.chunks + 6 + 3);
 }
 
