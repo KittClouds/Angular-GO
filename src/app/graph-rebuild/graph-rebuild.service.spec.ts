@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
     GRAPH_REBUILD_NAMESPACE,
+    graphIndexReceiptToScopedDocument,
     graphRebuildSnapshotToScopedDocument,
+    scopedDocumentToGraphIndexReceipt,
     scopedDocumentToGraphRebuildSnapshot,
 } from './graph-rebuild.service';
-import type { GraphRebuildSnapshot } from './graph-rebuild-snapshot';
+import type { GraphIndexRunReceipt, GraphRebuildSnapshot } from './graph-rebuild-snapshot';
 
 describe('GraphRebuildService persistence helpers', () => {
     it('roundtrips explicit graph snapshots through Overgraph scoped documents', () => {
@@ -68,5 +70,74 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(document.namespace).toBe(GRAPH_REBUILD_NAMESPACE);
         expect(document.scopeFolderId).toBe('global');
         expect(scopedDocumentToGraphRebuildSnapshot(document)).toEqual(snapshot);
+    });
+
+    it('roundtrips Full Atlas Index receipts through Overgraph scoped documents', () => {
+        const receipt: GraphIndexRunReceipt = {
+            schemaVersion: 'phoenix-graph-index-run/v1',
+            id: 'full-atlas:global:1',
+            scope: { kind: 'global', scopeId: 'global', label: 'Global', noteIds: ['note-1'] },
+            policy: 'delta',
+            delta: true,
+            status: 'completed',
+            modelSelection: {
+                dynamicNerId: 'dynamic_ner',
+                embeddingModelId: 'mongodb-leaf',
+                embeddingModelLabel: 'MDBR Leaf',
+                embeddingDimensionLabel: '384d',
+                nliModelId: 'modernbert-nli',
+            },
+            modelReadiness: [],
+            startedAt: 100,
+            completedAt: 120,
+            durationMs: 20,
+            stageReceipts: [],
+            projectionReceipts: [],
+            snapshotId: 'graph-rebuild:global:1',
+            counters: {
+                entities: 2,
+                aliases: 1,
+                candidates: 2,
+                mentions: 2,
+                acceptedAnchors: 2,
+                chunks: 1,
+                relationshipCandidates: 0,
+                relationships: 0,
+                acceptedRelationships: 0,
+                reviewRelationships: 0,
+                rejectedRelationships: 0,
+                events: 0,
+                episodes: 0,
+                temporalEdges: 0,
+                causalEdges: 0,
+                memoryState: 0,
+                embeddingTargets: 0,
+                embeddingVectors: 0,
+                projectionRefs: 0,
+                nodes: 2,
+                edges: 1,
+                dropReasons: {
+                    missingEntity: 0,
+                    invalidSpan: 0,
+                    duplicateAnchor: 0,
+                    singletonBucket: 0,
+                    missingChunk: 0,
+                },
+            },
+            dropReasons: {
+                missingEntity: 0,
+                invalidSpan: 0,
+                duplicateAnchor: 0,
+                singletonBucket: 0,
+                missingChunk: 0,
+            },
+            message: 'Full Atlas Index built 2 nodes and 1 edges.',
+        };
+
+        const document = graphIndexReceiptToScopedDocument(receipt);
+
+        expect(document.namespace).toBe(GRAPH_REBUILD_NAMESPACE);
+        expect(document.scopeFolderId).toBe('global');
+        expect(scopedDocumentToGraphIndexReceipt(document)).toEqual(receipt);
     });
 });

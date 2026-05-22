@@ -43,6 +43,29 @@
   margin-top: 8px;
 }
 
+.full-atlas-advanced {
+  margin-top: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0 8px 8px;
+}
+
+.full-atlas-advanced summary {
+  cursor: pointer;
+  list-style: none;
+  padding-top: 8px;
+  color: #8b8d98;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.full-atlas-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
 .legacy-pipeline summary {
   cursor: pointer;
   list-style: none;
@@ -1152,6 +1175,10 @@
   margin-top: 8px;
 }
 
+.full-atlas-actions {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
 .primary-action {
   display: inline-flex;
   align-items: center;
@@ -1190,6 +1217,12 @@
   background: rgba(var(--phthalo-rgb), 0.42);
   color: var(--phthalo-ink);
   box-shadow: 0 0 16px rgba(var(--phthalo-rgb), 0.18);
+}
+
+.warm-required-action.warm-cold {
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.045);
+  color: #d4d4d8;
 }
 
 .warm-required-action.warm-running {

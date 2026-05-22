@@ -10,6 +10,7 @@ import type { RegisteredEntity } from '../lib/registry';
 import { PhoenixStoreService, type StoreScopedDocument } from '../services/phoenix-store.service';
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import type {
+    GraphIndexRunReceipt,
     GraphRebuildChunk,
     GraphRebuildScopeKind,
     GraphRebuildSnapshot,
@@ -17,6 +18,7 @@ import type {
 
 export const GRAPH_REBUILD_NAMESPACE = 'phoenix_graph_rebuild_v1';
 const SNAPSHOT_DOCUMENT_KEY = 'snapshot';
+const RECEIPT_DOCUMENT_KEY = 'receipt';
 
 export interface GraphRebuildBuildRequest {
     scopeKind: GraphRebuildScopeKind;
@@ -70,8 +72,26 @@ export class GraphRebuildService {
         return document ? scopedDocumentToGraphRebuildSnapshot(document) : null;
     }
 
+    async persistRunReceipt(receipt: GraphIndexRunReceipt): Promise<void> {
+        await this.store.upsertScopedDocument(graphIndexReceiptToScopedDocument(receipt));
+        dispatchGraphRebuildEvent('graph-index-run-completed', {
+            scopeId: receipt.scope.scopeId,
+            receiptId: receipt.id,
+            snapshotId: receipt.snapshotId,
+        });
+    }
+
+    async loadPersistedRunReceipt(scopeId: string): Promise<GraphIndexRunReceipt | null> {
+        const document = await this.store.getScopedDocument(scopeId, GRAPH_REBUILD_NAMESPACE, RECEIPT_DOCUMENT_KEY);
+        return document ? scopedDocumentToGraphIndexReceipt(document) : null;
+    }
+
     private async persistSnapshot(snapshot: GraphRebuildSnapshot): Promise<void> {
         await this.store.upsertScopedDocument(graphRebuildSnapshotToScopedDocument(snapshot));
+        dispatchGraphRebuildEvent('graph-rebuild-snapshot-updated', {
+            scopeId: snapshot.scopeId,
+            snapshotId: snapshot.id,
+        });
     }
 
     private async loadOccurrences(noteIds: string[], entities: RegisteredEntity[]): Promise<EntityOccurrence[]> {
@@ -109,6 +129,29 @@ export function scopedDocumentToGraphRebuildSnapshot(document: StoreScopedDocume
     try {
         const parsed = JSON.parse(document.payload) as GraphRebuildSnapshot;
         return parsed?.schemaVersion === 'phoenix-graph-rebuild/v1' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+export function graphIndexReceiptToScopedDocument(receipt: GraphIndexRunReceipt): StoreScopedDocument {
+    const now = Date.now();
+    return {
+        id: `${GRAPH_REBUILD_NAMESPACE}:${receipt.scope.scopeId}:${RECEIPT_DOCUMENT_KEY}`,
+        scopeFolderId: receipt.scope.scopeId,
+        narrativeId: receipt.scope.kind === 'narrative' ? receipt.scope.scopeId : '',
+        namespace: GRAPH_REBUILD_NAMESPACE,
+        documentKey: RECEIPT_DOCUMENT_KEY,
+        payload: JSON.stringify(receipt),
+        createdAt: receipt.startedAt || now,
+        updatedAt: now,
+    };
+}
+
+export function scopedDocumentToGraphIndexReceipt(document: StoreScopedDocument): GraphIndexRunReceipt | null {
+    try {
+        const parsed = JSON.parse(document.payload) as GraphIndexRunReceipt;
+        return parsed?.schemaVersion === 'phoenix-graph-index-run/v1' ? parsed : null;
     } catch {
         return null;
     }
@@ -159,6 +202,11 @@ function canUseBlockTable(): boolean {
 
 function canUseNotesTable(): boolean {
     return typeof db.notes?.get === 'function';
+}
+
+function dispatchGraphRebuildEvent(name: string, detail: Record<string, unknown>): void {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(name, { detail }));
 }
 
 function simpleHash(value: string): string {

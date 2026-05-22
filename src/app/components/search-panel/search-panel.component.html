@@ -8,8 +8,8 @@
         <ng-icon name="lucideSparkles" class="h-3.5 w-3.5"></ng-icon>
       </div>
       <div class="banner-titles">
-        <h2>Graph Rebuild</h2>
-        <span class="banner-sub">{{ buildScopeLabel() }} / active lane</span>
+        <h2>Full Atlas Index</h2>
+        <span class="banner-sub">{{ buildScopeLabel() }} / one contract</span>
       </div>
     </div>
     <div class="banner-right">
@@ -24,7 +24,7 @@
   <section class="workbench-surface command-surface graph-builder-surface">
     <div class="section-heading">
       <div>
-        <h3>Build Graph</h3>
+        <h3>Full Atlas Index</h3>
         <p>{{ scopedNotes().length }} notes / {{ chunkingStatus().estimatedChunks }} expected chunks</p>
       </div>
       <span class="dimension-pill">{{ activeEmbeddingDimensionLabel() }}</span>
@@ -58,14 +58,80 @@
     </div>
 
     <div class="graph-rebuild-active-card">
-      <span>Active spine</span>
-      <strong>Alex anchors -> graph snapshot -> embeddings -> Hybrid / Hopf / Lorentz</strong>
-      <small>Legacy staged contracts are preserved below for reference, but the graph tab now reads the explicit graph-rebuild snapshot.</small>
+      <span>Active contract</span>
+      <strong>Dynamic NER -> Alex anchors -> graph snapshot -> adjudication -> all projections</strong>
+      <small>One button builds the durable atlas for this scope. The graph tab only reads the latest snapshot and receipt.</small>
+    </div>
+
+    <div class="backend-map-head compact">
+      <span>Runtime models</span>
+      <strong>{{ loadModelsButtonLabel() }}</strong>
+    </div>
+    <div class="semantic-control model-config-grid">
+      <label>
+        <span class="section-kicker">Embedding model</span>
+        <p-select [options]="models" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)"
+          optionLabel="label" optionValue="id" styleClass="scope-select">
+        </p-select>
+      </label>
+
+      <div class="dimension-grid">
+        <button *ngFor="let dim of truncateDims" type="button" (click)="truncateDim.set(dim)"
+          [ngClass]="truncateDim() === dim ? 'dimension-active' : 'dimension-muted'">
+          {{ dim === 'full' ? 'Full' : dim + 'd' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="model-lane-grid full-atlas-model-grid">
+      <div *ngFor="let model of fullAtlasModelReadiness()" class="model-lane-card"
+        [ngClass]="'lane-' + modelReadinessTone(model.status)">
+        <span>{{ model.label }}</span>
+        <strong>{{ model.status }}</strong>
+        <small>{{ model.detail }}</small>
+        <em>{{ model.status === 'ready' ? 'warm' : 'required' }}</em>
+      </div>
+    </div>
+
+    <details class="full-atlas-advanced">
+      <summary>Advanced indexing policy</summary>
+      <div class="builder-row build-mode-row">
+        <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'dirty-only'"
+          (click)="setBuildPolicy('dirty-only')">Delta Index</button>
+        <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'force'"
+          (click)="setBuildPolicy('force')">Force Rebuild</button>
+      </div>
+    </details>
+
+    <div class="recipe-actions full-atlas-actions">
+      <button type="button" class="secondary-action warm-required-action" [ngClass]="fullAtlasModelsReady() ? 'warm-ready' : 'warm-cold'"
+        (click)="loadFullAtlasModels()" [disabled]="fullAtlasBusy()">
+        <ng-icon [name]="fullAtlasBusy() ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
+          [class.animate-spin]="fullAtlasBusy()"></ng-icon>
+        {{ loadModelsButtonLabel() }}
+      </button>
+      <button type="button" class="primary-action" (click)="buildFullAtlas()"
+        [disabled]="isFullAtlasBuildDisabled()">
+        <ng-icon [name]="fullAtlasBusy() ? 'lucideLoader2' : 'lucideSparkles'" class="h-3.5 w-3.5"
+          [class.animate-spin]="fullAtlasBusy()"></ng-icon>
+        {{ fullAtlasBuildButtonLabel() }}
+      </button>
+      <button type="button" class="secondary-action" (click)="openGraphLens()">
+        <ng-icon name="lucideLayers" class="h-3.5 w-3.5"></ng-icon>
+        Open Graph
+      </button>
+    </div>
+
+    <div class="last-run">
+      <span>Last run</span>
+      <strong>{{ lastRunStatus().label }}</strong>
+      <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
+          lastRunStatus().durationMs }} ms</ng-container></small>
     </div>
 
     <details class="legacy-pipeline">
       <summary class="graph-target-head">
-      <span>Contract Stages</span>
+      <span>Legacy Diagnostics</span>
         <strong>{{ selectedCapabilityIds().length }} legacy staged</strong>
       </summary>
 

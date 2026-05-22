@@ -34,6 +34,9 @@ import { AtlasScanCoordinatorService } from '../../services/atlas-scan-coordinat
 import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
+import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
+import type { GraphIndexRunRequest, GraphIndexRunScope } from '../../graph-rebuild/graph-rebuild-snapshot';
+import { smartGraphRegistry } from '../../lib/registry';
 import type {
   AtlasCapabilityRuntimeState,
   AtlasBuildScope,
@@ -134,6 +137,7 @@ export class SearchPanelComponent implements OnInit {
   private readonly hubService = inject(BlueprintHubService);
   private readonly nli = inject(NliWorkerService);
   private readonly atlasRuntime = inject(AtlasCapabilityRuntimeService);
+  private readonly fullAtlasPipeline = inject(GraphRebuildPipelineService);
 
   readonly query = this.machine.query;
   readonly indexScope = this.machine.scope;
@@ -336,6 +340,14 @@ export class SearchPanelComponent implements OnInit {
   readonly sidecarMetrics = computed(() => this.commandStatus().sidecars);
   readonly chunkingStatus = computed(() => this.commandStatus().chunking);
   readonly lastRunStatus = computed(() => {
+    const fullAtlasReceipt = this.fullAtlasPipeline.lastReceipt();
+    if (fullAtlasReceipt) {
+      return {
+        label: fullAtlasReceipt.status === 'completed' ? 'Full Atlas Index complete' : 'Full Atlas Index failed',
+        detail: fullAtlasReceipt.message,
+        durationMs: fullAtlasReceipt.durationMs,
+      };
+    }
     const receipt = this.atlasRuntime.lastBuildReceipt();
     if (receipt) {
       return {
@@ -381,6 +393,21 @@ export class SearchPanelComponent implements OnInit {
       manifoldStatuses: this.machine.manifoldStatuses(),
     });
   });
+  readonly fullAtlasRequest = computed<GraphIndexRunRequest>(() => ({
+    scope: this.graphIndexScope(),
+    policy: this.buildPolicy() === 'force' ? 'force' : 'delta',
+    modelSelection: {
+      dynamicNerId: 'dynamic_ner',
+      embeddingModelId: this.selectedModel(),
+      embeddingModelLabel: this.currentModelLabel(),
+      embeddingDimensionLabel: this.activeEmbeddingDimensionLabel(),
+      nliModelId: this.nli.modelId() || 'onnx-community/ModernBERT-base-nli',
+    },
+    entities: smartGraphRegistry.getAllEntities(),
+  }));
+  readonly fullAtlasModelReadiness = computed(() => this.fullAtlasPipeline.modelReadiness(this.fullAtlasRequest()));
+  readonly fullAtlasModelsReady = computed(() => this.fullAtlasPipeline.modelsReady(this.fullAtlasRequest()));
+  readonly fullAtlasBusy = this.fullAtlasPipeline.running;
   readonly recipeLifecycle = computed(() => buildAtlasRecipeLifecycle(
     this.activeRecipeStep(),
     this.completedRecipeSteps(),
@@ -543,6 +570,51 @@ export class SearchPanelComponent implements OnInit {
     } catch (err) {
       this.error.set(this.toErrorMessage(err));
     }
+  }
+
+  async loadFullAtlasModels(): Promise<void> {
+    if (this.fullAtlasBusy()) return;
+    this.error.set(null);
+    try {
+      await this.fullAtlasPipeline.loadModels(this.fullAtlasRequest());
+      this.notice.set('Full Atlas Index models are warm. No graph data was built.');
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
+  async buildFullAtlas(): Promise<void> {
+    if (this.isFullAtlasBuildDisabled()) return;
+    this.error.set(null);
+    try {
+      const result = await this.fullAtlasPipeline.buildFullAtlas(this.fullAtlasRequest());
+      this.notice.set(result.receipt.message);
+      this.openGraphLens();
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
+  isFullAtlasBuildDisabled(): boolean {
+    return this.fullAtlasBusy() || !this.fullAtlasModelsReady() || !this.hasRunnableBuildScope();
+  }
+
+  fullAtlasBuildButtonLabel(): string {
+    if (this.fullAtlasBusy()) return 'Building Atlas';
+    if (!this.fullAtlasModelsReady()) return 'Load Models First';
+    return this.buildPolicy() === 'force' ? 'Force Build Full Atlas' : 'Build Full Atlas';
+  }
+
+  loadModelsButtonLabel(): string {
+    if (this.fullAtlasBusy()) return 'Working';
+    return this.fullAtlasModelsReady() ? 'Models Warm' : 'Load Models';
+  }
+
+  modelReadinessTone(status: string): string {
+    if (status === 'ready') return 'ready';
+    if (status === 'warming' || status === 'running') return 'running';
+    if (status === 'error') return 'error';
+    return 'idle';
   }
 
   async runAtlasRecipe(recipeId: AtlasRecipeId): Promise<void> {
@@ -1019,6 +1091,27 @@ export class SearchPanelComponent implements OnInit {
       buildPolicy: this.buildPolicy(),
       noteIds: this.buildDocumentIdsForRun(),
       query: this.query().trim(),
+    };
+  }
+
+  private graphIndexScope(): GraphIndexRunScope {
+    const scope = this.selectedBuildScope();
+    if (scope.mode === 'global') {
+      return { kind: 'global', scopeId: 'global', label: 'Global', noteIds: this.buildDocumentIdsForRun() };
+    }
+    if (scope.mode === 'folder') {
+      const label = this.folders().find((folder) => folder.id === scope.folderId)?.name || 'Folder';
+      return { kind: 'folder', scopeId: `folder:${scope.folderId}`, label, noteIds: this.buildDocumentIdsForRun() };
+    }
+    if (scope.mode === 'note') {
+      const label = this.notes().find((note) => note.id === scope.noteId)?.title || 'Active Note';
+      return { kind: 'note', scopeId: `note:${scope.noteId}`, label, noteIds: scope.noteId ? [scope.noteId] : [] };
+    }
+    return {
+      kind: 'multiNote',
+      scopeId: `multi:${scope.noteIds.join('|') || 'none'}`,
+      label: `${scope.noteIds.length} notes`,
+      noteIds: scope.noteIds,
     };
   }
 

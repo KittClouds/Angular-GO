@@ -220,6 +220,13 @@ export interface NerSuggestion {
     source: EntitySuggestionProviderId;
 }
 
+export interface NerSuggestionAcceptanceContext {
+    noteId: string;
+    plainText: string;
+    noteTitle?: string;
+    generation?: number;
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -372,43 +379,20 @@ export class NerService {
         if (!suggestion) {
             return;
         }
-
-        const replacement = `[${suggestion.kind}|${suggestion.label}]`;
-        console.log('[NerService] Accepting:', replacement);
-
-        this.suggestions.update((list) => list.filter((entry) => entry.id !== id));
-
         const currentNote = this.noteStore.currentNote();
-        const noteId = currentNote?.id || 'unknown';
-        const registration = smartGraphRegistry.registerEntity(
-            suggestion.label,
-            suggestion.kind as any,
-            noteId,
-            { source: 'user' }
-        );
-        await recordAcceptedEntityAnchor({
-            noteId,
-            entity: registration.entity,
-            surface: suggestion.label,
-            plainText: this.currentText || currentNote?.markdownContent || '',
-            confidence: suggestion.confidence,
+        await this.acceptResolvedSuggestion(id, suggestion, {
+            noteId: currentNote?.id || 'unknown',
+            noteTitle: currentNote?.title,
+            plainText: this.currentText || currentNote?.markdownContent || currentNote?.content || '',
             generation: currentNote?.version || currentNote?.updatedAt || Date.now(),
-            context: suggestion.context,
-        }).catch(error => {
-            console.warn('[NerService] Failed to record accepted graph anchor:', error);
         });
-        await recordSuggestionAccepted({
-            entityId: registration.entity.id,
-            label: registration.entity.label,
-            kind: registration.entity.kind,
-            surface: suggestion.label,
-            provider: suggestion.source,
-            noteId,
-            confidence: suggestion.confidence,
-            context: suggestion.context,
-        }).catch(error => {
-            console.warn('[NerService] Failed to record accepted suggestion:', error);
-        });
+    }
+
+    async acceptSuggestionForContext(id: string, context: NerSuggestionAcceptanceContext): Promise<boolean> {
+        const suggestion = this.suggestions().find((entry) => entry.id === id);
+        if (!suggestion) return false;
+        await this.acceptResolvedSuggestion(id, suggestion, context);
+        return true;
     }
 
     async rejectSuggestion(id: string) {
@@ -483,6 +467,48 @@ export class NerService {
         }
 
         this.fstStatus.set(status);
+    }
+
+    private async acceptResolvedSuggestion(
+        id: string,
+        suggestion: NerSuggestion,
+        context: NerSuggestionAcceptanceContext,
+    ): Promise<void> {
+        const replacement = `[${suggestion.kind}|${suggestion.label}]`;
+        console.log('[NerService] Accepting:', replacement);
+
+        this.suggestions.update((list) => list.filter((entry) => entry.id !== id));
+
+        const noteId = context.noteId || 'unknown';
+        const registration = smartGraphRegistry.registerEntity(
+            suggestion.label,
+            suggestion.kind as any,
+            noteId,
+            { source: 'user' }
+        );
+        await recordAcceptedEntityAnchor({
+            noteId,
+            entity: registration.entity,
+            surface: suggestion.label,
+            plainText: context.plainText || this.currentText || '',
+            confidence: suggestion.confidence,
+            generation: context.generation || Date.now(),
+            context: suggestion.context,
+        }).catch(error => {
+            console.warn('[NerService] Failed to record accepted graph anchor:', error);
+        });
+        await recordSuggestionAccepted({
+            entityId: registration.entity.id,
+            label: registration.entity.label,
+            kind: registration.entity.kind,
+            surface: suggestion.label,
+            provider: suggestion.source,
+            noteId,
+            confidence: suggestion.confidence,
+            context: suggestion.context,
+        }).catch(error => {
+            console.warn('[NerService] Failed to record accepted suggestion:', error);
+        });
     }
 
     private mapProviderSuggestions(

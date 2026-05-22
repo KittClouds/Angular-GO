@@ -253,13 +253,6 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                             <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
                                 <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
                             </button>
-                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning || isRefreshingProjection" (click)="runSemanticAtlasAction()" [title]="semanticAtlasActionTitle()">
-                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning || isRefreshingProjection"></lucide-icon>
-                                <span class="scan-action-copy">
-                                    <span class="scan-action-kicker">{{ semanticAtlasActionKicker() }}</span>
-                                    <span class="scan-action-main">{{ semanticAtlasActionLabel() }}</span>
-                                </span>
-                            </button>
                         </div>
                     </form>
                     } @else {
@@ -272,9 +265,6 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                         <div class="atlas-canvas-actions">
                             <button type="button" class="atlas-canvas-action" (click)="addEntityRequested.emit()">
                                 <lucide-icon [img]="PlusIcon" class="h-4 w-4"></lucide-icon>Add
-                            </button>
-                            <button type="button" class="atlas-canvas-action scan-action" [disabled]="isScanning" (click)="scanRequested.emit(currentLensState())" title="Run Dynamic NER as Alex candidate input">
-                                <lucide-icon [img]="ZapIcon" class="h-4 w-4" [class.animate-pulse]="isScanning"></lucide-icon>Scan
                             </button>
                         </div>
                     </div>

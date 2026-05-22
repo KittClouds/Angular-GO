@@ -61,6 +61,12 @@ import {
             </section>
             }
 
+            @if (graphSnapshotStale()) {
+            <section class="shrink-0 rounded-xl border border-amber-400/15 bg-amber-500/5 px-3 py-2 text-xs font-semibold text-amber-100">
+                Latest anchors changed. The atlas view is stale until Build Full Atlas runs again.
+            </section>
+            }
+
             <app-graph-atlas-preview class="block min-h-0 flex-1"
                 [entities]="lensedGraph().entities"
                 [edges]="lensedGraph().edges"
@@ -89,13 +95,12 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     private readonly graphRebuild = inject(GraphRebuildService);
     private readonly narrativeEntitiesSignal = signal<RegisteredEntity[]>([]);
     private readonly narrativeEdgesSignal = signal<AtlasPreviewEdge[]>([]);
-    private readonly candidateCountSignal = signal(0);
     private readonly graphRebuildSnapshotSignal = signal<GraphRebuildSnapshot | null>(null);
-    private readonly anchorRevision = signal(0);
+    private readonly graphSnapshotStaleSignal = signal(false);
     private readonly memberships = signal<GraphLensMembership[]>([]);
     private membershipToken = 0;
     private noteToken = 0;
-    private graphBuildToken = 0;
+    private graphSnapshotLoadToken = 0;
     private removeAnchorListeners: (() => void) | null = null;
 
     @Input() set narrativeEntities(value: RegisteredEntity[] | null | undefined) {
@@ -116,7 +121,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     @Input() isScanning = false;
     @Input() activeProvider: EntitySuggestionProviderId | null = null;
     @Input() set candidateCount(value: number | null | undefined) {
-        this.candidateCountSignal.set(Math.max(0, Number(value || 0)));
+        void value;
     }
 
     @Output() entitySelected = new EventEmitter<RegisteredEntity>();
@@ -157,6 +162,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     }));
     readonly graphRebuildInventory = computed(() => graphInventoryFromSnapshot(this.graphRebuildSnapshotSignal()));
     readonly graphRebuildCounters = computed(() => this.graphRebuildSnapshotSignal()?.counters ?? null);
+    readonly graphSnapshotStale = computed(() => this.graphSnapshotStaleSignal());
     readonly filteredNotes = computed(() => {
         const query = this.noteQuery().trim().toLowerCase();
         if (!query) return this.notes();
@@ -167,13 +173,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         void this.refreshNotes();
         this.bindAnchorEvents();
         effect(() => void this.refreshMemberships(this.lens()));
-        effect(() => {
-            this.anchorRevision();
-            const lens = this.lens();
-            const entities = this.anchorEntitiesForLens(lens);
-            const candidateCount = this.candidateCountSignal();
-            void this.refreshAnchorGraph(lens, entities, candidateCount);
-        });
+        effect(() => void this.loadPersistedGraphSnapshot(this.lens()));
     }
 
     ngOnDestroy(): void {
@@ -262,47 +262,33 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         })));
     }
 
-    private async refreshAnchorGraph(
-        lens: GraphLensState,
-        entities: RegisteredEntity[],
-        candidateCount: number,
-    ): Promise<void> {
-        const token = ++this.graphBuildToken;
+    private async loadPersistedGraphSnapshot(lens: GraphLensState): Promise<void> {
+        const token = ++this.graphSnapshotLoadToken;
         const normalized = normalizeGraphLensForBuild(lens);
         try {
-            const snapshot = await this.graphRebuild.buildAndPersistSnapshot({
-                scopeKind: normalized.scopeKind,
-                scopeId: normalized.scopeId,
-                noteIds: normalized.noteIds,
-                entities,
-                candidateCount,
-            });
-            if (token === this.graphBuildToken) {
+            const snapshot = await this.graphRebuild.loadPersistedSnapshot(normalized.scopeId);
+            if (token === this.graphSnapshotLoadToken) {
                 this.graphRebuildSnapshotSignal.set(snapshot);
+                this.graphSnapshotStaleSignal.set(false);
             }
         } catch (error) {
-            console.warn('[GraphLensWorkspace] Failed to rebuild graph snapshot', error);
+            console.warn('[GraphLensWorkspace] Failed to load graph rebuild snapshot', error);
         }
-    }
-
-    private anchorEntitiesForLens(lens: GraphLensState): RegisteredEntity[] {
-        if (lens.mode === 'narrative' && this.narrativeEntitiesSignal().length) {
-            return this.narrativeEntitiesSignal();
-        }
-        if (lens.mode === 'note' || lens.mode === 'multiNote') {
-            return this.narrativeEntitiesSignal().length ? this.narrativeEntitiesSignal() : this.globalEntities();
-        }
-        return this.globalEntities();
     }
 
     private bindAnchorEvents(): void {
         if (typeof window === 'undefined') return;
-        const bump = () => this.anchorRevision.update((value) => value + 1);
-        window.addEventListener('graph-rebuild-anchors-changed', bump);
-        window.addEventListener('entities-changed', bump);
+        const markStale = () => this.graphSnapshotStaleSignal.set(true);
+        const reload = () => void this.loadPersistedGraphSnapshot(this.lens());
+        window.addEventListener('graph-rebuild-anchors-changed', markStale);
+        window.addEventListener('entities-changed', markStale);
+        window.addEventListener('graph-rebuild-snapshot-updated', reload);
+        window.addEventListener('graph-index-run-completed', reload);
         this.removeAnchorListeners = () => {
-            window.removeEventListener('graph-rebuild-anchors-changed', bump);
-            window.removeEventListener('entities-changed', bump);
+            window.removeEventListener('graph-rebuild-anchors-changed', markStale);
+            window.removeEventListener('entities-changed', markStale);
+            window.removeEventListener('graph-rebuild-snapshot-updated', reload);
+            window.removeEventListener('graph-index-run-completed', reload);
         };
     }
 }

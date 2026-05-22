@@ -1,7 +1,7 @@
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
 
-export type GraphRebuildScopeKind = 'global' | 'narrative' | 'note' | 'multiNote';
+export type GraphRebuildScopeKind = 'global' | 'folder' | 'narrative' | 'note' | 'multiNote';
 export type GraphRebuildAnchorSource = EntityOccurrence['source'] | 'accepted_suggestion';
 export type GraphRebuildEdgeType = 'anchored-cooccurrence' | 'relationship' | 'temporal' | 'causal';
 export type GraphRebuildEmbeddingTargetKind = 'note' | 'chunk' | 'entity' | 'anchor' | 'graphFact';
@@ -192,6 +192,83 @@ export interface GraphRebuildSnapshot {
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
     counters: GraphRebuildCounters;
+}
+
+export type GraphIndexPolicy = 'delta' | 'force';
+export type GraphIndexRunStatus = 'blocked' | 'running' | 'completed' | 'failed';
+export type GraphIndexStageStatus = 'blocked' | 'skipped' | 'running' | 'completed' | 'failed';
+export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz';
+
+export interface GraphIndexRunScope {
+    kind: GraphRebuildScopeKind;
+    scopeId: string;
+    label: string;
+    noteIds: string[];
+}
+
+export interface GraphIndexModelSelection {
+    dynamicNerId: 'dynamic_ner';
+    embeddingModelId: string;
+    embeddingModelLabel: string;
+    embeddingDimensionLabel: string;
+    nliModelId: string;
+}
+
+export interface GraphIndexRunRequest {
+    scope: GraphIndexRunScope;
+    policy: GraphIndexPolicy;
+    modelSelection: GraphIndexModelSelection;
+    entities: RegisteredEntity[];
+}
+
+export interface GraphIndexModelReadiness {
+    id: 'dynamicNer' | 'semanticEmbedding' | 'nli';
+    label: string;
+    status: 'idle' | 'warming' | 'running' | 'ready' | 'error';
+    detail: string;
+}
+
+export interface GraphIndexStageReceipt {
+    id: string;
+    label: string;
+    status: GraphIndexStageStatus;
+    startedAt: number;
+    completedAt: number;
+    durationMs: number;
+    outputCount: number;
+    counters: Record<string, number>;
+    message: string;
+}
+
+export interface GraphIndexProjectionReceipt {
+    mode: GraphIndexProjectionMode;
+    status: 'synced' | 'stale' | 'error' | 'skipped';
+    startedAt: number;
+    completedAt: number;
+    durationMs: number;
+    targetCount: number;
+    vectorCount: number;
+    message: string;
+}
+
+export interface GraphIndexRunReceipt {
+    schemaVersion: 'phoenix-graph-index-run/v1';
+    id: string;
+    scope: GraphIndexRunScope;
+    policy: GraphIndexPolicy;
+    delta: boolean;
+    status: GraphIndexRunStatus;
+    modelSelection: GraphIndexModelSelection;
+    modelReadiness: GraphIndexModelReadiness[];
+    startedAt: number;
+    completedAt: number;
+    durationMs: number;
+    stageReceipts: GraphIndexStageReceipt[];
+    projectionReceipts: GraphIndexProjectionReceipt[];
+    snapshotId?: string;
+    counters: GraphRebuildCounters;
+    dropReasons: GraphRebuildDropReasons;
+    message: string;
 }
 
 export interface GraphRebuildCandidate {

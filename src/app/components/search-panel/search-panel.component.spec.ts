@@ -43,6 +43,7 @@ import { AtlasScanCoordinatorService } from '../../services/atlas-scan-coordinat
 import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
+import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
 import { PhoenixUiApiService } from '../../services/phoenix-ui-api.service';
 import { PhoenixBackendService } from '../../services/phoenix-backend.service';
 
@@ -74,6 +75,7 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             { provide: NliWorkerService, useValue: nli },
             { provide: PhoenixUiApiService, useValue: createPhoenixUiApiMock() },
             { provide: PhoenixBackendService, useValue: createPhoenixBackendMock() },
+            { provide: GraphRebuildPipelineService, useValue: createFullAtlasPipelineMock() },
             AtlasCapabilityRuntimeService,
         ], parentInjector);
         component = runInInjectionContext(injector, () => new SearchPanelComponent());
@@ -388,6 +390,30 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             buildScope: { mode: 'multiNote', noteIds: ['note-a', 'note-b'] },
         }));
     });
+
+    it('runs the unified Full Atlas Index only from the explicit button path', async () => {
+        const pipeline = injector.get(GraphRebuildPipelineService) as unknown as ReturnType<typeof createFullAtlasPipelineMock>;
+        pipeline.modelsReady.mockReturnValue(true);
+        pipeline.modelReadiness.mockReturnValue([
+            { id: 'dynamicNer', label: 'Dynamic NER', status: 'ready', detail: 'ready' },
+            { id: 'semanticEmbedding', label: 'Semantic Embedding', status: 'ready', detail: 'ready' },
+            { id: 'nli', label: 'NLI', status: 'ready', detail: 'ready' },
+        ]);
+
+        component.setBuildScopeMode('note');
+        await component.buildFullAtlas();
+
+        expect(pipeline.buildFullAtlas).toHaveBeenCalledTimes(1);
+        expect(pipeline.buildFullAtlas.mock.calls[0][0]).toEqual(expect.objectContaining({
+            policy: 'delta',
+            scope: expect.objectContaining({
+                kind: 'note',
+                scopeId: 'note:note-1',
+                noteIds: ['note-1'],
+            }),
+        }));
+        expect(machine.requestGraphFocus).toHaveBeenCalled();
+    });
 });
 
 function createMachineMock() {
@@ -498,5 +524,33 @@ function createPhoenixUiApiMock() {
 function createPhoenixBackendMock() {
     return {
         storeCommand: vi.fn(async () => []),
+    };
+}
+
+function createFullAtlasPipelineMock() {
+    const running = signal(false);
+    const lastReceipt = signal<any>(null);
+    return {
+        running: computed(() => running()),
+        lastReceipt: computed(() => lastReceipt()),
+        modelReadiness: vi.fn(() => [
+            { id: 'dynamicNer', label: 'Dynamic NER', status: 'ready', detail: 'ready' },
+            { id: 'semanticEmbedding', label: 'Semantic Embedding', status: 'idle', detail: 'idle' },
+            { id: 'nli', label: 'NLI', status: 'idle', detail: 'idle' },
+        ]),
+        modelsReady: vi.fn(() => false),
+        loadModels: vi.fn(async () => undefined),
+        buildFullAtlas: vi.fn(async () => {
+            const receipt = {
+                status: 'completed',
+                message: 'Full Atlas Index built 2 nodes and 1 edges.',
+                durationMs: 12,
+            };
+            lastReceipt.set(receipt);
+            return {
+                receipt,
+                snapshot: { counters: { nodes: 2, edges: 1 } },
+            };
+        }),
     };
 }
