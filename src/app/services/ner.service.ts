@@ -89,6 +89,15 @@ const PERSON_LIKE_ACTIONS = [
     'responded', 'set', 'wanted', 'went',
 ];
 
+const KNOWN_LOCATION_SURFACES = new Set([
+    'germany',
+    'dc citadel',
+    'white house',
+    'blackroot works',
+]);
+
+const LOCATION_SUFFIX_PATTERN = /\b(?:citadel|works|tower|palace|house|harbor|port|city|capital|country|nation|realm|kingdom|empire|territory|province|region)\b/iu;
+
 const PHOENIX_DISCOVERY_STOPWORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'above', 'absolute', 'absolutely',
     'accepted', 'access', 'accurate', 'again', 'all', 'almost', 'already',
@@ -137,6 +146,7 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
 
     const normalized = label.toLocaleLowerCase();
     const words = normalized.split(/\s+/).filter(Boolean);
+    const casedWords = label.split(/\s+/).filter(Boolean);
     if (!words.length || words.length > 4) {
         return false;
     }
@@ -154,6 +164,9 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
     }
 
     const kind = normalizeSuggestedEntityKind(String(candidate.kind || 'UNKNOWN'));
+    if (isLikelyLocationEntityLabel(label, text)) {
+        return true;
+    }
     if (kind === 'CHARACTER') {
         return isLikelyCharacterName(label, text);
     }
@@ -165,7 +178,25 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
         return /^[\p{Lu}][\p{L}'-]{1,31}$/u.test(label);
     }
 
-    return words.some((word) => /^[\p{Lu}]/u.test(word));
+    return casedWords.some((word) => /^[\p{Lu}]/u.test(word));
+}
+
+export function isLikelyLocationEntityLabel(label: string, text: string): boolean {
+    const cleaned = cleanPhoenixCandidateLabel(label);
+    if (!cleaned) return false;
+
+    const normalized = cleaned.toLocaleLowerCase();
+    if (KNOWN_LOCATION_SURFACES.has(normalized) && !hasPersonActionContext(cleaned, text)) return true;
+
+    const words = normalized.split(/\s+/).filter(Boolean);
+    if (words.length > 1 && LOCATION_SUFFIX_PATTERN.test(cleaned)) return true;
+
+    const escaped = escapeRegExp(cleaned);
+    const contextPattern = new RegExp([
+        `\\b(?:in|at|near|from|to|inside|outside|through|above|below)\\s+(?:the\\s+)?${escaped}\\b`,
+        `\\b${escaped}\\b\\s+(?:government|continuity|exchange\\s+terms|observations|country|nation|city|capital|citadel|works)\\b`,
+    ].join('|'), 'iu');
+    return contextPattern.test(text);
 }
 
 function isLikelyCharacterName(label: string, text: string): boolean {
@@ -178,17 +209,22 @@ function isLikelyCharacterName(label: string, text: string): boolean {
     }
 
     const escaped = escapeRegExp(label);
-    const actionPattern = PERSON_LIKE_ACTIONS.join('|');
-    const actorPattern = new RegExp(
-        `\\b${escaped}\\b(?:\\s+\\w+){0,2}\\s+(${actionPattern})\\b|\\b(${actionPattern})\\s+(?:\\w+\\s+){0,2}\\b${escaped}\\b`,
-        'iu',
-    );
-    if (actorPattern.test(text)) {
+    if (hasPersonActionContext(label, text)) {
         return true;
     }
 
     const possessivePattern = new RegExp(`\\b${escaped}\\b(?:'|\\u2019)s\\b`, 'iu');
     return possessivePattern.test(text);
+}
+
+function hasPersonActionContext(label: string, text: string): boolean {
+    const escaped = escapeRegExp(label);
+    const actionPattern = PERSON_LIKE_ACTIONS.join('|');
+    const actorPattern = new RegExp(
+        `\\b${escaped}\\b(?:\\s+\\w+){0,2}\\s+(${actionPattern})\\b|\\b(${actionPattern})\\s+(?:\\w+\\s+){0,2}\\b${escaped}\\b`,
+        'iu',
+    );
+    return actorPattern.test(text);
 }
 
 function escapeRegExp(value: string): string {
@@ -218,6 +254,17 @@ export interface NerSuggestion {
     llmEnhanced?: boolean;
     llmReasoning?: string;
     source: EntitySuggestionProviderId;
+    kindVotes?: NerKindVote[];
+    decisionStatus?: 'accepted' | 'review' | 'rejected' | string;
+    reviewReason?: string;
+    requiresReview?: boolean;
+}
+
+export interface NerKindVote {
+    kind: string;
+    source: string;
+    confidence: number;
+    reason: string;
 }
 
 export interface NerSuggestionAcceptanceContext {
@@ -225,6 +272,7 @@ export interface NerSuggestionAcceptanceContext {
     plainText: string;
     noteTitle?: string;
     generation?: number;
+    registrationSource?: 'user' | 'extraction' | 'auto';
 }
 
 @Injectable({
@@ -296,15 +344,21 @@ export class NerService {
                     count: 1,
                     status: 0,
                 }, candidateText);
+                const confidence = typeof candidate.confidence === 'number' ? candidate.confidence : 0.5;
+                const kindVotes = buildKindVotes(label, kind, confidence, candidateText, candidate.kindVotes);
                 return {
                     id: candidate.id || uuidv4(),
                     label: label || 'Unknown',
                     kind,
-                    confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0.5,
+                    confidence,
                     context: candidate.evidence || undefined,
                     llmEnhanced: false,
                     llmReasoning: undefined,
                     source: 'atlas_surface' as const,
+                    kindVotes,
+                    decisionStatus: normalizeDecisionStatus(candidate.decisionStatus, kind, confidence),
+                    reviewReason: candidate.reviewReason || reviewReason(kind, confidence, kindVotes),
+                    requiresReview: requiresReview(candidate.decisionStatus, kind, confidence, kindVotes),
                 };
             })
             .filter((suggestion) => !smartGraphRegistry.isRegisteredEntity(suggestion.label))
@@ -385,12 +439,14 @@ export class NerService {
             noteTitle: currentNote?.title,
             plainText: this.currentText || currentNote?.markdownContent || currentNote?.content || '',
             generation: currentNote?.version || currentNote?.updatedAt || Date.now(),
+            registrationSource: 'user',
         });
     }
 
     async acceptSuggestionForContext(id: string, context: NerSuggestionAcceptanceContext): Promise<boolean> {
         const suggestion = this.suggestions().find((entry) => entry.id === id);
         if (!suggestion) return false;
+        if (suggestion.requiresReview) return false;
         await this.acceptResolvedSuggestion(id, suggestion, context);
         return true;
     }
@@ -480,11 +536,21 @@ export class NerService {
         this.suggestions.update((list) => list.filter((entry) => entry.id !== id));
 
         const noteId = context.noteId || 'unknown';
+        const registrationSource = context.registrationSource || 'extraction';
         const registration = smartGraphRegistry.registerEntity(
             suggestion.label,
             suggestion.kind as any,
             noteId,
-            { source: 'user' }
+            {
+                source: registrationSource,
+                attributes: {
+                    discoverySource: suggestion.source,
+                    sourceConfidence: suggestion.confidence,
+                    nerDecisionStatus: suggestion.decisionStatus,
+                    nerReviewReason: suggestion.reviewReason,
+                    nerKindVotes: suggestion.kindVotes,
+                },
+            }
         );
         await recordAcceptedEntityAnchor({
             noteId,
@@ -526,19 +592,140 @@ export class NerService {
                 count: 1,
                 status: 0,
             }, this.currentText))
-            .map((suggestion) => ({
-                id: uuidv4(),
-                label: suggestion.label || 'Unknown',
-                kind: String(normalizeSuggestedEntityKind(String(suggestion.kind || 'UNKNOWN'))),
-                confidence: typeof suggestion.rawScore === 'number'
+            .map((suggestion) => {
+                const confidence = typeof suggestion.rawScore === 'number'
                     ? suggestion.rawScore
-                    : mapConfidenceLevelToScore(suggestion.confidence),
-                context: suggestion.evidence || undefined,
-                llmEnhanced: !isNativeScanProvider(providerId),
-                llmReasoning: suggestion.reasoning || undefined,
-                source: providerId,
-            }));
+                    : mapConfidenceLevelToScore(suggestion.confidence);
+                const kind = resolvedSuggestionKind(suggestion, providerId, this.currentText);
+                const kindVotes = buildKindVotes(suggestion.label, kind, confidence, this.currentText);
+                return {
+                    id: uuidv4(),
+                    label: suggestion.label || 'Unknown',
+                    kind,
+                    confidence,
+                    context: suggestion.evidence || undefined,
+                    llmEnhanced: !isNativeScanProvider(providerId),
+                    llmReasoning: suggestion.reasoning || undefined,
+                    source: providerId,
+                    kindVotes,
+                    decisionStatus: normalizeDecisionStatus(undefined, kind, confidence),
+                    reviewReason: reviewReason(kind, confidence, kindVotes),
+                    requiresReview: requiresReview(undefined, kind, confidence, kindVotes),
+                };
+            });
     }
+}
+
+function resolvedSuggestionKind(
+    suggestion: LocalEntitySuggestion,
+    providerId: EntitySuggestionProviderId,
+    text: string,
+): string {
+    if (!isNativeScanProvider(providerId)) {
+        return String(normalizeSuggestedEntityKind(String(suggestion.kind || 'UNKNOWN')));
+    }
+    return resolvePhoenixScanKind({
+        key: suggestion.label,
+        token: suggestion.label,
+        kind: suggestion.kind,
+        score: typeof suggestion.rawScore === 'number' ? suggestion.rawScore : mapConfidenceLevelToScore(suggestion.confidence),
+        count: 1,
+        status: 0,
+    }, text);
+}
+
+function buildKindVotes(
+    label: string,
+    kind: string,
+    confidence: number,
+    text: string,
+    upstreamVotes?: Array<{ kind?: string; source?: string; confidence?: number; reason?: string }>,
+): NerKindVote[] {
+    const votes: NerKindVote[] = [];
+    for (const vote of upstreamVotes || []) {
+        const normalizedKind = normalizeKindVote(vote.kind || '');
+        if (!normalizedKind) continue;
+        votes.push({
+            kind: normalizedKind,
+            source: String(vote.source || 'upstream'),
+            confidence: clampScore(Number(vote.confidence || 0)),
+            reason: String(vote.reason || 'upstream_vote'),
+        });
+    }
+
+    const normalizedKind = normalizeKindVote(kind);
+    if (normalizedKind && normalizedKind !== 'UNKNOWN' && normalizedKind !== 'OTHER') {
+        votes.push({
+            kind: normalizedKind,
+            source: 'provider',
+            confidence: clampScore(confidence),
+            reason: 'provider_kind',
+        });
+    }
+
+    if (isLikelyLocationEntityLabel(label, text) && normalizedKind !== 'LOCATION') {
+        votes.push({
+            kind: 'LOCATION',
+            source: 'angular_location_context',
+            confidence: 0.34,
+            reason: 'review_only_location_context',
+        });
+    }
+
+    return dedupeKindVotes(votes);
+}
+
+function normalizeDecisionStatus(
+    upstreamStatus: string | undefined,
+    kind: string,
+    confidence: number,
+): 'accepted' | 'review' | 'rejected' {
+    const normalizedStatus = String(upstreamStatus || '').toLocaleLowerCase();
+    if (normalizedStatus === 'rejected') return 'rejected';
+    if (normalizedStatus === 'review') return 'review';
+    if (normalizeKindVote(kind) === 'UNKNOWN' || confidence < 0.35) return 'review';
+    return 'accepted';
+}
+
+function requiresReview(
+    upstreamStatus: string | undefined,
+    kind: string,
+    confidence: number,
+    votes: NerKindVote[] = [],
+): boolean {
+    if (normalizeDecisionStatus(upstreamStatus, kind, confidence) !== 'accepted') return true;
+    const normalizedKind = normalizeKindVote(kind);
+    return votes.some((vote) => vote.source === 'angular_location_context' && vote.kind !== normalizedKind);
+}
+
+function reviewReason(kind: string, confidence: number, votes: NerKindVote[]): string | undefined {
+    if (normalizeKindVote(kind) === 'UNKNOWN') return 'missing_kind_vote';
+    if (confidence < 0.35) return 'low_confidence';
+    if (votes.some((vote) => vote.source === 'angular_location_context' && vote.kind !== normalizeKindVote(kind))) {
+        return 'location_context_conflict';
+    }
+    return undefined;
+}
+
+function normalizeKindVote(kind: string): string {
+    return String(normalizeSuggestedEntityKind(String(kind || 'UNKNOWN')) || 'UNKNOWN');
+}
+
+function clampScore(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function dedupeKindVotes(votes: NerKindVote[]): NerKindVote[] {
+    const byKey = new Map<string, NerKindVote>();
+    for (const vote of votes) {
+        const key = `${vote.kind}:${vote.source}:${vote.reason}`;
+        const current = byKey.get(key);
+        if (!current || vote.confidence > current.confidence) {
+            byKey.set(key, vote);
+        }
+    }
+    return [...byKey.values()].sort((left, right) => right.confidence - left.confidence);
 }
 
 function isNativeScanProvider(providerId: EntitySuggestionProviderId): boolean {

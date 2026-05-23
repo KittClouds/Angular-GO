@@ -236,6 +236,7 @@ export class GraphRebuildPipelineService {
                     noteTitle: doc.title,
                     plainText: doc.plainText,
                     generation: doc.version || doc.updatedAt || Date.now(),
+                    registrationSource: 'extraction',
                 });
                 acceptedAnchors += accepted ? 1 : 0;
                 dropped += accepted ? 0 : 1;

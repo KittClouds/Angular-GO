@@ -6,6 +6,8 @@
 
 mod adjudication;
 mod builder;
+mod embedding;
+mod facts;
 #[cfg(test)]
 mod tests;
 mod types;

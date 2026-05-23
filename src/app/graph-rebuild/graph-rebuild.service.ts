@@ -47,6 +47,7 @@ export class GraphRebuildService {
         try {
             const occurrences = await this.loadOccurrences(request.noteIds, request.entities);
             const chunks = await this.loadChunks(request.noteIds, occurrences);
+            const noteTexts = await this.loadNoteTexts(request.noteIds, occurrences);
             const snapshot = buildGraphRebuildSnapshot({
                 scopeKind: request.scopeKind,
                 scopeId: request.scopeId,
@@ -54,6 +55,7 @@ export class GraphRebuildService {
                 entities: request.entities,
                 occurrences,
                 chunks,
+                noteTexts,
                 relationshipHints: request.relationshipHints,
                 candidateCount: request.candidateCount,
             });
@@ -105,6 +107,13 @@ export class GraphRebuildService {
             ? (await Promise.all(noteIds.map((noteId) => db.entityOccurrences.where('noteId').equals(noteId).toArray()))).flat()
             : await db.entityOccurrences.toArray();
         return rows.filter((row) => entityIds.has(row.entityId));
+    }
+
+    private async loadNoteTexts(noteIds: string[], occurrences: EntityOccurrence[]): Promise<Record<string, string>> {
+        if (!canUseNotesTable()) return {};
+        const scopedNoteIds = noteIds.length ? noteIds : [...new Set(occurrences.map((row) => row.noteId))];
+        const notes = (await Promise.all(scopedNoteIds.map((noteId) => db.notes.get(noteId)))).filter((note): note is Note => !!note);
+        return Object.fromEntries(notes.map((note) => [note.id, notePlainText(note)]));
     }
 
     private async loadChunks(noteIds: string[], occurrences: EntityOccurrence[]): Promise<GraphRebuildChunk[]> {

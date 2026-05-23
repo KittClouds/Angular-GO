@@ -10,6 +10,8 @@ use std::time::Instant;
 
 mod binary;
 #[cfg(not(target_arch = "wasm32"))]
+mod dynamic_gliclass;
+#[cfg(not(target_arch = "wasm32"))]
 mod dynamic_gliner;
 #[cfg(not(target_arch = "wasm32"))]
 mod overgraph_lane;
@@ -20,14 +22,13 @@ mod view;
 #[cfg(feature = "legacy-cozo-graph")]
 use overgraph_lane::OvergraphLaneSyncReport;
 use overgraph_lane::PhoenixOvergraphLane;
+use phoenix_alex::{normalized_has_meaningful_token, Lexicon as DynamicLexicon};
 use phoenix_analytics::TextAnalytics;
 use phoenix_chat::PhoenixChat;
 use phoenix_dynamic_ner::{
     MentionKind as DynamicMentionKind, MentionStatus as DynamicMentionStatus,
     PhoenixNerEngineBuilder, SurfaceNerInput,
 };
-use phoenix_alex::{normalized_has_meaningful_token, Lexicon as DynamicLexicon};
-use phoenix_types as dynamic_types;
 #[cfg(feature = "legacy-cozo-graph")]
 use phoenix_gldr::PhoenixGldr;
 use phoenix_graph::{
@@ -70,22 +71,22 @@ use phoenix_store_native_core::{
 use phoenix_store_overgraph::PhoenixOvergraphStore;
 use phoenix_structure::PhoenixStructure;
 use phoenix_triverse_v2::PhoenixTriverseV2;
+use phoenix_types as dynamic_types;
 use phoenix_types::{
     AtlasRichScanCandidateSummary, AtlasRichScanDocument, AtlasRichScanEmbeddingCounts,
-    AtlasRichScanManifestSummary, AtlasRichScanPolicy, AtlasRichScanRequest, AtlasRichScanResult,
-    AtlasRichScanScope, AtlasRichScanStageSummary, ChatPlannerModelResponse, ChatRunEvent,
-    ChatRuntimeConfig, CommitId, CommitRequest, CommitResult, CreateSessionRequest, Diagnostic,
-    DocumentId, EntityCard, EntityId, EntityKind, FolderSchema, GraphDeltaChunk, GraphDeltaEdge,
-    GraphDeltaNode, GraphDeltaRequest, GraphDeltaResult, IndexedSpan, IndexedTextField,
-    IngestRequest, IngestResult, LexicalField, LexicalSearchResult,
-    NetworkInstance, NodeHit, NoteId, OmPendingAction, OmRecord, OmReflectorModelResponse,
-    OmReflectorToolResult,
-    PhoenixBootSnapshotRows, QueryRequest, QueryResult, RebuildRequest, RebuildResult,
-    RelationCount, RunOptions, RuntimeConfig, RuntimeInitResult, RuntimeTarget, SavedNetworkView,
-    ScanArtifact, ScanRequest, ScopeKey, SessionDocumentState, SessionId, SessionRecord,
-    SessionState, SessionStats, SnapshotDto, SpanHit, StoreCommandRequest, StoreCommandResult,
-    StorageMode, StructureArtifact, StructureRequest, TextRange, Thread, ThreadMessage,
-    ToolResultSubmission,
+    AtlasRichScanKindVoteSummary, AtlasRichScanManifestSummary, AtlasRichScanPolicy,
+    AtlasRichScanRequest, AtlasRichScanResult, AtlasRichScanScope, AtlasRichScanStageSummary,
+    ChatPlannerModelResponse, ChatRunEvent, ChatRuntimeConfig, CommitId, CommitRequest,
+    CommitResult, CreateSessionRequest, Diagnostic, DocumentId, EntityCard, EntityId, EntityKind,
+    FolderSchema, GraphDeltaChunk, GraphDeltaEdge, GraphDeltaNode, GraphDeltaRequest,
+    GraphDeltaResult, IndexedSpan, IndexedTextField, IngestRequest, IngestResult, LexicalField,
+    LexicalSearchResult, NetworkInstance, NodeHit, NoteId, OmPendingAction, OmRecord,
+    OmReflectorModelResponse, OmReflectorToolResult, PhoenixBootSnapshotRows, QueryRequest,
+    QueryResult, RebuildRequest, RebuildResult, RelationCount, RunOptions, RuntimeConfig,
+    RuntimeInitResult, RuntimeTarget, SavedNetworkView, ScanArtifact, ScanRequest, ScopeKey,
+    SessionDocumentState, SessionId, SessionRecord, SessionState, SessionStats, SnapshotDto,
+    SpanHit, StorageMode, StoreCommandRequest, StoreCommandResult, StructureArtifact,
+    StructureRequest, TextRange, Thread, ThreadMessage, ToolResultSubmission,
 };
 use planner::{list_run_artifacts, set_artifact_pinned, ChatPlannerRunner};
 use serde::{Deserialize, Serialize};
@@ -4353,6 +4354,25 @@ impl PhoenixRuntime {
                 });
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        match dynamic_gliclass::load_default_adjudicator() {
+            Ok(adjudicator) => {
+                engine_builder = engine_builder
+                    .adjudicator(adjudicator)
+                    .max_adjudication_cases(dynamic_ner_gliclass_case_budget());
+                result.diagnostics.push(Diagnostic {
+                    code: "dynamicNer.gliclassAdjudicator".to_owned(),
+                    message: "Dynamic NER attached the GLiClass Instruct kind arbitration lane."
+                        .to_owned(),
+                });
+            }
+            Err(error) => {
+                result.diagnostics.push(Diagnostic {
+                    code: "dynamicNer.gliclassUnavailable".to_owned(),
+                    message: format!("Dynamic NER skipped GLiClass kind arbitration: {error}"),
+                });
+            }
+        }
         let engine = engine_builder.build();
         let chunk_config = phoenix_chunker::ChunkerConfig::default();
 
@@ -4416,10 +4436,13 @@ impl PhoenixRuntime {
                 attributes.insert("noteId".to_owned(), json!(note_id));
                 attributes.insert("searchChunkId".to_owned(), json!(leaf_id));
                 attributes.insert("pipelineSource".to_owned(), json!("dynamic_chunker_v1"));
-                attributes.insert("range".to_owned(), json!({
-                    "start": chunk.start,
-                    "end": chunk.end,
-                }));
+                attributes.insert(
+                    "range".to_owned(),
+                    json!({
+                        "start": chunk.start,
+                        "end": chunk.end,
+                    }),
+                );
                 phase1_push_vertex(
                     &mut vertex_ids,
                     &mut vertex_rows,
@@ -4515,10 +4538,13 @@ impl PhoenixRuntime {
                 );
                 attributes.insert("confidence".to_owned(), json!(mention.confidence));
                 attributes.insert("normalized".to_owned(), json!(mention.normalized.as_str()));
-                attributes.insert("range".to_owned(), json!({
-                    "start": mention.range.start,
-                    "end": mention.range.end,
-                }));
+                attributes.insert(
+                    "range".to_owned(),
+                    json!({
+                        "start": mention.range.start,
+                        "end": mention.range.end,
+                    }),
+                );
                 attributes.insert("sentenceIndex".to_owned(), json!(mention.sentence_index));
                 let evidence_refs = vec![
                     format!("document:{document_id}"),
@@ -4563,21 +4589,33 @@ impl PhoenixRuntime {
                     && dynamic_should_surface_candidate(mention)
                 {
                     let key = atlas_candidate_key(&label);
-                    candidate_by_key.entry(key).or_insert_with(|| AtlasRichScanCandidateSummary {
-                        id: format!("dyn-candidate-{:016x}", atlas_hash64(vertex_id.as_bytes())),
-                        label: label.clone(),
-                        kind: atlas_entity_kind_name(entity_kind.as_ref()).to_owned(),
-                        confidence: mention.confidence,
-                        source_document_id: Some(document.document_id.clone()),
-                        source_note_id: document.note_id.clone(),
-                        evidence: Some(label.clone()),
-                        aliases: Vec::new(),
-                        range: Some(TextRange {
-                            start: mention.range.start,
-                            end: mention.range.end,
-                        }),
-                        source_stage: "dynamicNer".to_owned(),
-                    });
+                    let kind_votes = dynamic_candidate_kind_votes(mention, entity_kind.as_ref());
+                    let kind = dynamic_candidate_kind(mention, entity_kind.as_ref(), &kind_votes);
+                    let decision_status = dynamic_candidate_decision_status(mention);
+                    let review_reason = dynamic_candidate_review_reason(mention, &kind);
+                    candidate_by_key
+                        .entry(key)
+                        .or_insert_with(|| AtlasRichScanCandidateSummary {
+                            id: format!(
+                                "dyn-candidate-{:016x}",
+                                atlas_hash64(vertex_id.as_bytes())
+                            ),
+                            label: label.clone(),
+                            kind,
+                            confidence: mention.confidence,
+                            source_document_id: Some(document.document_id.clone()),
+                            source_note_id: document.note_id.clone(),
+                            evidence: Some(label.clone()),
+                            aliases: Vec::new(),
+                            range: Some(TextRange {
+                                start: mention.range.start,
+                                end: mention.range.end,
+                            }),
+                            source_stage: "dynamicNer".to_owned(),
+                            kind_votes,
+                            decision_status,
+                            review_reason,
+                        });
                 }
             }
 
@@ -4589,7 +4627,10 @@ impl PhoenixRuntime {
                     continue;
                 };
                 let mut attributes = Map::new();
-                attributes.insert("pipelineSource".to_owned(), json!("dynamic_mention_graph_v1"));
+                attributes.insert(
+                    "pipelineSource".to_owned(),
+                    json!("dynamic_mention_graph_v1"),
+                );
                 attributes.insert(
                     "mentionEdgeKind".to_owned(),
                     json!(format!("{:?}", edge.kind)),
@@ -7235,6 +7276,14 @@ fn runtime_ingest_progress_enabled() -> bool {
     )
 }
 
+fn dynamic_ner_gliclass_case_budget() -> usize {
+    std::env::var("PHOENIX_DYN_NER_GLICLASS_MAX_CASES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|value| value.clamp(0, 96))
+        .unwrap_or(48)
+}
+
 fn native_note_row_from_ingest(
     document: &IngestDocumentView<'_>,
     note_id: &str,
@@ -7435,8 +7484,13 @@ fn dynamic_token_spans(text: &str) -> Vec<dynamic_types::TokenSpan> {
         let next_class = dynamic_char_class(ch);
         let joins_open = matches!(
             (&class, &next_class),
-            (Some(dynamic_types::TokenClass::Word), Some(dynamic_types::TokenClass::Word))
-                | (Some(dynamic_types::TokenClass::Number), Some(dynamic_types::TokenClass::Number))
+            (
+                Some(dynamic_types::TokenClass::Word),
+                Some(dynamic_types::TokenClass::Word)
+            ) | (
+                Some(dynamic_types::TokenClass::Number),
+                Some(dynamic_types::TokenClass::Number)
+            )
         );
         if next_class.is_none() || !joins_open {
             if let (Some(open_start), Some(open_class)) = (start.take(), class.take()) {
@@ -7448,7 +7502,10 @@ fn dynamic_token_spans(text: &str) -> Vec<dynamic_types::TokenSpan> {
                 start = Some(index);
                 class = Some(next_class.clone());
             }
-            if !matches!(next_class, dynamic_types::TokenClass::Word | dynamic_types::TokenClass::Number) {
+            if !matches!(
+                next_class,
+                dynamic_types::TokenClass::Word | dynamic_types::TokenClass::Number
+            ) {
                 if let Some(open_start) = start.take() {
                     tokens.push(dynamic_token_span(text, open_start, end, next_class));
                 }
@@ -7484,7 +7541,11 @@ fn dynamic_token_span(
     token_class: dynamic_types::TokenClass,
 ) -> dynamic_types::TokenSpan {
     let token = &text[start..end];
-    let capitalized = token.chars().next().map(char::is_uppercase).unwrap_or(false);
+    let capitalized = token
+        .chars()
+        .next()
+        .map(char::is_uppercase)
+        .unwrap_or(false);
     let pos = match token_class {
         dynamic_types::TokenClass::Word => dynamic_word_pos(token, capitalized),
         dynamic_types::TokenClass::Punctuation => Some(dynamic_types::PosTag::Punctuation),
@@ -7504,9 +7565,9 @@ fn dynamic_token_span(
 
 fn dynamic_word_pos(token: &str, capitalized: bool) -> Option<dynamic_types::PosTag> {
     match token.to_ascii_lowercase().as_str() {
-        "he" | "him" | "his" | "she" | "her" | "hers" | "they" | "them" | "their"
-        | "theirs" | "it" | "its" | "we" | "us" | "our" | "ours" | "i" | "me" | "my"
-        | "mine" | "you" | "your" | "yours" => Some(dynamic_types::PosTag::Pronoun),
+        "he" | "him" | "his" | "she" | "her" | "hers" | "they" | "them" | "their" | "theirs"
+        | "it" | "its" | "we" | "us" | "our" | "ours" | "i" | "me" | "my" | "mine" | "you"
+        | "your" | "yours" => Some(dynamic_types::PosTag::Pronoun),
         _ if capitalized => Some(dynamic_types::PosTag::ProperNoun),
         _ => Some(dynamic_types::PosTag::Noun),
     }
@@ -7562,6 +7623,138 @@ fn dynamic_has_candidate_signal(mention: &phoenix_dynamic_ner::MentionPacket) ->
     has_strong_signal || (has_title_pattern && mention.normalized.split_whitespace().count() > 1)
 }
 
+fn dynamic_candidate_kind_votes(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    known_kind: Option<&EntityKind>,
+) -> Vec<AtlasRichScanKindVoteSummary> {
+    let mut by_key = BTreeMap::<(String, String, String), f32>::new();
+
+    if let Some(kind) = known_kind {
+        by_key.insert(
+            (
+                atlas_entity_kind_name(Some(kind)).to_owned(),
+                "known_lexicon".to_owned(),
+                "known_entity_kind".to_owned(),
+            ),
+            1.0,
+        );
+    }
+
+    for (label, confidence) in &mention.label_distribution {
+        if let Some(kind) = dynamic_label_to_atlas_kind(label.as_str()) {
+            by_key
+                .entry((
+                    kind.to_owned(),
+                    "label_distribution".to_owned(),
+                    "model_label_distribution".to_owned(),
+                ))
+                .and_modify(|current| *current = current.max(*confidence))
+                .or_insert(*confidence);
+        }
+    }
+
+    for vote in &mention.source_votes {
+        let Some(label) = vote.label.as_ref() else {
+            continue;
+        };
+        let Some(kind) = dynamic_label_to_atlas_kind(label.as_str()) else {
+            continue;
+        };
+        by_key
+            .entry((
+                kind.to_owned(),
+                dynamic_vote_source_name(vote.source).to_owned(),
+                format!("{:?}", vote.reason),
+            ))
+            .and_modify(|current| *current = current.max(vote.confidence))
+            .or_insert(vote.confidence);
+    }
+
+    by_key
+        .into_iter()
+        .map(
+            |((kind, source, reason), confidence)| AtlasRichScanKindVoteSummary {
+                kind,
+                source,
+                confidence,
+                reason,
+            },
+        )
+        .collect()
+}
+
+fn dynamic_candidate_kind(
+    _mention: &phoenix_dynamic_ner::MentionPacket,
+    known_kind: Option<&EntityKind>,
+    votes: &[AtlasRichScanKindVoteSummary],
+) -> String {
+    if let Some(kind) = known_kind {
+        return atlas_entity_kind_name(Some(kind)).to_owned();
+    }
+
+    votes
+        .iter()
+        .max_by(|left, right| left.confidence.total_cmp(&right.confidence))
+        .filter(|vote| vote.confidence >= 0.20)
+        .map(|vote| vote.kind.clone())
+        .unwrap_or_else(|| "UNKNOWN".to_owned())
+}
+
+fn dynamic_candidate_decision_status(mention: &phoenix_dynamic_ner::MentionPacket) -> String {
+    match mention.status {
+        DynamicMentionStatus::AcceptedKnown | DynamicMentionStatus::AcceptedNew => "accepted",
+        DynamicMentionStatus::AliasCandidate | DynamicMentionStatus::NeedsAdjudication => "review",
+        DynamicMentionStatus::Rejected => "rejected",
+    }
+    .to_owned()
+}
+
+fn dynamic_candidate_review_reason(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    kind: &str,
+) -> Option<String> {
+    if kind == "UNKNOWN" {
+        return Some("missing_kind_vote".to_owned());
+    }
+    match mention.status {
+        DynamicMentionStatus::AliasCandidate => Some("alias_candidate".to_owned()),
+        DynamicMentionStatus::NeedsAdjudication => Some("needs_adjudication".to_owned()),
+        DynamicMentionStatus::Rejected => Some("rejected".to_owned()),
+        DynamicMentionStatus::AcceptedKnown | DynamicMentionStatus::AcceptedNew => None,
+    }
+}
+
+fn dynamic_vote_source_name(source: phoenix_dynamic_ner::MentionSourceKind) -> &'static str {
+    match source {
+        phoenix_dynamic_ner::MentionSourceKind::KnownLexicon => "known_lexicon",
+        phoenix_dynamic_ner::MentionSourceKind::NativeDiscovery => "native_discovery",
+        phoenix_dynamic_ner::MentionSourceKind::Scirs2Rule => "scirs2_rule",
+        phoenix_dynamic_ner::MentionSourceKind::Scirs2Pattern => "scirs2_pattern",
+        phoenix_dynamic_ner::MentionSourceKind::ModelDiscovery => "model_discovery",
+        phoenix_dynamic_ner::MentionSourceKind::ModelVerify => "model_verify",
+        phoenix_dynamic_ner::MentionSourceKind::Adjudication => "adjudication",
+        phoenix_dynamic_ner::MentionSourceKind::Pronoun => "pronoun",
+    }
+}
+
+fn dynamic_label_to_atlas_kind(label: &str) -> Option<&'static str> {
+    match label.trim().to_ascii_lowercase().as_str() {
+        "character" | "person" | "speaker" | "npc" => Some("CHARACTER"),
+        "organization" | "faction" | "alliance" | "department" | "institution" => {
+            Some("ORGANIZATION")
+        }
+        "location" | "place" | "region" | "landmark" | "city" | "country" | "nation" => {
+            Some("LOCATION")
+        }
+        "artifact" | "item" | "weapon" | "object" => Some("ITEM"),
+        "event" => Some("EVENT"),
+        "role" | "rank" | "title" | "ability" | "spell" | "state" | "goal" | "relationship"
+        | "emotion" | "metric" | "initiative" | "risk" | "library" | "function" | "module"
+        | "error" | "benchmark" | "algorithm" => Some("CONCEPT"),
+        _ => None,
+    }
+}
+
 fn dynamic_mention_label(mention: &phoenix_dynamic_ner::MentionPacket) -> String {
     atlas_clean_label(mention.surface.as_str())
 }
@@ -7579,9 +7772,7 @@ fn dynamic_mention_vertex_id(
 ) -> String {
     let key = format!(
         "{document_id}:{}:{}:{}",
-        mention.range.start,
-        mention.range.end,
-        mention.normalized
+        mention.range.start, mention.range.end, mention.normalized
     );
     format!("entity::dyn::{:016x}", atlas_hash64(key.as_bytes()))
 }
@@ -11038,9 +11229,11 @@ fn overgraph_store_path(config: &RuntimeConfig, storage_path: Option<&Path>) -> 
 fn ephemeral_overgraph_store_path() -> PathBuf {
     static PATH: OnceLock<PathBuf> = OnceLock::new();
     PATH.get_or_init(|| {
-        let path = std::env::temp_dir()
-            .join("Phoenix Desktop")
-            .join(format!("phoenix-overgraph-ephemeral-{}-{}", std::process::id(), now_ms()));
+        let path = std::env::temp_dir().join("Phoenix Desktop").join(format!(
+            "phoenix-overgraph-ephemeral-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
         let _ = fs::remove_dir_all(&path);
         path
     })
@@ -11163,15 +11356,87 @@ mod tests {
             "Absolutely",
             phoenix_dynamic_ner::VoteReason::RepeatedSurface,
         );
-        let dialogue = dynamic_test_mention(
-            "Aella",
-            phoenix_dynamic_ner::VoteReason::DialogueSpeaker,
-        );
+        let dialogue =
+            dynamic_test_mention("Aella", phoenix_dynamic_ner::VoteReason::DialogueSpeaker);
 
         assert!(!dynamic_has_candidate_signal(&repeated));
         assert!(!dynamic_mention_is_graphworthy(&repeated));
         assert!(dynamic_has_candidate_signal(&dialogue));
         assert!(dynamic_mention_is_graphworthy(&dialogue));
+    }
+
+    #[test]
+    fn dynamic_candidate_kind_prefers_model_label_evidence_over_unknown_entity_kind() {
+        let mut mention =
+            dynamic_test_mention("Allied Table", phoenix_dynamic_ner::VoteReason::ModelLabel);
+        mention
+            .label_distribution
+            .push((phoenix_dynamic_ner::EntityLabel::new("Organization"), 0.82));
+        mention
+            .label_distribution
+            .push((phoenix_dynamic_ner::EntityLabel::new("Location"), 0.18));
+        mention.source_votes.push(phoenix_dynamic_ner::MentionVote {
+            source: phoenix_dynamic_ner::MentionSourceKind::ModelDiscovery,
+            label: Some(phoenix_dynamic_ner::EntityLabel::new("Organization")),
+            entity_ref: None,
+            confidence: 0.82,
+            reason: phoenix_dynamic_ner::VoteReason::ModelLabel,
+        });
+
+        let votes = dynamic_candidate_kind_votes(&mention, None);
+        let kind = dynamic_candidate_kind(&mention, None, &votes);
+
+        assert_eq!(kind, "ORGANIZATION");
+        assert_eq!(dynamic_candidate_decision_status(&mention), "accepted");
+        assert!(votes.iter().any(|vote| vote.kind == "ORGANIZATION"));
+        assert!(votes.iter().any(|vote| vote.kind == "LOCATION"));
+    }
+
+    #[test]
+    fn dynamic_ner_smoke_uses_shortrun_and_mother2_without_location_collapse() {
+        let runtime = native_test_runtime();
+        runtime.init().expect("init");
+
+        let result = runtime
+            .atlas_rich_scan(AtlasRichScanRequest {
+                documents: vec![
+                    smoke_doc("shortrun", "shortrun.md"),
+                    smoke_doc("mother2", "mother2.md"),
+                ],
+                options: phoenix_types::AtlasRichScanOptions {
+                    include_semantic_atlas: false,
+                    return_candidate_suggestions: true,
+                    ..phoenix_types::AtlasRichScanOptions::default()
+                },
+                ..AtlasRichScanRequest::default()
+            })
+            .expect("atlas smoke scan");
+
+        assert_eq!(result.processed_documents, 2);
+        assert!(result.candidate_suggestions.iter().any(|candidate| {
+            candidate
+                .source_document_id
+                .as_ref()
+                .is_some_and(|id| id.0 == "shortrun")
+        }));
+        assert!(result.candidate_suggestions.iter().any(|candidate| {
+            candidate
+                .source_document_id
+                .as_ref()
+                .is_some_and(|id| id.0 == "mother2")
+        }));
+        assert!(result
+            .candidate_suggestions
+            .iter()
+            .all(|candidate| !candidate.decision_status.is_empty()));
+        assert!(result
+            .candidate_suggestions
+            .iter()
+            .any(|candidate| candidate.kind != "LOCATION"));
+        assert!(result
+            .candidate_suggestions
+            .iter()
+            .all(|candidate| { candidate.label != "Rook" || candidate.kind != "LOCATION" }));
     }
 
     fn dynamic_test_mention(
@@ -11208,10 +11473,30 @@ mod tests {
         });
         packet
     }
+
+    fn smoke_doc(id: &str, file_name: &str) -> AtlasRichScanDocument {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("docs")
+            .join(file_name);
+        let mut text = fs::read_to_string(&path).expect("smoke document");
+        text = text.chars().take(24_000).collect::<String>();
+        text.push_str("\n\nNER arbitration control: Rook said the Allied Table approved Red Mesa.");
+        AtlasRichScanDocument {
+            document_id: DocumentId(id.to_owned()),
+            note_id: Some(NoteId(format!("note-{id}"))),
+            title: file_name.to_owned(),
+            text,
+            scope: ScopeKey::default(),
+        }
+    }
     use phoenix_types::{
         ChatRunStatus, CreateSessionRequest, DocumentId, EntityId, EntityKind, GenderHint,
-        GraphDeltaRequest, MentionEntityRef, QueryResultHeader, QueryTarget, RunOptions, ScopeKey,
-        SessionStateResultHeader, SessionStatsResultHeader, TextRange,
+        GraphDeltaRequest, MentionEntityRef, NoteId, QueryResultHeader, QueryTarget, RunOptions,
+        ScopeKey, SessionStateResultHeader, SessionStatsResultHeader, TextRange,
     };
     use serde_json::{json, Value};
 

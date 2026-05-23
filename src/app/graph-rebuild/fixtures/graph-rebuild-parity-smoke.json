@@ -1,0 +1,66 @@
+{
+  "noteId": "parity-note",
+  "scopeKind": "note",
+  "scopeId": "note:parity-note",
+  "builtAt": 1,
+  "text": "Kai approved the packet with Hazel because Rift warned Kai. Hazel stood beside Kai as Diamond rank was confirmed.",
+  "entities": [
+    {
+      "id": "e-kai",
+      "label": "Kai",
+      "kind": "CHARACTER",
+      "aliases": ["Captain Kai"]
+    },
+    {
+      "id": "e-hazel",
+      "label": "Hazel",
+      "kind": "CHARACTER",
+      "aliases": []
+    },
+    {
+      "id": "e-rift",
+      "label": "Rift",
+      "kind": "CHARACTER",
+      "aliases": []
+    }
+  ],
+  "chunks": [
+    {
+      "id": "parity-note:chunk:0",
+      "noteId": "parity-note",
+      "start": 0,
+      "end": 113,
+      "ordinal": 0,
+      "source": "dynamic-chunking"
+    }
+  ],
+  "occurrences": [
+    { "entityId": "e-kai", "entityLabel": "Kai", "entityKind": "CHARACTER", "surface": "Kai", "sourceStart": 0, "sourceEnd": 3, "source": "Some(ExactCanonical)", "confidence": 1 },
+    { "entityId": "e-hazel", "entityLabel": "Hazel", "entityKind": "CHARACTER", "surface": "Hazel", "sourceStart": 29, "sourceEnd": 34, "source": "Some(ExactCanonical)", "confidence": 1 },
+    { "entityId": "e-rift", "entityLabel": "Rift", "entityKind": "CHARACTER", "surface": "Rift", "sourceStart": 43, "sourceEnd": 47, "source": "Some(ExactCanonical)", "confidence": 1 },
+    { "entityId": "e-kai", "entityLabel": "Kai", "entityKind": "CHARACTER", "surface": "Kai", "sourceStart": 55, "sourceEnd": 58, "source": "Some(ExactCanonical)", "confidence": 1 },
+    { "entityId": "e-hazel", "entityLabel": "Hazel", "entityKind": "CHARACTER", "surface": "Hazel", "sourceStart": 60, "sourceEnd": 65, "source": "Some(ExactCanonical)", "confidence": 1 },
+    { "entityId": "e-kai", "entityLabel": "Kai", "entityKind": "CHARACTER", "surface": "Kai", "sourceStart": 79, "sourceEnd": 82, "source": "Some(ExactCanonical)", "confidence": 1 }
+  ],
+  "expected": {
+    "relationships": [
+      { "id": "relationship:e-hazel:anchored-cooccurrence:e-kai", "relationType": "co_occurs_with", "status": "review" },
+      { "id": "relationship:e-hazel:anchored-cooccurrence:e-rift", "relationType": "co_occurs_with", "status": "review" },
+      { "id": "relationship:e-kai:anchored-cooccurrence:e-rift", "relationType": "co_occurs_with", "status": "review" },
+      { "id": "typed:parity-note:0:e-hazel:approves_or_accepts:e-rift", "relationType": "approves_or_accepts", "status": "accepted" },
+      { "id": "typed:parity-note:0:e-kai:approves_or_accepts:e-hazel", "relationType": "approves_or_accepts", "status": "accepted" },
+      { "id": "typed:parity-note:0:e-kai:approves_or_accepts:e-rift", "relationType": "approves_or_accepts", "status": "accepted" }
+    ],
+    "eventCount": 1,
+    "memoryStateCount": 3,
+    "embeddingTargetKindCounts": {
+      "anchor": 6,
+      "chunk": 1,
+      "entity": 3,
+      "event": 1,
+      "graphFact": 6,
+      "memoryState": 3,
+      "note": 1
+    }
+  }
+}

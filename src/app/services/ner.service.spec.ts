@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { signal } from '@angular/core';
+import { readFileSync } from 'node:fs';
 
 vi.mock('../lib/registry', () => ({
   smartGraphRegistry: {
@@ -112,12 +113,55 @@ describe('NerService provider orchestration', () => {
 
     await service.acceptSuggestion('s-1');
 
-    expect(smartGraphRegistry.registerEntity).toHaveBeenCalledWith('Kai', 'CHARACTER', 'note-1', { source: 'user' });
+    expect(smartGraphRegistry.registerEntity).toHaveBeenCalledWith('Kai', 'CHARACTER', 'note-1', expect.objectContaining({
+      source: 'user',
+      attributes: expect.objectContaining({ discoverySource: 'dynamic_ner' }),
+    }));
     expect(recordAcceptedEntityAnchor).toHaveBeenCalledWith(expect.objectContaining({
       noteId: 'note-1',
       surface: 'Kai',
       plainText: 'Kai crossed the room.',
       confidence: 0.91,
+    }));
+  });
+
+  it('auto-accepted context suggestions register as extraction, not user curation', async () => {
+    vi.mocked(smartGraphRegistry.registerEntity).mockReturnValue({
+      entity: {
+        id: 'entity-kai',
+        label: 'Kai',
+        kind: 'CHARACTER',
+        aliases: [],
+        firstNote: 'note-1',
+        mentionsByNote: new Map(),
+        totalMentions: 1,
+        lastSeenDate: new Date(1),
+        createdAt: new Date(1),
+        createdBy: 'extraction',
+        registeredAt: 1,
+      },
+      isNew: true,
+      wasMerged: false,
+    } as any);
+    const service = makeService();
+    service.suggestions.set([
+      {
+        id: 's-1',
+        label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 0.91,
+        source: 'dynamic_ner',
+      },
+    ] as any);
+
+    await service.acceptSuggestionForContext('s-1', {
+      noteId: 'note-1',
+      plainText: 'Kai crossed the room.',
+      registrationSource: 'extraction',
+    });
+
+    expect(smartGraphRegistry.registerEntity).toHaveBeenCalledWith('Kai', 'CHARACTER', 'note-1', expect.objectContaining({
+      source: 'extraction',
     }));
   });
 
@@ -362,6 +406,53 @@ describe('NerService provider orchestration', () => {
     ]);
   });
 
+  it('keeps provider kind stable and records location context as review evidence', async () => {
+    const service = makeService();
+    service.fstProvider.scan.mockResolvedValue([
+      {
+        label: 'Germany',
+        kind: 'CHARACTER',
+        confidence: 'high',
+        rawScore: 0.91,
+        reasoning: '',
+        evidence: "Germany's price is exchange.",
+        aliases: [],
+      },
+      {
+        label: 'Kai',
+        kind: 'CHARACTER',
+        confidence: 'high',
+        rawScore: 0.91,
+        reasoning: '',
+        evidence: 'Kai said yes.',
+        aliases: [],
+      },
+    ]);
+
+    await service.runManualScan('fst', {
+      noteId: 'note-1',
+      noteTitle: 'Untitled Note',
+      plainText: "Germany's price is exchange. Kai said yes.",
+    });
+
+    expect(service.suggestions()).toEqual([
+      expect.objectContaining({
+        label: 'Germany',
+        kind: 'CHARACTER',
+        requiresReview: true,
+        reviewReason: 'location_context_conflict',
+        kindVotes: expect.arrayContaining([
+          expect.objectContaining({ kind: 'LOCATION', source: 'angular_location_context' }),
+        ]),
+      }),
+      expect.objectContaining({
+        label: 'Kai',
+        kind: 'CHARACTER',
+        requiresReview: false,
+      }),
+    ]);
+  });
+
   it('applies the same Phoenix gate to Atlas surface suggestions', async () => {
     const service = makeService();
 
@@ -399,5 +490,90 @@ describe('NerService provider orchestration', () => {
         source: 'atlas_surface',
       }),
     ]);
+  });
+
+  it('honors native kind votes for Atlas suggestions and marks low confidence as review-only', async () => {
+    const service = makeService();
+
+    await service.loadAtlasSurfaceSuggestions([
+      {
+        id: 'org-1',
+        label: 'Allied Table',
+        kind: 'ORGANIZATION',
+        confidence: 0.82,
+        evidence: 'Allied Table approved the Red Mesa route.',
+        sourceStage: 'dynamicNer',
+        kindVotes: [
+          { kind: 'ORGANIZATION', source: 'model_discovery', confidence: 0.82, reason: 'ModelLabel' },
+          { kind: 'LOCATION', source: 'model_discovery', confidence: 0.18, reason: 'context' },
+        ],
+        decisionStatus: 'accepted',
+      },
+      {
+        id: 'low-1',
+        label: 'Allied Table city',
+        kind: 'LOCATION',
+        confidence: 0.07,
+        evidence: 'Allied Table city',
+        sourceStage: 'dynamicNer',
+        decisionStatus: 'review',
+      },
+    ] as any);
+
+    expect(service.suggestions()).toEqual([
+      expect.objectContaining({
+        label: 'Allied Table',
+        kind: 'FACTION',
+        requiresReview: false,
+        kindVotes: expect.arrayContaining([
+          expect.objectContaining({ kind: 'FACTION', source: 'model_discovery' }),
+        ]),
+      }),
+      expect.objectContaining({
+        label: 'Allied Table city',
+        kind: 'LOCATION',
+        requiresReview: true,
+        decisionStatus: 'review',
+      }),
+    ]);
+  });
+
+  it('smokes Angular arbitration over shortrun and mother2 genre samples', async () => {
+    const service = makeService();
+    const shortrun = readFileSync(new URL('../../../docs/shortrun.md', import.meta.url), 'utf8');
+    const mother2 = readFileSync(new URL('../../../docs/mother2.md', import.meta.url), 'utf8');
+
+    await service.loadAtlasSurfaceSuggestions([
+      {
+        id: 'control-org',
+        label: 'Allied Table',
+        kind: 'ORGANIZATION',
+        confidence: 0.86,
+        evidence: `${shortrun.slice(0, 1200)} Allied Table approved Red Mesa.`,
+        sourceStage: 'dynamicNer',
+        kindVotes: [
+          { kind: 'ORGANIZATION', source: 'model_discovery', confidence: 0.86, reason: 'ModelLabel' },
+        ],
+        decisionStatus: 'accepted',
+      },
+      {
+        id: 'variable-person',
+        label: 'Rook',
+        kind: 'CHARACTER',
+        confidence: 0.81,
+        evidence: `${mother2.slice(0, 1200)} Rook said the answer aloud.`,
+        sourceStage: 'dynamicNer',
+        kindVotes: [
+          { kind: 'CHARACTER', source: 'model_discovery', confidence: 0.81, reason: 'ModelLabel' },
+        ],
+        decisionStatus: 'accepted',
+      },
+    ] as any);
+
+    expect(service.suggestions()).toEqual([
+      expect.objectContaining({ label: 'Allied Table', kind: 'FACTION', requiresReview: false }),
+      expect.objectContaining({ label: 'Rook', kind: 'CHARACTER', requiresReview: false }),
+    ]);
+    expect(service.suggestions().every((suggestion) => suggestion.kind !== 'LOCATION')).toBe(true);
   });
 });

@@ -84,8 +84,22 @@ export class NliWorkerService {
                 worker.onmessage = (event) => this.handleWorkerMessage(event);
                 worker.onerror = (event) => {
                     this.ngZone.run(() => {
-                        console.error('[NliWorkerService] Worker error:', event);
+                        const error = this.formatWorkerError(event);
+                        console.error('[NliWorkerService] Worker error:', error);
+                        this.rejectPending(error);
+                        this.worker?.terminate();
+                        this.worker = null;
+                        this.isInitialized.set(false);
+                        this.modelId.set(null);
+                        this.device.set('wasm');
                         this.progress.set(null);
+                    });
+                };
+                worker.onmessageerror = (event) => {
+                    this.ngZone.run(() => {
+                        const error = new Error(`NLI worker message error: ${String(event.data)}`);
+                        console.error('[NliWorkerService] Worker message error:', error);
+                        this.rejectPending(error);
                     });
                 };
             },
@@ -195,6 +209,29 @@ export class NliWorkerService {
 
     private nextId(): number {
         return ++this.callbackId;
+    }
+
+    private rejectPending(error: Error): void {
+        for (const { reject } of this.pendingCallbacks.values()) {
+            reject(error);
+        }
+        this.pendingCallbacks.clear();
+        this.isProcessing.set(false);
+    }
+
+    private formatWorkerError(event: ErrorEvent | Event): Error {
+        if ('error' in event && event.error instanceof Error) {
+            return event.error;
+        }
+        if ('message' in event && typeof event.message === 'string' && event.message.length) {
+            const location = [
+                'filename' in event ? event.filename : '',
+                'lineno' in event && event.lineno ? event.lineno : '',
+                'colno' in event && event.colno ? event.colno : '',
+            ].filter(Boolean).join(':');
+            return new Error(location ? `${event.message} (${location})` : event.message);
+        }
+        return new Error(`NLI worker failed with ${event.type || 'unknown'} event`);
     }
 
     private handleWorkerMessage(event: MessageEvent): void {

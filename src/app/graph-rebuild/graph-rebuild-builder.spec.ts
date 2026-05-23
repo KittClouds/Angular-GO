@@ -34,7 +34,7 @@ describe('Phoenix graph rebuild builder', () => {
         });
     });
 
-    it('builds graph rows and embedding targets from accepted anchors', () => {
+    it('builds cooccurrence rows, typed facts, memory state, and embedding targets', () => {
         const snapshot = buildGraphRebuildSnapshot({
             scopeKind: 'note',
             scopeId: 'note:one',
@@ -54,35 +54,57 @@ describe('Phoenix graph rebuild builder', () => {
                 occurrence('note-2', 'e-hazel', 'Hazel', 0, 5),
             ],
             candidateCount: 4,
+            noteTexts: {
+                'note-1': 'Kai approved the packet with Rift because Hazel warned Kai. Hazel stood beside Kai as Diamond rank was confirmed.',
+            },
             builtAt: 10,
         });
 
         expect(snapshot.schemaVersion).toBe('phoenix-graph-rebuild/v1');
         expect(snapshot.nodes.map((node) => node.id).sort()).toEqual(['e-hazel', 'e-kai', 'e-rift']);
-        expect(snapshot.edges.map((edge) => [edge.sourceId, edge.targetId]).sort()).toEqual([
+        expect(snapshot.edges.filter((edge) => edge.type === 'anchored-cooccurrence').map((edge) => [edge.sourceId, edge.targetId]).sort()).toEqual([
             ['e-hazel', 'e-kai'],
             ['e-hazel', 'e-rift'],
             ['e-kai', 'e-rift'],
         ]);
-        expect(snapshot.relationships).toHaveLength(3);
-        expect(snapshot.relationships.every((row) => row.adjudicationSource === 'graph-rebuild-cooccurrence-policy')).toBe(true);
-        expect(snapshot.counters.relationshipCandidates).toBe(3);
-        expect(snapshot.counters.acceptedRelationships + snapshot.counters.reviewRelationships).toBe(3);
-        expect(snapshot.embeddingTargets.map((target) => target.kind)).toEqual(expect.arrayContaining([
-            'note',
-            'chunk',
-            'entity',
-            'anchor',
-            'graphFact',
+        expect(snapshot.relationships).toHaveLength(6);
+        expect(snapshot.relationships.filter((row) => row.adjudicationSource === 'graph-rebuild-cooccurrence-policy')).toHaveLength(3);
+        expect(snapshot.relationships.filter((row) => row.adjudicationSource === 'graph-rebuild-typed-cue-policy')).toHaveLength(3);
+        expect(snapshot.relationships.map((row) => [row.relationType, row.status])).toEqual(expect.arrayContaining([
+            ['co_occurs_with', 'review'],
+            ['approves_or_accepts', 'accepted'],
         ]));
+        expect(snapshot.counters.relationshipCandidates).toBe(6);
+        expect(snapshot.counters.acceptedRelationships).toBe(3);
+        expect(snapshot.counters.reviewRelationships).toBe(3);
+        expect(snapshot.counters.rejectedRelationships).toBe(0);
+        expect(snapshot.events.map((event) => event.id)).toEqual(['event:note-1:0:approval_event']);
+        expect(snapshot.memoryState.map((state) => [state.entityId, state.key]).sort()).toEqual([
+            ['e-hazel', 'rank_or_status'],
+            ['e-kai', 'rank_or_status'],
+            ['e-rift', 'rank_or_status'],
+        ]);
+        expect(kindCounts(snapshot.embeddingTargets.map((target) => target.kind))).toEqual({
+            anchor: 3,
+            chunk: 1,
+            entity: 3,
+            event: 1,
+            graphFact: 6,
+            memoryState: 3,
+            note: 1,
+        });
         expect(snapshot.counters).toMatchObject({
             entities: 3,
             aliases: 1,
             candidates: 4,
             acceptedAnchors: 3,
             chunks: 1,
+            events: 1,
+            episodes: 1,
+            memoryState: 3,
+            embeddingTargets: 18,
             nodes: 3,
-            edges: 3,
+            edges: 6,
         });
     });
 
@@ -180,4 +202,10 @@ function occurrence(noteId: string, entityId: string, surface: string, sourceSta
         createdAt: 1,
         updatedAt: 1,
     };
+}
+
+function kindCounts(kinds: string[]): Record<string, number> {
+    const counts = new Map<string, number>();
+    for (const kind of kinds) counts.set(kind, (counts.get(kind) || 0) + 1);
+    return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)));
 }

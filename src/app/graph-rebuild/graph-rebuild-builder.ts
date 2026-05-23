@@ -6,7 +6,6 @@ import type {
     GraphRebuildChunk,
     GraphRebuildDropReasons,
     GraphRebuildEdge,
-    GraphRebuildEmbeddingTarget,
     GraphRebuildEntityAnchor,
     GraphRebuildMention,
     GraphRebuildNode,
@@ -14,6 +13,8 @@ import type {
     GraphRebuildRelationshipHint,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
+import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
+import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
 
 export interface GraphRebuildAliasResolver {
     aliasCount: number;
@@ -96,12 +97,25 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     }
 
     const nodes = buildNodes(entityAnchors, entitiesById);
-    const edges = buildEdges(entityAnchors, drops);
-    const relationships = applyRelationshipHints(edges.map(edgeToRelationship), input.relationshipHints || []);
+    const cooccurrenceEdges = buildEdges(entityAnchors, drops);
+    const derived = deriveGraphRebuildFacts(chunks, entityAnchors, input.noteTexts || {});
+    const edges = [...cooccurrenceEdges, ...derived.edges]
+        .sort((left, right) => right.weight - left.weight || left.type.localeCompare(right.type) || left.id.localeCompare(right.id));
+    const relationships = applyRelationshipHints([...cooccurrenceEdges.map(edgeToRelationship), ...derived.relationships], input.relationshipHints || []);
     const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
     const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
     const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
-    const embeddingTargets = buildEmbeddingTargets(input, chunks, entityAnchors, nodes, relationships);
+    const embeddingTargets = buildGraphRebuildEmbeddingTargets(
+        input,
+        chunks,
+        entityAnchors,
+        nodes,
+        relationships,
+        derived.events,
+        derived.temporalEdges,
+        derived.causalEdges,
+        derived.memoryState,
+    );
     const noteIds = input.noteIds ? [...input.noteIds] : unique([
         ...chunks.map((chunk) => chunk.noteId),
         ...entityAnchors.map((anchor) => anchor.noteId),
@@ -119,11 +133,11 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         mentions,
         entityAnchors,
         relationships,
-        events: [],
-        episodes: [],
-        temporalEdges: [],
-        causalEdges: [],
-        memoryState: [],
+        events: derived.events,
+        episodes: derived.episodes,
+        temporalEdges: derived.temporalEdges,
+        causalEdges: derived.causalEdges,
+        memoryState: derived.memoryState,
         embeddingTargets,
         embeddingVectors: [],
         projectionRefs: [],
@@ -136,16 +150,16 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             mentions: mentions.length,
             acceptedAnchors: entityAnchors.length,
             chunks: chunks.length,
-            relationshipCandidates: edges.length,
+            relationshipCandidates: relationships.length,
             relationships: relationships.length,
             acceptedRelationships,
             reviewRelationships,
             rejectedRelationships,
-            events: 0,
-            episodes: 0,
-            temporalEdges: 0,
-            causalEdges: 0,
-            memoryState: 0,
+            events: derived.events.length,
+            episodes: derived.episodes.length,
+            temporalEdges: derived.temporalEdges.length,
+            causalEdges: derived.causalEdges.length,
+            memoryState: derived.memoryState.length,
             embeddingTargets: embeddingTargets.length,
             embeddingVectors: 0,
             projectionRefs: 0,
@@ -336,79 +350,6 @@ function idVariants(value: string): string[] {
     const parts = raw.split(':').filter(Boolean);
     if (parts.length > 1) variants.push(parts[parts.length - 1]);
     return unique(variants);
-}
-
-function buildEmbeddingTargets(
-    input: BuildGraphRebuildSnapshotInput,
-    chunks: GraphRebuildChunk[],
-    anchors: GraphRebuildEntityAnchor[],
-    nodes: GraphRebuildNode[],
-    relationships: GraphRebuildRelationship[],
-): GraphRebuildEmbeddingTarget[] {
-    const targets: GraphRebuildEmbeddingTarget[] = [];
-    const noteIds = input.noteIds?.length ? input.noteIds : unique([
-        ...chunks.map((chunk) => chunk.noteId),
-        ...anchors.map((anchor) => anchor.noteId),
-    ]);
-    for (const noteId of noteIds) {
-        targets.push({
-            id: `embed:note:${noteId}`,
-            kind: 'note',
-            sourceId: noteId,
-            noteId,
-            label: `Note ${noteId}`,
-            text: `note:${noteId}`,
-            evidenceIds: [],
-        });
-    }
-    for (const chunk of chunks) {
-        targets.push({
-            id: `embed:chunk:${chunk.id}`,
-            kind: 'chunk',
-            sourceId: chunk.id,
-            noteId: chunk.noteId,
-            chunkId: chunk.id,
-            label: `Chunk ${chunk.ordinal + 1}`,
-            text: `${chunk.noteId}:${chunk.start}-${chunk.end}`,
-            evidenceIds: [],
-        });
-    }
-    for (const node of nodes) {
-        targets.push({
-            id: `embed:entity:${node.entityId}`,
-            kind: 'entity',
-            sourceId: node.entityId,
-            entityId: node.entityId,
-            label: node.label,
-            text: [node.label, ...node.aliases].join(' '),
-            evidenceIds: node.anchorIds,
-        });
-    }
-    for (const anchor of anchors) {
-        targets.push({
-            id: `embed:anchor:${anchor.id}`,
-            kind: 'anchor',
-            sourceId: anchor.id,
-            noteId: anchor.noteId,
-            chunkId: anchor.chunkId,
-            entityId: anchor.entityId,
-            label: anchor.surface,
-            text: anchor.surface,
-            evidenceIds: [anchor.id],
-        });
-    }
-    for (const relationship of relationships) {
-        if (relationship.status === 'rejected') continue;
-        targets.push({
-            id: `embed:graph-fact:${relationship.id}`,
-            kind: 'graphFact',
-            sourceId: relationship.id,
-            label: `${relationship.sourceEntityId} ${relationship.relationType} ${relationship.targetEntityId}`,
-            text: `${relationship.sourceEntityId} ${relationship.relationType} ${relationship.targetEntityId} [${relationship.status}]`,
-            evidenceIds: relationship.evidenceAnchorIds,
-        });
-    }
-    return targets;
 }
 
 function normalizeChunks(chunks: GraphRebuildChunk[]): GraphRebuildChunk[] {

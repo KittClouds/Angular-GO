@@ -859,6 +859,15 @@ pub struct AtlasRichScanManifestSummary {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AtlasRichScanKindVoteSummary {
+    pub kind: String,
+    pub source: String,
+    pub confidence: f32,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AtlasRichScanCandidateSummary {
     pub id: String,
     pub label: String,
@@ -871,6 +880,12 @@ pub struct AtlasRichScanCandidateSummary {
     pub aliases: Vec<String>,
     pub range: Option<TextRange>,
     pub source_stage: String,
+    #[serde(default)]
+    pub kind_votes: Vec<AtlasRichScanKindVoteSummary>,
+    #[serde(default)]
+    pub decision_status: String,
+    #[serde(default)]
+    pub review_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

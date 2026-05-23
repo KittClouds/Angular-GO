@@ -9,9 +9,11 @@ use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::adjudication::adjudicate_cooccurrence_edges;
+use crate::embedding::build_embedding_targets;
+use crate::facts::derive_graph_facts;
 use crate::types::{
-    GraphAnchor, GraphChunk, GraphCounters, GraphDropReasons, GraphEdge, GraphEmbeddingTarget,
-    GraphMention, GraphNode, GraphRebuildSnapshot, GraphRelationship, GraphScopeKind,
+    GraphAnchor, GraphChunk, GraphCounters, GraphDropReasons, GraphEdge, GraphMention, GraphNode,
+    GraphRebuildSnapshot, GraphScopeKind,
 };
 
 #[derive(Debug, Error)]
@@ -115,11 +117,48 @@ pub fn build_graph_rebuild_snapshot(
     }
 
     let nodes = build_nodes(&anchors, input.entities);
-    let edges = build_edges(&anchors, &mut drops);
-    let relationship_candidates = edges.len();
-    let (relationships, adjudication_counts) = adjudicate_cooccurrence_edges(&edges);
-    let embedding_targets =
-        build_embedding_targets(input.note_id, &chunks, &anchors, &nodes, &relationships);
+    let mut edges = build_edges(&anchors, &mut drops);
+    let (mut relationships, _) = adjudicate_cooccurrence_edges(&edges);
+    let mut derived = derive_graph_facts(input.note_id, input.text, &chunks, &anchors);
+    edges.append(&mut derived.edges);
+    edges.sort_by(|left, right| {
+        right
+            .weight
+            .cmp(&left.weight)
+            .then_with(|| left.edge_type.cmp(&right.edge_type))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    relationships.append(&mut derived.relationships);
+    let relationship_candidates = relationships.len();
+    let accepted_relationships = relationships
+        .iter()
+        .filter(|relationship| relationship.status == "accepted")
+        .count();
+    let review_relationships = relationships
+        .iter()
+        .filter(|relationship| relationship.status == "review")
+        .count();
+    let rejected_relationships = relationships
+        .iter()
+        .filter(|relationship| relationship.status == "rejected")
+        .count();
+    let events = derived.events;
+    let episodes = derived.episodes;
+    let temporal_edges = derived.temporal_edges;
+    let causal_edges = derived.causal_edges;
+    let memory_state = derived.memory_state;
+    let embedding_targets = build_embedding_targets(
+        input.note_id,
+        input.text,
+        &chunks,
+        &anchors,
+        &nodes,
+        &relationships,
+        &events,
+        &temporal_edges,
+        &causal_edges,
+        &memory_state,
+    );
     let counters = GraphCounters {
         entities: input.entities.len(),
         aliases: input.entities.iter().map(|entry| entry.aliases.len()).sum(),
@@ -129,9 +168,14 @@ pub fn build_graph_rebuild_snapshot(
         chunks: chunks.len(),
         relationship_candidates,
         relationships: relationships.len(),
-        accepted_relationships: adjudication_counts.accepted,
-        review_relationships: adjudication_counts.review,
-        rejected_relationships: adjudication_counts.rejected,
+        accepted_relationships,
+        review_relationships,
+        rejected_relationships,
+        events: events.len(),
+        episodes: episodes.len(),
+        temporal_edges: temporal_edges.len(),
+        causal_edges: causal_edges.len(),
+        memory_state: memory_state.len(),
         embedding_targets: embedding_targets.len(),
         nodes: nodes.len(),
         edges: edges.len(),
@@ -156,11 +200,11 @@ pub fn build_graph_rebuild_snapshot(
         mentions,
         entity_anchors: anchors,
         relationships,
-        events: Vec::new(),
-        episodes: Vec::new(),
-        temporal_edges: Vec::new(),
-        causal_edges: Vec::new(),
-        memory_state: Vec::new(),
+        events,
+        episodes,
+        temporal_edges,
+        causal_edges,
+        memory_state,
         embedding_targets,
         embedding_vectors: Vec::new(),
         projection_refs: Vec::new(),
@@ -368,89 +412,6 @@ fn upsert_edge(
             push_unique(&mut edge.note_ids, anchor.note_id.clone());
         }
     }
-}
-
-fn build_embedding_targets(
-    note_id: &str,
-    chunks: &[GraphChunk],
-    anchors: &[GraphAnchor],
-    nodes: &[GraphNode],
-    relationships: &[GraphRelationship],
-) -> Vec<GraphEmbeddingTarget> {
-    let mut targets =
-        Vec::with_capacity(chunks.len() + anchors.len() + nodes.len() + relationships.len() + 1);
-    targets.push(GraphEmbeddingTarget {
-        id: format_compact!("embed:note:{note_id}"),
-        kind: "note".into(),
-        source_id: note_id.into(),
-        note_id: Some(note_id.into()),
-        chunk_id: None,
-        entity_id: None,
-        label: format_compact!("Note {note_id}"),
-        text: format_compact!("note:{note_id}"),
-        evidence_ids: Vec::new(),
-    });
-    targets.extend(chunks.iter().map(|chunk| GraphEmbeddingTarget {
-        id: format_compact!("embed:chunk:{}", chunk.id),
-        kind: "chunk".into(),
-        source_id: chunk.id.clone(),
-        note_id: Some(chunk.note_id.clone()),
-        chunk_id: Some(chunk.id.clone()),
-        entity_id: None,
-        label: format_compact!("Chunk {}", chunk.ordinal + 1),
-        text: format_compact!("{}:{}-{}", chunk.note_id, chunk.start, chunk.end),
-        evidence_ids: Vec::new(),
-    }));
-    targets.extend(nodes.iter().map(|node| GraphEmbeddingTarget {
-        id: format_compact!("embed:entity:{}", node.entity_id.0),
-        kind: "entity".into(),
-        source_id: node.entity_id.0.as_str().into(),
-        note_id: None,
-        chunk_id: None,
-        entity_id: Some(node.entity_id.clone()),
-        label: node.label.clone(),
-        text: node.label.clone(),
-        evidence_ids: node.anchor_ids.clone(),
-    }));
-    targets.extend(anchors.iter().map(|anchor| GraphEmbeddingTarget {
-        id: format_compact!("embed:anchor:{}", anchor.id),
-        kind: "anchor".into(),
-        source_id: anchor.id.clone(),
-        note_id: Some(anchor.note_id.clone()),
-        chunk_id: anchor.chunk_id.clone(),
-        entity_id: Some(anchor.entity_id.clone()),
-        label: anchor.surface.clone(),
-        text: anchor.surface.clone(),
-        evidence_ids: vec![anchor.id.clone()],
-    }));
-    targets.extend(
-        relationships
-            .iter()
-            .filter(|relationship| relationship.status != "rejected")
-            .map(|relationship| GraphEmbeddingTarget {
-                id: format_compact!("embed:graph-fact:{}", relationship.id),
-                kind: "graphFact".into(),
-                source_id: relationship.id.clone(),
-                note_id: None,
-                chunk_id: None,
-                entity_id: None,
-                label: format_compact!(
-                    "{} {} {}",
-                    relationship.source_entity_id.0,
-                    relationship.relation_type,
-                    relationship.target_entity_id.0
-                ),
-                text: format_compact!(
-                    "{} {} {} [{}]",
-                    relationship.source_entity_id.0,
-                    relationship.relation_type,
-                    relationship.target_entity_id.0,
-                    relationship.status
-                ),
-                evidence_ids: relationship.evidence_anchor_ids.clone(),
-            }),
-    );
-    targets
 }
 
 fn push_unique(values: &mut Vec<CompactString>, value: CompactString) {

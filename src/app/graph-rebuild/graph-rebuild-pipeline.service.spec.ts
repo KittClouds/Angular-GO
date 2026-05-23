@@ -11,6 +11,14 @@ const notesMock = vi.hoisted(() => ({
 const registryMock = vi.hoisted(() => ({
     entities: [] as any[],
     getAllEntities: vi.fn(() => registryMock.entities),
+    updateEntity: vi.fn((id: string, updates: any) => {
+        const entity = registryMock.entities.find((row) => row.id === id);
+        if (!entity) return null;
+        Object.assign(entity, updates, {
+            attributes: { ...(entity.attributes || {}), ...(updates.attributes || {}) },
+        });
+        return entity;
+    }),
 }));
 
 vi.mock('../lib/dexie/db', () => ({
@@ -56,6 +64,7 @@ describe('GraphRebuildPipelineService', () => {
             { id: 'entity-hazel', label: 'Hazel', aliases: [], kind: 'CHARACTER' },
         ];
         registryMock.getAllEntities.mockClear();
+        registryMock.updateEntity.mockClear();
         graphRebuild = createGraphRebuildMock();
         atlasRuntime = createAtlasRuntimeMock();
         ner = createNerMock();
@@ -124,6 +133,31 @@ describe('GraphRebuildPipelineService', () => {
                 expect.objectContaining({ mode: 'hybrid', status: 'synced' }),
                 expect.objectContaining({ mode: 'hopf', status: 'synced' }),
                 expect.objectContaining({ mode: 'lorentz', status: 'synced' }),
+            ]),
+        }));
+    });
+
+    it('does not rewrite entity kinds from Angular location context during rebuild', async () => {
+        notesMock.rows = [{
+            id: 'note-1',
+            title: 'Release Terms',
+            markdownContent: "Germany's price is exchange. Kai said yes.",
+            content: '',
+            folderId: '',
+            updatedAt: 10,
+            version: 2,
+        }];
+        registryMock.entities = [
+            { id: 'entity-germany', label: 'Germany', aliases: [], kind: 'CHARACTER', attributes: {} },
+            { id: 'entity-kai', label: 'Kai', aliases: [], kind: 'CHARACTER', attributes: {} },
+        ];
+
+        await service.buildFullAtlas(request());
+
+        expect(registryMock.updateEntity).not.toHaveBeenCalled();
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            entities: expect.arrayContaining([
+                expect.objectContaining({ id: 'entity-germany', kind: 'CHARACTER' }),
             ]),
         }));
     });

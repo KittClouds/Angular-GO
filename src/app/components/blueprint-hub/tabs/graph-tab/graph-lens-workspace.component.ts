@@ -72,6 +72,7 @@ import {
                 [edges]="lensedGraph().edges"
                 [committedGraphInventory]="graphRebuildInventory()"
                 [graphCounters]="graphRebuildCounters()"
+                [graphSnapshot]="graphRebuildSnapshot()"
                 [sourceLabel]="lensedGraph().sourceLabel"
                 [lensMode]="lens().mode"
                 [primaryNoteId]="lens().primaryNoteId"
@@ -162,6 +163,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
     }));
     readonly graphRebuildInventory = computed(() => graphInventoryFromSnapshot(this.graphRebuildSnapshotSignal()));
     readonly graphRebuildCounters = computed(() => this.graphRebuildSnapshotSignal()?.counters ?? null);
+    readonly graphRebuildSnapshot = computed(() => this.graphRebuildSnapshotSignal());
     readonly graphSnapshotStale = computed(() => this.graphSnapshotStaleSignal());
     readonly filteredNotes = computed(() => {
         const query = this.noteQuery().trim().toLowerCase();

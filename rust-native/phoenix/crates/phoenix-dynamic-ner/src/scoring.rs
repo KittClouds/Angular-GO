@@ -5,12 +5,13 @@
 //! accumulator during the pipeline.
 
 use compact_str::CompactString;
-use phoenix_types::MentionEntityRef;
+use phoenix_types::{MentionEntityRef, SentenceSpan};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::known_lane::KnownCandidate;
 use crate::native_lane::NativeCandidate;
+use crate::traits::{AdjudicationCase, InstructTask};
 use crate::types::{
     EntityLabel, LocalMentionId, MentionContext, MentionKind, MentionPacket, MentionSemantics,
     MentionSourceKind, MentionStatus, MentionVote, VoteReason,
@@ -108,6 +109,21 @@ struct WorkspaceEntry {
 struct LabelHint {
     label: EntityLabel,
     confidence: f32,
+}
+
+#[derive(Clone, Debug)]
+struct SurfaceKindPrior {
+    label: EntityLabel,
+    confidence: f32,
+    has_known: bool,
+}
+
+#[derive(Clone, Debug)]
+struct SurfaceLabelEvidence {
+    label: EntityLabel,
+    score: f32,
+    count: usize,
+    known_count: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +225,53 @@ impl MentionWorkspace {
         }
     }
 
+    pub fn build_kind_adjudication_cases(
+        &self,
+        text: &str,
+        sentences: &[SentenceSpan],
+        limit: usize,
+    ) -> Vec<AdjudicationCase> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let mut cases = self
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let priority = kind_adjudication_priority(entry, text, sentences)?;
+                Some((
+                    priority,
+                    entry.range.start,
+                    self.kind_adjudication_case(entry, text, sentences),
+                ))
+            })
+            .collect::<Vec<_>>();
+        cases.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        cases
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, case)| case)
+            .collect()
+    }
+
+    fn kind_adjudication_case(
+        &self,
+        entry: &WorkspaceEntry,
+        text: &str,
+        sentences: &[SentenceSpan],
+    ) -> AdjudicationCase {
+        AdjudicationCase {
+            mention_id: entry.id,
+            task: InstructTask::SpanLabelChoice,
+            surface: entry.surface.clone(),
+            sentence_text: sentence_text(text, sentences, entry.sentence_index),
+            neighbor_sentence: None,
+            candidate_labels: candidate_labels_for_entry(entry, text, sentences),
+            candidate_entities: SmallVec::new(),
+        }
+    }
+
     /// Next available mention id.
     pub fn next_id(&mut self) -> LocalMentionId {
         let id = LocalMentionId(self.next_id);
@@ -220,6 +283,7 @@ impl MentionWorkspace {
     pub fn finalize_packets(mut self) -> Vec<MentionPacket> {
         let mut entries = std::mem::take(&mut self.entries);
         Self::propagate_model_labels(&mut entries);
+        Self::apply_surface_kind_priors(&mut entries);
         let mut packets = Vec::with_capacity(entries.len());
 
         for entry in entries {
@@ -249,6 +313,93 @@ impl MentionWorkspace {
         // Sort by range start for stable output.
         packets.sort_by_key(|p| p.range.start);
         packets
+    }
+
+    fn apply_surface_kind_priors(entries: &mut [WorkspaceEntry]) {
+        let priors = Self::surface_kind_priors(entries);
+        for entry in entries.iter_mut() {
+            if entry.mention_kind != MentionKind::Named || entry_has_known_label(entry) {
+                continue;
+            }
+            let Some(prior) = priors.get(entry.normalized.as_str()) else {
+                continue;
+            };
+            if entry_has_label_group(entry, prior.label.as_str()) {
+                continue;
+            }
+            if !prior.has_known && entry_has_non_model_label(entry) {
+                continue;
+            }
+            entry.votes.push(MentionVote {
+                source: MentionSourceKind::NativeDiscovery,
+                label: Some(prior.label.clone()),
+                entity_ref: None,
+                confidence: prior.confidence,
+                reason: VoteReason::RepeatedSurface,
+            });
+        }
+    }
+
+    fn surface_kind_priors(
+        entries: &[WorkspaceEntry],
+    ) -> FxHashMap<CompactString, SurfaceKindPrior> {
+        let mut evidence = FxHashMap::<CompactString, Vec<SurfaceLabelEvidence>>::default();
+        for entry in entries {
+            if entry.mention_kind != MentionKind::Named {
+                continue;
+            }
+            for vote in &entry.votes {
+                let Some(label) = vote.label.as_ref() else {
+                    continue;
+                };
+                if !is_entity_label(label.as_str()) || vote.reason == VoteReason::RepeatedSurface {
+                    continue;
+                }
+                let Some(weight) = surface_evidence_weight(vote) else {
+                    continue;
+                };
+                upsert_surface_evidence(
+                    evidence.entry(entry.normalized.clone()).or_default(),
+                    label,
+                    weight,
+                    vote.source == MentionSourceKind::KnownLexicon,
+                );
+            }
+        }
+
+        let mut priors = FxHashMap::<CompactString, SurfaceKindPrior>::default();
+        for (surface, mut rows) in evidence {
+            rows.sort_by(|left, right| {
+                right
+                    .score
+                    .partial_cmp(&left.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| right.count.cmp(&left.count))
+            });
+            let Some(top) = rows.first() else {
+                continue;
+            };
+            let runner_up = rows.get(1).map(|row| row.score).unwrap_or(0.0);
+            let has_known = top.known_count > 0;
+            let stable_repeat = top.count >= 2 && top.score >= runner_up + 0.45;
+            if !has_known && !stable_repeat {
+                continue;
+            }
+            let confidence = if has_known {
+                0.86
+            } else {
+                (0.56 + top.count.min(5) as f32 * 0.04).min(0.74)
+            };
+            priors.insert(
+                surface,
+                SurfaceKindPrior {
+                    label: top.label.clone(),
+                    confidence,
+                    has_known,
+                },
+            );
+        }
+        priors
     }
 
     fn propagate_model_labels(entries: &mut [WorkspaceEntry]) {
@@ -345,16 +496,23 @@ impl MentionWorkspace {
     fn build_label_distribution(
         votes: &SmallVec<[MentionVote; 6]>,
     ) -> SmallVec<[(EntityLabel, f32); 4]> {
-        let mut labels = SmallVec::<[(EntityLabel, f32); 4]>::new();
+        let mut labels = Vec::<(EntityLabel, f32)>::new();
         for vote in votes {
             if let Some(label) = &vote.label {
                 if let Some(existing) = labels.iter_mut().find(|(l, _)| l == label) {
                     existing.1 += vote.confidence;
-                } else if labels.len() < 4 {
+                } else {
                     labels.push((label.clone(), vote.confidence));
                 }
             }
         }
+        labels.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        labels.truncate(4);
         // Normalize to sum=1 if possible.
         let total: f32 = labels.iter().map(|(_, w)| *w).sum();
         if total > 0.0 {
@@ -362,9 +520,275 @@ impl MentionWorkspace {
                 *w /= total;
             }
         }
-        labels
+        SmallVec::from_vec(labels)
     }
 }
+
+fn surface_evidence_weight(vote: &MentionVote) -> Option<f32> {
+    match vote.source {
+        MentionSourceKind::KnownLexicon => Some(3.0 + vote.confidence),
+        MentionSourceKind::ModelDiscovery => Some(vote.confidence),
+        _ => None,
+    }
+}
+
+fn upsert_surface_evidence(
+    rows: &mut Vec<SurfaceLabelEvidence>,
+    label: &EntityLabel,
+    score: f32,
+    is_known: bool,
+) {
+    let group = label_group(label.as_str());
+    if let Some(row) = rows
+        .iter_mut()
+        .find(|row| label_group(row.label.as_str()) == group)
+    {
+        row.score += score;
+        row.count += 1;
+        if is_known {
+            row.known_count += 1;
+            row.label = label.clone();
+        }
+    } else {
+        rows.push(SurfaceLabelEvidence {
+            label: label.clone(),
+            score,
+            count: 1,
+            known_count: usize::from(is_known),
+        });
+    }
+}
+
+fn entry_has_known_label(entry: &WorkspaceEntry) -> bool {
+    entry
+        .votes
+        .iter()
+        .any(|vote| vote.source == MentionSourceKind::KnownLexicon && vote.label.is_some())
+}
+
+fn entry_has_non_model_label(entry: &WorkspaceEntry) -> bool {
+    entry.votes.iter().any(|vote| {
+        vote.label.is_some()
+            && !matches!(
+                vote.source,
+                MentionSourceKind::ModelDiscovery | MentionSourceKind::ModelVerify
+            )
+    })
+}
+
+fn entry_has_label_group(entry: &WorkspaceEntry, label: &str) -> bool {
+    let group = label_group(label);
+    entry.votes.iter().any(|vote| {
+        vote.label
+            .as_ref()
+            .is_some_and(|existing| label_group(existing.as_str()) == group)
+    })
+}
+
+fn label_group(label: &str) -> &'static str {
+    match label.to_ascii_lowercase().as_str() {
+        "character" | "person" | "npc" => "person",
+        "organization" | "faction" | "alliance" | "department" => "organization",
+        "location" | "region" | "landmark" => "location",
+        "artifact" | "item" | "weapon" => "item",
+        "ability" | "spell" => "ability",
+        "event" => "event",
+        _ => "other",
+    }
+}
+
+fn kind_adjudication_priority(
+    entry: &WorkspaceEntry,
+    text: &str,
+    sentences: &[SentenceSpan],
+) -> Option<u16> {
+    if entry.mention_kind != MentionKind::Named
+        || entry_has_known_label(entry)
+        || entry
+            .votes
+            .iter()
+            .any(|vote| vote.source == MentionSourceKind::Adjudication)
+    {
+        return None;
+    }
+
+    let sentence = sentence_text(text, sentences, entry.sentence_index);
+    let groups = label_groups_for_entry(entry);
+    if groups.len() > 1 {
+        return Some(120 + groups.len().min(4) as u16);
+    }
+
+    if let Some(hint) = surface_kind_hint(entry.surface.as_str(), sentence.as_str()) {
+        let hint_group = label_group(hint.as_str());
+        if groups.is_empty() {
+            return Some(88);
+        }
+        if groups.iter().any(|group| *group != hint_group) {
+            return Some(110);
+        }
+    }
+
+    if dialogue_speaker_hint(entry.surface.as_str(), sentence.as_str())
+        && groups.iter().any(|group| *group != "person")
+    {
+        return Some(104);
+    }
+
+    let has_repeated = entry
+        .votes
+        .iter()
+        .any(|vote| vote.reason == VoteReason::RepeatedSurface);
+    let has_model = entry.votes.iter().any(|vote| {
+        matches!(
+            vote.source,
+            MentionSourceKind::ModelDiscovery | MentionSourceKind::ModelVerify
+        )
+    });
+    if has_repeated && (!has_model || groups.is_empty()) {
+        return Some(72);
+    }
+
+    None
+}
+
+fn candidate_labels_for_entry(
+    entry: &WorkspaceEntry,
+    text: &str,
+    sentences: &[SentenceSpan],
+) -> SmallVec<[EntityLabel; 4]> {
+    let sentence = sentence_text(text, sentences, entry.sentence_index);
+    let mut labels = SmallVec::<[EntityLabel; 4]>::new();
+    for vote in &entry.votes {
+        let Some(label) = vote.label.as_ref() else {
+            continue;
+        };
+        push_unique_label(&mut labels, canonical_kind_label(label.as_str()));
+    }
+    if let Some(label) = surface_kind_hint(entry.surface.as_str(), sentence.as_str()) {
+        push_unique_label(&mut labels, label);
+    }
+    for fallback in ["Character", "Organization", "Location", "Event", "Artifact"] {
+        if labels.len() >= 4 {
+            break;
+        }
+        push_unique_label(&mut labels, EntityLabel::new(fallback));
+    }
+    labels
+}
+
+fn push_unique_label(labels: &mut SmallVec<[EntityLabel; 4]>, label: EntityLabel) {
+    let group = label_group(label.as_str());
+    if labels
+        .iter()
+        .any(|existing| label_group(existing.as_str()) == group)
+    {
+        return;
+    }
+    labels.push(label);
+}
+
+fn label_groups_for_entry(entry: &WorkspaceEntry) -> SmallVec<[&'static str; 4]> {
+    let mut groups = SmallVec::<[&'static str; 4]>::new();
+    for vote in &entry.votes {
+        let Some(label) = vote.label.as_ref() else {
+            continue;
+        };
+        let group = label_group(label.as_str());
+        if group == "other" || groups.contains(&group) {
+            continue;
+        }
+        groups.push(group);
+    }
+    groups
+}
+
+fn canonical_kind_label(label: &str) -> EntityLabel {
+    match label_group(label) {
+        "person" => EntityLabel::new("Character"),
+        "organization" => EntityLabel::new("Organization"),
+        "location" => EntityLabel::new("Location"),
+        "event" => EntityLabel::new("Event"),
+        "item" => EntityLabel::new("Artifact"),
+        "ability" => EntityLabel::new("Ability"),
+        _ => EntityLabel::new(label),
+    }
+}
+
+fn surface_kind_hint(surface: &str, sentence: &str) -> Option<EntityLabel> {
+    let normalized = surface.to_ascii_lowercase();
+    if dialogue_speaker_hint(surface, sentence) {
+        return Some(EntityLabel::new("Character"));
+    }
+    if contains_kind_cue(&normalized, ORG_CUES) {
+        return Some(EntityLabel::new("Organization"));
+    }
+    if contains_kind_cue(&normalized, LOCATION_CUES) {
+        return Some(EntityLabel::new("Location"));
+    }
+    None
+}
+
+fn contains_kind_cue(surface: &str, cues: &[&str]) -> bool {
+    cues.iter().any(|cue| {
+        surface
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|word| !word.is_empty() && word == *cue)
+    })
+}
+
+fn dialogue_speaker_hint(surface: &str, sentence: &str) -> bool {
+    let surface = surface.trim().to_ascii_lowercase();
+    if surface.is_empty() {
+        return false;
+    }
+    let sentence = sentence.to_ascii_lowercase();
+    let cues = [
+        "said",
+        "asked",
+        "told",
+        "replied",
+        "answered",
+        "whispered",
+        "shouted",
+    ];
+    cues.iter().any(|cue| {
+        sentence.starts_with(&format!("{surface} {cue}"))
+            || sentence.contains(&format!(" {surface} {cue}"))
+    })
+}
+
+fn sentence_text(text: &str, sentences: &[SentenceSpan], sentence_index: u32) -> CompactString {
+    sentences
+        .get(sentence_index as usize)
+        .and_then(|sentence| text.get(sentence.range.start as usize..sentence.range.end as usize))
+        .map(str::trim)
+        .unwrap_or_default()
+        .into()
+}
+
+const ORG_CUES: &[&str] = &[
+    "academy",
+    "alliance",
+    "allied",
+    "association",
+    "clan",
+    "committee",
+    "company",
+    "council",
+    "department",
+    "faction",
+    "guild",
+    "institute",
+    "order",
+    "society",
+    "table",
+    "team",
+];
+
+const LOCATION_CUES: &[&str] = &[
+    "base", "camp", "city", "country", "district", "fort", "germany", "kingdom", "land", "mesa",
+    "mount", "province", "region", "river", "station", "town", "valley",
+];
 
 fn is_surface_label_source(source: MentionSourceKind) -> bool {
     matches!(
@@ -603,6 +1027,68 @@ mod tests {
             .iter()
             .any(|(label, _)| label.as_str() == "Character"));
         assert_eq!(propagated.status, MentionStatus::AliasCandidate);
+    }
+
+    #[test]
+    fn known_surface_kind_prior_resists_conflicting_model_label() {
+        let mut ws = MentionWorkspace::new("doc1", 0);
+        ws.entries.push(WorkspaceEntry {
+            id: LocalMentionId(0),
+            range: phoenix_types::TextRange { start: 0, end: 6 },
+            surface: CompactString::from("Cyoria"),
+            normalized: CompactString::from("cyoria"),
+            mention_kind: MentionKind::Named,
+            entity_ref: Some(MentionEntityRef::Known(phoenix_types::EntityId(
+                "cyoria".into(),
+            ))),
+            votes: SmallVec::from_elem(
+                MentionVote {
+                    source: MentionSourceKind::KnownLexicon,
+                    label: Some(EntityLabel::new("Location")),
+                    entity_ref: Some(MentionEntityRef::Known(phoenix_types::EntityId(
+                        "cyoria".into(),
+                    ))),
+                    confidence: 1.0,
+                    reason: VoteReason::ExactCanonical,
+                },
+                1,
+            ),
+            sentence_index: 0,
+        });
+        ws.entries.push(WorkspaceEntry {
+            id: LocalMentionId(1),
+            range: phoenix_types::TextRange { start: 20, end: 26 },
+            surface: CompactString::from("Cyoria"),
+            normalized: CompactString::from("cyoria"),
+            mention_kind: MentionKind::Named,
+            entity_ref: None,
+            votes: SmallVec::from_elem(
+                MentionVote {
+                    source: MentionSourceKind::ModelDiscovery,
+                    label: Some(EntityLabel::new("Person")),
+                    entity_ref: None,
+                    confidence: 0.74,
+                    reason: VoteReason::ModelLabel,
+                },
+                1,
+            ),
+            sentence_index: 1,
+        });
+
+        let packets = ws.finalize_packets();
+        let contested = packets
+            .iter()
+            .find(|packet| packet.mention_id == LocalMentionId(1))
+            .unwrap();
+
+        assert_eq!(contested.label_distribution[0].0.as_str(), "Location");
+        assert!(contested.source_votes.iter().any(|vote| {
+            vote.reason == VoteReason::RepeatedSurface
+                && vote
+                    .label
+                    .as_ref()
+                    .is_some_and(|label| label.as_str() == "Location")
+        }));
     }
 
     #[test]

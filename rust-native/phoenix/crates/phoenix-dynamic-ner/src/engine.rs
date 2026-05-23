@@ -14,7 +14,8 @@ use crate::native_lane::NativeDiscoveryLane;
 use crate::router::SurfaceRouter;
 use crate::schema::DynamicSchemaBuilder;
 use crate::scoring::MentionWorkspace;
-use crate::traits::{DynamicNerModel, MentionAdjudicator, ModelNerWindow};
+use crate::surface_memory::SurfaceMemoryReport;
+use crate::traits::{AdjudicationDecision, DynamicNerModel, MentionAdjudicator, ModelNerWindow};
 use crate::types::{MentionPacket, NerRoute};
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ pub struct SurfaceNerInput<'a> {
 pub struct SurfaceNerOutput {
     pub mentions: Vec<MentionPacket>,
     pub mention_graph: MentionGraph,
+    pub surface_memory: SurfaceMemoryReport,
     pub chunk_hints: Vec<ChunkHint>,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -66,6 +68,7 @@ pub struct PhoenixNerEngine {
     dynamic_schema: DynamicSchemaBuilder,
     adjudicator: Option<Box<dyn MentionAdjudicator + Send + Sync>>,
     model_ner: Option<Box<dyn DynamicNerModel + Send + Sync>>,
+    max_adjudication_cases: usize,
 }
 
 /// Builder for PhoenixNerEngine.
@@ -74,6 +77,7 @@ pub struct PhoenixNerEngineBuilder {
     schema: DynamicSchemaBuilder,
     adjudicator: Option<Box<dyn MentionAdjudicator + Send + Sync>>,
     model_ner: Option<Box<dyn DynamicNerModel + Send + Sync>>,
+    max_adjudication_cases: usize,
 }
 
 impl PhoenixNerEngineBuilder {
@@ -83,6 +87,7 @@ impl PhoenixNerEngineBuilder {
             schema: DynamicSchemaBuilder::default(),
             adjudicator: None,
             model_ner: None,
+            max_adjudication_cases: 48,
         }
     }
 
@@ -101,6 +106,11 @@ impl PhoenixNerEngineBuilder {
         self
     }
 
+    pub fn max_adjudication_cases(mut self, max_cases: usize) -> Self {
+        self.max_adjudication_cases = max_cases;
+        self
+    }
+
     pub fn model(mut self, model: Box<dyn DynamicNerModel + Send + Sync>) -> Self {
         self.model_ner = Some(model);
         self
@@ -112,6 +122,7 @@ impl PhoenixNerEngineBuilder {
             dynamic_schema: self.schema,
             adjudicator: self.adjudicator,
             model_ner: self.model_ner,
+            max_adjudication_cases: self.max_adjudication_cases,
         }
     }
 }
@@ -276,7 +287,11 @@ impl PhoenixNerEngine {
                                 mention_id: c.mention_id,
                                 task: crate::traits::InstructTask::SpanIsEntity,
                                 surface: c.surface.clone(),
-                                sentence_text: compact_str::CompactString::new(""),
+                                sentence_text: Self::sentence_text(
+                                    input.text,
+                                    input.sentences,
+                                    c.sentence_index,
+                                ),
                                 neighbor_sentence: None,
                                 candidate_labels: c.candidate_labels.clone(),
                                 candidate_entities: c.candidate_entity_refs.clone(),
@@ -284,32 +299,7 @@ impl PhoenixNerEngine {
                             .collect();
                         match adj.adjudicate(&adj_cases) {
                             Ok(decisions) => {
-                                let votes: Vec<_> = decisions
-                                    .into_iter()
-                                    .map(|d| {
-                                        let reason = match d.decision {
-                                            crate::traits::DecisionKind::Accept => {
-                                                crate::types::VoteReason::NliSupport
-                                            }
-                                            crate::traits::DecisionKind::Reject => {
-                                                crate::types::VoteReason::NliContradiction
-                                            }
-                                            _ => crate::types::VoteReason::NliSupport,
-                                        };
-                                        (
-                                            d.mention_id,
-                                            crate::types::MentionVote {
-                                                source:
-                                                    crate::types::MentionSourceKind::Adjudication,
-                                                label: d.chosen_label,
-                                                entity_ref: d.chosen_entity,
-                                                confidence: d.confidence,
-                                                reason,
-                                            },
-                                        )
-                                    })
-                                    .collect();
-                                workspace.apply_adjudication(votes);
+                                workspace.apply_adjudication(Self::adjudication_votes(decisions))
                             }
                             Err(e) => diagnostics.push(Diagnostic {
                                 code: "NER_ADJUDICATE_FAIL".into(),
@@ -321,8 +311,28 @@ impl PhoenixNerEngine {
             }
         }
 
+        if let Some(adj) = self.adjudicator.as_ref() {
+            let cases = workspace.build_kind_adjudication_cases(
+                input.text,
+                input.sentences,
+                self.max_adjudication_cases,
+            );
+            if !cases.is_empty() {
+                match adj.adjudicate(&cases) {
+                    Ok(decisions) => {
+                        workspace.apply_adjudication(Self::adjudication_votes(decisions))
+                    }
+                    Err(e) => diagnostics.push(Diagnostic {
+                        code: "NER_KIND_ADJUDICATE_FAIL".into(),
+                        message: e.to_string(),
+                    }),
+                }
+            }
+        }
+
         // === Finalize ===
         let packets = workspace.finalize_packets();
+        let surface_memory = SurfaceMemoryReport::build(&packets);
         let mention_graph = MentionGraphBuilder::build(&packets);
         let chunk_hints = build_chunk_hints(
             input.text,
@@ -335,6 +345,7 @@ impl PhoenixNerEngine {
         Ok(SurfaceNerOutput {
             mentions: packets,
             mention_graph,
+            surface_memory,
             chunk_hints,
             diagnostics,
         })
@@ -356,6 +367,48 @@ impl PhoenixNerEngine {
             }
             _ => ("", 0),
         }
+    }
+
+    fn sentence_text(
+        text: &str,
+        sentences: &[SentenceSpan],
+        sentence_index: u32,
+    ) -> compact_str::CompactString {
+        sentences
+            .get(sentence_index as usize)
+            .and_then(|sentence| {
+                text.get(sentence.range.start as usize..sentence.range.end as usize)
+            })
+            .map(str::trim)
+            .unwrap_or_default()
+            .into()
+    }
+
+    fn adjudication_votes(
+        decisions: Vec<AdjudicationDecision>,
+    ) -> Vec<(crate::types::LocalMentionId, crate::types::MentionVote)> {
+        decisions
+            .into_iter()
+            .filter(|decision| decision.decision != crate::traits::DecisionKind::NeedsMore)
+            .map(|decision| {
+                let reason = match decision.decision {
+                    crate::traits::DecisionKind::Reject => {
+                        crate::types::VoteReason::NliContradiction
+                    }
+                    _ => crate::types::VoteReason::NliSupport,
+                };
+                (
+                    decision.mention_id,
+                    crate::types::MentionVote {
+                        source: crate::types::MentionSourceKind::Adjudication,
+                        label: decision.chosen_label,
+                        entity_ref: decision.chosen_entity,
+                        confidence: decision.confidence,
+                        reason,
+                    },
+                )
+            })
+            .collect()
     }
 
     fn accept_model_span(text: &str, range: TextRange, surface: &str, label: &str) -> bool {
@@ -580,6 +633,38 @@ mod tests {
     use crate::{ChunkHintKind, MentionKind};
     use phoenix_types::{PosTag, TokenClass, TokenSpan};
 
+    struct SurfaceKindJudge;
+
+    impl crate::traits::MentionAdjudicator for SurfaceKindJudge {
+        fn adjudicate(
+            &self,
+            cases: &[crate::traits::AdjudicationCase],
+        ) -> Result<Vec<crate::traits::AdjudicationDecision>, crate::traits::AdjudicationError>
+        {
+            Ok(cases
+                .iter()
+                .filter_map(|case| {
+                    assert!(!case.sentence_text.is_empty());
+                    let label = match case.surface.as_str() {
+                        "Rook" => "Character",
+                        "Allied Table" => "Organization",
+                        "Mesa" => "Location",
+                        _ => return None,
+                    };
+                    Some(crate::traits::AdjudicationDecision {
+                        mention_id: case.mention_id,
+                        decision: crate::traits::DecisionKind::Relabel,
+                        confidence: 0.86,
+                        chosen_label: Some(crate::types::EntityLabel::new(label)),
+                        chosen_entity: None,
+                        modality: None,
+                        polarity: None,
+                    })
+                })
+                .collect())
+        }
+    }
+
     #[test]
     fn engine_builds_with_defaults() {
         let engine = PhoenixNerEngineBuilder::new().build();
@@ -753,6 +838,51 @@ mod tests {
         let result = engine.extract_mentions(&input).unwrap();
         assert!(!result.chunk_hints.is_empty());
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn adjudicator_receives_marked_sentence_and_casts_kind_votes() {
+        let text = "At dusk, Rook said the Allied Table approved Red Mesa.";
+        let sentences = period_sentences(text);
+        let tokens = simple_tokens(text);
+        let scope = ScopeKey::default();
+        let engine = PhoenixNerEngineBuilder::new()
+            .adjudicator(Box::new(SurfaceKindJudge))
+            .max_adjudication_cases(8)
+            .build();
+        let input = SurfaceNerInput {
+            document_id: "doc1",
+            text,
+            tokens: &tokens,
+            sentences: &sentences,
+            scope: &scope,
+            lexicon: None,
+        };
+
+        let result = engine.extract_mentions(&input).unwrap();
+        let surfaces = result
+            .mentions
+            .iter()
+            .map(|mention| mention.surface.as_str())
+            .collect::<Vec<_>>();
+        for (surface, label) in [
+            ("Rook", "Character"),
+            ("Allied Table", "Organization"),
+            ("Mesa", "Location"),
+        ] {
+            let mention = result
+                .mentions
+                .iter()
+                .find(|mention| mention.surface.as_str() == surface)
+                .unwrap_or_else(|| panic!("missing {surface}; got {surfaces:?}"));
+            assert!(mention.source_votes.iter().any(|vote| {
+                vote.source == crate::types::MentionSourceKind::Adjudication
+                    && vote
+                        .label
+                        .as_ref()
+                        .is_some_and(|actual| actual.as_str() == label)
+            }));
+        }
     }
 
     #[test]

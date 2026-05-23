@@ -16,6 +16,8 @@ mod router;
 mod schema;
 #[path = "../../../../../rust-native/phoenix/crates/phoenix-dynamic-ner/src/scoring.rs"]
 mod scoring;
+#[path = "../../../../../rust-native/phoenix/crates/phoenix-dynamic-ner/src/surface_memory.rs"]
+mod surface_memory;
 #[path = "../../../../../rust-native/phoenix/crates/phoenix-dynamic-ner/src/traits.rs"]
 mod traits;
 #[path = "../../../../../rust-native/phoenix/crates/phoenix-dynamic-ner/src/types.rs"]
@@ -31,10 +33,14 @@ pub use native_lane::NativeDiscoveryLane;
 pub use router::SurfaceRouter;
 pub use schema::DynamicSchemaBuilder;
 pub use scoring::{MentionWorkspace, ScoreTable};
+pub use surface_memory::{
+    SurfaceCandidateEdge, SurfaceCandidateKind, SurfaceCandidateTarget, SurfaceMemoryEntry,
+    SurfaceMemoryReport,
+};
 pub use traits::{
-    AdjudicationCase, AdjudicationDecision, DecisionKind, DiscoveredSpan, DynamicNerModel,
-    InstructTask, MentionAdjudicator, Modality, ModelNerWindow, NerModelError, Polarity,
-    VerificationCase,
+    AdjudicationCase, AdjudicationDecision, AdjudicationError, DecisionKind, DiscoveredSpan,
+    DynamicNerModel, InstructTask, MentionAdjudicator, Modality, ModelNerWindow, NerModelError,
+    Polarity, VerificationCase,
 };
 pub use types::{
     DomainProfile, EntityLabel, LabelPack, LocalMentionId, MentionContext, MentionKind,

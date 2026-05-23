@@ -15,6 +15,7 @@ mod gliner_relex;
 mod gliner_relex_decode;
 mod gliner_seed;
 mod gliner_x;
+mod gliner_x_tensors;
 mod glirel;
 mod lens_consumer;
 mod nli;

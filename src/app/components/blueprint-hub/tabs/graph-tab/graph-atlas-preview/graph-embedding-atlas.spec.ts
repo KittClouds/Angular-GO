@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NoteBlockProjection } from '../../../../../lib/dexie/db';
 import { buildLeafEmbeddingAtlas } from './graph-embedding-atlas';
+import { buildGraphRebuildEmbeddingAtlas } from './graph-rebuild-embedding-atlas';
 
 function block(id: string, text: string, ordinal: number): NoteBlockProjection {
     return {
@@ -44,5 +45,63 @@ describe('embedding atlas projection', () => {
             Math.abs(node.atlasZ || 0),
         ]));
         expect(maxAxis).toBeLessThanOrEqual(1.08);
+    });
+
+    it('renders graph-rebuild embedding targets for chunks, anchors, entities, and graph links', () => {
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-1',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [{ id: 'chunk-1', noteId: 'note-1', start: 0, end: 40, ordinal: 0, source: 'dynamic-chunking' }],
+            mentions: [],
+            entityAnchors: [{
+                id: 'anchor-1',
+                noteId: 'note-1',
+                chunkId: 'chunk-1',
+                surface: 'Kai',
+                sourceStart: 0,
+                sourceEnd: 3,
+                source: 'accepted_suggestion',
+                confidence: 0.9,
+                entityId: 'kai',
+                status: 'accepted',
+                generation: 1,
+            }],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Note 1', text: 'chapter text', evidenceIds: [] },
+                { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'Kai entered the room.', evidenceIds: [] },
+                { id: 'embed:anchor:anchor-1', kind: 'anchor', sourceId: 'anchor-1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
+                { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [{ id: 'edge-1', sourceId: 'kai', targetId: 'hazel', type: 'co_occurs_with', weight: 1, confidence: 0.7, evidenceAnchorIds: ['anchor-1'], scopeKeys: ['chunk-1'], noteIds: ['note-1'] }],
+            counters: null as any,
+        }, 'hybrid');
+
+        expect(atlas.nodes.map((node) => node.id)).toEqual(expect.arrayContaining([
+            'embed:chunk:chunk-1',
+            'embed:anchor:anchor-1',
+            'embed:entity:kai',
+        ]));
+        expect(atlas.edges.map((edge) => edge.type)).toEqual(expect.arrayContaining([
+            'note-chunk',
+            'chunk-anchor',
+            'anchor-entity',
+            'co_occurs_with',
+        ]));
+        expect(atlas.sourceLabel).toContain('graph rebuild snapshot');
     });
 });

@@ -34,6 +34,7 @@ yarn-error.log
 /.angular/cache
 /.tmp
 /.codex-run
+/.codex-runlogs/
 .agent/
 .sass-cache/
 /connect.lock

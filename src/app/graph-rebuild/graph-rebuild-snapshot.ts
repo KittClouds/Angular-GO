@@ -3,8 +3,8 @@ import type { RegisteredEntity } from '../lib/registry';
 
 export type GraphRebuildScopeKind = 'global' | 'folder' | 'narrative' | 'note' | 'multiNote';
 export type GraphRebuildAnchorSource = EntityOccurrence['source'] | 'accepted_suggestion';
-export type GraphRebuildEdgeType = 'anchored-cooccurrence' | 'relationship' | 'temporal' | 'causal';
-export type GraphRebuildEmbeddingTargetKind = 'note' | 'chunk' | 'entity' | 'anchor' | 'graphFact';
+export type GraphRebuildEdgeType = string;
+export type GraphRebuildEmbeddingTargetKind = string;
 export type GraphRebuildAdjudicationStatus = 'accepted' | 'review' | 'rejected';
 
 export interface GraphRebuildChunk {
@@ -296,6 +296,7 @@ export interface BuildGraphRebuildSnapshotInput {
     occurrences: EntityOccurrence[];
     chunks?: GraphRebuildChunk[];
     relationshipHints?: GraphRebuildRelationshipHint[];
+    noteTexts?: Record<string, string>;
     candidateCount?: number;
     builtAt?: number;
 }

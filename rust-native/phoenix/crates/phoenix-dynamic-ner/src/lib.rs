@@ -13,6 +13,7 @@ mod native_lane;
 mod router;
 mod schema;
 mod scoring;
+mod surface_memory;
 mod traits;
 mod types;
 
@@ -26,10 +27,14 @@ pub use native_lane::NativeDiscoveryLane;
 pub use router::SurfaceRouter;
 pub use schema::DynamicSchemaBuilder;
 pub use scoring::{MentionWorkspace, ScoreTable};
+pub use surface_memory::{
+    SurfaceCandidateEdge, SurfaceCandidateKind, SurfaceCandidateTarget, SurfaceMemoryEntry,
+    SurfaceMemoryReport,
+};
 pub use traits::{
-    AdjudicationCase, AdjudicationDecision, DecisionKind, DiscoveredSpan, DynamicNerModel,
-    InstructTask, MentionAdjudicator, Modality, ModelNerWindow, NerModelError, Polarity,
-    VerificationCase,
+    AdjudicationCase, AdjudicationDecision, AdjudicationError, DecisionKind, DiscoveredSpan,
+    DynamicNerModel, InstructTask, MentionAdjudicator, Modality, ModelNerWindow, NerModelError,
+    Polarity, VerificationCase,
 };
 pub use types::{
     DomainProfile, EntityLabel, LabelPack, LocalMentionId, MentionContext, MentionKind,

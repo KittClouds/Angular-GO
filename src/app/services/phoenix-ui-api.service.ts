@@ -65,6 +65,13 @@ export interface AtlasRichScanStageSummary {
     counts: Record<string, number>;
 }
 
+export interface AtlasRichScanKindVoteSummary {
+    kind: string;
+    source: string;
+    confidence: number;
+    reason: string;
+}
+
 export interface AtlasRichScanCandidateSummary {
     id: string;
     label: string;
@@ -76,6 +83,9 @@ export interface AtlasRichScanCandidateSummary {
     aliases?: string[];
     range?: { start: number; end: number } | null;
     sourceStage?: string;
+    kindVotes?: AtlasRichScanKindVoteSummary[];
+    decisionStatus?: string;
+    reviewReason?: string | null;
 }
 
 export interface AtlasRichScanResult {
