@@ -21,6 +21,7 @@ import { AtlasScanCoordinatorService } from '../../../../services/atlas-scan-coo
 import type { AtlasMode } from './graph-atlas-preview/graph-atlas-preview.component';
 import type { GraphLensState } from './graph-lens';
 import { buildGraphAtlasReadContext } from './graph-atlas-preview/graph-atlas-read-context';
+import { clearRejectedSuggestionFeedback } from '../../../../lib/entity-learning/entity-feedback';
 
 @Component({
     selector: 'app-graph-tab',
@@ -206,7 +207,11 @@ export class GraphTabComponent {
     async flushRegistry() {
         if (confirm(`Delete all ${this.totalEntities()} entities? This cannot be undone.`)) {
             const cleared = await smartGraphRegistry.clearAll();
-            if (cleared === 0) return;
+            const clearedRejects = await Promise.all([
+                clearRejectedSuggestionFeedback('atlas_surface'),
+                clearRejectedSuggestionFeedback('dynamic_ner'),
+            ]);
+            if (cleared === 0 && clearedRejects.every((count) => count === 0)) return;
             this.selectedEntity.set(null);
             this.entitySelection.clear();
         }

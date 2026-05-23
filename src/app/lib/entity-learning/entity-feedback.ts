@@ -75,6 +75,26 @@ export async function filterRejectedSuggestions<T extends SuggestionLike>(
     });
 }
 
+export async function clearRejectedSuggestionFeedback(provider?: string): Promise<number> {
+    if (!canUseEntityFeedbackTable() || typeof db.entityFeedback?.bulkDelete !== 'function') {
+        return 0;
+    }
+
+    const rows = await db.entityFeedback
+        .where('action')
+        .equals('rejected_suggestion')
+        .toArray();
+    const ids = rows
+        .filter((row) => !provider || row.provider === provider)
+        .map((row) => row.id);
+    if (!ids.length) {
+        return 0;
+    }
+
+    await db.entityFeedback.bulkDelete(ids);
+    return ids.length;
+}
+
 export async function getLearnedAliasesByEntityId(): Promise<Map<string, string[]>> {
     const aliases = new Map<string, Map<string, { surface: string; weight: number }>>();
 

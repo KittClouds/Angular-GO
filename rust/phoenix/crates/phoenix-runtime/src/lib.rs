@@ -4593,29 +4593,34 @@ impl PhoenixRuntime {
                     let kind = dynamic_candidate_kind(mention, entity_kind.as_ref(), &kind_votes);
                     let decision_status = dynamic_candidate_decision_status(mention);
                     let review_reason = dynamic_candidate_review_reason(mention, &kind);
+                    let evidence =
+                        dynamic_mention_context_snippet(&document.text, mention.range, 220);
+                    let candidate = AtlasRichScanCandidateSummary {
+                        id: format!("dyn-candidate-{:016x}", atlas_hash64(vertex_id.as_bytes())),
+                        label: label.clone(),
+                        kind,
+                        confidence: mention.confidence,
+                        source_document_id: Some(document.document_id.clone()),
+                        source_note_id: document.note_id.clone(),
+                        evidence: (!evidence.is_empty()).then_some(evidence),
+                        aliases: Vec::new(),
+                        range: Some(TextRange {
+                            start: mention.range.start,
+                            end: mention.range.end,
+                        }),
+                        source_stage: "dynamicNer".to_owned(),
+                        kind_votes,
+                        decision_status,
+                        review_reason,
+                    };
                     candidate_by_key
                         .entry(key)
-                        .or_insert_with(|| AtlasRichScanCandidateSummary {
-                            id: format!(
-                                "dyn-candidate-{:016x}",
-                                atlas_hash64(vertex_id.as_bytes())
-                            ),
-                            label: label.clone(),
-                            kind,
-                            confidence: mention.confidence,
-                            source_document_id: Some(document.document_id.clone()),
-                            source_note_id: document.note_id.clone(),
-                            evidence: Some(label.clone()),
-                            aliases: Vec::new(),
-                            range: Some(TextRange {
-                                start: mention.range.start,
-                                end: mention.range.end,
-                            }),
-                            source_stage: "dynamicNer".to_owned(),
-                            kind_votes,
-                            decision_status,
-                            review_reason,
-                        });
+                        .and_modify(|current| {
+                            if dynamic_candidate_is_better(&candidate, current) {
+                                *current = candidate.clone();
+                            }
+                        })
+                        .or_insert(candidate);
                 }
             }
 
@@ -7722,6 +7727,55 @@ fn dynamic_candidate_review_reason(
         DynamicMentionStatus::Rejected => Some("rejected".to_owned()),
         DynamicMentionStatus::AcceptedKnown | DynamicMentionStatus::AcceptedNew => None,
     }
+}
+
+fn dynamic_candidate_is_better(
+    next: &AtlasRichScanCandidateSummary,
+    current: &AtlasRichScanCandidateSummary,
+) -> bool {
+    let next_status = dynamic_candidate_status_rank(&next.decision_status);
+    let current_status = dynamic_candidate_status_rank(&current.decision_status);
+    next_status > current_status
+        || (next_status == current_status && next.confidence > current.confidence)
+}
+
+fn dynamic_candidate_status_rank(status: &str) -> u8 {
+    match status {
+        "accepted" => 3,
+        "review" => 2,
+        "rejected" => 0,
+        _ => 1,
+    }
+}
+
+fn dynamic_mention_context_snippet(text: &str, range: TextRange, limit: usize) -> String {
+    if text.is_empty() || range.start >= range.end {
+        return String::new();
+    }
+    let start = (range.start as usize).min(text.len());
+    let end = (range.end as usize).min(text.len());
+    if start >= end {
+        return String::new();
+    }
+
+    let left = text[..start]
+        .rfind(['\n', '.', '!', '?'])
+        .map(|index| index + 1)
+        .unwrap_or(start.saturating_sub(limit / 2));
+    let right = text[end..]
+        .find(['\n', '.', '!', '?'])
+        .map(|index| end + index + 1)
+        .unwrap_or((end + limit / 2).min(text.len()));
+    let left = floor_text_boundary(text, left.min(text.len()));
+    let right = floor_text_boundary(text, right.min(text.len()));
+    phase1_snippet(text.get(left..right).unwrap_or(""), limit)
+}
+
+fn floor_text_boundary(text: &str, mut index: usize) -> usize {
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn dynamic_vote_source_name(source: phoenix_dynamic_ner::MentionSourceKind) -> &'static str {
@@ -11390,6 +11444,41 @@ mod tests {
         assert_eq!(dynamic_candidate_decision_status(&mention), "accepted");
         assert!(votes.iter().any(|vote| vote.kind == "ORGANIZATION"));
         assert!(votes.iter().any(|vote| vote.kind == "LOCATION"));
+    }
+
+    #[test]
+    fn dynamic_candidate_context_snippet_preserves_sentence_evidence() {
+        let text = "Kai waited. Baton Rouge came first. Red Mesa stayed quiet.";
+        let start = text.find("Baton Rouge").expect("surface") as u32;
+        let snippet = dynamic_mention_context_snippet(
+            text,
+            TextRange {
+                start,
+                end: start + "Baton Rouge".len() as u32,
+            },
+            120,
+        );
+
+        assert_eq!(snippet, "Baton Rouge came first.");
+    }
+
+    #[test]
+    fn dynamic_candidate_dedupe_prefers_accepted_higher_confidence_row() {
+        let review = AtlasRichScanCandidateSummary {
+            label: "Nemo".to_owned(),
+            decision_status: "review".to_owned(),
+            confidence: 0.42,
+            ..AtlasRichScanCandidateSummary::default()
+        };
+        let accepted = AtlasRichScanCandidateSummary {
+            label: "Nemo".to_owned(),
+            decision_status: "accepted".to_owned(),
+            confidence: 0.38,
+            ..AtlasRichScanCandidateSummary::default()
+        };
+
+        assert!(dynamic_candidate_is_better(&accepted, &review));
+        assert!(!dynamic_candidate_is_better(&review, &accepted));
     }
 
     #[test]
