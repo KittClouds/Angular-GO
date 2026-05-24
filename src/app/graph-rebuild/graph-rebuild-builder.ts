@@ -12,6 +12,8 @@ import type {
 } from './graph-rebuild-snapshot';
 import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
 import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
+import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
+import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import {
     buildGraphRebuildAliasResolver,
     normalizeGraphRebuildCandidate,
@@ -43,9 +45,11 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const edges = [...cooccurrenceEdges, ...derived.edges]
         .sort((left, right) => right.weight - left.weight || left.type.localeCompare(right.type) || left.id.localeCompare(right.id));
     const relationships = applyRelationshipHints([...cooccurrenceEdges.map(edgeToRelationship), ...derived.relationships], input.relationshipHints || []);
+    const structuralPostProcess = buildGraphRebuildStructuralPostProcess(nodes, edges);
     const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
     const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
     const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
+    const graphAwareLinkSuggestions = buildGraphAwareLinkSuggestions(nodes, edges, relationships, structuralPostProcess);
     const embeddingTargets = buildGraphRebuildEmbeddingTargets(
         input,
         chunks,
@@ -84,6 +88,8 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         projectionRefs: [],
         nodes,
         edges,
+        structuralPostProcess,
+        graphAwareLinkSuggestions,
         counters: {
             entities: input.entities.length,
             aliases: resolver.aliasCount,
@@ -106,6 +112,12 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             projectionRefs: 0,
             nodes: nodes.length,
             edges: edges.length,
+            structuralComponents: structuralPostProcess.components.length,
+            structuralHubs: structuralPostProcess.hubEntityIds.length,
+            structuralBridgeEdges: structuralPostProcess.bridgeEdgeIds.length,
+            graphAwareLinkSuggestions: graphAwareLinkSuggestions.length,
+            meaningFrameChunks: chunks.filter((chunk) => Boolean(chunk.meaningFrame)).length,
+            eventAspects: derived.events.filter((event) => Boolean(event.aspect)).length,
             dropReasons: drops,
             resolution: hygiene.resolution,
         },

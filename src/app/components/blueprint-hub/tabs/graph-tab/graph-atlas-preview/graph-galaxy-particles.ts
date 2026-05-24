@@ -1,20 +1,54 @@
 import * as THREE from 'three';
 
 import type { GalaxyRenderSettings } from './graph-galaxy-engine';
+import type { GalaxyFocusMask } from './graph-galaxy-focus';
 import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
+
+const MAX_FLOW_PARTICLES = 1800;
+const EMPTY_VEC3 = new Float32Array(0);
+const EMPTY_SCALAR = new Float32Array(0);
 
 export class GraphGalaxyParticles {
     readonly points: THREE.Points;
     private readonly geometry = new THREE.BufferGeometry();
-    private readonly material = new THREE.PointsMaterial({
-        color: 0xffcf6b,
+    private readonly material = new THREE.ShaderMaterial({
         transparent: true,
-        opacity: 0,
-        size: 0.03,
         depthWrite: false,
         depthTest: true,
-        blending: THREE.AdditiveBlending,
+        blending: THREE.NormalBlending,
         toneMapped: false,
+        vertexColors: true,
+        uniforms: {
+            uBaseSize: { value: 7 },
+        },
+        vertexShader: `
+            uniform float uBaseSize;
+            attribute float alpha;
+            attribute float flowSize;
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            void main() {
+                vColor = color;
+                vAlpha = alpha;
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                float perspectiveScale = clamp(180.0 / max(110.0, -mvPosition.z), 0.85, 1.55);
+                gl_PointSize = min(7.2, flowSize * uBaseSize * perspectiveScale);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            void main() {
+                float dist = length(gl_PointCoord - vec2(0.5));
+                float softDot = smoothstep(0.5, 0.12, dist);
+                float core = smoothstep(0.28, 0.0, dist);
+                vec3 litColor = vColor * (0.82 + core * 0.18);
+                gl_FragColor = vec4(litColor, vAlpha * softDot);
+            }
+        `,
     });
     private readonly edgeIndexes: number[] = [];
     private readonly seeds: number[] = [];
@@ -31,56 +65,65 @@ export class GraphGalaxyParticles {
         this.speeds.length = 0;
         const edgeCount = data.edgePairs.length / 2;
         if (!settings.particleFlow || edgeCount === 0) {
-            this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+            this.setEmptyAttributes();
             this.points.visible = false;
             return;
         }
 
-        const degrees = new Uint16Array(data.ids.length);
-        for (let edge = 0; edge < edgeCount; edge++) {
-            degrees[data.edgePairs[edge * 2]]++;
-            degrees[data.edgePairs[edge * 2 + 1]]++;
+        const particleCount = Math.min(edgeCount, MAX_FLOW_PARTICLES);
+        const stride = edgeCount / particleCount;
+        for (let i = 0; i < particleCount; i++) {
+            const edge = Math.min(edgeCount - 1, Math.floor(i * stride));
+            const seed = this.stableUnit(edge * 17 + 3);
+            this.edgeIndexes.push(edge);
+            this.seeds.push(seed);
+            this.speeds.push(0.23 + this.stableUnit(edge * 31 + 11) * 0.32);
         }
-        const ranked = Array.from({ length: edgeCount }, (_, edge) => edge)
-            .sort((a, b) => this.edgeScore(data, degrees, b) - this.edgeScore(data, degrees, a));
-        const activeEdges = ranked.slice(0, Math.min(edgeCount, Math.max(16, Math.round(Math.sqrt(edgeCount) * 7))));
-        for (const edge of activeEdges) {
-            const score = this.edgeScore(data, degrees, edge);
-            const count = Math.max(1, Math.min(4, Math.ceil(score / 14)));
-            for (let item = 0; item < count; item++) {
-                this.edgeIndexes.push(edge);
-                this.seeds.push((item + 1) / (count + 1));
-                this.speeds.push(0.28 + ((score + item * 3) % 9) * 0.035);
-            }
-        }
-        this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.edgeIndexes.length * 3), 3));
+
+        const count = this.edgeIndexes.length;
+        this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+        this.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+        this.geometry.setAttribute('alpha', new THREE.BufferAttribute(new Float32Array(count), 1));
+        this.geometry.setAttribute('flowSize', new THREE.BufferAttribute(new Float32Array(count), 1));
         this.updateSettings(settings);
         this.points.visible = true;
     }
 
     updateSettings(settings: GalaxyRenderSettings): void {
-        this.material.opacity = settings.particleFlow ? settings.particleOpacity * 0.74 : 0;
-        this.material.size = 0.018 + settings.particleSize * 0.018;
+        this.material.uniforms['uBaseSize'].value = 3.35 + settings.particleSize * 0.95;
         this.points.visible = settings.particleFlow && this.edgeIndexes.length > 0;
-        this.material.needsUpdate = true;
     }
 
-    update(data: GalaxySceneV2 | null, positions: Float32Array | null, settings: GalaxyRenderSettings, time: number): void {
+    update(
+        data: GalaxySceneV2 | null,
+        positions: Float32Array | null,
+        settings: GalaxyRenderSettings,
+        time: number,
+        focus?: GalaxyFocusMask | null,
+    ): void {
         if (!data || !positions || !this.points.visible) return;
-        const attr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const positionAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const colorAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+        const alphaAttr = this.geometry.getAttribute('alpha') as THREE.BufferAttribute;
+        const sizeAttr = this.geometry.getAttribute('flowSize') as THREE.BufferAttribute;
+        const baseAlpha = settings.particleOpacity * (focus?.hasFocus ? 0.72 : 0.42);
+        const flowSize = 0.62 + settings.particleSize * 0.1;
+        const curved = settings.edgeMode === 'curved';
         for (let i = 0; i < this.edgeIndexes.length; i++) {
             const edge = this.edgeIndexes[i];
             const source = data.edgePairs[edge * 2];
             const target = data.edgePairs[edge * 2 + 1];
             const t = (this.seeds[i] + time * 0.001 * this.speeds[i] * settings.particleSpeed) % 1;
-            attr.setXYZ(
-                i,
-                THREE.MathUtils.lerp(positions[source * 3], positions[target * 3], t),
-                THREE.MathUtils.lerp(positions[source * 3 + 1], positions[target * 3 + 1], t),
-                THREE.MathUtils.lerp(positions[source * 3 + 2], positions[target * 3 + 2], t),
-            );
+            const lift = curved ? this.edgeLift(data, settings, edge, source, target) : 0;
+            positionAttr.setXYZ(i, this.edgeX(positions, source, target, t), this.edgeY(positions, source, target, lift, t), this.edgeZ(positions, source, target, t));
+            this.writeTargetColor(colorAttr, data, edge, i);
+            alphaAttr.setX(i, focus?.hasFocus && focus.edgeLevels[edge] === 0 ? 0 : baseAlpha);
+            sizeAttr.setX(i, flowSize);
         }
-        attr.needsUpdate = true;
+        positionAttr.needsUpdate = true;
+        colorAttr.needsUpdate = true;
+        alphaAttr.needsUpdate = true;
+        sizeAttr.needsUpdate = true;
     }
 
     dispose(): void {
@@ -88,7 +131,38 @@ export class GraphGalaxyParticles {
         this.material.dispose();
     }
 
-    private edgeScore(data: GalaxySceneV2, degrees: Uint16Array, edge: number): number {
-        return degrees[data.edgePairs[edge * 2]] + degrees[data.edgePairs[edge * 2 + 1]];
+    private setEmptyAttributes(): void {
+        this.geometry.setAttribute('position', new THREE.BufferAttribute(EMPTY_VEC3, 3));
+        this.geometry.setAttribute('color', new THREE.BufferAttribute(EMPTY_VEC3, 3));
+        this.geometry.setAttribute('alpha', new THREE.BufferAttribute(EMPTY_SCALAR, 1));
+        this.geometry.setAttribute('flowSize', new THREE.BufferAttribute(EMPTY_SCALAR, 1));
+    }
+
+    private edgeLift(data: GalaxySceneV2, settings: GalaxyRenderSettings, edge: number, source: number, target: number): number {
+        const interGalaxy = data.edgeKinds[edge] === 1;
+        const curveScale = THREE.MathUtils.clamp(settings.edgeCurveStrength, 0.25, 1.2) * (interGalaxy ? 0.92 : 0.58);
+        return (0.08 + Math.abs(source - target) * 0.002) * curveScale + (interGalaxy ? 0.18 : 0);
+    }
+
+    private edgeX(positions: Float32Array, source: number, target: number, t: number): number {
+        return THREE.MathUtils.lerp(positions[source * 3], positions[target * 3], t);
+    }
+
+    private edgeY(positions: Float32Array, source: number, target: number, lift: number, t: number): number {
+        return THREE.MathUtils.lerp(positions[source * 3 + 1], positions[target * 3 + 1], t) + lift * Math.sin(Math.PI * t);
+    }
+
+    private edgeZ(positions: Float32Array, source: number, target: number, t: number): number {
+        return THREE.MathUtils.lerp(positions[source * 3 + 2], positions[target * 3 + 2], t);
+    }
+
+    private writeTargetColor(colorAttr: THREE.BufferAttribute, data: GalaxySceneV2, edge: number, particle: number): void {
+        const offset = edge * 6 + 3;
+        colorAttr.setXYZ(particle, data.edgeColors[offset], data.edgeColors[offset + 1], data.edgeColors[offset + 2]);
+    }
+
+    private stableUnit(value: number): number {
+        const raw = Math.sin((value + 1) * 12.9898) * 43758.5453;
+        return raw - Math.floor(raw);
     }
 }

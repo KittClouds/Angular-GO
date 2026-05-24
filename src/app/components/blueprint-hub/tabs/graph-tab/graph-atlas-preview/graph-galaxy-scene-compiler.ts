@@ -1,9 +1,9 @@
 import type { PhoenixBackendService } from '../../../../../services/phoenix-backend.service';
 import type { PhoenixGalaxySceneRequest } from '../../../../../services/phoenix-galaxy-scene.model';
-import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 import {
     buildGalaxyScene,
     hslToRgb,
+    resolveGalaxyNodeColorHsl,
     type GalaxyInputEdge,
     type GalaxyRenderableNode,
     type GalaxyRenderSettings,
@@ -37,7 +37,7 @@ export async function compileGalaxyScene(
                 atlasX: entity.atlasX,
                 atlasY: entity.atlasY,
                 atlasZ: entity.atlasZ,
-                colorHsl: entity.colorHsl ?? entityColorStore.getRawHsl(entity.kind as any),
+                colorHsl: resolveGalaxyNodeColorHsl(entity),
             })),
             edges,
             settings: {
@@ -49,15 +49,15 @@ export async function compileGalaxyScene(
         return {
             nodes: scene.nodes.map((node) => {
                 const source = entities.find((entity) => entity.id === node.entity.id);
-                const color = hslToRgb(source?.colorHsl ?? entityColorStore.getRawHsl(node.entity.kind as any));
+                const color = hslToRgb(source ? resolveGalaxyNodeColorHsl(source) : resolveGalaxyNodeColorHsl(node.entity));
                 return {
-                ...node,
-                ...color,
-                sx: 0,
-                sy: 0,
-                depth: 0,
-                galaxyOpacity: 1,
-            };
+                    ...node,
+                    ...color,
+                    sx: 0,
+                    sy: 0,
+                    depth: 0,
+                    galaxyOpacity: 1,
+                };
             }),
             links: scene.links.map((link) => ({ ...link })),
             layoutMode: 'single',

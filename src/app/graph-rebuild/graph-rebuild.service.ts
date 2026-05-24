@@ -10,6 +10,7 @@ import { parseContentToPlainText } from '../lib/analytics';
 import type { RegisteredEntity } from '../lib/registry';
 import { PhoenixStoreService, type StoreScopedDocument } from '../services/phoenix-store.service';
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
+import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames';
 import type {
     GraphIndexRunReceipt,
     GraphRebuildChunk,
@@ -172,10 +173,6 @@ export function scopedDocumentToGraphIndexReceipt(document: StoreScopedDocument)
     }
 }
 
-const DYNAMIC_CHUNK_SIZE_TOKENS = 500;
-const DYNAMIC_CHUNK_OVERLAP_TOKENS = 100;
-const ESTIMATED_CHARS_PER_TOKEN = 4;
-
 async function loadDynamicNoteChunks(noteIds: string[]): Promise<GraphRebuildChunk[]> {
     if (!canUseNotesTable() || !noteIds.length) return [];
     const notes = (await Promise.all(noteIds.map((noteId) => db.notes.get(noteId)))).filter((note): note is Note => !!note);
@@ -184,40 +181,7 @@ async function loadDynamicNoteChunks(noteIds: string[]): Promise<GraphRebuildChu
 
 export function dynamicChunksForNote(note: Pick<Note, 'id' | 'markdownContent' | 'content'>): GraphRebuildChunk[] {
     const text = notePlainText(note);
-    const spans = sentenceSpans(text);
-    if (!text.trim()) return [];
-    if (!spans.length) return [dynamicChunk(note.id, 0, 0, text.length, text)];
-
-    const chunks: GraphRebuildChunk[] = [];
-    let window: Array<{ start: number; end: number }> = [];
-    let tokenCount = 0;
-    const emit = () => {
-        if (!window.length) return;
-        const first = window[0];
-        const last = window[window.length - 1];
-        chunks.push(dynamicChunk(note.id, chunks.length, first.start, last.end, text.slice(first.start, last.end)));
-    };
-    for (const span of spans) {
-        const spanTokens = estimatedTokens(span.start, span.end);
-        if (window.length && tokenCount + spanTokens > DYNAMIC_CHUNK_SIZE_TOKENS) {
-            emit();
-            const overlap: Array<{ start: number; end: number }> = [];
-            let overlapTokens = 0;
-            for (let index = window.length - 1; index >= 0; index -= 1) {
-                const candidate = window[index];
-                const candidateTokens = estimatedTokens(candidate.start, candidate.end);
-                if (overlapTokens + candidateTokens > DYNAMIC_CHUNK_OVERLAP_TOKENS) break;
-                overlap.unshift(candidate);
-                overlapTokens += candidateTokens;
-            }
-            window = overlap;
-            tokenCount = overlapTokens;
-        }
-        window.push(span);
-        tokenCount += spanTokens;
-    }
-    emit();
-    return chunks;
+    return buildAdaptiveGraphRebuildChunks(note.id, text);
 }
 
 async function loadBlockChunks(noteIds: string[]): Promise<GraphRebuildChunk[]> {
@@ -246,48 +210,6 @@ function notePlainText(note: Pick<Note, 'markdownContent' | 'content'>): string 
     const markdown = String(note.markdownContent || '');
     if (markdown.trim()) return markdown;
     return parseContentToPlainText(String(note.content || ''));
-}
-
-function sentenceSpans(text: string): Array<{ start: number; end: number }> {
-    const spans: Array<{ start: number; end: number }> = [];
-    let start = 0;
-    for (let index = 0; index < text.length; index += 1) {
-        if (!isSentenceBoundary(text, index)) continue;
-        pushTrimmedSpan(spans, text, start, index + 1);
-        start = index + 1;
-    }
-    pushTrimmedSpan(spans, text, start, text.length);
-    return spans;
-}
-
-function isSentenceBoundary(text: string, index: number): boolean {
-    const char = text[index];
-    if (char === '\n') return text[index + 1] === '\n';
-    if (char !== '.' && char !== '!' && char !== '?') return false;
-    const next = text[index + 1] || '';
-    return !next || /\s|["')\]]/.test(next);
-}
-
-function pushTrimmedSpan(spans: Array<{ start: number; end: number }>, text: string, start: number, end: number): void {
-    while (start < end && /\s/.test(text[start])) start += 1;
-    while (end > start && /\s/.test(text[end - 1])) end -= 1;
-    if (end > start) spans.push({ start, end });
-}
-
-function estimatedTokens(start: number, end: number): number {
-    return Math.max(1, Math.ceil(Math.max(0, end - start) / ESTIMATED_CHARS_PER_TOKEN));
-}
-
-function dynamicChunk(noteId: string, ordinal: number, start: number, end: number, text: string): GraphRebuildChunk {
-    return {
-        id: `${noteId}:chunk:${ordinal}`,
-        noteId,
-        start,
-        end,
-        ordinal,
-        source: 'dynamic-chunking',
-        textHash: simpleHash(text),
-    };
 }
 
 function blockToChunk(block: NoteBlockProjection): GraphRebuildChunk {

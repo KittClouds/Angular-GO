@@ -59,7 +59,7 @@
 
     <div class="graph-rebuild-active-card">
       <span>Active contract</span>
-      <strong>Dynamic NER -> Alex anchors -> graph snapshot -> adjudication -> all projections</strong>
+      <strong>Dynamic NER -> hygiene/pre-link -> clean graph -> structural post-process -> graph-aware links -> projections</strong>
       <small>One button builds the durable atlas for this scope. The graph tab only reads the latest snapshot and receipt.</small>
     </div>
 
@@ -129,158 +129,33 @@
           lastRunStatus().durationMs }} ms</ng-container></small>
     </div>
 
-    <details class="legacy-pipeline">
-      <summary class="graph-target-head">
-      <span>Legacy Diagnostics</span>
-        <strong>{{ selectedCapabilityIds().length }} legacy staged</strong>
-      </summary>
-
-    <div class="graph-target-toolbar">
-      <label class="graph-target-filter">
-        <ng-icon name="lucideSearch" class="h-3.5 w-3.5"></ng-icon>
-        <input pInputText type="text" placeholder="Filter graphs..." [ngModel]="graphTargetQuery()"
-          (ngModelChange)="graphTargetQuery.set($event)" />
-      </label>
-    </div>
-
-    <div class="graph-target-list">
-      <section *ngFor="let group of backendGraphTargetGroups(); trackBy: trackCapabilityGroup" class="graph-target-group">
-        <button type="button" class="graph-target-group-head" (click)="toggleCapabilityGroup(group.id)">
-          <span>{{ group.label }}</span>
-          <em>{{ group.selectedCount }} / {{ group.count }}</em>
-          <ng-icon name="lucideChevronDown" class="h-3.5 w-3.5"
-            [class.group-collapsed]="isCapabilityGroupCollapsed(group.id)"></ng-icon>
-        </button>
-
-        <div class="graph-target-rows" *ngIf="!isCapabilityGroupCollapsed(group.id)">
-          <div *ngFor="let target of group.targets; trackBy: trackCapabilityTarget" role="button" tabindex="0" class="graph-target-row"
-            [ngClass]="capabilityStatusClass(target.state)"
-            [class.graph-target-row-active]="selectedCapabilityId() === target.capability.id"
-            (click)="selectCapability(target.capability.id)">
-            <span class="target-check" [class.target-check-on]="isCapabilitySelected(target.capability.id)">
-              <ng-icon *ngIf="isCapabilitySelected(target.capability.id)" name="lucideCheck" class="h-3 w-3"></ng-icon>
-            </span>
-            <span class="target-icon">
-              <ng-icon [name]="capabilityIconName(target.capability)" class="h-3.5 w-3.5"></ng-icon>
-            </span>
-            <span class="target-title">
-              <strong>{{ target.capability.graphTargetLabel || target.capability.label }}</strong>
-              <small>{{ target.layerLabel }}</small>
-            </span>
-            <span class="target-tags">
-              <em>{{ compactPolicyLabel(target.state.runPolicy) }}</em>
-              <em>{{ compactOperationLabel(target.state.operationKind) }}</em>
-            </span>
-            <span class="target-status">{{ target.state.statusLabel }}</span>
-            <span class="target-menu">
-              <ng-icon name="lucideMoreVertical" class="h-3.5 w-3.5"></ng-icon>
-            </span>
-          </div>
+    <div class="link-suggestion-card" *ngIf="graphAwareLinkSuggestionTotal() > 0">
+      <div class="link-suggestion-head">
+        <span>Graph-aware links</span>
+        <strong>{{ graphAwareLinkSuggestionCount() }} open / {{ graphAwareLinkSuggestionTotal() }} total</strong>
+      </div>
+      <div class="link-suggestion-rows">
+        <div *ngFor="let suggestion of graphAwareLinkSuggestions()" class="link-suggestion-row"
+          [ngClass]="'link-kind-' + suggestion.kind">
+          <span class="link-kind">{{ linkSuggestionKindLabel(suggestion.kind) }}</span>
+          <span class="link-main">
+            <strong>{{ linkSuggestionTitle(suggestion) }}</strong>
+            <small>{{ suggestion.suggestedRelationType }} / {{ suggestion.semanticStatus }} / {{ suggestion.structuralRole }}</small>
+          </span>
+          <em>{{ confidencePercent(suggestion.confidence) }}%</em>
+          <span class="link-review-actions">
+            <button type="button" class="link-review-btn accept" title="Accept suggestion"
+              (click)="acceptLinkSuggestion(suggestion, $event)">
+              <ng-icon name="lucideCheck" class="h-3 w-3"></ng-icon>
+            </button>
+            <button type="button" class="link-review-btn reject" title="Reject suggestion"
+              (click)="rejectLinkSuggestion(suggestion, $event)">
+              <ng-icon name="lucideX" class="h-3 w-3"></ng-icon>
+            </button>
+          </span>
         </div>
-      </section>
-    </div>
-
-    <div class="preset-strip">
-      <button *ngFor="let recipe of graphBuildRecipes" type="button" class="preset-chip"
-        [class.preset-chip-active]="selectedRecipe() === recipe.id"
-        [disabled]="!!activeRecipe() && activeRecipe() !== recipe.id" (click)="selectRecipe(recipe.id)">
-        {{ recipe.label }}
-      </button>
-    </div>
-
-    <div class="builder-row build-mode-row">
-      <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'dirty-only'"
-        (click)="setBuildPolicy('dirty-only')">Dirty Update</button>
-      <button type="button" class="builder-pill" [class.builder-pill-active]="buildPolicy() === 'force'"
-        (click)="setBuildPolicy('force')">Force Rebuild</button>
-    </div>
-
-    <div class="selected-pipeline-rail">
-      <button *ngFor="let stage of selectedPipelineRail(); let index = index" type="button" class="pipe-node"
-        [ngClass]="'pipe-' + stage.status">
-        <span class="pipe-idx">{{ index + 1 }}</span>
-        <div class="pipe-body">
-          <strong>{{ stage.label }}</strong>
-          <em>{{ stage.status }}</em>
-        </div>
-      </button>
-    </div>
-
-    <div class="selected-recipe-panel">
-      <div class="selected-recipe-copy">
-        <span class="section-kicker">Selected contract focus</span>
-        <strong>{{ selectedCapability().label }}</strong>
-        <small>{{ selectedCapability().description }}</small>
-      </div>
-      <div class="recipe-lane-summary">
-        <span>Scope: {{ buildScopeLabel() }} / {{ scopedNotes().length }} notes</span>
-        <span>Models: {{ selectedCapabilityModelSummary() }}</span>
-        <span>Policy: {{ selectedCapabilityState().runPolicy }} / {{ selectedCapabilityState().mutationPolicy }}</span>
-        <span>Route: {{ selectedCapability().backendRoute }}</span>
-        <span>Inputs: {{ selectedCapability().inputs.join(' / ') }}</span>
-        <span>Outputs: {{ selectedCapability().outputs.join(' / ') }}</span>
-        <span>Service: {{ serviceRequirementLabel(selectedCapabilityState().requiredServices) }}</span>
-        <span>Proof: {{ selectedCapabilityState().outputProbe.detail }}</span>
-        <span *ngIf="selectedCapabilityState().blockedReason">Blocked: {{ selectedCapabilityState().blockedReason }}</span>
       </div>
     </div>
-
-    <div class="backend-map-head compact">
-      <span>Runtime models</span>
-      <strong>{{ warmButtonLabel() }}</strong>
-    </div>
-    <div class="semantic-control model-config-grid">
-      <label>
-        <span class="section-kicker">Embedding model</span>
-        <p-select [options]="models" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)"
-          optionLabel="label" optionValue="id" styleClass="scope-select">
-        </p-select>
-      </label>
-
-      <div class="dimension-grid">
-        <button *ngFor="let dim of truncateDims" type="button" (click)="truncateDim.set(dim)"
-          [ngClass]="truncateDim() === dim ? 'dimension-active' : 'dimension-muted'">
-          {{ dim === 'full' ? 'Full' : dim + 'd' }}
-        </button>
-      </div>
-    </div>
-    <div class="model-lane-grid">
-      <button *ngFor="let lane of modelLaneViews()" type="button" class="model-lane-card"
-        [ngClass]="'lane-' + lane.status" [disabled]="isLaneCardDisabled(lane.id)"
-        (click)="warmModelLaneFromCard(lane.id)">
-        <span>{{ lane.label }}</span>
-        <strong>{{ lane.status }}</strong>
-        <small>{{ lane.detail }}</small>
-        <em>{{ laneCardActionLabel(lane.id, lane.status) }}</em>
-      </button>
-    </div>
-
-    <div class="recipe-actions">
-      <button type="button" class="primary-action" (click)="runSelectedRecipe()"
-        [disabled]="isRecipeDisabled(selectedRecipe())">
-        <ng-icon [name]="isRecipeBusy(selectedRecipe()) ? 'lucideLoader2' : 'lucideSparkles'" class="h-3.5 w-3.5"
-          [class.animate-spin]="isRecipeBusy(selectedRecipe())"></ng-icon>
-        {{ selectedRecipePlan().actionLabel }}
-      </button>
-      <button type="button" class="secondary-action warm-required-action" [ngClass]="warmButtonTone()"
-        (click)="warmSelectedRecipeModels()" [disabled]="isWarmDisabled()">
-        <ng-icon [name]="activeRecipeStep() === 'warm' ? 'lucideLoader2' : 'lucideMicrochip'" class="h-3.5 w-3.5"
-          [class.animate-spin]="activeRecipeStep() === 'warm'"></ng-icon>
-        {{ warmButtonLabel() }}
-      </button>
-      <button type="button" class="secondary-action" (click)="openGraphLens()">
-        <ng-icon name="lucideLayers" class="h-3.5 w-3.5"></ng-icon>
-        Open Graph
-      </button>
-    </div>
-
-    <div class="last-run">
-      <span>Last run</span>
-      <strong>{{ lastRunStatus().label }}</strong>
-      <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
-          lastRunStatus().durationMs }} ms</ng-container></small>
-    </div>
-    </details>
   </section>
 
   <section class="workbench-surface command-surface search-surface">

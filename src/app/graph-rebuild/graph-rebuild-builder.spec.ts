@@ -93,6 +93,10 @@ describe('Phoenix graph rebuild builder', () => {
             memoryState: 3,
             note: 1,
         });
+        expect(snapshot.embeddingTargets
+            .filter((target) => target.kind === 'entity')
+            .map((target) => target.entityKind)
+        ).toEqual(['CHARACTER', 'CHARACTER', 'CHARACTER']);
         expect(snapshot.counters).toMatchObject({
             entities: 3,
             aliases: 1,
@@ -105,7 +109,88 @@ describe('Phoenix graph rebuild builder', () => {
             embeddingTargets: 18,
             nodes: 3,
             edges: 6,
+            structuralComponents: 1,
+            structuralHubs: 3,
         });
+        expect(snapshot.structuralPostProcess).toMatchObject({
+            schemaVersion: 'phoenix-graph-structure/v1',
+            hubEntityIds: ['e-hazel', 'e-kai', 'e-rift'],
+        });
+        expect(snapshot.structuralPostProcess?.components).toHaveLength(1);
+    });
+
+    it('adds deterministic topology roles for structural post-processing', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:structure',
+            noteIds: ['note-1'],
+            entities: [
+                entity('e-kai', 'Kai', []),
+                entity('e-hazel', 'Hazel', []),
+                entity('e-rowan', 'Rowan', []),
+                entity('e-rook', 'Rook', []),
+            ],
+            chunks: [
+                { id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 80, ordinal: 0, source: 'dynamic-chunking' },
+                { id: 'note-1:chunk:1', noteId: 'note-1', start: 81, end: 160, ordinal: 1, source: 'dynamic-chunking' },
+            ],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3),
+                occurrence('note-1', 'e-hazel', 'Hazel', 10, 15),
+                occurrence('note-1', 'e-rowan', 'Rowan', 20, 25),
+                occurrence('note-1', 'e-rook', 'Rook', 90, 94),
+                occurrence('note-1', 'e-rowan', 'Rowan', 100, 105),
+            ],
+            builtAt: 13,
+        });
+
+        const structure = snapshot.structuralPostProcess!;
+        expect(structure.components.map((component) => component.size)).toEqual([4]);
+        expect(structure.bridgeEdgeIds).toEqual(['e-rook:anchored-cooccurrence:e-rowan']);
+        expect(structure.nodes.map((node) => [node.entityId, node.role]).sort()).toEqual([
+            ['e-hazel', 'connector'],
+            ['e-kai', 'connector'],
+            ['e-rook', 'leaf'],
+            ['e-rowan', 'hub'],
+        ]);
+        expect(structure.edges.find((edge) => edge.edgeId === 'e-rook:anchored-cooccurrence:e-rowan')?.role).toBe('bridge');
+        expect(snapshot.graphAwareLinkSuggestions?.map((suggestion) => suggestion.kind)).toEqual(expect.arrayContaining([
+            'bridge_review',
+            'suspicious_leaf',
+        ]));
+        expect(snapshot.counters.structuralBridgeEdges).toBe(1);
+        expect(snapshot.counters.graphAwareLinkSuggestions).toBeGreaterThanOrEqual(2);
+    });
+
+    it('suggests network hub affiliations from semantic status and structural role', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:network',
+            noteIds: ['note-1'],
+            entities: [
+                entity('e-kai', 'Kai', [], 'CHARACTER'),
+                entity('e-allied-table', 'Allied Table', [], 'NETWORK'),
+            ],
+            chunks: [
+                { id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 80, ordinal: 0, source: 'dynamic-chunking' },
+            ],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3),
+                occurrence('note-1', 'e-allied-table', 'Allied Table', 20, 32),
+            ],
+            builtAt: 14,
+        });
+
+        expect(snapshot.graphAwareLinkSuggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: 'hub_affiliation',
+                sourceEntityId: 'e-allied-table',
+                targetEntityId: 'e-kai',
+                suggestedRelationType: 'affiliated_with',
+                semanticStatus: 'review',
+                structuralRole: 'bridge',
+            }),
+        ]));
     });
 
     it('upgrades matching relationship candidates with explicit NLI hints', () => {
@@ -169,11 +254,11 @@ describe('Phoenix graph rebuild builder', () => {
     });
 });
 
-function entity(id: string, label: string, aliases: string[]): RegisteredEntity {
+function entity(id: string, label: string, aliases: string[], kind = 'CHARACTER'): RegisteredEntity {
     return {
         id,
         label,
-        kind: 'CHARACTER' as any,
+        kind: kind as any,
         aliases,
         firstNote: `${id}-note`,
         mentionsByNote: new Map(),

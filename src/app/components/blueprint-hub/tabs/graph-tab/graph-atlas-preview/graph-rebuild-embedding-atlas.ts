@@ -13,6 +13,7 @@ import type {
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
 import { relationHslFromText } from './graph-relation-visual-style';
+import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
 const DIMS = 32;
 const LIMIT = 420;
@@ -21,9 +22,11 @@ export function buildGraphRebuildEmbeddingAtlas(
     snapshot: GraphRebuildSnapshot,
     manifold: AtlasManifoldMode,
 ): EmbeddingAtlasData {
+    const entityKindById = new Map(snapshot.nodes.map((node) => [node.entityId, node.kind]));
     const selected = snapshot.embeddingTargets
         .filter((target) => target.text.trim() || target.label.trim())
-        .slice(0, LIMIT);
+        .slice(0, LIMIT)
+        .map((target) => hydrateTargetEntityKind(target, entityKindById));
     const vectors = selected.map((target) => textVector(targetText(target)));
     const nodes = selected.map((target, index) =>
         targetNode(target, vectors[index], index, selected.length, manifold),
@@ -53,6 +56,15 @@ export function buildGraphRebuildEmbeddingAtlas(
     };
 }
 
+function hydrateTargetEntityKind(
+    target: GraphRebuildEmbeddingTarget,
+    entityKindById: Map<string, string>,
+): GraphRebuildEmbeddingTarget {
+    if (target.entityKind || !target.entityId) return target;
+    const entityKind = entityKindById.get(target.entityId);
+    return entityKind ? { ...target, entityKind } : target;
+}
+
 function targetNode(
     target: GraphRebuildEmbeddingTarget,
     vector: Float32Array,
@@ -64,7 +76,7 @@ function targetNode(
     return {
         id: target.id,
         label: target.label || target.id,
-        kind: displayKind(target.kind),
+        kind: targetRenderKind(target),
         totalMentions: Math.max(1, target.evidenceIds.length),
         atlasX: point.x,
         atlasY: point.y,
@@ -73,9 +85,11 @@ function targetNode(
         metadata: {
             sourceType: target.kind,
             sourceId: target.sourceId,
+            entityKind: target.entityKind,
             noteId: target.noteId,
             chunkId: target.chunkId,
             sourceEntityId: target.entityId,
+            graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
             manifold,
             preview: target.text || target.label,
@@ -138,7 +152,7 @@ function dedupeEdges(edges: GalaxyInputEdge[]): GalaxyInputEdge[] {
 }
 
 function targetText(target: GraphRebuildEmbeddingTarget): string {
-    return `${target.kind} ${target.label} ${target.text} ${target.noteId || ''} ${target.chunkId || ''}`;
+    return `${target.kind} ${target.entityKind || ''} ${target.label} ${target.text} ${target.noteId || ''} ${target.chunkId || ''}`;
 }
 
 function textVector(text: string): Float32Array {
@@ -182,10 +196,20 @@ function displayKind(kind: string): string {
     return String(kind || 'target').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
+function targetRenderKind(target: GraphRebuildEmbeddingTarget): string {
+    if (displayKind(target.kind) === 'entity' && target.entityKind) {
+        return displayKind(target.entityKind);
+    }
+    return displayKind(target.kind);
+}
+
 function targetColorHsl(target: GraphRebuildEmbeddingTarget): string {
     const kind = displayKind(target.kind);
     if (kind === 'graph-fact') {
         return relationHslFromText(target.label, target.text, target.sourceId) || kindHsl(kind);
+    }
+    if ((kind === 'entity' || kind === 'anchor') && target.entityKind) {
+        return entityColorStore.getRawHsl(target.entityKind.toUpperCase() as any);
     }
     return kindHsl(kind);
 }

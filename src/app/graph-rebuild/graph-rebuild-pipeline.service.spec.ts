@@ -135,6 +135,7 @@ describe('GraphRebuildPipelineService', () => {
                 expect.objectContaining({ mode: 'lorentz', status: 'synced' }),
             ]),
         }));
+        expect(service.lastSnapshot()?.id).toBe('snapshot-1');
     });
 
     it('does not rewrite entity kinds from Angular location context during rebuild', async () => {
@@ -189,6 +190,7 @@ function createGraphRebuildMock() {
                 acceptedAnchors: 2,
                 embeddingTargets: 3,
                 embeddingVectors: 3,
+                graphAwareLinkSuggestions: 2,
                 dropReasons: {
                     missingEntity: 0,
                     invalidSpan: 0,

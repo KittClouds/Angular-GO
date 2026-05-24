@@ -17,6 +17,7 @@ import {
   lucideMoreVertical,
   lucideSearch,
   lucideSparkles,
+  lucideX,
   lucideZap,
 } from '@ng-icons/lucide';
 import { InputTextModule } from 'primeng/inputtext';
@@ -35,7 +36,7 @@ import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
 import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
-import type { GraphIndexRunRequest, GraphIndexRunScope } from '../../graph-rebuild/graph-rebuild-snapshot';
+import type { GraphIndexRunRequest, GraphIndexRunScope, GraphRebuildLinkSuggestion } from '../../graph-rebuild/graph-rebuild-snapshot';
 import { smartGraphRegistry } from '../../lib/registry';
 import type {
   AtlasCapabilityRuntimeState,
@@ -120,6 +121,7 @@ type BuilderCapabilityGroup = {
     lucideMoreVertical,
     lucideSearch,
     lucideSparkles,
+    lucideX,
     lucideZap,
   })],
   templateUrl: './search-panel.component.html',
@@ -177,6 +179,7 @@ export class SearchPanelComponent implements OnInit {
   readonly graphTargetQuery = signal('');
   readonly collapsedCapabilityGroups = signal<string[]>([]);
   readonly buildPolicy = signal<'dirty-only' | 'force'>('dirty-only');
+  readonly linkSuggestionDecisions = signal<Record<string, 'accepted' | 'rejected'>>({});
 
   readonly laneOptions = RETRIEVAL_LANE_OPTIONS;
   readonly models = EMBEDDING_MODELS;
@@ -358,6 +361,17 @@ export class SearchPanelComponent implements OnInit {
     }
     return this.commandStatus().lastRun;
   });
+  readonly graphAwareLinkSuggestionTotal = computed(() =>
+    this.fullAtlasPipeline.lastSnapshot()?.counters.graphAwareLinkSuggestions
+      ?? this.fullAtlasPipeline.lastReceipt()?.counters.graphAwareLinkSuggestions
+      ?? this.fullAtlasPipeline.lastSnapshot()?.graphAwareLinkSuggestions?.length
+      ?? 0
+  );
+  readonly graphAwareLinkSuggestions = computed(() =>
+    (this.fullAtlasPipeline.lastSnapshot()?.graphAwareLinkSuggestions || [])
+      .filter((suggestion) => !this.linkSuggestionDecisions()[this.linkSuggestionDecisionKey(suggestion)])
+  );
+  readonly graphAwareLinkSuggestionCount = computed(() => this.graphAwareLinkSuggestions().length);
   readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
   readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
   readonly selectedCapabilityState = computed(() =>
@@ -831,6 +845,66 @@ export class SearchPanelComponent implements OnInit {
     if (this.activeLaneWarm() === laneId) return 'warming';
     if (laneId === 'manifoldProjection') return 'read-only';
     return status === 'ready' ? 'warm' : 'click to warm';
+  }
+
+  linkSuggestionKindLabel(kind: GraphRebuildLinkSuggestion['kind']): string {
+    switch (kind) {
+      case 'bridge_review': return 'Bridge';
+      case 'hub_affiliation': return 'Hub';
+      case 'backbone_promotion': return 'Backbone';
+      case 'missing_triangle': return 'Triangle';
+      case 'suspicious_leaf': return 'Leaf';
+    }
+  }
+
+  linkSuggestionTitle(suggestion: GraphRebuildLinkSuggestion): string {
+    return `${this.compactEntityId(suggestion.sourceEntityId)} -> ${this.compactEntityId(suggestion.targetEntityId)}`;
+  }
+
+  acceptLinkSuggestion(suggestion: GraphRebuildLinkSuggestion, event?: Event): void {
+    event?.stopPropagation();
+    smartGraphRegistry.createEdge(
+      suggestion.sourceEntityId,
+      suggestion.targetEntityId,
+      suggestion.suggestedRelationType,
+      {
+        weight: suggestion.confidence,
+        provenance: 'manual',
+        attributes: {
+          source: 'graph_aware_link_suggestion',
+          suggestionId: suggestion.id,
+          kind: suggestion.kind,
+          semanticStatus: suggestion.semanticStatus,
+          structuralRole: suggestion.structuralRole,
+          evidenceIds: suggestion.evidenceIds,
+        },
+      },
+    );
+    this.setLinkSuggestionDecision(suggestion, 'accepted');
+    this.notice.set(`Accepted graph-aware link: ${this.linkSuggestionTitle(suggestion)}`);
+  }
+
+  rejectLinkSuggestion(suggestion: GraphRebuildLinkSuggestion, event?: Event): void {
+    event?.stopPropagation();
+    this.setLinkSuggestionDecision(suggestion, 'rejected');
+    this.notice.set(`Rejected link review: ${this.linkSuggestionTitle(suggestion)}`);
+  }
+
+  confidencePercent(value: number): number {
+    return Math.round(Math.max(0, Math.min(1, value)) * 100);
+  }
+
+  compactEntityId(id: string): string {
+    return id.replace(/^entity:/, '').replace(/^e-/, '');
+  }
+
+  private setLinkSuggestionDecision(suggestion: GraphRebuildLinkSuggestion, decision: 'accepted' | 'rejected'): void {
+    const key = this.linkSuggestionDecisionKey(suggestion);
+    this.linkSuggestionDecisions.update((decisions) => ({ ...decisions, [key]: decision }));
+  }
+
+  private linkSuggestionDecisionKey(suggestion: GraphRebuildLinkSuggestion): string {
+    return `${this.fullAtlasPipeline.lastSnapshot()?.id || 'latest'}:${suggestion.id}`;
   }
 
   isLaneCardDisabled(laneId: AtlasModelLaneId): boolean {

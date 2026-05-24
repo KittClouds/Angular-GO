@@ -70,6 +70,16 @@ export const DEFAULT_ENTITY_SOURCE_COLORS: Record<EntitySourceSystem, string> = 
     legacy: '0 0% 50%',
 };
 
+export function normalizeEntityKind(kind: EntityKind | string | null | undefined): EntityKind | null {
+    const normalized = String(kind || '').trim().toUpperCase().replace(/[-\s]+/g, '_') as EntityKind;
+    return Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_COLORS, normalized) ? normalized : null;
+}
+
+export function normalizeEntitySourceSystem(source: EntitySourceSystem | string | null | undefined): EntitySourceSystem | null {
+    const normalized = String(source || '').trim().toLowerCase().replace(/[-\s]+/g, '_') as EntitySourceSystem;
+    return Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_SOURCE_COLORS, normalized) ? normalized : null;
+}
+
 // ============================================
 // STORE CLASS - PURE RUNTIME REGISTRY
 // No localStorage persistence - CSS variables are the source of truth
@@ -164,49 +174,37 @@ class EntityColorStore {
      * Returns: '--entity-character'
      */
     getCssVarName(kind: EntityKind | string): string {
-        const normalized = kind.toUpperCase();
-        // Check if known, otherwise fallback to UNKNOWN
-        // We cast to any to key check on the Record
-        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_COLORS, normalized)) {
-            return `--entity-${kind.toLowerCase().replace(/_/g, '-')}`;
-        }
-        return '--entity-unknown';
+        return `--entity-${(normalizeEntityKind(kind) ?? 'UNKNOWN').toLowerCase().replace(/_/g, '-')}`;
     }
 
     getTextCssVarName(kind: EntityKind | string): string {
-        const normalized = kind.toUpperCase();
-        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_TEXT_COLORS, normalized)) {
-            return `--entity-${kind.toLowerCase().replace(/_/g, '-')}-text`;
-        }
-        return '--entity-unknown-text';
+        return `--entity-${(normalizeEntityKind(kind) ?? 'UNKNOWN').toLowerCase().replace(/_/g, '-')}-text`;
     }
 
     getSourceCssVarName(source: EntitySourceSystem | string): string {
-        const normalized = source.toLowerCase();
-        if (Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_SOURCE_COLORS, normalized)) {
-            return `--entity-source-${normalized.replace(/_/g, '-')}`;
-        }
-        return '--entity-source-legacy';
+        return `--entity-source-${(normalizeEntitySourceSystem(source) ?? 'legacy').replace(/_/g, '-')}`;
     }
 
     /**
      * Get raw HSL value for pill color (without hsl() wrapper)
      * Returns: '280 70% 60%'
      */
-    getRawHsl(kind: EntityKind): string {
-        return this.colors[kind] || '220 10% 50%'; // Gray fallback
+    getRawHsl(kind: EntityKind | string): string {
+        const normalized = normalizeEntityKind(kind);
+        return normalized ? this.colors[normalized] : '220 10% 50%';
     }
 
     /**
      * Get raw HSL value for text color (without hsl() wrapper)
      * Returns: '280 70% 60%'
      */
-    getRawTextHsl(kind: EntityKind): string {
-        return this.textColors[kind] || '220 10% 50%'; // Gray fallback
+    getRawTextHsl(kind: EntityKind | string): string {
+        const normalized = normalizeEntityKind(kind);
+        return normalized ? this.textColors[normalized] : '220 10% 50%';
     }
 
     getRawSourceHsl(source: EntitySourceSystem | string): string {
-        return this.sourceColors[source as EntitySourceSystem] || DEFAULT_ENTITY_SOURCE_COLORS.legacy;
+        return this.sourceColors[normalizeEntitySourceSystem(source) ?? 'legacy'] || DEFAULT_ENTITY_SOURCE_COLORS.legacy;
     }
 
     /**

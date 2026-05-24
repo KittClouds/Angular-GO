@@ -53,6 +53,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private shells: THREE.Group | null = null;
     private edges: THREE.LineSegments | null = null;
     private labels: LabelSprite[] = [];
+    private focusMask: GalaxyFocusMask | null = null;
     private selectedId: string | null = null;
     private hoverId: string | null = null;
     private settings: GalaxyRenderSettings = mergeGalaxySettings();
@@ -151,7 +152,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     render(): void {
         const renderer = this.renderer;
         if (!renderer) return;
-        this.particles.update(this.sceneData, this.positions(), this.settings, performance.now());
+        this.particles.update(this.sceneData, this.positions(), this.settings, performance.now(), this.focusMask);
         renderer.render(this.scene, this.camera());
     }
 
@@ -305,6 +306,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         if (!data) return;
         const positions = this.mode === '2d' ? data.positions2d : data.positions3d;
         const focus = buildGalaxyFocusMask(data, this.selectedId, this.hoverId);
+        this.focusMask = focus;
         this.updateGroupShells(data);
         this.updateGuideFocus(data, focus);
         this.updateInstances(data, positions, focus);
@@ -318,6 +320,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const positions = this.positions();
         if (!positions) return;
         const focus = buildGalaxyFocusMask(data, this.selectedId, this.hoverId);
+        this.focusMask = focus;
         this.updateGroupShells(data);
         this.updateGuideFocus(data, focus);
         this.updateInstances(data, positions, focus);

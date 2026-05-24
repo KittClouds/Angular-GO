@@ -2,6 +2,9 @@ import type {
     GraphRebuildChunk,
     GraphRebuildEdge,
     GraphRebuildEntityAnchor,
+    GraphRebuildEventAspect,
+    GraphRebuildEventAspectKind,
+    GraphRebuildEventCompletion,
     GraphRebuildEpisode,
     GraphRebuildEvent,
     GraphRebuildMemoryState,
@@ -91,7 +94,7 @@ function deriveRelationships(
         for (let j = i + 1; j < entities.length; j += 1) {
             const left = entities[i];
             const right = entities[j];
-            const relationType = inferRelationType(pairWindow(lower, chunk, left, right));
+            const relationType = inferRelationType(pairWindow(lower, chunk, left, right), chunk);
             if (!relationType) continue;
             const evidence = unique([...left.anchorIds, ...right.anchorIds]);
             const id = `typed:${chunk.noteId}:${chunk.ordinal}:${left.id}:${relationType}:${right.id}`;
@@ -122,7 +125,9 @@ function pairWindow(lower: string, chunk: GraphRebuildChunk, left: EntityInChunk
     return lower.slice(Math.max(0, localStart - 160), Math.min(lower.length, localEnd + 160));
 }
 
-function inferRelationType(text: string): string | null {
+function inferRelationType(text: string, chunk?: GraphRebuildChunk): string | null {
+    if (chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) return 'command_or_service_tie';
+    if (chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) return 'documented_in';
     if (hasAny(text, [' father', ' daughter', ' grandfather', ' family'])) return 'family_or_house_tie';
     if (hasAny(text, ['command', 'admiral', 'phantom', 'military'])) return 'command_or_service_tie';
     if (hasAny(text, ['approved', 'approval', 'accepted', 'agreed', 'proceed'])) return 'approves_or_accepts';
@@ -154,7 +159,7 @@ function upsertTypedEdge(edgeMap: Map<string, GraphRebuildEdge>, left: string, r
 }
 
 function deriveEvent(chunk: GraphRebuildChunk, lower: string, entities: EntityInChunk[], events: GraphRebuildEvent[]): void {
-    const type = inferEventType(lower);
+    const type = inferEventType(lower, chunk);
     if (!type) return;
     const picked = entities.slice(0, 6);
     events.push({
@@ -165,17 +170,51 @@ function deriveEvent(chunk: GraphRebuildChunk, lower: string, entities: EntityIn
         entityIds: unique(picked.map((entity) => entity.id)),
         evidenceAnchorIds: unique(picked.flatMap((entity) => entity.anchorIds)),
         confidence: 0.68,
+        aspect: inferEventAspect(lower, type, chunk),
     });
 }
 
-function inferEventType(text: string): string | null {
+function inferEventType(text: string, chunk?: GraphRebuildChunk): string | null {
+    if (chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) return 'authority_chain_event';
+    if (chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) return 'evidence_packet_event';
     if (hasAny(text, ['approved', 'signed', 'proceed'])) return 'approval_event';
     if (hasAny(text, ['warn', 'coercion', 'risk', 'prohibited'])) return 'warning_event';
+    if (hasAny(text, ['keeps ', 'kept ', 'continues', 'continued', 'started', 'began', 'pulses', 'pulse ', 'selecting', 'selected', 'shifted', 'expanded'])) return 'process_event';
     if (hasAny(text, ['entered', 'arrived', 'came in', 'opened the door'])) return 'arrival_event';
     if (hasAny(text, ['asked', 'answered', 'said', 'spoke', 'read'])) return 'dialogue_event';
     if (hasAny(text, ['kiss', 'took his hand', 'handed', 'gave'])) return 'contact_or_transfer_event';
     if (hasAny(text, ['stood', 'watched', 'looked', 'turned'])) return 'positioning_event';
     return null;
+}
+
+function inferEventAspect(text: string, eventType: string, chunk: GraphRebuildChunk): GraphRebuildEventAspect {
+    if (hasAny(text, HABITUAL_CUES)) return aspect('habitual', 'ongoing', text, HABITUAL_CUES, 'repeated_or_customary_event_shape', 0.78);
+    if (hasAny(text, PLANNED_CUES)) return aspect('endeavor', 'planned', text, PLANNED_CUES, 'intended_or_authorized_event_shape', 0.74);
+    if (hasAny(text, ATTEMPT_CUES)) return aspect('endeavor', 'attempted', text, ATTEMPT_CUES, 'attempted_event_shape', 0.72);
+    if (hasAny(text, ONGOING_CUES)) return aspect('process', 'ongoing', text, ONGOING_CUES, 'ongoing_process_event_shape', 0.72);
+    if (hasAny(text, STATE_CUES) || eventType === 'positioning_event') return aspect('state', 'ongoing', text, STATE_CUES, 'stative_or_position_event_shape', 0.68);
+    if (eventType === 'dialogue_event') return aspect('activity', 'ongoing', text, DIALOGUE_CUES, 'unbounded_dialogue_activity', 0.66);
+    if (hasAny(text, COMPLETED_CUES) || eventType.endsWith('_event')) return aspect('performance', 'completed', text, COMPLETED_CUES, 'bounded_completed_event_shape', 0.7);
+    const role = chunk.meaningFrame?.role;
+    if (role === 'transition') return aspect('transition', 'unknown', text, [], 'chunk_transition_shape', 0.62);
+    return aspect('activity', 'unknown', text, [], 'fallback_unbounded_event_shape', 0.58);
+}
+
+function aspect(
+    kind: GraphRebuildEventAspectKind,
+    completion: GraphRebuildEventCompletion,
+    text: string,
+    cuePool: readonly string[],
+    rationale: string,
+    confidence: number,
+): GraphRebuildEventAspect {
+    return {
+        kind,
+        completion,
+        confidence,
+        cues: cuePool.filter((cue) => text.includes(cue)).slice(0, 8),
+        rationale,
+    };
 }
 
 function deriveMemory(chunk: GraphRebuildChunk, lower: string, entities: EntityInChunk[], seen: Set<string>, memory: GraphRebuildMemoryState[]): void {
@@ -239,10 +278,18 @@ function buildCausalEdges(events: GraphRebuildEvent[], chunks: GraphRebuildChunk
     return out;
 }
 
-function hasAny(text: string, needles: string[]): boolean {
+function hasAny(text: string, needles: readonly string[]): boolean {
     return needles.some((needle) => text.includes(needle));
 }
 
 function unique<T>(values: T[]): T[] {
     return [...new Set(values)];
 }
+
+const HABITUAL_CUES = ['keeps ', 'kept ', 'every ', 'often', 'usually', 'always', 'again', 'repeated'] as const;
+const PLANNED_CUES = ['planned', 'wanted', 'needed', 'would ', 'could ', 'may ', 'might ', 'preparing', 'assigned', 'authorized'] as const;
+const ATTEMPT_CUES = ['tried', 'trying', 'attempt', 'attempted', 'struggled'] as const;
+const ONGOING_CUES = ['continues', 'continued', 'started', 'began', 'moving', 'selecting', 'expanding', 'breathing', 'stirred'] as const;
+const STATE_CUES = [' is ', ' was ', ' are ', ' were ', 'remained', 'stayed', 'stood', 'sat ', 'sits ', 'has ', 'had '] as const;
+const DIALOGUE_CUES = ['said', 'asked', 'answered', 'spoke', 'replied', 'murmured'] as const;
+const COMPLETED_CUES = ['approved', 'signed', 'entered', 'arrived', 'opened', 'handed', 'gave', 'took ', 'read ', 'moved', 'walked', 'warned'] as const;

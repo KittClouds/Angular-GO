@@ -59,9 +59,11 @@ export class GraphRebuildPipelineService {
     private readonly ner = inject(NerService);
     private readonly runningState = signal(false);
     private readonly lastReceiptState = signal<GraphIndexRunReceipt | null>(null);
+    private readonly lastSnapshotState = signal<GraphRebuildSnapshot | null>(null);
 
     readonly running = computed(() => this.runningState());
     readonly lastReceipt = computed(() => this.lastReceiptState());
+    readonly lastSnapshot = computed(() => this.lastSnapshotState());
 
     modelReadiness(request: GraphIndexRunRequest): GraphIndexModelReadiness[] {
         const options = this.atlasOptions(request);
@@ -151,9 +153,10 @@ export class GraphRebuildPipelineService {
                         acceptedRelationships: snapshot.counters.acceptedRelationships,
                         reviewRelationships: snapshot.counters.reviewRelationships,
                         rejectedRelationships: snapshot.counters.rejectedRelationships,
+                        linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
                         nliHints: relationshipHints.length,
                     },
-                    message: `${snapshot.counters.nodes} nodes / ${snapshot.counters.edges} edges`,
+                    message: `${snapshot.counters.nodes} nodes / ${snapshot.counters.edges} edges / ${snapshot.counters.graphAwareLinkSuggestions || 0} link suggestions`,
                 };
             });
             stageReceipts.push(graphStage);
@@ -186,6 +189,7 @@ export class GraphRebuildPipelineService {
                     ? `Full Atlas Index built ${completedSnapshot.counters.nodes} nodes and ${completedSnapshot.counters.edges} edges.`
                     : 'Full Atlas Index completed without a graph snapshot.',
             };
+            this.lastSnapshotState.set(completedSnapshot);
             this.lastReceiptState.set(receipt);
             await this.graphRebuild.persistRunReceipt(receipt);
             return { receipt, snapshot: completedSnapshot! };
@@ -211,6 +215,7 @@ export class GraphRebuildPipelineService {
                 dropReasons: failedSnapshot?.counters.dropReasons || emptyDropReasons(),
                 message: error instanceof Error ? error.message : String(error),
             };
+            if (failedSnapshot) this.lastSnapshotState.set(failedSnapshot);
             this.lastReceiptState.set(failedReceipt);
             throw error;
         } finally {

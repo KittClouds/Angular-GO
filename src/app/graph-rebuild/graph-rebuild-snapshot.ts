@@ -6,6 +6,36 @@ export type GraphRebuildAnchorSource = EntityOccurrence['source'] | 'accepted_su
 export type GraphRebuildEdgeType = string;
 export type GraphRebuildEmbeddingTargetKind = string;
 export type GraphRebuildAdjudicationStatus = 'accepted' | 'review' | 'rejected';
+export type GraphRebuildChunkRole =
+    | 'dialogue'
+    | 'scene_action'
+    | 'exposition_packet'
+    | 'authority_chain'
+    | 'evidence_block'
+    | 'transition'
+    | 'mixed';
+
+export interface GraphRebuildChunkEntityPrior {
+    surface: string;
+    likelyKinds: string[];
+    reason: string;
+    confidence: number;
+}
+
+export interface GraphRebuildMeaningFrame {
+    role: GraphRebuildChunkRole;
+    splitReason: string;
+    breakPressure: number;
+    mergePressure: number;
+    entityPriors: GraphRebuildChunkEntityPrior[];
+    eventCues: string[];
+    modalCues: string[];
+    temporalCues: string[];
+    authorityCues: string[];
+    evidenceCues: string[];
+    carryoverIn: string[];
+    carryoverOut: string[];
+}
 
 export interface GraphRebuildChunk {
     id: string;
@@ -15,6 +45,9 @@ export interface GraphRebuildChunk {
     ordinal: number;
     source: 'dynamic-chunking' | 'note-block' | 'note-fallback' | 'anchor-derived';
     textHash?: string;
+    role?: GraphRebuildChunkRole;
+    splitReason?: string;
+    meaningFrame?: GraphRebuildMeaningFrame;
 }
 
 export interface GraphRebuildMention {
@@ -83,6 +116,32 @@ export interface GraphRebuildRelationshipHint {
     evidence?: string[];
 }
 
+export type GraphRebuildEventAspectKind =
+    | 'state'
+    | 'activity'
+    | 'process'
+    | 'performance'
+    | 'endeavor'
+    | 'habitual'
+    | 'transition';
+
+export type GraphRebuildEventCompletion =
+    | 'completed'
+    | 'ongoing'
+    | 'planned'
+    | 'attempted'
+    | 'reported'
+    | 'hypothetical'
+    | 'unknown';
+
+export interface GraphRebuildEventAspect {
+    kind: GraphRebuildEventAspectKind;
+    completion: GraphRebuildEventCompletion;
+    confidence: number;
+    cues: string[];
+    rationale: string;
+}
+
 export interface GraphRebuildEvent {
     id: string;
     noteId: string;
@@ -91,6 +150,7 @@ export interface GraphRebuildEvent {
     entityIds: string[];
     evidenceAnchorIds: string[];
     confidence: number;
+    aspect?: GraphRebuildEventAspect;
 }
 
 export interface GraphRebuildEpisode {
@@ -128,6 +188,7 @@ export interface GraphRebuildEmbeddingTarget {
     noteId?: string;
     chunkId?: string;
     entityId?: string;
+    entityKind?: string;
     label: string;
     text: string;
     evidenceIds: string[];
@@ -144,6 +205,62 @@ export interface GraphRebuildProjectionRef {
     targetId: string;
     manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'hyperbolic';
     projectionId: string;
+}
+
+export type GraphRebuildStructuralNodeRole = 'isolated' | 'leaf' | 'connector' | 'hub' | 'bridge';
+export type GraphRebuildStructuralEdgeRole = 'local' | 'backbone' | 'bridge';
+
+export interface GraphRebuildStructuralComponent {
+    id: string;
+    nodeIds: string[];
+    edgeIds: string[];
+    size: number;
+    density: number;
+}
+
+export interface GraphRebuildStructuralNode {
+    entityId: string;
+    role: GraphRebuildStructuralNodeRole;
+    degree: number;
+    componentId: string;
+}
+
+export interface GraphRebuildStructuralEdge {
+    edgeId: string;
+    role: GraphRebuildStructuralEdgeRole;
+    sourceId: string;
+    targetId: string;
+    componentId: string;
+}
+
+export interface GraphRebuildStructuralPostProcess {
+    schemaVersion: 'phoenix-graph-structure/v1';
+    components: GraphRebuildStructuralComponent[];
+    nodes: GraphRebuildStructuralNode[];
+    edges: GraphRebuildStructuralEdge[];
+    hubEntityIds: string[];
+    bridgeEdgeIds: string[];
+}
+
+export type GraphRebuildLinkSuggestionKind =
+    | 'bridge_review'
+    | 'hub_affiliation'
+    | 'backbone_promotion'
+    | 'missing_triangle'
+    | 'suspicious_leaf';
+
+export interface GraphRebuildLinkSuggestion {
+    id: string;
+    kind: GraphRebuildLinkSuggestionKind;
+    sourceEntityId: string;
+    targetEntityId: string;
+    suggestedRelationType: string;
+    status: 'review' | 'confirmed';
+    confidence: number;
+    semanticStatus: GraphRebuildAdjudicationStatus | 'none';
+    structuralRole: GraphRebuildStructuralEdgeRole | GraphRebuildStructuralNodeRole | 'shared_component';
+    rationale: string[];
+    evidenceIds: string[];
 }
 
 export interface GraphRebuildDropReasons {
@@ -205,6 +322,12 @@ export interface GraphRebuildCounters {
     projectionRefs: number;
     nodes: number;
     edges: number;
+    structuralComponents?: number;
+    structuralHubs?: number;
+    structuralBridgeEdges?: number;
+    graphAwareLinkSuggestions?: number;
+    meaningFrameChunks?: number;
+    eventAspects?: number;
     dropReasons: GraphRebuildDropReasons;
     resolution?: GraphRebuildResolutionCounters;
 }
@@ -231,6 +354,8 @@ export interface GraphRebuildSnapshot {
     projectionRefs: GraphRebuildProjectionRef[];
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
+    structuralPostProcess?: GraphRebuildStructuralPostProcess;
+    graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
     counters: GraphRebuildCounters;
     resolutionSuggestions?: GraphRebuildResolutionSuggestion[];
 }

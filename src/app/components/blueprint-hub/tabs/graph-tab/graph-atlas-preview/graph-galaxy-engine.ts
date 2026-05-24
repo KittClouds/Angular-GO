@@ -1,4 +1,8 @@
-import { entityColorStore } from '../../../../../lib/store/entityColorStore';
+import {
+    entityColorStore,
+    normalizeEntityKind,
+    normalizeEntitySourceSystem,
+} from '../../../../../lib/store/entityColorStore';
 import { applyLorentzTreeLayout } from './graph-galaxy-lorentz-layout';
 
 export type GalaxyLabelMode = 'hover' | 'selected' | 'important' | 'always' | 'off';
@@ -70,6 +74,7 @@ export interface GalaxyRenderableNode {
         sourceId?: string;
         sourceTitle?: string;
         sourceType?: string;
+        sourceSystem?: string;
         noteId?: string;
         galaxyId?: string;
         galaxyRole?: 'primary' | 'context';
@@ -222,7 +227,7 @@ export function buildGalaxyScene(
             baseY: yy,
             baseZ: z,
             radius: Math.min(5.8, 2.1 + Math.sqrt(Math.max(1, entity.totalMentions || 1)) * 0.32),
-            ...hslToRgb(entity.colorHsl || entityColorStore.getRawHsl(entity.kind as any)),
+            ...hslToRgb(resolveGalaxyNodeColorHsl(entity)),
             sx: 0,
             sy: 0,
             depth: 0,
@@ -1156,6 +1161,7 @@ const ENTITY_RENDER_KINDS = new Set([
     'npc',
     'item',
     'faction',
+    'network',
     'organization',
     'event',
     'concept',
@@ -1172,6 +1178,17 @@ function semanticNodePriority(entity: GalaxyRenderableNode): number {
 
 function normalizeRenderKind(kind: string): string {
     return kind.trim().toLowerCase().replace(/[_\s]+/g, '-');
+}
+
+export function resolveGalaxyNodeColorHsl(entity: GalaxyRenderableNode): string {
+    const metadata = entity.metadata || {};
+    const entityKind = normalizeEntityKind(stringValue(metadata['entityKind']) || entity.kind);
+    if (entityKind) return entityColorStore.getRawHsl(entityKind);
+
+    const sourceSystem = normalizeEntitySourceSystem(stringValue(metadata['sourceSystem']));
+    if (sourceSystem) return entityColorStore.getRawSourceHsl(sourceSystem);
+
+    return entity.colorHsl || entityColorStore.getRawHsl(entity.kind);
 }
 
 export function hslToRgb(rawHsl: string): Rgb {
