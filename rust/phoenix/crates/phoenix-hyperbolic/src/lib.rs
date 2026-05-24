@@ -6,8 +6,13 @@
 
 pub mod poincare;
 pub mod lorentz_tree;
+pub mod product_manifold;
+mod product_manifold_math;
 pub mod shard;
 pub mod tangent;
+
+#[cfg(test)]
+mod product_manifold_tests;
 
 use memmap2::{Mmap, MmapMut};
 use rand::{prelude::*, thread_rng};

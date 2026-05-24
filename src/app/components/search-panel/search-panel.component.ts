@@ -1255,6 +1255,7 @@ const BUILDER_CAPABILITY_IDS: AtlasCapabilityId[] = [
   'hybridManifold',
   'hopfProjection',
   'lorentzForest',
+  'productManifold',
   'retrievalWalk',
   'galaxyVisualization',
 ];
@@ -1289,7 +1290,7 @@ function recipeForCapability(id: AtlasCapabilityId): AtlasRecipeId {
   }
   if (id === 'nliAdjudication') return 'adjudicatedSemanticGraph';
   if (id === 'semanticEmbedding' || id === 'semanticAtlas' || id === 'semanticCandidate') return 'semanticGraph';
-  if (id === 'hybridManifold' || id === 'hopfProjection' || id === 'lorentzForest') return 'semanticGraph';
+  if (id === 'hybridManifold' || id === 'hopfProjection' || id === 'lorentzForest' || id === 'productManifold') return 'semanticGraph';
   return 'textGraph';
 }
 

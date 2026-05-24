@@ -1,4 +1,5 @@
 import type { GalaxyEdge, GalaxyLorentzGuide, GalaxyNode, Rgb } from './graph-galaxy-engine';
+import { GRAPH_RELATION_FAMILY_HSL, relationFamilyFromText } from './graph-relation-visual-style';
 
 const LORENTZ_SCENE_RADIUS = 2.18;
 const LORENTZ_RING_SEGMENTS = 96;
@@ -22,6 +23,7 @@ const KIND_HSL: Record<string, string> = {
     species: '286 64% 66%',
     powerSystem: '292 80% 66%',
     documentStructure: '214 78% 62%',
+    ...GRAPH_RELATION_FAMILY_HSL,
 };
 
 export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
@@ -57,8 +59,12 @@ export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[])
         link.curve *= 0.82 + Math.min(0.5, levelDelta * 0.12);
     }
 
+    const membershipGuides = buildMembershipGuides(nodes, links);
+    const productRelationGuides = membershipGuides.length ? [] : buildProductRelationGuides(nodes, links);
+
     return [
-        ...buildMembershipGuides(nodes, links),
+        ...membershipGuides,
+        ...productRelationGuides,
         ...buildRootLaneGuides(nodes),
         ...buildLevelShellGuides(nodes),
         buildWAxisGuide(),
@@ -94,6 +100,44 @@ function buildMembershipGuides(nodes: GalaxyNode[], links: GalaxyEdge[]): Galaxy
             level,
             guideKind: 'membership',
             guideWeight: 0.72 + Math.min(0.5, link.confidence * 0.2),
+            ...rgbForKind(treeKind),
+        });
+    }
+    return guides
+        .sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id))
+        .slice(0, LORENTZ_MAX_MEMBERSHIP_GUIDES);
+}
+
+function buildProductRelationGuides(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
+    if (!nodes.some(isProductNode)) return [];
+    const guides: GalaxyLorentzGuide[] = [];
+    const seen = new Set<string>();
+    for (const link of links) {
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        if (!source || !target) continue;
+        const key = `${source.entity.id}->${target.entity.id}:${link.type}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const sourceInfo = lorentzNodeInfo(source);
+        const targetInfo = lorentzNodeInfo(target);
+        const treeKind = productTreeKind(link, source, target, sourceInfo, targetInfo);
+        const level = Math.max(
+            1,
+            sourceInfo?.level ?? productFallbackLevel(source),
+            targetInfo?.level ?? productFallbackLevel(target),
+        );
+        const confidence = clamp(finite(link.confidence), 0.12, 1);
+        guides.push({
+            id: `lorentz:product-guide:${link.id}`,
+            nodeIds: [source.entity.id, target.entity.id],
+            positions3d: laneSegments(source, target, level, treeKind),
+            importance: Math.max(source.radius, target.radius) * 0.62 + confidence,
+            treeId: 'product:graph-relations',
+            treeKind,
+            level,
+            guideKind: 'membership',
+            guideWeight: 0.52 + Math.min(0.3, confidence * 0.24),
             ...rgbForKind(treeKind),
         });
     }
@@ -271,6 +315,78 @@ function lorentzNodeScale(info: LorentzInfo): number {
     const levelScale = info.level <= 0 ? 1.16 : Math.max(0.72, 1 - info.level * 0.035);
     const wGlow = Math.min(0.08, Math.abs(info.w) * 0.1);
     return levelScale + membershipBoost + wGlow;
+}
+
+function isProductNode(node: GalaxyNode): boolean {
+    const metadata = node.entity.metadata || {};
+    const sourceType = String(metadata['sourceType'] || '').toLowerCase();
+    const product = metadata['product'];
+    const manifold = String(metadata['manifold'] || '').toLowerCase();
+    const kind = String(node.entity.kind || '').toLowerCase();
+    return manifold === 'product'
+        || Boolean(product && typeof product === 'object')
+        || sourceType === 'product_node'
+        || sourceType === 'product_root'
+        || kind.startsWith('product:');
+}
+
+function productTreeKind(
+    link: GalaxyEdge,
+    source: GalaxyNode,
+    target: GalaxyNode,
+    sourceInfo: LorentzInfo | null,
+    targetInfo: LorentzInfo | null,
+): string {
+    const type = String(link.type || '').toLowerCase();
+    const relationFamily = relationFamilyFromText(
+        type,
+        source.entity.label,
+        source.entity.metadata?.['preview'],
+        target.entity.label,
+        target.entity.metadata?.['preview'],
+    );
+    if (relationFamily) return relationFamily;
+    const sourceKind = productKindFromNode(source);
+    const targetKind = productKindFromNode(target);
+    if (/caus|because|effect/.test(type)) return 'causal';
+    if (/temporal|before|after|timeline/.test(type)) return 'temporal';
+    if (/event|scene/.test(type)) return 'event';
+    if (sourceKind !== 'identity' && sourceKind !== 'documentStructure') return sourceKind;
+    if (targetKind !== 'identity' && targetKind !== 'documentStructure') return targetKind;
+    if (/location|place|city|route/.test(type)) return 'location';
+    if (/memory|evidence|source|provenance/.test(type)) return 'evidence';
+    if (/relation|relationship|fact|co.?occurs/.test(type)) return 'relationship';
+    if (/contrad|reject|oppos/.test(type)) return 'contradiction';
+    if (/anchor|chunk|note|document|doc/.test(type)) return 'documentStructure';
+    return targetInfo?.primaryTreeKind
+        || sourceInfo?.primaryTreeKind
+        || targetKind
+        || sourceKind
+        || 'identity';
+}
+
+function productKindFromNode(node: GalaxyNode): string {
+    const metadata = node.entity.metadata || {};
+    const text = `${node.entity.kind || ''} ${metadata['sourceType'] || ''} ${node.entity.label || ''}`.toLowerCase();
+    const relationFamily = relationFamilyFromText(text, metadata['preview']);
+    if (relationFamily) return relationFamily;
+    if (/causal|cause|effect/.test(text)) return 'causal';
+    if (/temporal|timeline|time/.test(text)) return 'temporal';
+    if (/event|scene/.test(text)) return 'event';
+    if (/location|place|city|route/.test(text)) return 'location';
+    if (/memory|evidence|source|provenance/.test(text)) return 'evidence';
+    if (/relationship|relation|graph-fact|graphfact|fact/.test(text)) return 'relationship';
+    if (/chunk|anchor|note|document|doc/.test(text)) return 'documentStructure';
+    return 'identity';
+}
+
+function productFallbackLevel(node: GalaxyNode): number {
+    const metadata = node.entity.metadata || {};
+    const text = `${node.entity.kind || ''} ${metadata['sourceType'] || ''}`.toLowerCase();
+    if (/note|document|doc/.test(text)) return 0;
+    if (/chunk|entity/.test(text)) return 1;
+    if (/anchor|event|fact|memory/.test(text)) return 2;
+    return Math.max(1, Math.round((node.depth || 0.35) * 4));
 }
 
 function isLorentzTreeEdge(link: GalaxyEdge): boolean {

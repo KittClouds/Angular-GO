@@ -53,6 +53,12 @@ describe('lfm-local-entity-utils', () => {
     expect(normalizeSuggestedEntityKind('speaker')).toBe('CHARACTER');
   });
 
+  it('flattens group-like model kinds into networks', () => {
+    expect(normalizeSuggestedEntityKind('organization')).toBe('NETWORK');
+    expect(normalizeSuggestedEntityKind('faction')).toBe('NETWORK');
+    expect(normalizeSuggestedEntityKind('group')).toBe('NETWORK');
+  });
+
   it('extracts the first json array even when the model wraps it in fences', () => {
     const output = `
 \`\`\`json

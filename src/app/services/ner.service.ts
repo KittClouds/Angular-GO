@@ -94,9 +94,44 @@ const KNOWN_LOCATION_SURFACES = new Set([
     'dc citadel',
     'white house',
     'blackroot works',
+    'baton rouge',
+    'lower mississippi',
+    'red mesa',
+    'red mesa marker',
+    'redwater',
+    'black cypress',
+    'blacktooth',
+    'boundary keep',
+    'skyglass',
+    'malachor',
+    'halcyon',
+    'south',
+    'southwest',
 ]);
 
-const LOCATION_SUFFIX_PATTERN = /\b(?:citadel|works|tower|palace|house|harbor|port|city|capital|country|nation|realm|kingdom|empire|territory|province|region)\b/iu;
+const LOCATION_SUFFIX_PATTERN = /\b(?:citadel|works|tower|palace|house|harbor|port|city|capital|country|nation|realm|kingdom|empire|territory|province|region|mesa|keep|range|ranges|road|roads|route|routes|river|rivers|lock|locks|zone|zones|camp|camps)\b/iu;
+
+const KNOWN_NETWORK_SURFACES = new Set([
+    'allied table',
+    'atlas',
+    'joint chiefs',
+    'operator office',
+    'operators',
+    'phantom command',
+    'phantom authority',
+    'phantoms',
+    'warden force',
+    'canton recovery',
+    'federal range command',
+    'state emergency command',
+    'private claim crews',
+    'containment forces',
+    'militia',
+    'militias',
+    'military',
+]);
+
+const NETWORK_SUFFIX_PATTERN = /\b(?:table|chiefs|operators?|office|force|forces|command|authority|agency|alliance|guild|crew|crews|clan|council|department|directorate|committee|institution|contractors?|militia|militias|military)\b/iu;
 
 const PHOENIX_DISCOVERY_STOPWORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'above', 'absolute', 'absolutely',
@@ -124,6 +159,9 @@ const COMMON_SENTENCE_STARTERS = new Set([
 function resolvePhoenixScanKind(candidate: PhoenixDiscoveryCandidate, text: string): string {
     const normalized = normalizeSuggestedEntityKind(String(candidate.kind || 'UNKNOWN'));
     const label = String(candidate.token || '').trim();
+    if (isLikelyNetworkEntityLabel(label, text)) {
+        return 'NETWORK';
+    }
     if (normalized === 'CHARACTER') {
         return isLikelyCharacterName(label, text) ? 'CHARACTER' : 'UNKNOWN';
     }
@@ -133,6 +171,9 @@ function resolvePhoenixScanKind(candidate: PhoenixDiscoveryCandidate, text: stri
 
     if (isLikelyCharacterName(label, text)) {
         return 'CHARACTER';
+    }
+    if (isLikelyLocationEntityLabel(label, text)) {
+        return 'LOCATION';
     }
 
     return normalized;
@@ -153,10 +194,12 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
     if (words.every((word) => PHOENIX_DISCOVERY_STOPWORDS.has(word))) {
         return false;
     }
+    const locationLike = isLikelyLocationEntityLabel(label, text);
+    const networkLike = isLikelyNetworkEntityLabel(label, text);
     if (words.length > 1 && (
         PHOENIX_DISCOVERY_STOPWORDS.has(words[0]) ||
         PHOENIX_DISCOVERY_STOPWORDS.has(words[words.length - 1])
-    )) {
+    ) && !locationLike && !networkLike) {
         return false;
     }
     if (words.length === 1 && COMMON_SENTENCE_STARTERS.has(words[0])) {
@@ -164,7 +207,10 @@ function isPlausiblePhoenixDiscoveryCandidate(candidate: PhoenixDiscoveryCandida
     }
 
     const kind = normalizeSuggestedEntityKind(String(candidate.kind || 'UNKNOWN'));
-    if (isLikelyLocationEntityLabel(label, text)) {
+    if (locationLike) {
+        return true;
+    }
+    if (networkLike) {
         return true;
     }
     if (kind === 'CHARACTER') {
@@ -193,8 +239,33 @@ export function isLikelyLocationEntityLabel(label: string, text: string): boolea
 
     const escaped = escapeRegExp(cleaned);
     const contextPattern = new RegExp([
-        `\\b(?:in|at|near|from|to|inside|outside|through|above|below)\\s+(?:the\\s+)?${escaped}\\b`,
-        `\\b${escaped}\\b\\s+(?:government|continuity|exchange\\s+terms|observations|country|nation|city|capital|citadel|works)\\b`,
+        `\\b(?:in|at|near|from|to|inside|outside|through|above|below|across|around|toward|towards|within|into|onto|over|clearing)\\s+(?:the\\s+)?${escaped}\\b`,
+        `\\b(?:returned\\s+from|pane\\s+from|opens?\\s+into|moved\\s+through)\\s+(?:the\\s+)?${escaped}\\b`,
+        `\\b${escaped}\\b\\s+(?:government|continuity|exchange\\s+terms|observations|country|nation|city|capital|citadel|works|marker|break|route|routes|roads|river|locks|territory|range|region|map|radius|pulse|tower|mesa|opens?|sits|came\\s+first|moves\\s+first)\\b`,
+        `\\b${escaped}\\b\\.\\s+(?:fuel\\s+movement|rail\\s+breaks|river\\s+locks|hospital\\s+reroutes|detention\\s+sites)\\b`,
+    ].join('|'), 'iu');
+    return contextPattern.test(text);
+}
+
+export function isLikelyNetworkEntityLabel(label: string, text: string): boolean {
+    const cleaned = cleanPhoenixCandidateLabel(label);
+    if (!cleaned) return false;
+
+    const normalized = cleaned.toLocaleLowerCase();
+    if (KNOWN_NETWORK_SURFACES.has(normalized) && !hasPersonActionContext(cleaned, text)) {
+        return true;
+    }
+
+    const words = normalized.split(/\s+/).filter(Boolean);
+    if (words.length > 1 && NETWORK_SUFFIX_PATTERN.test(words[words.length - 1])) {
+        return true;
+    }
+
+    const escaped = escapeRegExp(cleaned);
+    const contextPattern = new RegExp([
+        `\\b${escaped}\\b\\s+(?:approved|understands|backing|authority|command|coverage|records|contracts?|forces?|operators?|militias?|military|signed\\s+to|wanted|believed)\\b`,
+        `\\b(?:signed\\s+to|under\\s+command|backed\\s+by|bringing\\s+in|forcing\\s+records\\s+open\\s+to|direct\\s+line\\s+to)\\s+(?:the\\s+)?${escaped}\\b`,
+        `\\b(?:local|private|state-backed|federal|phantom|warden)\\s+${escaped}\\b`,
     ].join('|'), 'iu');
     return contextPattern.test(text);
 }
@@ -672,6 +743,15 @@ function buildKindVotes(
         });
     }
 
+    if (isLikelyNetworkEntityLabel(label, text) && normalizedKind !== 'NETWORK') {
+        votes.push({
+            kind: 'NETWORK',
+            source: 'angular_network_context',
+            confidence: 0.42,
+            reason: 'review_only_network_context',
+        });
+    }
+
     return dedupeKindVotes(votes);
 }
 
@@ -695,7 +775,10 @@ function requiresReview(
 ): boolean {
     if (normalizeDecisionStatus(upstreamStatus, kind, confidence) !== 'accepted') return true;
     const normalizedKind = normalizeKindVote(kind);
-    return votes.some((vote) => vote.source === 'angular_location_context' && vote.kind !== normalizedKind);
+    return votes.some((vote) => (
+        (vote.source === 'angular_location_context' || vote.source === 'angular_network_context')
+        && vote.kind !== normalizedKind
+    ));
 }
 
 function reviewReason(kind: string, confidence: number, votes: NerKindVote[]): string | undefined {
@@ -703,6 +786,9 @@ function reviewReason(kind: string, confidence: number, votes: NerKindVote[]): s
     if (confidence < 0.35) return 'low_confidence';
     if (votes.some((vote) => vote.source === 'angular_location_context' && vote.kind !== normalizeKindVote(kind))) {
         return 'location_context_conflict';
+    }
+    if (votes.some((vote) => vote.source === 'angular_network_context' && vote.kind !== normalizeKindVote(kind))) {
+        return 'network_context_conflict';
     }
     return undefined;
 }

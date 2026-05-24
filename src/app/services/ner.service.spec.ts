@@ -453,6 +453,212 @@ describe('NerService provider orchestration', () => {
     ]);
   });
 
+  it('surfaces story locations from native location context without collapsing people', async () => {
+    const service = makeService();
+    service.fstProvider.scan.mockResolvedValue([
+      {
+        label: 'Baton Rouge',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.62,
+        reasoning: '',
+        evidence: 'Baton Rouge came first.',
+        aliases: [],
+      },
+      {
+        label: 'Lower Mississippi',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.61,
+        reasoning: '',
+        evidence: 'Baton Rouge. Lower Mississippi. Fuel movement. Rail breaks. River locks.',
+        aliases: [],
+      },
+      {
+        label: 'Redwater',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.58,
+        reasoning: '',
+        evidence: 'Clearing Redwater or Black Cypress if dungeon control is part of the break.',
+        aliases: [],
+      },
+      {
+        label: 'Black Cypress',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.58,
+        reasoning: '',
+        evidence: 'Clearing Redwater or Black Cypress if dungeon control is part of the break.',
+        aliases: [],
+      },
+      {
+        label: 'Blacktooth',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.57,
+        reasoning: '',
+        evidence: 'Iriane had only just returned from Blacktooth.',
+        aliases: [],
+      },
+      {
+        label: 'Boundary Keep',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.57,
+        reasoning: '',
+        evidence: 'Blacktooth now has Boundary Keep interference.',
+        aliases: [],
+      },
+      {
+        label: 'Skyglass',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.57,
+        reasoning: '',
+        evidence: 'Skyglass has Aetherians and Kyodai.',
+        aliases: [],
+      },
+      {
+        label: 'Malachor',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.57,
+        reasoning: '',
+        evidence: 'Malachor already has one tower.',
+        aliases: [],
+      },
+      {
+        label: 'Halcyon',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.57,
+        reasoning: '',
+        evidence: 'Soleya remained on a side pane from Halcyon.',
+        aliases: [],
+      },
+      {
+        label: 'Rook',
+        kind: 'CHARACTER',
+        confidence: 'high',
+        rawScore: 0.86,
+        reasoning: '',
+        evidence: 'Rook said the answer aloud.',
+        aliases: [],
+      },
+      {
+        label: 'Allied Table',
+        kind: 'ORGANIZATION',
+        confidence: 'high',
+        rawScore: 0.84,
+        reasoning: '',
+        evidence: 'Allied Table approved the operation.',
+        aliases: [],
+      },
+    ]);
+
+    await service.runManualScan('fst', {
+      noteId: 'note-1',
+      noteTitle: 'Untitled Note',
+      plainText: [
+        'Baton Rouge came first.',
+        'Baton Rouge. Lower Mississippi. Fuel movement. Rail breaks. River locks.',
+        'Clearing Redwater or Black Cypress if dungeon control is part of the break.',
+        'Iriane had only just returned from Blacktooth.',
+        'Blacktooth now has Boundary Keep interference.',
+        'Skyglass has Aetherians and Kyodai.',
+        'Malachor already has one tower.',
+        'Soleya remained on a side pane from Halcyon.',
+        'Rook said the answer aloud. Allied Table approved the operation.',
+      ].join(' '),
+    });
+
+    expect(service.suggestions()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Baton Rouge', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Lower Mississippi', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Redwater', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Black Cypress', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Blacktooth', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Boundary Keep', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Skyglass', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Malachor', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Halcyon', kind: 'LOCATION' }),
+      expect.objectContaining({ label: 'Rook', kind: 'CHARACTER' }),
+      expect.objectContaining({ label: 'Allied Table', kind: 'NETWORK' }),
+    ]));
+    expect(service.suggestions().find((suggestion) => suggestion.label === 'Rook')?.kind).not.toBe('LOCATION');
+    expect(service.suggestions().find((suggestion) => suggestion.label === 'Allied Table')?.kind).not.toBe('LOCATION');
+  });
+
+  it('flattens group-like story entities into networks', async () => {
+    const service = makeService();
+    service.fstProvider.scan.mockResolvedValue([
+      {
+        label: 'Allied Table',
+        kind: 'LOCATION',
+        confidence: 'medium',
+        rawScore: 0.64,
+        reasoning: '',
+        evidence: 'Allied Table approved Red Mesa.',
+        aliases: [],
+      },
+      {
+        label: 'Atlas',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.62,
+        reasoning: '',
+        evidence: 'Atlas backing. Nemo and Nereus in the line.',
+        aliases: [],
+      },
+      {
+        label: 'Joint Chiefs',
+        kind: 'ORGANIZATION',
+        confidence: 'medium',
+        rawScore: 0.62,
+        reasoning: '',
+        evidence: 'Joint Chiefs, Nemo, Atlas, Allied Table.',
+        aliases: [],
+      },
+      {
+        label: 'militia',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.5,
+        reasoning: '',
+        evidence: 'Local militia hero.',
+        aliases: [],
+      },
+      {
+        label: 'military',
+        kind: 'UNKNOWN',
+        confidence: 'medium',
+        rawScore: 0.5,
+        reasoning: '',
+        evidence: 'Rook is a military officer.',
+        aliases: [],
+      },
+    ]);
+
+    await service.runManualScan('fst', {
+      noteId: 'note-1',
+      noteTitle: 'Untitled Note',
+      plainText: [
+        'Allied Table approved Red Mesa.',
+        'Atlas backing. Joint Chiefs, Nemo, Atlas, Allied Table.',
+        'Local militia hero. Rook is a military officer.',
+      ].join(' '),
+    });
+
+    expect(service.suggestions()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Allied Table', kind: 'NETWORK' }),
+      expect.objectContaining({ label: 'Atlas', kind: 'NETWORK' }),
+      expect.objectContaining({ label: 'Joint Chiefs', kind: 'NETWORK' }),
+      expect.objectContaining({ label: 'militia', kind: 'NETWORK' }),
+      expect.objectContaining({ label: 'military', kind: 'NETWORK' }),
+    ]));
+  });
+
   it('applies the same Phoenix gate to Atlas surface suggestions', async () => {
     const service = makeService();
 
@@ -523,10 +729,10 @@ describe('NerService provider orchestration', () => {
     expect(service.suggestions()).toEqual([
       expect.objectContaining({
         label: 'Allied Table',
-        kind: 'FACTION',
+        kind: 'NETWORK',
         requiresReview: false,
         kindVotes: expect.arrayContaining([
-          expect.objectContaining({ kind: 'FACTION', source: 'model_discovery' }),
+          expect.objectContaining({ kind: 'NETWORK', source: 'model_discovery' }),
         ]),
       }),
       expect.objectContaining({
@@ -557,6 +763,18 @@ describe('NerService provider orchestration', () => {
         decisionStatus: 'accepted',
       },
       {
+        id: 'control-location',
+        label: 'Red Mesa',
+        kind: 'LOCATION',
+        confidence: 0.62,
+        evidence: `${shortrun.slice(0, 1200)} Allied Table approved Red Mesa.`,
+        sourceStage: 'dynamicNer',
+        kindVotes: [
+          { kind: 'LOCATION', source: 'native_location_shape', confidence: 0.46, reason: 'location_surface_or_context' },
+        ],
+        decisionStatus: 'review',
+      },
+      {
         id: 'variable-person',
         label: 'Rook',
         kind: 'CHARACTER',
@@ -571,9 +789,11 @@ describe('NerService provider orchestration', () => {
     ] as any);
 
     expect(service.suggestions()).toEqual([
-      expect.objectContaining({ label: 'Allied Table', kind: 'FACTION', requiresReview: false }),
+      expect.objectContaining({ label: 'Allied Table', kind: 'NETWORK', requiresReview: false }),
+      expect.objectContaining({ label: 'Red Mesa', kind: 'LOCATION', requiresReview: true }),
       expect.objectContaining({ label: 'Rook', kind: 'CHARACTER', requiresReview: false }),
     ]);
-    expect(service.suggestions().every((suggestion) => suggestion.kind !== 'LOCATION')).toBe(true);
+    expect(service.suggestions().find((suggestion) => suggestion.label === 'Rook')?.kind).not.toBe('LOCATION');
+    expect(service.suggestions().find((suggestion) => suggestion.label === 'Allied Table')?.kind).not.toBe('LOCATION');
   });
 });

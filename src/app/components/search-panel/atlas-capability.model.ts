@@ -76,6 +76,7 @@ export type AtlasCapabilityId =
     | 'hybridManifold'
     | 'hopfProjection'
     | 'lorentzForest'
+    | 'productManifold'
     | 'retrievalWalk'
     | 'galaxyVisualization';
 
@@ -566,6 +567,27 @@ export const ATLAS_CAPABILITY_REGISTRY: AtlasCapability[] = [
         docRefs: ['src/app/services/manifold-atlas.types.ts'],
     },
     {
+        id: 'productManifold',
+        label: 'Product Manifold',
+        family: 'manifold',
+        description: 'Canonical Lorentz-Hopf product atlas with Klein skeleton, semantic shell, and context fibers.',
+        cost: 'Very high',
+        subsystems: 11,
+        statusSource: 'PhoenixMachineManifoldStatusMap.product',
+        backendRoute: 'manifoldSnapshot(product) / Lorentz-Hopf product atlas',
+        inputs: ['semantic atlas vectors', 'Lorentz forest sidecar', 'Hopf fiber topology'],
+        outputs: ['product points', 'Klein skeleton', 'fiber ribbons', 'directed lane hints'],
+        dependencies: ['semanticAtlas', 'semanticCandidate'],
+        skips: [],
+        mutationPolicy: 'read-only',
+        uiCoverage: 'partial',
+        runnable: true,
+        modelLaneId: 'manifoldProjection',
+        stageSummaryKeys: ['product', 'productManifold'],
+        testRefs: ['graph-galaxy-product.spec.ts'],
+        docRefs: ['rust/phoenix/crates/phoenix-hyperbolic/src/product_manifold.rs', 'src/app/services/manifold-atlas.types.ts'],
+    },
+    {
         id: 'retrievalWalk',
         label: 'Retrieval / Triverse Walk',
         family: 'retrieval',
@@ -643,8 +665,8 @@ export const ATLAS_CAPABILITY_LAYERS: AtlasCapabilityLayer[] = [
     {
         id: 'manifoldGeometry',
         label: 'Manifold / Geometry',
-        description: 'Hybrid, Hopf, and Lorentz projection/forest sidecars.',
-        capabilityIds: ['hybridManifold', 'hopfProjection', 'lorentzForest'],
+        description: 'Hybrid, Hopf, Lorentz, and product projection/forest sidecars.',
+        capabilityIds: ['hybridManifold', 'hopfProjection', 'lorentzForest', 'productManifold'],
     },
     {
         id: 'retrievalVisualization',
@@ -673,7 +695,7 @@ const SEMANTIC_GRAPH_CHAIN: AtlasCapabilityId[] = [
     'semanticCandidate',
 ];
 
-const MANIFOLD_CAPABILITIES: AtlasCapabilityId[] = ['hybridManifold', 'hopfProjection', 'lorentzForest'];
+const MANIFOLD_CAPABILITIES: AtlasCapabilityId[] = ['hybridManifold', 'hopfProjection', 'lorentzForest', 'productManifold'];
 
 const ADJUDICATED_SEMANTIC_CHAIN: AtlasCapabilityId[] = [
     ...SEMANTIC_GRAPH_CHAIN,
@@ -739,7 +761,7 @@ export const ATLAS_CAPABILITY_RECIPES: AtlasCapabilityRecipeDefinition[] = [
         outputLabel: 'graph + vectors',
         mutationPolicy: 'dirty-only',
         cost: 'High',
-        backendRoute: 'dynamic_ner -> load embedding -> atlas_rich_scan(includeSemanticAtlas=true) -> manifoldSnapshot(hybrid/hopf/lorentz)',
+        backendRoute: 'dynamic_ner -> load embedding -> atlas_rich_scan(includeSemanticAtlas=true) -> manifoldSnapshot(hybrid/hopf/lorentz/product)',
         dependencyChain: [...SEMANTIC_GRAPH_CHAIN, ...MANIFOLD_CAPABILITIES],
         requiredCapabilities: [...SEMANTIC_GRAPH_CHAIN, ...MANIFOLD_CAPABILITIES],
         optionalCapabilities: [],

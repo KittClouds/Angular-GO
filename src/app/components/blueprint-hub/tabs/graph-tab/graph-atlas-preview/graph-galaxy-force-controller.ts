@@ -15,6 +15,8 @@ const HYBRID_SHELL_LOCK_RATIO = 0.92;
 const HYBRID_MIN_RADIUS = 0.000001;
 const HOPF_DEFAULT_BOUNDARY_RADIUS = 1.95;
 const HOPF_BOUNDARY_PADDING = 1.04;
+const PRODUCT_DEFAULT_BOUNDARY_RADIUS = 2.32;
+const PRODUCT_BOUNDARY_PADDING = 1.1;
 
 export class GraphGalaxyForceController {
     private base3d = new Float32Array(0);
@@ -39,6 +41,8 @@ export class GraphGalaxyForceController {
     private hybridBoundaryRadius2d = HYBRID_DEFAULT_BOUNDARY_RADIUS;
     private hopfBoundaryRadius3d = HOPF_DEFAULT_BOUNDARY_RADIUS;
     private hopfBoundaryRadius2d = HOPF_DEFAULT_BOUNDARY_RADIUS;
+    private productBoundaryRadius3d = PRODUCT_DEFAULT_BOUNDARY_RADIUS;
+    private productBoundaryRadius2d = PRODUCT_DEFAULT_BOUNDARY_RADIUS;
 
     bind(scene: GalaxySceneV2): void {
         this.scene = scene;
@@ -53,6 +57,7 @@ export class GraphGalaxyForceController {
         this.fixed = new Uint8Array(scene.ids.length);
         this.rebuildHybridConstraints(scene);
         this.rebuildHopfConstraints(scene);
+        this.rebuildProductConstraints(scene);
         this.neighbors.length = scene.ids.length;
         for (let i = 0; i < scene.ids.length; i++) this.neighbors[i] = [];
         for (let i = 0; i < scene.edgePairs.length; i += 2) {
@@ -73,7 +78,15 @@ export class GraphGalaxyForceController {
         const previous = this.settings;
         this.settings = mergeGalaxySettings(settings ?? undefined);
         const layoutChanged = previous.edgeLength !== this.settings.edgeLength || previous.nodeDistance !== this.settings.nodeDistance;
-        if (!layoutChanged || !this.scene || this.scene.ids.length < 2 || this.scene.layoutMode !== 'single') return;
+        if (!layoutChanged || !this.scene || this.scene.ids.length < 2) return;
+        if (this.scene.layoutMode === 'productManifold') {
+            this.applyProductVolume(this.scene);
+            this.forceActive = false;
+            this.relaxing = false;
+            this.alpha = 0;
+            return;
+        }
+        if (this.scene.layoutMode !== 'single') return;
         this.forceActive = true;
         this.relaxing = false;
         this.alpha = Math.max(this.alpha, this.scene.edgePairs.length ? 0.62 : 0.36);
@@ -116,11 +129,12 @@ export class GraphGalaxyForceController {
     dragTo(target: THREE.Vector3, mode: GalaxyNodeDragMode): boolean {
         const scene = this.scene;
         if (!scene || this.activeIndex < 0 || mode === 'camera') return false;
-        if (mode === 'force' && scene.layoutMode !== 'single') return this.drag(this.dragDelta.set(
+        const dragMode = this.effectiveDragMode(scene, mode);
+        if (dragMode === 'stretch' && mode === 'force') return this.drag(this.dragDelta.set(
             target.x - this.livePositions(scene)[this.activeIndex * 3],
             target.y - this.livePositions(scene)[this.activeIndex * 3 + 1],
             this.mode === '2d' ? 0 : target.z - this.livePositions(scene)[this.activeIndex * 3 + 2],
-        ), 'stretch');
+        ), dragMode);
         const live = this.livePositions(scene);
         const offset = this.activeIndex * 3;
         this.dragDelta.set(
@@ -129,7 +143,7 @@ export class GraphGalaxyForceController {
             this.mode === '2d' ? 0 : target.z - live[offset + 2],
         );
 
-        if (mode === 'force') {
+        if (dragMode === 'force') {
             this.setPosition(live, this.activeIndex, target.x, target.y, this.mode === '2d' ? 0 : target.z);
             this.zeroVelocity(this.activeIndex);
             this.alpha = Math.max(this.alpha, 0.66);
@@ -139,7 +153,7 @@ export class GraphGalaxyForceController {
             return true;
         }
 
-        return this.drag(this.dragDelta, mode);
+        return this.drag(this.dragDelta, dragMode);
     }
 
     drag(delta: THREE.Vector3, mode: GalaxyNodeDragMode): boolean {
@@ -162,9 +176,11 @@ export class GraphGalaxyForceController {
 
     end(mode: GalaxyNodeDragMode): boolean {
         if (this.activeIndex < 0) return false;
-        if (mode === 'pin') this.fixed[this.activeIndex] = 1;
-        else if (mode === 'stretch') this.relaxing = true;
-        else if (mode === 'force') {
+        const scene = this.scene;
+        const dragMode = scene ? this.effectiveDragMode(scene, mode) : mode;
+        if (dragMode === 'pin') this.fixed[this.activeIndex] = 1;
+        else if (dragMode === 'stretch') this.relaxing = true;
+        else if (dragMode === 'force') {
             this.forceActive = true;
             this.alpha = Math.max(this.alpha, 0.38);
         }
@@ -187,7 +203,16 @@ export class GraphGalaxyForceController {
         return this.activeIndex >= 0 || this.relaxing || this.alpha > EPSILON;
     }
 
+    private effectiveDragMode(scene: GalaxySceneV2, mode: GalaxyNodeDragMode): GalaxyNodeDragMode {
+        return mode === 'force' && scene.layoutMode !== 'single' ? 'stretch' : mode;
+    }
+
     private tickForce(scene: GalaxySceneV2): void {
+        if (scene.layoutMode !== 'single') {
+            this.forceActive = false;
+            this.alpha = 0;
+            return;
+        }
         const live = this.livePositions(scene);
         const base = this.mode === '2d' ? this.base2d : this.base3d;
         const count = scene.ids.length;
@@ -364,6 +389,7 @@ export class GraphGalaxyForceController {
     private constrainManifoldBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
         this.constrainHybridBuffer(scene, buffer);
         this.constrainHopfBuffer(scene, buffer);
+        this.constrainProductBuffer(scene, buffer);
     }
 
     private constrainHybridBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
@@ -434,6 +460,59 @@ export class GraphGalaxyForceController {
         }
     }
 
+    private rebuildProductConstraints(scene: GalaxySceneV2): void {
+        this.productBoundaryRadius3d = PRODUCT_DEFAULT_BOUNDARY_RADIUS;
+        this.productBoundaryRadius2d = PRODUCT_DEFAULT_BOUNDARY_RADIUS;
+        if (scene.layoutMode !== 'productManifold') return;
+        const expansion = productManifoldExpansionScale(this.settings);
+        for (let i = 0; i < scene.ids.length; i++) {
+            const radius3d = pointRadius(this.base3d, i, true);
+            const radius2d = pointRadius(this.base2d, i, false);
+            if (Number.isFinite(radius3d)) this.productBoundaryRadius3d = Math.max(this.productBoundaryRadius3d, radius3d * expansion * PRODUCT_BOUNDARY_PADDING);
+            if (Number.isFinite(radius2d)) this.productBoundaryRadius2d = Math.max(this.productBoundaryRadius2d, radius2d * expansion * PRODUCT_BOUNDARY_PADDING);
+        }
+    }
+
+    private applyProductVolume(scene: GalaxySceneV2): void {
+        if (scene.layoutMode !== 'productManifold') return;
+        const expansion = productManifoldExpansionScale(this.settings);
+        this.scaleFromBase(this.base3d, scene.positions3d, expansion, true);
+        this.scaleFromBase(this.base2d, scene.positions2d, expansion, false);
+        this.rebuildProductConstraints(scene);
+        this.vx.fill(0);
+        this.vy.fill(0);
+        this.vz.fill(0);
+    }
+
+    private scaleFromBase(base: Float32Array, target: Float32Array, scale: number, is3d: boolean): void {
+        for (let offset = 0; offset < target.length; offset += 3) {
+            target[offset] = base[offset] * scale;
+            target[offset + 1] = base[offset + 1] * scale;
+            target[offset + 2] = is3d ? base[offset + 2] * scale : 0;
+        }
+    }
+
+    private constrainProductBuffer(scene: GalaxySceneV2, buffer: Float32Array): void {
+        if (scene.layoutMode !== 'productManifold') return;
+        const is3d = buffer === scene.positions3d && this.mode !== '2d';
+        const boundaryRadius = is3d ? this.productBoundaryRadius3d : this.productBoundaryRadius2d;
+        for (let i = 0; i < scene.ids.length; i++) {
+            const offset = i * 3;
+            const x = buffer[offset];
+            const y = buffer[offset + 1];
+            const z = is3d ? buffer[offset + 2] : 0;
+            const radius = Math.hypot(x, y, z);
+            if (!is3d) buffer[offset + 2] = 0;
+            if (radius <= boundaryRadius + EPSILON || radius <= HYBRID_MIN_RADIUS) continue;
+
+            const scale = Math.max(HYBRID_MIN_RADIUS, boundaryRadius - EPSILON) / radius;
+            buffer[offset] = x * scale;
+            buffer[offset + 1] = y * scale;
+            buffer[offset + 2] = is3d ? z * scale : 0;
+            this.zeroVelocity(i);
+        }
+    }
+
     private writeBaseDirection(buffer: Float32Array, index: number, is3d: boolean, radius: number): void {
         const base = is3d ? this.base3d : this.base2d;
         const offset = index * 3;
@@ -467,6 +546,12 @@ export class GraphGalaxyForceController {
             scene.positions2d[i * 3 + 1] = scene.positions3d[i * 3 + 1];
         }
     }
+}
+
+export function productManifoldExpansionScale(settings: Pick<GalaxyRenderSettings, 'edgeLength' | 'nodeDistance'>): number {
+    const distance = clamp(settings.nodeDistance, 0.15, 3.2);
+    const edgeLength = clamp(settings.edgeLength, 0.15, 3.4);
+    return clamp(1 + (distance - 1) * 0.28 + (edgeLength - 1) * 0.16, 0.68, 1.82);
 }
 
 function clamp(value: number, min: number, max: number): number {

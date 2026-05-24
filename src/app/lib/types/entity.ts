@@ -13,6 +13,7 @@ export type EntityKind =
     | 'NPC'
     | 'ITEM'
     | 'FACTION'
+    | 'NETWORK'
     | 'SCENE'
     | 'EVENT'
     | 'CONCEPT'
@@ -32,6 +33,7 @@ export const ENTITY_KINDS: readonly EntityKind[] = [
     'NPC',
     'ITEM',
     'FACTION',
+    'NETWORK',
     'SCENE',
     'EVENT',
     'CONCEPT',

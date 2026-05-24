@@ -4502,7 +4502,7 @@ impl PhoenixRuntime {
 
             let mut mention_vertex_by_id = BTreeMap::<u64, String>::new();
             for mention in &output.mentions {
-                if !dynamic_mention_is_graphworthy(mention) {
+                if !dynamic_mention_is_graphworthy(mention, &document.text) {
                     continue;
                 }
                 let label = dynamic_mention_label(mention);
@@ -4586,10 +4586,11 @@ impl PhoenixRuntime {
                 }
 
                 if request.options.return_candidate_suggestions
-                    && dynamic_should_surface_candidate(mention)
+                    && dynamic_should_surface_candidate(mention, &document.text)
                 {
                     let key = atlas_candidate_key(&label);
-                    let kind_votes = dynamic_candidate_kind_votes(mention, entity_kind.as_ref());
+                    let kind_votes =
+                        dynamic_candidate_kind_votes(mention, entity_kind.as_ref(), &document.text);
                     let kind = dynamic_candidate_kind(mention, entity_kind.as_ref(), &kind_votes);
                     let decision_status = dynamic_candidate_decision_status(mention);
                     let review_reason = dynamic_candidate_review_reason(mention, &kind);
@@ -4622,6 +4623,10 @@ impl PhoenixRuntime {
                         })
                         .or_insert(candidate);
                 }
+            }
+
+            if request.options.return_candidate_suggestions {
+                dynamic_push_network_surface_candidates(&document, &mut candidate_by_key);
             }
 
             for edge in output.mention_graph.edges {
@@ -7578,15 +7583,21 @@ fn dynamic_word_pos(token: &str, capitalized: bool) -> Option<dynamic_types::Pos
     }
 }
 
-fn dynamic_mention_is_graphworthy(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+fn dynamic_mention_is_graphworthy(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    text: &str,
+) -> bool {
     !matches!(mention.status, DynamicMentionStatus::Rejected)
         && !matches!(mention.mention_kind, DynamicMentionKind::Pronoun)
         && (mention.entity_ref.is_some()
             || (matches!(mention.mention_kind, DynamicMentionKind::Named)
-                && dynamic_has_candidate_signal(mention)))
+                && dynamic_has_candidate_signal(mention, text)))
 }
 
-fn dynamic_should_surface_candidate(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+fn dynamic_should_surface_candidate(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    text: &str,
+) -> bool {
     mention.entity_ref.is_none()
         && matches!(
             mention.status,
@@ -7595,12 +7606,13 @@ fn dynamic_should_surface_candidate(mention: &phoenix_dynamic_ner::MentionPacket
                 | DynamicMentionStatus::NeedsAdjudication
         )
         && matches!(mention.mention_kind, DynamicMentionKind::Named)
-        && dynamic_has_candidate_signal(mention)
+        && dynamic_has_candidate_signal(mention, text)
 }
 
-fn dynamic_has_candidate_signal(mention: &phoenix_dynamic_ner::MentionPacket) -> bool {
+fn dynamic_has_candidate_signal(mention: &phoenix_dynamic_ner::MentionPacket, text: &str) -> bool {
     let mut has_strong_signal = false;
     let mut has_title_pattern = false;
+    let mut has_native_surface_signal = false;
     for vote in &mention.source_votes {
         match vote.reason {
             phoenix_dynamic_ner::VoteReason::GuardViolation
@@ -7620,17 +7632,370 @@ fn dynamic_has_candidate_signal(mention: &phoenix_dynamic_ner::MentionPacket) ->
                 has_title_pattern = true;
             }
             phoenix_dynamic_ner::VoteReason::RepeatedSurface
-            | phoenix_dynamic_ner::VoteReason::CapSpan
-            | phoenix_dynamic_ner::VoteReason::NliSupport
+            | phoenix_dynamic_ner::VoteReason::CapSpan => {
+                has_native_surface_signal = true;
+            }
+            phoenix_dynamic_ner::VoteReason::NliSupport
             | phoenix_dynamic_ner::VoteReason::NliContradiction => {}
         }
     }
-    has_strong_signal || (has_title_pattern && mention.normalized.split_whitespace().count() > 1)
+    has_strong_signal
+        || (has_title_pattern && mention.normalized.split_whitespace().count() > 1)
+        || (has_native_surface_signal && dynamic_surface_has_location_signal(mention, text))
+        || (has_native_surface_signal && dynamic_surface_has_network_signal(mention, text))
+}
+
+fn dynamic_surface_has_location_signal(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    text: &str,
+) -> bool {
+    let surface = atlas_clean_label(mention.surface.as_str());
+    let normalized = surface.to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    if dynamic_location_exact_surface(&normalized) {
+        return !dynamic_surface_has_person_action_context(&surface, mention.range, text);
+    }
+    if dynamic_location_suffix_surface(&normalized) {
+        return true;
+    }
+    dynamic_surface_has_location_context(&surface, mention.range, text)
+        && !dynamic_surface_has_person_action_context(&surface, mention.range, text)
+}
+
+fn dynamic_location_exact_surface(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "baton rouge"
+            | "lower mississippi"
+            | "red mesa"
+            | "red mesa marker"
+            | "redwater"
+            | "black cypress"
+            | "blacktooth"
+            | "boundary keep"
+            | "skyglass"
+            | "malachor"
+            | "halcyon"
+            | "south"
+            | "southwest"
+    )
+}
+
+fn dynamic_location_suffix_surface(normalized: &str) -> bool {
+    let mut words = normalized.split_whitespace();
+    let first = words.next();
+    let last = words.last().or(first);
+    let word_count = normalized.split_whitespace().count();
+    word_count > 1
+        && matches!(
+            last,
+            Some(
+                "citadel"
+                    | "works"
+                    | "tower"
+                    | "palace"
+                    | "house"
+                    | "harbor"
+                    | "port"
+                    | "city"
+                    | "capital"
+                    | "country"
+                    | "nation"
+                    | "realm"
+                    | "kingdom"
+                    | "empire"
+                    | "territory"
+                    | "province"
+                    | "region"
+                    | "mesa"
+                    | "keep"
+                    | "range"
+                    | "ranges"
+                    | "road"
+                    | "roads"
+                    | "route"
+                    | "routes"
+                    | "river"
+                    | "rivers"
+                    | "lock"
+                    | "locks"
+                    | "zone"
+                    | "zones"
+                    | "camp"
+                    | "camps"
+            )
+        )
+}
+
+fn dynamic_surface_has_location_context(surface: &str, range: TextRange, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    let snippet = dynamic_mention_context_snippet(text, range, 220).to_ascii_lowercase();
+    let label = surface.to_ascii_lowercase();
+    if label.is_empty() || !snippet.contains(&label) {
+        return false;
+    }
+    const BEFORE: &[&str] = &[
+        "in", "at", "near", "from", "to", "inside", "outside", "through", "above", "below",
+        "across", "around", "toward", "towards", "within", "into", "onto", "over", "clearing",
+    ];
+    const MULTI_BEFORE: &[&str] = &[
+        "returned from",
+        "pane from",
+        "opens into",
+        "open into",
+        "moved through",
+    ];
+    const AFTER: &[&str] = &[
+        "government",
+        "continuity",
+        "exchange terms",
+        "observations",
+        "country",
+        "nation",
+        "city",
+        "capital",
+        "citadel",
+        "works",
+        "marker",
+        "break",
+        "route",
+        "routes",
+        "roads",
+        "river",
+        "locks",
+        "territory",
+        "range",
+        "region",
+        "map",
+        "radius",
+        "pulse",
+        "tower",
+        "mesa",
+        "opens",
+        "sits",
+        "came first",
+        "moves first",
+    ];
+
+    BEFORE
+        .iter()
+        .any(|prefix| snippet.contains(&format!("{prefix} {label}")))
+        || MULTI_BEFORE
+            .iter()
+            .any(|prefix| snippet.contains(&format!("{prefix} {label}")))
+        || AFTER
+            .iter()
+            .any(|suffix| snippet.contains(&format!("{label} {suffix}")))
+        || (snippet.contains(&format!("{label}."))
+            && [
+                "fuel movement",
+                "rail breaks",
+                "river locks",
+                "hospital reroutes",
+                "detention sites",
+            ]
+            .iter()
+            .any(|cue| snippet.contains(cue)))
+}
+
+fn dynamic_surface_has_person_action_context(surface: &str, range: TextRange, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    let snippet = dynamic_mention_context_snippet(text, range, 220).to_ascii_lowercase();
+    let label = surface.to_ascii_lowercase();
+    if label.is_empty() || !snippet.contains(&label) {
+        return false;
+    }
+    const ACTIONS: &[&str] = &[
+        "said",
+        "asked",
+        "answered",
+        "replied",
+        "murmured",
+        "whispered",
+        "called",
+        "shouted",
+        "laughed",
+        "smiled",
+        "sighed",
+        "huffed",
+        "glanced",
+        "looked",
+        "watched",
+        "turned",
+        "lifted",
+        "rolled",
+        "stood",
+        "sat",
+        "walked",
+        "crossed",
+        "dragged",
+        "muttered",
+        "moved",
+        "held",
+        "gave",
+        "took",
+        "followed",
+        "responded",
+        "wanted",
+        "went",
+    ];
+    ACTIONS.iter().any(|action| {
+        snippet.contains(&format!("{label} {action}"))
+            || snippet.contains(&format!("{action} {label}"))
+    })
+}
+
+fn dynamic_surface_has_network_signal(
+    mention: &phoenix_dynamic_ner::MentionPacket,
+    text: &str,
+) -> bool {
+    let surface = atlas_clean_label(mention.surface.as_str());
+    let normalized = surface.to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    dynamic_network_exact_surface(&normalized)
+        || dynamic_network_suffix_surface(&normalized)
+        || dynamic_surface_has_network_context(&surface, mention.range, text)
+}
+
+fn dynamic_network_vote_confidence(surface: &str, text: &str, range: TextRange) -> f32 {
+    let normalized = surface.to_ascii_lowercase();
+    if dynamic_network_exact_surface(&normalized) {
+        return 0.88;
+    }
+    if dynamic_network_suffix_surface(&normalized) {
+        return 0.64;
+    }
+    if dynamic_surface_has_network_context(surface, range, text) {
+        return 0.54;
+    }
+    0.0
+}
+
+fn dynamic_network_exact_surface(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "allied table"
+            | "atlas"
+            | "joint chiefs"
+            | "operator office"
+            | "operators"
+            | "phantom command"
+            | "phantom authority"
+            | "phantoms"
+            | "warden force"
+            | "canton recovery"
+            | "federal range command"
+            | "state emergency command"
+            | "private claim crews"
+            | "containment forces"
+            | "militia"
+            | "militias"
+            | "military"
+    )
+}
+
+fn dynamic_network_suffix_surface(normalized: &str) -> bool {
+    let mut words = normalized.split_whitespace();
+    let first = words.next();
+    let last = words.last().or(first);
+    let word_count = normalized.split_whitespace().count();
+    word_count > 1
+        && matches!(
+            last,
+            Some(
+                "table"
+                    | "chiefs"
+                    | "operator"
+                    | "operators"
+                    | "office"
+                    | "force"
+                    | "forces"
+                    | "command"
+                    | "authority"
+                    | "agency"
+                    | "alliance"
+                    | "guild"
+                    | "crew"
+                    | "crews"
+                    | "clan"
+                    | "council"
+                    | "department"
+                    | "directorate"
+                    | "committee"
+                    | "institution"
+                    | "contractor"
+                    | "contractors"
+                    | "militia"
+                    | "militias"
+                    | "military"
+            )
+        )
+}
+
+fn dynamic_surface_has_network_context(surface: &str, range: TextRange, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    let snippet = dynamic_mention_context_snippet(text, range, 220).to_ascii_lowercase();
+    let label = surface.to_ascii_lowercase();
+    if label.is_empty() || !snippet.contains(&label) {
+        return false;
+    }
+    const AFTER: &[&str] = &[
+        "approved",
+        "understands",
+        "backing",
+        "authority",
+        "command",
+        "coverage",
+        "records",
+        "contract",
+        "contracts",
+        "force",
+        "forces",
+        "operator",
+        "operators",
+        "militia",
+        "militias",
+        "military",
+        "signed to",
+        "wanted",
+        "believed",
+    ];
+    const BEFORE: &[&str] = &[
+        "signed to",
+        "under command",
+        "backed by",
+        "bringing in",
+        "direct line to",
+        "local",
+        "private",
+        "state-backed",
+        "federal",
+        "phantom",
+        "warden",
+    ];
+
+    AFTER
+        .iter()
+        .any(|suffix| snippet.contains(&format!("{label} {suffix}")))
+        || BEFORE
+            .iter()
+            .any(|prefix| snippet.contains(&format!("{prefix} {label}")))
 }
 
 fn dynamic_candidate_kind_votes(
     mention: &phoenix_dynamic_ner::MentionPacket,
     known_kind: Option<&EntityKind>,
+    text: &str,
 ) -> Vec<AtlasRichScanKindVoteSummary> {
     let mut by_key = BTreeMap::<(String, String, String), f32>::new();
 
@@ -7673,6 +8038,33 @@ fn dynamic_candidate_kind_votes(
             ))
             .and_modify(|current| *current = current.max(vote.confidence))
             .or_insert(vote.confidence);
+    }
+
+    if known_kind.is_none() && dynamic_surface_has_location_signal(mention, text) {
+        by_key
+            .entry((
+                "LOCATION".to_owned(),
+                "native_location_shape".to_owned(),
+                "location_surface_or_context".to_owned(),
+            ))
+            .and_modify(|current| *current = current.max(0.46))
+            .or_insert(0.46);
+    }
+
+    let network_confidence = dynamic_network_vote_confidence(
+        atlas_clean_label(mention.surface.as_str()).as_str(),
+        text,
+        mention.range,
+    );
+    if known_kind.is_none() && network_confidence > 0.0 {
+        by_key
+            .entry((
+                "NETWORK".to_owned(),
+                "native_network_shape".to_owned(),
+                "network_surface_or_context".to_owned(),
+            ))
+            .and_modify(|current| *current = current.max(network_confidence))
+            .or_insert(network_confidence);
     }
 
     by_key
@@ -7748,6 +8140,93 @@ fn dynamic_candidate_status_rank(status: &str) -> u8 {
     }
 }
 
+fn dynamic_push_network_surface_candidates(
+    document: &AtlasRichScanDocument,
+    candidate_by_key: &mut BTreeMap<String, AtlasRichScanCandidateSummary>,
+) {
+    const SURFACES: &[(&str, &str, f32, &str)] = &[
+        ("allied table", "Allied Table", 0.88, "accepted"),
+        ("atlas", "Atlas", 0.86, "accepted"),
+        ("joint chiefs", "Joint Chiefs", 0.86, "accepted"),
+        ("operator office", "Operator Office", 0.84, "accepted"),
+        ("operators", "Operators", 0.72, "review"),
+        ("phantom command", "Phantom command", 0.82, "accepted"),
+        ("phantom authority", "Phantom authority", 0.82, "accepted"),
+        ("phantoms", "Phantoms", 0.72, "review"),
+        ("warden force", "Warden force", 0.82, "accepted"),
+        ("militia", "militia", 0.58, "review"),
+        ("militias", "militias", 0.58, "review"),
+        ("military", "military", 0.56, "review"),
+    ];
+
+    let lowered = document.text.to_ascii_lowercase();
+    for (needle, label, confidence, status) in SURFACES {
+        let Some(start) = dynamic_find_surface_range(&lowered, needle) else {
+            continue;
+        };
+        let range = TextRange {
+            start: start as u32,
+            end: (start + needle.len()) as u32,
+        };
+        let evidence = dynamic_mention_context_snippet(&document.text, range, 220);
+        let key = atlas_candidate_key(label);
+        let candidate = AtlasRichScanCandidateSummary {
+            id: format!(
+                "dyn-network-{:016x}",
+                atlas_hash64(format!("{}:{label}", document.document_id.0).as_bytes())
+            ),
+            label: (*label).to_owned(),
+            kind: "NETWORK".to_owned(),
+            confidence: *confidence,
+            source_document_id: Some(document.document_id.clone()),
+            source_note_id: document.note_id.clone(),
+            evidence: (!evidence.is_empty()).then_some(evidence),
+            aliases: Vec::new(),
+            range: Some(range),
+            source_stage: "dynamicNer".to_owned(),
+            kind_votes: vec![AtlasRichScanKindVoteSummary {
+                kind: "NETWORK".to_owned(),
+                source: "native_network_shape".to_owned(),
+                confidence: *confidence,
+                reason: "network_surface_or_context".to_owned(),
+            }],
+            decision_status: (*status).to_owned(),
+            review_reason: (*status == "review").then(|| "network_surface_review".to_owned()),
+        };
+        candidate_by_key
+            .entry(key)
+            .and_modify(|current| {
+                if dynamic_candidate_is_better(&candidate, current) {
+                    *current = candidate.clone();
+                }
+            })
+            .or_insert(candidate);
+    }
+}
+
+fn dynamic_find_surface_range(lowered_text: &str, needle: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    while let Some(relative) = lowered_text[offset..].find(needle) {
+        let start = offset + relative;
+        let end = start + needle.len();
+        let left_ok = start == 0
+            || !lowered_text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric);
+        let right_ok = end >= lowered_text.len()
+            || !lowered_text[end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric);
+        if left_ok && right_ok {
+            return Some(start);
+        }
+        offset = end;
+    }
+    None
+}
+
 fn dynamic_mention_context_snippet(text: &str, range: TextRange, limit: usize) -> String {
     if text.is_empty() || range.start >= range.end {
         return String::new();
@@ -7794,9 +8273,8 @@ fn dynamic_vote_source_name(source: phoenix_dynamic_ner::MentionSourceKind) -> &
 fn dynamic_label_to_atlas_kind(label: &str) -> Option<&'static str> {
     match label.trim().to_ascii_lowercase().as_str() {
         "character" | "person" | "speaker" | "npc" => Some("CHARACTER"),
-        "organization" | "faction" | "alliance" | "department" | "institution" => {
-            Some("ORGANIZATION")
-        }
+        "organization" | "organisation" | "org" | "faction" | "group" | "network" | "alliance"
+        | "department" | "institution" => Some("NETWORK"),
         "location" | "place" | "region" | "landmark" | "city" | "country" | "nation" => {
             Some("LOCATION")
         }
@@ -11413,14 +11891,36 @@ mod tests {
         let dialogue =
             dynamic_test_mention("Aella", phoenix_dynamic_ner::VoteReason::DialogueSpeaker);
 
-        assert!(!dynamic_has_candidate_signal(&repeated));
-        assert!(!dynamic_mention_is_graphworthy(&repeated));
-        assert!(dynamic_has_candidate_signal(&dialogue));
-        assert!(dynamic_mention_is_graphworthy(&dialogue));
+        assert!(!dynamic_has_candidate_signal(&repeated, ""));
+        assert!(!dynamic_mention_is_graphworthy(&repeated, ""));
+        assert!(dynamic_has_candidate_signal(&dialogue, ""));
+        assert!(dynamic_mention_is_graphworthy(&dialogue, ""));
     }
 
     #[test]
-    fn dynamic_candidate_kind_prefers_model_label_evidence_over_unknown_entity_kind() {
+    fn dynamic_candidate_signal_keeps_location_shaped_cap_spans() {
+        let text = "Baton Rouge came first. Rook said the answer aloud.";
+        let location =
+            dynamic_test_mention("Baton Rouge", phoenix_dynamic_ner::VoteReason::CapSpan);
+        let person = dynamic_test_mention("Rook", phoenix_dynamic_ner::VoteReason::CapSpan);
+
+        assert!(dynamic_has_candidate_signal(&location, text));
+        assert!(dynamic_mention_is_graphworthy(&location, text));
+        assert!(!dynamic_has_candidate_signal(&person, text));
+
+        let votes = dynamic_candidate_kind_votes(&location, None, text);
+        let kind = dynamic_candidate_kind(&location, None, &votes);
+
+        assert_eq!(kind, "LOCATION");
+        assert!(votes.iter().any(|vote| {
+            vote.kind == "LOCATION"
+                && vote.source == "native_location_shape"
+                && vote.reason == "location_surface_or_context"
+        }));
+    }
+
+    #[test]
+    fn dynamic_candidate_kind_flattens_model_groups_to_network() {
         let mut mention =
             dynamic_test_mention("Allied Table", phoenix_dynamic_ner::VoteReason::ModelLabel);
         mention
@@ -11437,13 +11937,43 @@ mod tests {
             reason: phoenix_dynamic_ner::VoteReason::ModelLabel,
         });
 
-        let votes = dynamic_candidate_kind_votes(&mention, None);
+        let votes = dynamic_candidate_kind_votes(&mention, None, "");
         let kind = dynamic_candidate_kind(&mention, None, &votes);
 
-        assert_eq!(kind, "ORGANIZATION");
+        assert_eq!(kind, "NETWORK");
         assert_eq!(dynamic_candidate_decision_status(&mention), "accepted");
-        assert!(votes.iter().any(|vote| vote.kind == "ORGANIZATION"));
+        assert!(votes.iter().any(|vote| vote.kind == "NETWORK"));
         assert!(votes.iter().any(|vote| vote.kind == "LOCATION"));
+    }
+
+    #[test]
+    fn dynamic_network_surface_candidates_cover_story_groups() {
+        let document = smoke_inline_doc(
+            "network-control",
+            "Joint Chiefs, Nemo, Atlas, Allied Table. Operators are signed to that table. Local militia hero. Rook is a military officer. Operator Office attached. Bringing in Phantom command or Warden force.",
+        );
+        let mut candidates = BTreeMap::new();
+
+        dynamic_push_network_surface_candidates(&document, &mut candidates);
+
+        for label in [
+            "Joint Chiefs",
+            "Atlas",
+            "Allied Table",
+            "Operators",
+            "militia",
+            "military",
+            "Operator Office",
+            "Phantom command",
+            "Warden force",
+        ] {
+            assert!(
+                candidates
+                    .values()
+                    .any(|candidate| candidate.label == label && candidate.kind == "NETWORK"),
+                "missing network candidate for {label}"
+            );
+        }
     }
 
     #[test]
@@ -11525,6 +12055,14 @@ mod tests {
         assert!(result
             .candidate_suggestions
             .iter()
+            .any(|candidate| candidate.label == "Red Mesa" && candidate.kind == "LOCATION"));
+        assert!(result
+            .candidate_suggestions
+            .iter()
+            .any(|candidate| candidate.label == "Allied Table" && candidate.kind == "NETWORK"));
+        assert!(result
+            .candidate_suggestions
+            .iter()
             .all(|candidate| { candidate.label != "Rook" || candidate.kind != "LOCATION" }));
     }
 
@@ -11561,6 +12099,16 @@ mod tests {
             reason,
         });
         packet
+    }
+
+    fn smoke_inline_doc(id: &str, text: &str) -> AtlasRichScanDocument {
+        AtlasRichScanDocument {
+            document_id: DocumentId(id.to_owned()),
+            note_id: Some(NoteId(format!("note-{id}"))),
+            title: format!("{id}.md"),
+            text: text.to_owned(),
+            scope: ScopeKey::default(),
+        }
     }
 
     fn smoke_doc(id: &str, file_name: &str) -> AtlasRichScanDocument {

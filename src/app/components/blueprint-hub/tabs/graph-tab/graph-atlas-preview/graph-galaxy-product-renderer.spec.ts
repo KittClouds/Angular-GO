@@ -1,0 +1,168 @@
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./graph-galaxy-textures', async () => {
+    const THREE = await import('three');
+    const texture = () => new THREE.Texture();
+    return {
+        makeAtomTexture: texture,
+        makeHaloTexture: texture,
+        makeLabelSprite: vi.fn(),
+        makeNodeTexture: texture,
+    };
+});
+
+import * as THREE from 'three';
+
+import { buildGalaxyFocusMask } from './graph-galaxy-focus';
+import { buildGalaxyGlows } from './graph-galaxy-objects';
+import { ThreeGalaxyRenderer } from './three-galaxy-renderer';
+
+type RendererProbe = {
+    setSettings(settings: Record<string, unknown>): void;
+    edgeMaterialOpacity(): number;
+    hybridShellOpacity(): number;
+    hopfGuideWeightForKind(kind: string, surface?: string): number;
+    hopfLayerOpacity(layer: string, kind: string, weight?: number, surface?: string): number;
+    hopfTubeOpacity(kind: string, glow: boolean, surface: string): number;
+    hopfTubeRadius(kind: string, layer: 'tubeCore' | 'tubeGlow', surface: string): number;
+    lorentzGuideFocusMultiplier(data: { ids: string[] }, focus: ReturnType<typeof buildGalaxyFocusMask>, nodeIds: readonly string[]): number;
+    lorentzGuideTint(guide: Record<string, unknown>, index: number, surface?: string): { r: number; g: number; b: number };
+    lorentzLayerOpacity(layer: string, guideKind: string, treeKind?: string, weight?: number, surface?: string): number;
+    lorentzTubeRadius(guide: { guideKind: string }, layer: 'tubeCore' | 'tubeGlow', surface?: string): number;
+    writeLorentzGuideColor(colors: Float32Array, offset: number, guide: Record<string, unknown>, index: number, phase: number, surface: string): void;
+    nodeDensityFactors(data: { ids: string[] }, positions: Float32Array): Float32Array;
+    productKleinLayerOpacity(layer: string): number;
+};
+
+describe('Product manifold guide styling', () => {
+    it('keeps evidence fibers visually above scaffold and Lorentz guides', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const productDataWeight = renderer.hopfGuideWeightForKind('dataFiber', 'product');
+        const productScaffoldWeight = renderer.hopfGuideWeightForKind('torusBand', 'product');
+
+        const productData = renderer.hopfLayerOpacity('line', 'dataFiber', productDataWeight, 'product');
+        const productScaffold = renderer.hopfLayerOpacity('line', 'torusBand', productScaffoldWeight, 'product');
+        const productLorentz = renderer.lorentzLayerOpacity('line', 'membership', 'identity', 1, 'product');
+
+        expect(productData).toBeGreaterThan(productScaffold * 4);
+        expect(productData).toBeGreaterThan(productLorentz);
+        expect(renderer.hopfTubeOpacity('torusBand', false, 'product')).toBe(0);
+        expect(renderer.hopfTubeOpacity('torusBand', false, 'default')).toBeGreaterThan(0);
+    });
+
+    it('keeps Product fibers leaner and dimmer while preserving Hopf space control', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeCore', 'product')).toBeCloseTo(0.00675);
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeGlow', 'product')).toBeCloseTo(0.0216);
+        expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBeCloseTo(0.13464);
+
+        renderer.setSettings({ hopfSpaceIntensity: 0 });
+        expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBe(0);
+    });
+
+    it('makes Lorentz space and Glow sliders affect visible Product geometry', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+
+        const baseLorentz = renderer.lorentzLayerOpacity('line', 'membership', 'identity', 1, 'product');
+        renderer.setSettings({ lorentzSpaceIntensity: 0 });
+        expect(renderer.lorentzLayerOpacity('line', 'membership', 'identity', 1, 'product')).toBe(0);
+        renderer.setSettings({ lorentzSpaceIntensity: 1.4 });
+        expect(renderer.lorentzLayerOpacity('line', 'membership', 'identity', 1, 'product')).toBeGreaterThan(baseLorentz * 1.25);
+
+        renderer.setSettings({ glow: 0 });
+        const lowEdge = renderer.edgeMaterialOpacity();
+        const lowShell = renderer.hybridShellOpacity();
+        renderer.setSettings({ glow: 1.8 });
+        expect(renderer.edgeMaterialOpacity()).toBeGreaterThan(lowEdge * 1.6);
+        expect(renderer.hybridShellOpacity()).toBeLessThan(lowShell * 1.5);
+    });
+
+    it('dims Lorentz guides by node focus without changing graph edge focus', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const data = {
+            ids: ['kai', 'cael', 'hazel'],
+            edgePairs: new Uint32Array([0, 1]),
+        } as any;
+        const focus = buildGalaxyFocusMask(data, null, 'kai');
+
+        expect(renderer.lorentzGuideFocusMultiplier(data, focus, ['kai', 'cael'])).toBeGreaterThan(1);
+        expect(renderer.lorentzGuideFocusMultiplier(data, focus, ['hazel'])).toBeLessThan(0.2);
+        expect(renderer.lorentzGuideFocusMultiplier(data, focus, [])).toBeLessThan(0.3);
+    });
+
+    it('keeps Lorentz structure ten percent leaner', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+
+        expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeCore', 'product')).toBeCloseTo(0.00396);
+        expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeGlow', 'product')).toBeCloseTo(0.01125);
+        expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeCore')).toBeCloseTo(0.00432);
+    });
+
+    it('preserves Product Lorentz lane colors instead of washing them to cyan', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const causalGuide = {
+            id: 'lorentz:product-guide:causal',
+            guideKind: 'membership',
+            treeKind: 'causal',
+            level: 2,
+            color: { r: 0.92, g: 0.38, b: 0.12 },
+        };
+        const documentGuide = {
+            id: 'lorentz:product-guide:document',
+            guideKind: 'membership',
+            treeKind: 'documentStructure',
+            level: 1,
+            color: { r: 0.14, g: 0.46, b: 0.9 },
+        };
+        const causalTint = renderer.lorentzGuideTint(causalGuide, 0, 'product');
+        const documentTint = renderer.lorentzGuideTint(documentGuide, 0, 'product');
+        const causalLine = new Float32Array(3);
+
+        renderer.writeLorentzGuideColor(causalLine, 0, causalGuide, 0, 0.5, 'product');
+
+        expect(causalTint.r).toBeGreaterThan(causalTint.b * 2);
+        expect(documentTint.b).toBeGreaterThan(documentTint.r * 2);
+        expect(causalLine[0]).toBeGreaterThan(causalLine[2] * 2);
+    });
+
+    it('keeps the Product Klein ball as its own toggleable layer', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+
+        expect(renderer.productKleinLayerOpacity('boundary')).toBeGreaterThan(0);
+        expect(renderer.productKleinLayerOpacity('chord')).toBeGreaterThan(renderer.productKleinLayerOpacity('boundary'));
+
+        renderer.setSettings({ productKleinVisible: false });
+        expect(renderer.productKleinLayerOpacity('boundary')).toBe(0);
+        expect(renderer.productKleinLayerOpacity('chord')).toBe(0);
+    });
+
+    it('prevents dense node overlaps from additive halo blowout', () => {
+        const glows = buildGalaxyGlows({ ids: ['a'] } as any, new THREE.Texture());
+        const material = glows?.children[0] instanceof THREE.Sprite ? glows.children[0].material : null;
+        expect(material?.blending).toBe(THREE.NormalBlending);
+
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe & {
+            renderer: { domElement: { clientWidth: number; clientHeight: number } };
+            perspective: THREE.PerspectiveCamera;
+        };
+        renderer.renderer = { domElement: { clientWidth: 100, clientHeight: 100 } };
+        renderer.perspective.position.set(0, 0, 7);
+        renderer.perspective.lookAt(0, 0, 0);
+        renderer.perspective.updateMatrixWorld();
+        renderer.perspective.updateProjectionMatrix();
+
+        const positions = new Float32Array([
+            0, 0, 0,
+            0.01, 0, 0,
+            -0.01, 0, 0,
+            0, 0.01, 0,
+        ]);
+        const factors = renderer.nodeDensityFactors({ ids: ['a', 'b', 'c', 'd'] }, positions);
+
+        expect(Math.max(...factors)).toBeLessThan(1);
+        expect(Math.min(...factors)).toBeGreaterThanOrEqual(0.28);
+    });
+});

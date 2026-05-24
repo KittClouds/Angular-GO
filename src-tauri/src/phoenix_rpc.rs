@@ -402,6 +402,7 @@ const HYBRID_GEOMETRY_VERSION: &str = "hybrid_semantic_v1";
 const HOPF_GEOMETRY_VERSION: &str = "hopf_ico_r5_v1";
 const HOPF_PROJECTION_VERSION: &str = "hopf_stereographic_v1";
 const LORENTZ_GEOMETRY_VERSION: &str = "lorentz_h4_forest_v1";
+const PRODUCT_GEOMETRY_VERSION: &str = "product_lorentz_hopf_v1";
 const HOPF_ICO_RESOLUTION: u32 = 5;
 const HOPF_CHART_RESOLUTION: u32 = 3;
 const HOPF_CONE_APERTURE_COS: f64 = 0.573_576_436_351_046;
@@ -919,26 +920,32 @@ fn build_manifold_snapshot(
     let manifold = request.manifold.as_deref().unwrap_or("hybrid");
     let is_hopf = manifold == "hopf";
     let is_lorentz = manifold == "lorentz";
+    let is_product = manifold == "product";
     let scope = request.scope.as_ref();
     let limit = request.limit.unwrap_or(360).max(1);
     let document_rows = store_relation_rows(host, "semantic_documents")?;
     let node_rows = store_relation_rows(host, "semantic_node_prototypes")?;
     let candidate_rows = store_relation_rows(host, "graph_candidate_edges")?;
+    let semantic =
+        semantic_rows_to_payload(&document_rows, &node_rows, &candidate_rows, scope, limit);
     let payload = if is_hopf {
-        let semantic =
-            semantic_rows_to_payload(&document_rows, &node_rows, &candidate_rows, scope, limit);
         semantic_payload_to_hopf_payload(&semantic)
     } else if is_lorentz {
         let build = ensure_lorentz_sidecar(host, scope, Some(limit), false)?;
         lorentz_index_to_payload(build.mmap.index(), build.cache)
+    } else if is_product {
+        let build = ensure_lorentz_sidecar(host, scope, Some(limit), false)?;
+        product_index_to_payload(&semantic, build.mmap.index(), build.cache)
     } else {
-        semantic_rows_to_payload(&document_rows, &node_rows, &candidate_rows, scope, limit)
+        semantic
     };
     Ok(DesktopManifoldSnapshot {
         manifold: if is_hopf {
             "hopf"
         } else if is_lorentz {
             "lorentz"
+        } else if is_product {
+            "product"
         } else {
             "hybrid"
         },
@@ -946,6 +953,8 @@ fn build_manifold_snapshot(
             HOPF_GEOMETRY_VERSION
         } else if is_lorentz {
             LORENTZ_GEOMETRY_VERSION
+        } else if is_product {
+            PRODUCT_GEOMETRY_VERSION
         } else {
             HYBRID_GEOMETRY_VERSION
         },
@@ -953,15 +962,17 @@ fn build_manifold_snapshot(
             "native hopf anchors + fibers"
         } else if is_lorentz {
             "native lorentz h4 forest sidecar"
+        } else if is_product {
+            "native product Lorentz-Hopf atlas"
         } else {
             "native hybrid semantic atlas"
         },
         capabilities: DesktopManifoldCapabilities {
-            ann: !is_lorentz,
-            anchors: is_hopf,
-            fibers: is_hopf,
-            phase: is_hopf,
-            cones: is_hopf || is_lorentz,
+            ann: !is_lorentz || is_product,
+            anchors: is_hopf || is_product,
+            fibers: is_hopf || is_product,
+            phase: is_hopf || is_product,
+            cones: is_hopf || is_lorentz || is_product,
         },
         payload,
     })
@@ -1594,6 +1605,84 @@ fn lorentz_index_to_payload(
         neighbor_rings: Vec::new(),
         cone_traces: Vec::new(),
         anchor_projections: Vec::new(),
+        lorentz_trees: snapshot.trees,
+        lorentz_memberships: snapshot.memberships,
+        lorentz_cache: Some(cache),
+    }
+}
+
+fn product_index_to_payload(
+    semantic: &DesktopManifoldPayload,
+    index: &LorentzForestIndex,
+    cache: DesktopLorentzCacheStatus,
+) -> DesktopManifoldPayload {
+    let snapshot = lorentz_index_to_snapshot(index);
+    let mut semantic_by_id = HashMap::<String, (&DesktopManifoldNode, usize)>::new();
+    for (ord, node) in semantic.nodes.iter().enumerate() {
+        semantic_by_id.insert(node.id.clone(), (node, ord));
+    }
+    let topology = IcoTopology::new(HOPF_ICO_RESOLUTION);
+    let chart_topology = IcoTopology::new(HOPF_CHART_RESOLUTION);
+    let mut assignments = Vec::<HopfAnchorAssignment>::new();
+    let mut nodes = snapshot.nodes;
+    for node in &mut nodes {
+        let Some((semantic_node, index)) = semantic_by_id.get(node.id.as_str()) else {
+            continue;
+        };
+        let fiber_kind = infer_hopf_fiber_kind(semantic_node);
+        let direction = project_vector_to_direction(&semantic_node.vector, &semantic_node.id);
+        let projection = topology.project(&direction);
+        let chart_projection = chart_topology.project(&direction);
+        let phase = hopf_phase_for_kind(fiber_kind, &semantic_node.id, *index);
+        assignments.push(HopfAnchorAssignment {
+            anchor_id: node.id.clone(),
+            fiber_id: format!("product:fiber:{}:{fiber_kind}", node.id),
+            fiber_kind: fiber_kind.to_owned(),
+            cell_id: projection.primary_cell_id.clone(),
+            chart_id: chart_projection.primary_cell_id,
+            secondary_cell_ids: projection.secondary_cell_ids.clone(),
+            center_vector: projection.center_vector,
+            cell_distance: projection.cell_distance,
+            boundary_score: projection.boundary_score,
+            phase,
+        });
+        node.source_type = "product_node".to_owned();
+        node.base_vector = Some(projection.center_vector);
+        node.cell_id = Some(projection.primary_cell_id);
+        node.secondary_cell_ids = projection.secondary_cell_ids;
+        node.cell_distance = Some(projection.cell_distance);
+        node.boundary_score = Some(projection.boundary_score);
+        node.phase = Some(phase);
+        node.fiber_kind = Some(fiber_kind.to_owned());
+        node.geometry_version = Some(PRODUCT_GEOMETRY_VERSION);
+        node.document_id = semantic_node.document_id.clone();
+        node.narrative_id = semantic_node.narrative_id.clone();
+        node.folder_id = semantic_node.folder_id.clone();
+        node.preview = semantic_node.preview.clone();
+        node.kind = format!("PRODUCT:{}", semantic_node.kind);
+    }
+    DesktopManifoldPayload {
+        nodes,
+        edges: snapshot.edges,
+        source_label: "native product Lorentz-Hopf atlas",
+        projection_source: "real_snapshot_vectors",
+        cells: build_desktop_cells(&topology, &assignments),
+        charts: build_desktop_charts(&topology, &chart_topology, &assignments),
+        seams: build_desktop_seams(&topology, &assignments),
+        neighbor_rings: build_desktop_neighbor_rings(&topology, &assignments),
+        cone_traces: build_desktop_cone_traces(&topology, &assignments),
+        anchor_projections: assignments
+            .iter()
+            .map(|assignment| DesktopAnchorProjection {
+                anchor_id: assignment.anchor_id.clone(),
+                primary_cell_id: assignment.cell_id.clone(),
+                secondary_cell_ids: assignment.secondary_cell_ids.clone(),
+                cell_distance: assignment.cell_distance,
+                boundary_score: assignment.boundary_score,
+                projection_version: HOPF_PROJECTION_VERSION,
+                geometry_version: PRODUCT_GEOMETRY_VERSION,
+            })
+            .collect(),
         lorentz_trees: snapshot.trees,
         lorentz_memberships: snapshot.memberships,
         lorentz_cache: Some(cache),

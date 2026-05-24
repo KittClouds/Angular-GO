@@ -80,24 +80,28 @@ const MANIFOLD_CAPABILITIES: Partial<Record<AtlasCapabilityId, AtlasManifoldMode
     hybridManifold: 'hybrid',
     hopfProjection: 'hopf',
     lorentzForest: 'lorentz',
+    productManifold: 'product',
 };
 
 const MANIFOLD_PROJECTION_CAPABILITIES: AtlasCapabilityId[] = [
     'hybridManifold',
     'hopfProjection',
     'lorentzForest',
+    'productManifold',
 ];
 
 const MANIFOLD_PROJECTION_OPERATIONS: AtlasRuntimeOperation[] = [
     { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'hybrid' },
     { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'hopf' },
     { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'lorentz' },
+    { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'product' },
 ];
 
 const MANIFOLD_MODE_CAPABILITIES: Record<AtlasManifoldMode, AtlasCapabilityId> = {
     hybrid: 'hybridManifold',
     hopf: 'hopfProjection',
     lorentz: 'lorentzForest',
+    product: 'productManifold',
 };
 
 type NativeStoreProbeConfig = {
@@ -867,7 +871,7 @@ export class AtlasCapabilityRuntimeService {
                 return {
                     requiredCapabilities: TEXT_GRAPH_CAPABILITIES,
                     optionalCapabilities: [] as AtlasCapabilityId[],
-                    skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', 'hybridManifold', 'hopfProjection', 'lorentzForest', 'retrievalWalk', 'galaxyVisualization', 'relationGraph', 'temporalGraph', 'eventIdentity', 'memoryState', 'causalGraph'] as AtlasCapabilityId[],
+                    skippedCapabilities: ['semanticEmbedding', 'semanticAtlas', 'semanticCandidate', 'nliAdjudication', 'hybridManifold', 'hopfProjection', 'lorentzForest', 'productManifold', 'retrievalWalk', 'galaxyVisualization', 'relationGraph', 'temporalGraph', 'eventIdentity', 'memoryState', 'causalGraph'] as AtlasCapabilityId[],
                     dependencyChain: TEXT_GRAPH_CAPABILITIES,
                     requiredModels: [dynamicNer],
                     optionalModels: [],
@@ -904,10 +908,11 @@ export class AtlasCapabilityRuntimeService {
                         expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
                         expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
                         expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
+                        expected('manifoldSnapshot.product', 'Product manifold', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(product)'),
                     ],
                     mutationPolicy: buildMutationPolicy as AtlasCapabilityMutationPolicy,
                     runPolicy: buildPolicy as AtlasCapabilityRunPolicy,
-                    backendRoute: `NerService.runDynamicScan -> PhoenixMachineControlService.loadSemanticModel -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true, policy=${buildPolicy}) -> manifoldSnapshot(hybrid/hopf/lorentz)`,
+                    backendRoute: `NerService.runDynamicScan -> PhoenixMachineControlService.loadSemanticModel -> AtlasScanCoordinatorService.runRichEmbeddingScan(includeSemanticAtlas=true, policy=${buildPolicy}) -> manifoldSnapshot(hybrid/hopf/lorentz/product)`,
                     runnable: true,
                     skippedLanes: ['nli'] as AtlasModelLaneId[],
                 };
@@ -927,6 +932,7 @@ export class AtlasCapabilityRuntimeService {
                         expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
                         expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
                         expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
+                        expected('manifoldSnapshot.product', 'Product manifold', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(product)'),
                         expected('nliJudgments', 'NLI candidate-edge judgments', 'semantic:applyNliJudgments'),
                     ],
                     mutationPolicy: buildMutationPolicy as AtlasCapabilityMutationPolicy,
@@ -955,6 +961,7 @@ export class AtlasCapabilityRuntimeService {
                         expected('manifoldSnapshot.hybrid', 'Hybrid projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hybrid)'),
                         expected('manifoldSnapshot.hopf', 'Hopf projection', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(hopf)'),
                         expected('manifoldSnapshot.lorentz', 'Lorentz forest', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(lorentz)'),
+                        expected('manifoldSnapshot.product', 'Product manifold', 'PhoenixUiApiService.loadManifoldAtlasSnapshot(product)'),
                         expected('nliJudgments', 'NLI candidate-edge judgments', 'semantic:applyNliJudgments'),
                         expected('graph_candidate_edges', 'relation rows', 'relation:list(graph_candidate_edges)'),
                         expected('graph_edges.active_during', 'temporal rows', 'relation:list(graph_edges, active_during)'),
@@ -1183,6 +1190,7 @@ export class AtlasCapabilityRuntimeService {
                     this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
                     this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
                     this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('productManifold', 'manifoldSnapshot'),
                 ];
             case 'adjudicatedSemanticGraph':
                 return [
@@ -1190,6 +1198,7 @@ export class AtlasCapabilityRuntimeService {
                     this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
                     this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
                     this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('productManifold', 'manifoldSnapshot'),
                     this.outputProbeForCapability('nliAdjudication', 'nliAdjudication'),
                 ];
             case 'reasoningGraph':
@@ -1198,6 +1207,7 @@ export class AtlasCapabilityRuntimeService {
                     this.outputProbeForCapability('hybridManifold', 'manifoldSnapshot'),
                     this.outputProbeForCapability('hopfProjection', 'manifoldSnapshot'),
                     this.outputProbeForCapability('lorentzForest', 'manifoldSnapshot'),
+                    this.outputProbeForCapability('productManifold', 'manifoldSnapshot'),
                     this.outputProbeForCapability('nliAdjudication', 'nliAdjudication'),
                     this.outputProbeForCapability('relationGraph', 'nativeStoreProbe'),
                     this.outputProbeForCapability('eventIdentity', 'nativeStoreProbe'),
@@ -1481,6 +1491,7 @@ function manifoldModeForCapability(id: AtlasCapabilityId | undefined): AtlasMani
 function manifoldModeLabel(mode: AtlasManifoldMode): string {
     if (mode === 'hopf') return 'Hopf';
     if (mode === 'lorentz') return 'Lorentz';
+    if (mode === 'product') return 'Product';
     return 'Hybrid';
 }
 

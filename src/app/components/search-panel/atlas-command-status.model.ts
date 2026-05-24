@@ -252,7 +252,7 @@ function buildStages(input: AtlasCommandStatusInput, counts: AtlasInventoryCount
         stage('ner', 'Dynamic NER / Review Lanes', nerTone(input.dynamicNerStatus), `Phoenix ${input.dynamicNerStatus}`, 'plain text', 'candidate entities', 'Run NER'),
         stage('graph', 'Text Graph Commit', graphTone(input.graphStatus), `${countNoun(counts.committedVertices, 'vertex', 'vertices')}, ${countNoun(counts.evidenceEdges, 'evidence edge', 'evidence edges')}`, 'surface + mentions', 'committed graph', 'Text Graph'),
         stage('semantic', 'Semantic Sidecar', vectorTone(input.vectorStatus, counts.embeddingVectors), `${input.embeddingModelLabel} ${input.embeddingDimensionLabel}`, 'committed graph + text', valueLabel(counts.embeddingVectors, 'vectors'), 'Semantic Atlas'),
-        stage('sidecars', 'Manifold Sidecars', manifoldTone(input.manifoldStatus), `${input.manifoldMode} ${input.manifoldStatus}`, 'semantic atlas', 'Hybrid / Hopf / Lorentz', 'Visualize'),
+        stage('sidecars', 'Manifold Sidecars', manifoldTone(input.manifoldStatus), `${input.manifoldMode} ${input.manifoldStatus}`, 'semantic atlas', 'Hybrid / Hopf / Lorentz / Product', 'Visualize'),
         stage('retrieval', 'Retrieval / Visualization', input.enabledLanes.length ? 'ready' : 'idle', input.enabledLanes.join(' + ') || 'lexical', 'query text', 'ranked results', 'Search'),
     ];
 }
@@ -263,6 +263,7 @@ function buildSidecars(input: AtlasCommandStatusInput): AtlasInventoryMetric[] {
         { label: 'Hybrid space', value: null, detail: input.manifoldStatuses.hybrid, source: 'Hybrid' },
         { label: 'Hopf projection', value: null, detail: input.manifoldStatuses.hopf, source: 'Hopf' },
         { label: 'Lorentz forest', value: null, detail: input.manifoldStatuses.lorentz, source: 'Lorentz' },
+        { label: 'Product manifold', value: null, detail: input.manifoldStatuses.product, source: 'Product' },
     ];
 }
 
@@ -302,6 +303,8 @@ function capabilityTone(
             return manifoldTone(input.manifoldStatuses.hopf);
         case 'lorentzForest':
             return manifoldTone(input.manifoldStatuses.lorentz);
+        case 'productManifold':
+            return manifoldTone(input.manifoldStatuses.product);
         case 'retrievalWalk':
             return input.enabledLanes.length ? 'ready' : 'idle';
         case 'galaxyVisualization':
@@ -354,6 +357,8 @@ function capabilityDetail(
             return `Hopf ${input.manifoldStatuses.hopf}`;
         case 'lorentzForest':
             return `Lorentz ${input.manifoldStatuses.lorentz}; tree kinds include temporal/causal/evidence/provenance`;
+        case 'productManifold':
+            return `Product ${input.manifoldStatuses.product}; Lorentz skeleton + Hopf fibers + semantic shell`;
         case 'retrievalWalk':
             return input.enabledLanes.join(' + ') || 'lexical fallback';
         case 'galaxyVisualization':

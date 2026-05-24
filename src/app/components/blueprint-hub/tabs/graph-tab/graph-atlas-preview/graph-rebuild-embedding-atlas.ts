@@ -2,6 +2,7 @@ import {
     HOPF_MANIFOLD_CAPABILITIES,
     HYBRID_MANIFOLD_CAPABILITIES,
     LORENTZ_MANIFOLD_CAPABILITIES,
+    PRODUCT_MANIFOLD_CAPABILITIES,
     type AtlasManifoldMode,
     type ManifoldCapabilities,
 } from '../../../../../services/manifold-atlas.types';
@@ -11,6 +12,7 @@ import type {
 } from '../../../../../graph-rebuild/graph-rebuild-snapshot';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
+import { relationHslFromText } from './graph-relation-visual-style';
 
 const DIMS = 32;
 const LIMIT = 420;
@@ -67,7 +69,7 @@ function targetNode(
         atlasX: point.x,
         atlasY: point.y,
         atlasZ: point.z,
-        colorHsl: kindHsl(target.kind),
+        colorHsl: targetColorHsl(target),
         metadata: {
             sourceType: target.kind,
             sourceId: target.sourceId,
@@ -161,7 +163,7 @@ function projectVector(
     const spiral = index * 2.399963229728653 + unitHash(id);
     const y = total > 1 ? 1 - (index / (total - 1)) * 2 : 0;
     const radial = Math.sqrt(Math.max(0, 1 - y * y));
-    const scale = manifold === 'hopf' ? 0.86 : manifold === 'lorentz' ? 1.22 : 1.48;
+    const scale = manifold === 'hopf' ? 0.86 : manifold === 'lorentz' ? 1.22 : manifold === 'product' ? 1.08 : 1.48;
     return {
         x: (vector[0] * 0.9 + Math.cos(spiral) * radial) * scale,
         y: (vector[1] * 0.7 + y * 0.64) * scale,
@@ -178,6 +180,14 @@ function normalize(vector: Float32Array): void {
 
 function displayKind(kind: string): string {
     return String(kind || 'target').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+function targetColorHsl(target: GraphRebuildEmbeddingTarget): string {
+    const kind = displayKind(target.kind);
+    if (kind === 'graph-fact') {
+        return relationHslFromText(target.label, target.text, target.sourceId) || kindHsl(kind);
+    }
+    return kindHsl(kind);
 }
 
 function kindHsl(kind: string): string {
@@ -198,12 +208,14 @@ function kindHsl(kind: string): string {
 function graphRebuildGeometryVersion(manifold: AtlasManifoldMode): string {
     if (manifold === 'hopf') return 'graph_rebuild_hopf_v1';
     if (manifold === 'lorentz') return 'graph_rebuild_lorentz_v1';
+    if (manifold === 'product') return 'graph_rebuild_product_lorentz_hopf_v1';
     return 'graph_rebuild_hybrid_v1';
 }
 
 function graphRebuildCapabilities(manifold: AtlasManifoldMode): ManifoldCapabilities {
     if (manifold === 'hopf') return HOPF_MANIFOLD_CAPABILITIES;
     if (manifold === 'lorentz') return LORENTZ_MANIFOLD_CAPABILITIES;
+    if (manifold === 'product') return PRODUCT_MANIFOLD_CAPABILITIES;
     return HYBRID_MANIFOLD_CAPABILITIES;
 }
 

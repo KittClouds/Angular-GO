@@ -1,4 +1,4 @@
-import { HOPF_MANIFOLD_CAPABILITIES, LORENTZ_MANIFOLD_CAPABILITIES, type AtlasManifoldMode, type ManifoldAtlasSnapshot } from '../../../../../services/manifold-atlas.types';
+import { HOPF_MANIFOLD_CAPABILITIES, LORENTZ_MANIFOLD_CAPABILITIES, PRODUCT_MANIFOLD_CAPABILITIES, type AtlasManifoldMode, type ManifoldAtlasSnapshot } from '../../../../../services/manifold-atlas.types';
 import type { PhoenixUiApiService, SearchScope, SemanticAtlasEmbeddingAtlas, SemanticAtlasEmbeddingNode } from '../../../../../services/phoenix-ui-api.service';
 import {
     buildBackendEmbeddingAtlas,
@@ -9,7 +9,7 @@ import {
 } from './graph-embedding-atlas';
 import { buildLorentzAtlas } from './graph-lorentz-atlas';
 
-type VisualManifoldMode = Extract<AtlasManifoldMode, 'hybrid' | 'hopf' | 'lorentz'>;
+type VisualManifoldMode = Extract<AtlasManifoldMode, 'hybrid' | 'hopf' | 'lorentz' | 'product'>;
 
 export interface ManifoldAtlasAdapter {
     readonly mode: VisualManifoldMode;
@@ -100,10 +100,45 @@ export const LORENTZ_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
     },
 };
 
+export const PRODUCT_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
+    mode: 'product',
+    label: 'Product',
+    traceLabel: 'Product trace',
+    async load(phoenixUiApi, scope) {
+        const snapshot = await phoenixUiApi.loadManifoldAtlasSnapshot('product', scope);
+        if (snapshot?.payload.nodes.length) {
+            return withManifoldMetadata(snapshot, buildProductAtlas(snapshot));
+        }
+        return {
+            ...emptyBackendAtlas('product semantic atlas unavailable'),
+            manifold: {
+                mode: 'product',
+                geometryVersion: 'product_lorentz_hopf_v1',
+                sourceLabel: 'product semantic atlas unavailable',
+                capabilities: PRODUCT_MANIFOLD_CAPABILITIES,
+                projectionSource: 'semantic_atlas_rows',
+                cells: [],
+                charts: [],
+                seams: [],
+                neighborRings: [],
+                coneTraces: [],
+                anchorProjections: [],
+                lorentzTrees: [],
+                lorentzMemberships: [],
+                lorentzCache: null,
+            },
+        };
+    },
+    trace(query, atlas) {
+        return buildEmbeddingQueryTrace(query, atlas);
+    },
+};
+
 export const MANIFOLD_ATLAS_ADAPTERS: Record<VisualManifoldMode, ManifoldAtlasAdapter> = {
     hybrid: HYBRID_MANIFOLD_ADAPTER,
     hopf: HOPF_MANIFOLD_ADAPTER,
     lorentz: LORENTZ_MANIFOLD_ADAPTER,
+    product: PRODUCT_MANIFOLD_ADAPTER,
 };
 
 export function manifoldAdapter(mode: AtlasManifoldMode): ManifoldAtlasAdapter {
@@ -147,6 +182,45 @@ function withManifoldMetadata(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbed
             lorentzMemberships: snapshot.payload.lorentzMemberships || [],
             lorentzCache: snapshot.payload.lorentzCache || null,
         },
+    };
+}
+
+function buildProductAtlas(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>): EmbeddingAtlasData {
+    const lorentzAtlas = buildLorentzAtlas(snapshot);
+    const nodes = lorentzAtlas.nodes.map((node, index) => {
+        const phase = hashToken(`product:${node.id}:${index}`);
+        const fiberKind = inferProductFiberKind(node.kind, node.metadata?.['preview']);
+        const kind = node.kind?.startsWith('PRODUCT:')
+            ? node.kind
+            : node.kind?.startsWith('LORENTZ:')
+                ? node.kind.replace('LORENTZ:', 'PRODUCT:')
+                : `PRODUCT:${node.kind || 'NODE'}`;
+        return {
+            ...node,
+            kind,
+            metadata: {
+                ...node.metadata,
+                sourceType: node.metadata?.sourceType === 'lorentz_root' ? 'product_root' : 'product_node',
+                product: {
+                    baseMode: 'lorentzHopf',
+                    sourceType: node.metadata?.sourceType,
+                    klein: (node.metadata?.['lorentz'] as Record<string, unknown> | undefined)?.['klein'],
+                    fiberKind,
+                    phase,
+                },
+                hopf: {
+                    role: 'anchor',
+                    baseId: node.id,
+                    fiberKind,
+                    phase,
+                },
+            },
+        };
+    });
+    return {
+        ...lorentzAtlas,
+        nodes,
+        sourceLabel: snapshot.sourceLabel || 'product Lorentz-Hopf atlas',
     };
 }
 
@@ -230,6 +304,16 @@ function inferFiberKind(node: SemanticAtlasEmbeddingNode): string {
     if (/power|veir|mechanic|channel|node|domain|technique/.test(text)) return 'power_system';
     if (/politic|corporate|faction|halcyon|surveillance/.test(text)) return 'political';
     if (/location|place|city|tower|realm|arcadia/.test(text)) return 'location';
+    if (/event|scene|chapter/.test(text)) return 'event';
+    return 'identity';
+}
+
+function inferProductFiberKind(kind: string | undefined, preview: unknown): string {
+    const text = `${kind || ''} ${typeof preview === 'string' ? preview : ''}`.toLowerCase();
+    if (/caus|because|therefore|effect/.test(text)) return 'causal';
+    if (/time|temporal|before|after|timeline/.test(text)) return 'temporal';
+    if (/evidence|source|document|provenance/.test(text)) return 'evidence';
+    if (/location|place|city|tower|realm/.test(text)) return 'location';
     if (/event|scene|chapter/.test(text)) return 'event';
     return 'identity';
 }

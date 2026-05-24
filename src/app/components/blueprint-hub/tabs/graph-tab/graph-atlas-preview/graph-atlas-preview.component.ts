@@ -121,6 +121,9 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
                                 [class.bg-violet-500/20]="manifoldMode() === 'lorentz'" [class.text-violet-100]="manifoldMode() === 'lorentz'"
                                 [class.text-zinc-500]="manifoldMode() !== 'lorentz'" (click)="setManifoldMode('lorentz')">Lorentz</button>
+                            <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
+                                [class.bg-violet-500/20]="manifoldMode() === 'product'" [class.text-violet-100]="manifoldMode() === 'product'"
+                                [class.text-zinc-500]="manifoldMode() !== 'product'" (click)="setManifoldMode('product')">Product</button>
                         </div>
                         @if (manifoldMode() === 'hybrid') {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
@@ -136,10 +139,15 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                             <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
                                 (click)="setLayoutMode('hopfProjection')">Projection</button>
                         </div>
-                        } @else {
+                        } @else if (manifoldMode() === 'lorentz') {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
                                 (click)="setLayoutMode('lorentzTree')">Tree</button>
+                        </div>
+                        } @else {
+                        <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
+                            <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
+                                (click)="setLayoutMode('productManifold')">Product</button>
                         </div>
                         }
                         }
@@ -282,29 +290,32 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                             <button type="button" class="galaxy-control-button" (click)="cycleNodeShape()">Shape<span>{{ settings.nodeShape }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="toggleAutoRotate()">Rotate<span>{{ settings.autoRotate ? 'on' : 'off' }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleBackgroundMode()">Backdrop<span>{{ backgroundLabel() }}</span></button>
-                            @if (settings.layoutMode === 'hybridSpace') {
+                            @if (settings.layoutMode === 'hybridSpace' || settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHybridShell()">Shell<span>{{ settings.hybridShellVisible ? 'on' : 'off' }}</span></button>
                             }
-                            @if (settings.layoutMode === 'hopfProjection') {
+                            @if (settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHopfSpace()">Hopf Space<span>{{ settings.hopfSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
-                            @if (settings.layoutMode === 'lorentzTree') {
+                            @if (settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Lorentz Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
+                            @if (settings.layoutMode === 'productManifold') {
+                            <button type="button" class="galaxy-control-button" (click)="toggleProductKlein()">Klein Ball<span>{{ settings.productKleinVisible ? 'on' : 'off' }}</span></button>
+                            }
                         </div>
-                        @if (settings.layoutMode === 'hybridSpace' && settings.hybridShellVisible) {
+                        @if ((settings.layoutMode === 'hybridSpace' || settings.layoutMode === 'productManifold') && settings.hybridShellVisible) {
                         <label class="mt-3 block">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Shell opacity</span><span>{{ settings.hybridShellOpacity | number:'1.2-2' }}</span></span>
                             <input type="range" min="0" max="1" step="0.02" [value]="settings.hybridShellOpacity" class="galaxy-slider" (input)="setHybridShellOpacity($any($event.target).value)" />
                         </label>
                         }
-                        @if (settings.layoutMode === 'hopfProjection' && settings.hopfSpaceVisible) {
+                        @if ((settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') && settings.hopfSpaceVisible) {
                         <label class="mt-3 block">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.hopfSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.hopfSpaceIntensity" class="galaxy-slider" (input)="setHopfSpaceIntensity($any($event.target).value)" />
                         </label>
                         }
-                        @if (settings.layoutMode === 'lorentzTree' && settings.lorentzSpaceVisible) {
+                        @if ((settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') && settings.lorentzSpaceVisible) {
                         <label class="mt-3 block">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.lorentzSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.lorentzSpaceIntensity" class="galaxy-slider" (input)="setLorentzSpaceIntensity($any($event.target).value)" />
@@ -703,6 +714,7 @@ export class GraphAtlasPreviewComponent {
         hybrid: emptyEmbeddingAtlas('hybrid atlas not loaded'),
         hopf: emptyEmbeddingAtlas('hopf atlas not loaded'),
         lorentz: emptyEmbeddingAtlas('lorentz forest not loaded'),
+        product: emptyEmbeddingAtlas('product atlas not loaded'),
     });
     readonly embeddingAtlas = computed(() => this.embeddingAtlasByMode()[this.manifoldMode()]);
     readonly graphRebuildEmbeddingAtlas = computed(() => {
@@ -792,6 +804,8 @@ export class GraphAtlasPreviewComponent {
             this.machine.setManifoldMode('hopf');
         } else if (mode === 'lorentzTree' && this.manifoldMode() !== 'lorentz') {
             this.machine.setManifoldMode('lorentz');
+        } else if (mode === 'productManifold' && this.manifoldMode() !== 'product') {
+            this.machine.setManifoldMode('product');
         }
         this.updateSettings({ layoutMode: mode });
     }
@@ -977,6 +991,10 @@ export class GraphAtlasPreviewComponent {
 
     toggleLorentzSpace(): void {
         this.updateSettings({ lorentzSpaceVisible: !this.settings.lorentzSpaceVisible });
+    }
+
+    toggleProductKlein(): void {
+        this.updateSettings({ productKleinVisible: !this.settings.productKleinVisible });
     }
 
     cycleBackgroundMode(): void {
@@ -1214,6 +1232,7 @@ export class GraphAtlasPreviewComponent {
     }
 
     private layoutForManifold(mode: AtlasManifoldMode): GalaxyLayoutMode {
+        if (mode === 'product') return 'productManifold';
         if (mode === 'hopf') return 'hopfProjection';
         if (mode === 'lorentz') return 'lorentzTree';
         return 'hybridSpace';

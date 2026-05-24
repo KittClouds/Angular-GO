@@ -18,6 +18,7 @@ import {
     HOPF_MANIFOLD_CAPABILITIES,
     HYBRID_MANIFOLD_CAPABILITIES,
     LORENTZ_MANIFOLD_CAPABILITIES,
+    PRODUCT_MANIFOLD_CAPABILITIES,
     type AtlasManifoldMode,
     type LorentzForestBuildRequest,
     type LorentzForestBuildResponse,
@@ -742,22 +743,29 @@ export class PhoenixUiApiService {
         if (!payload) return null;
         const isHopf = manifold === 'hopf';
         const isLorentz = manifold === 'lorentz';
+        const isProduct = manifold === 'product';
         return {
             manifold,
             geometryVersion: isHopf
                 ? 'hopf_ico_r5_v1'
                 : isLorentz
                   ? 'lorentz_h4_forest_v1'
+                  : isProduct
+                    ? 'product_lorentz_hopf_v1'
                   : 'hybrid_semantic_v1',
             sourceLabel: isHopf
                 ? 'backend semantic atlas -> hopf adapter'
                 : isLorentz
                   ? 'backend semantic atlas -> lorentz tree adapter'
-                : payload.sourceLabel,
+                  : isProduct
+                    ? 'backend semantic atlas -> product adapter'
+                  : payload.sourceLabel,
             capabilities: isHopf
                 ? HOPF_MANIFOLD_CAPABILITIES
                 : isLorentz
                   ? LORENTZ_MANIFOLD_CAPABILITIES
+                  : isProduct
+                    ? PRODUCT_MANIFOLD_CAPABILITIES
                 : HYBRID_MANIFOLD_CAPABILITIES,
             payload: {
                 ...payload,

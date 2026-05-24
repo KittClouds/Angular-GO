@@ -7,7 +7,7 @@ export type GalaxyEdgeColorMode = 'aqua' | 'orchid' | 'gold' | 'entityBlend' | '
 export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
 export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
 export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
-export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree';
+export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold';
 
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
@@ -37,6 +37,7 @@ export interface GalaxyRenderSettings {
     hopfSpaceIntensity: number;
     lorentzSpaceVisible: boolean;
     lorentzSpaceIntensity: number;
+    productKleinVisible: boolean;
 }
 
 export interface GalaxyInputEdge {
@@ -179,6 +180,7 @@ export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
     hopfSpaceIntensity: 1,
     lorentzSpaceVisible: true,
     lorentzSpaceIntensity: 1,
+    productKleinVisible: true,
 };
 
 export function mergeGalaxySettings(settings?: Partial<GalaxyRenderSettings> | null): GalaxyRenderSettings {
@@ -245,6 +247,15 @@ export function buildGalaxyScene(
         applyGalaxyMetadata(nodes);
         const lorentzGuides = applyLorentzTreeLayout(nodes, links);
         return { nodes, links, layoutMode: 'lorentzTree', groups: [], lorentzGuides };
+    }
+
+    if (settings.layoutMode === 'productManifold') {
+        applyGalaxyMetadata(nodes);
+        const lorentzGuides = applyLorentzTreeLayout(nodes, links);
+        const hopfNodes = productHopfProjectionNodes(nodes, links);
+        const hopfLinks = links.map((link) => ({ ...link }));
+        const hopfRibbons = applyHopfProjectionLayout(hopfNodes, hopfLinks);
+        return { nodes, links, layoutMode: 'productManifold', groups: [], hopfRibbons, lorentzGuides };
     }
 
     const groupPlan = settings.layoutMode === 'multiGalaxy' ? buildGroupPlan(nodes) : [];
@@ -520,6 +531,7 @@ const TAU = Math.PI * 2;
 const HOPF_RIBBON_SEGMENTS = 96;
 const HOPF_SPACE_FIBERS = 24;
 const HOPF_TORUS_BAND_FIBERS = 14;
+const PRODUCT_CONTEXT_SAMPLE_LIMIT = 384;
 
 interface HopfBaseInfo extends Rgb {
     key: string;
@@ -550,6 +562,186 @@ function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void 
         link.alpha = Math.min(0.38, link.alpha * (1.08 + radialDelta * 0.35));
         link.curve *= 0.78 + radialDelta * 0.9;
     }
+}
+
+function productHopfProjectionNodes(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyNode[] {
+    const clones = nodes.map((node) => productHopfClone(node));
+    const basesByRef = productEntityBaseMap(nodes);
+    const samples: GalaxyNode[] = [];
+    const seen = new Set<string>();
+    const addSample = (base: GalaxyNode | undefined, context: GalaxyNode | undefined, link: GalaxyEdge, side: string) => {
+        if (!base || !context || base === context || samples.length >= PRODUCT_CONTEXT_SAMPLE_LIMIT) return;
+        const fiberKind = productContextFiberKind(context, link);
+        const key = `${base.entity.id}|${context.entity.id}|${link.id}|${fiberKind}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        samples.push(productContextSampleNode(base, context, link, fiberKind, side, samples.length));
+    };
+
+    for (const link of links) {
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        if (!source || !target) continue;
+        if (isProductEntityBase(source)) addSample(source, target, link, 'target');
+        if (isProductEntityBase(target)) addSample(target, source, link, 'source');
+    }
+
+    for (const node of nodes) {
+        if (samples.length >= PRODUCT_CONTEXT_SAMPLE_LIMIT || isProductEntityBase(node)) continue;
+        const sourceEntityId = stringMetadata(node, 'sourceEntityId');
+        const base = sourceEntityId ? basesByRef.get(sourceEntityId) : undefined;
+        if (base) {
+            addSample(base, node, {
+                id: `product:implicit-context:${base.entity.id}:${node.entity.id}`,
+                source: 0,
+                target: 0,
+                type: 'product-context',
+                confidence: 0.62,
+                alpha: 0,
+                curve: 0,
+                flowOffset: 0,
+            }, 'implicit');
+        }
+    }
+
+    return [...clones, ...samples];
+}
+
+function productHopfClone(node: GalaxyNode): GalaxyNode {
+    const metadata = node.entity.metadata || {};
+    const existingHopf = hopfMetadata(node) || {};
+    const fiberKind = String(existingHopf['fiberKind'] || productContextFiberKind(node, null));
+    const phase = Number.isFinite(Number(existingHopf['phase']))
+        ? Number(existingHopf['phase'])
+        : productPhase(`${node.entity.id}:anchor:${fiberKind}`);
+    return {
+        ...node,
+        entity: {
+            ...node.entity,
+            metadata: {
+                ...metadata,
+                hopf: {
+                    ...existingHopf,
+                    role: existingHopf['role'] || 'anchor',
+                    baseId: existingHopf['baseId'] || node.entity.id,
+                    fiberKind,
+                    phase,
+                },
+            },
+        },
+    };
+}
+
+function productContextSampleNode(
+    base: GalaxyNode,
+    context: GalaxyNode,
+    link: GalaxyEdge,
+    fiberKind: string,
+    side: string,
+    ordinal: number,
+): GalaxyNode {
+    const phase = productPhase(`${base.entity.id}:${context.entity.id}:${link.id}:${fiberKind}:${ordinal}`);
+    const metadata = context.entity.metadata || {};
+    const id = `product:context:${base.entity.id}:${context.entity.id}:${link.id}:${side}`;
+    return {
+        ...context,
+        entity: {
+            ...context.entity,
+            id,
+            label: `${base.entity.label} / ${fiberKind.replace(/_/g, ' ')}`,
+            kind: `PRODUCT_CONTEXT:${fiberKind}`,
+            totalMentions: Math.max(1, Math.round((context.entity.totalMentions || 1) * Math.max(0.65, link.confidence || 0.65))),
+            colorHsl: base.entity.colorHsl || context.entity.colorHsl,
+            metadata: {
+                ...metadata,
+                sourceType: 'product_context_sample',
+                product: {
+                    role: 'contextSample',
+                    baseId: base.entity.id,
+                    sourceNodeId: context.entity.id,
+                    linkId: link.id,
+                    linkType: link.type,
+                    fiberKind,
+                },
+                hopf: {
+                    role: 'fiber',
+                    baseId: base.entity.id,
+                    fiberKind,
+                    phase,
+                },
+            },
+        },
+        r: base.r,
+        g: base.g,
+        b: base.b,
+        radius: Math.max(1.2, context.radius * 0.68),
+        galaxyOpacity: 0,
+    };
+}
+
+function productEntityBaseMap(nodes: GalaxyNode[]): Map<string, GalaxyNode> {
+    const out = new Map<string, GalaxyNode>();
+    for (const node of nodes) {
+        if (!isProductEntityBase(node)) continue;
+        for (const ref of productEntityRefs(node)) out.set(ref, node);
+    }
+    return out;
+}
+
+function productEntityRefs(node: GalaxyNode): string[] {
+    const refs = new Set<string>([node.entity.id]);
+    const sourceId = stringMetadata(node, 'sourceId');
+    const sourceEntityId = stringMetadata(node, 'sourceEntityId');
+    if (sourceId) refs.add(sourceId);
+    if (sourceEntityId) refs.add(sourceEntityId);
+    for (const prefix of ['embed:entity:', 'entity::']) {
+        if (node.entity.id.startsWith(prefix)) refs.add(node.entity.id.slice(prefix.length));
+        if (sourceId.startsWith(prefix)) refs.add(sourceId.slice(prefix.length));
+    }
+    return [...refs].filter(Boolean);
+}
+
+function isProductEntityBase(node: GalaxyNode): boolean {
+    const metadata = node.entity.metadata || {};
+    const sourceType = String(metadata.sourceType || '').toLowerCase();
+    const product = metadata['product'] as Record<string, unknown> | undefined;
+    const productSourceType = String(product?.['sourceType'] || '').toLowerCase();
+    const kind = String(node.entity.kind || '').toLowerCase();
+    const id = node.entity.id.toLowerCase();
+    return sourceType === 'entity'
+        || productSourceType === 'entity'
+        || id.startsWith('embed:entity:')
+        || id.startsWith('entity::')
+        || kind.includes('character')
+        || kind.includes('entity');
+}
+
+function productContextFiberKind(context: GalaxyNode, link: GalaxyEdge | null): string {
+    const text = [
+        link?.type || '',
+        context.entity.kind || '',
+        context.entity.label || '',
+        context.entity.metadata?.sourceType || '',
+        context.entity.metadata?.['preview'] || '',
+    ].join(' ').toLowerCase();
+    if (/caus|because|therefore|effect/.test(text)) return 'causal';
+    if (/time|temporal|before|after|timeline/.test(text)) return 'temporal';
+    if (/event|scene|episode/.test(text)) return 'event';
+    if (/anchor|evidence|source|span|provenance/.test(text)) return 'evidence';
+    if (/relationship|co.?occurs|relation|graph-fact|fact/.test(text)) return 'relationship';
+    if (/memory|state/.test(text)) return 'evidence';
+    if (/chunk|note|document|doc|leaf/.test(text)) return 'document_structure';
+    if (/location|place|city|tower|realm/.test(text)) return 'location';
+    return 'identity';
+}
+
+function productPhase(value: string): number {
+    return Math.round(stableUnit(value) * 1000000) / 1000000;
+}
+
+function stringMetadata(node: GalaxyNode, key: string): string {
+    const value = node.entity.metadata?.[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
 function normalizedDirection(node: GalaxyNode): { x: number; y: number; z: number } {

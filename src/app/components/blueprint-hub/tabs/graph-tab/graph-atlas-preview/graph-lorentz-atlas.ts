@@ -7,6 +7,7 @@ import type {
 import type { SemanticAtlasEmbeddingAtlas, SemanticAtlasEmbeddingNode } from '../../../../../services/phoenix-ui-api.service';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
+import { GRAPH_RELATION_FAMILY_HSL } from './graph-relation-visual-style';
 
 export interface LorentzKleinProjection {
     coords: [number, number, number, number, number];
@@ -41,6 +42,7 @@ export const LORENTZ_TREE_KIND_COLORS: Record<string, string> = {
     species: '286 64% 66%',
     powerSystem: '292 80% 66%',
     documentStructure: '214 78% 62%',
+    ...GRAPH_RELATION_FAMILY_HSL,
 };
 
 export function projectLorentzKlein(values: readonly number[]): LorentzKleinProjection {

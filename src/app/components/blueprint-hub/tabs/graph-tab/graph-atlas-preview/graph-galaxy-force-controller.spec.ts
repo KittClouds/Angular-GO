@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 
-import { GraphGalaxyForceController } from './graph-galaxy-force-controller';
+import { GraphGalaxyForceController, productManifoldExpansionScale } from './graph-galaxy-force-controller';
 import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
 
 describe('GraphGalaxyForceController Hybrid constraints', () => {
@@ -51,6 +51,43 @@ describe('GraphGalaxyForceController Hybrid constraints', () => {
         expect(radius3d(scene.positions3d, 0)).toBeLessThanOrEqual(1.95);
         expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(1.95);
     });
+
+    it('expands Product positions volumetrically from the canonical shape', () => {
+        const scene = productScene([
+            [1, 0.25, 0.5],
+            [-0.5, 0.2, -0.4],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+
+        controller.setSettings({ layoutMode: 'productManifold', nodeDistance: 2.2, edgeLength: 1.7 });
+
+        const scale = productManifoldExpansionScale({ nodeDistance: 2.2, edgeLength: 1.7 });
+        expect(scene.positions3d[0]).toBeCloseTo(1 * scale, 5);
+        expect(scene.positions3d[1]).toBeCloseTo(0.25 * scale, 5);
+        expect(scene.positions3d[2]).toBeCloseTo(0.5 * scale, 5);
+        expect(radius3d(scene.positions3d, 1)).toBeCloseTo(Math.hypot(-0.5, 0.2, -0.4) * scale, 5);
+    });
+
+    it('keeps Product force mode bounded instead of starting raw graph physics', () => {
+        const scene = productScene([
+            [1.2, 0.1, 0.05],
+            [0.45, -0.25, 0.2],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('shell')).toBe(true);
+        controller.dragTo(new THREE.Vector3(9, 9, 9), 'force');
+        expect(radius3d(scene.positions3d, 0)).toBeLessThanOrEqual(2.32);
+
+        controller.end('force');
+        for (let tick = 0; tick < 8; tick++) controller.tick();
+
+        expect(radius3d(scene.positions3d, 0)).toBeLessThanOrEqual(2.32);
+        expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(2.32);
+    });
 });
 
 function hybridScene(points: Array<[number, number, number]>): GalaxySceneV2 {
@@ -59,6 +96,10 @@ function hybridScene(points: Array<[number, number, number]>): GalaxySceneV2 {
 
 function hopfScene(points: Array<[number, number, number]>): GalaxySceneV2 {
     return projectedScene('hopfProjection', points);
+}
+
+function productScene(points: Array<[number, number, number]>): GalaxySceneV2 {
+    return projectedScene('productManifold', points);
 }
 
 function projectedScene(layoutMode: GalaxySceneV2['layoutMode'], points: Array<[number, number, number]>): GalaxySceneV2 {

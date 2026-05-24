@@ -48,7 +48,7 @@ export function buildGalaxyGlows(scene: GalaxySceneV2, haloTexture: THREE.Textur
             opacity: 0.38,
             depthWrite: false,
             depthTest: false,
-            blending: THREE.AdditiveBlending,
+            blending: THREE.NormalBlending,
             toneMapped: false,
         });
         const sprite = new THREE.Sprite(material);

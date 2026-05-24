@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_ENTITY_COLORS } from '../../../../../lib/store/entityColorStore';
 import type { NoteBlockProjection } from '../../../../../lib/dexie/db';
 import { buildLeafEmbeddingAtlas } from './graph-embedding-atlas';
 import { buildGraphRebuildEmbeddingAtlas } from './graph-rebuild-embedding-atlas';
@@ -83,6 +84,9 @@ describe('embedding atlas projection', () => {
                 { id: 'embed:anchor:anchor-1', kind: 'anchor', sourceId: 'anchor-1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
                 { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
                 { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
+                { id: 'embed:graph-fact:co', kind: 'graphFact', sourceId: 'co', label: 'Kai co_occurs_with Hazel', text: 'Kai co_occurs_with Hazel [review]', evidenceIds: [] },
+                { id: 'embed:graph-fact:observe', kind: 'graphFact', sourceId: 'observe', label: 'Kai observes Hazel', text: 'Kai observes Hazel [accepted]', evidenceIds: [] },
+                { id: 'embed:graph-fact:comment', kind: 'graphFact', sourceId: 'comment', label: 'Kai comments on Hazel', text: 'Kai comments on Hazel [accepted]', evidenceIds: [] },
             ],
             embeddingVectors: [],
             projectionRefs: [],
@@ -102,6 +106,14 @@ describe('embedding atlas projection', () => {
             'anchor-entity',
             'co_occurs_with',
         ]));
+        const colors = new Map(atlas.nodes.map((node) => [node.id, node.colorHsl]));
+        const styleLabDefaults = new Set(Object.values(DEFAULT_ENTITY_COLORS));
+        expect(colors.get('embed:graph-fact:co')).toBe('215 10% 62%');
+        expect(colors.get('embed:graph-fact:observe')).toBe('188 82% 62%');
+        expect(colors.get('embed:graph-fact:comment')).toBe('162 72% 57%');
+        expect(styleLabDefaults.has(colors.get('embed:graph-fact:co') || '')).toBe(false);
+        expect(styleLabDefaults.has(colors.get('embed:graph-fact:observe') || '')).toBe(false);
+        expect(styleLabDefaults.has(colors.get('embed:graph-fact:comment') || '')).toBe(false);
         expect(atlas.sourceLabel).toContain('graph rebuild snapshot');
     });
 });

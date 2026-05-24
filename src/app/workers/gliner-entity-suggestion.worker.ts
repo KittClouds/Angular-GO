@@ -18,7 +18,7 @@ const LABELS = ['person', 'location', 'organization', 'event', 'object', 'concep
 const KIND_BY_LABEL: Record<string, string> = {
     person: 'CHARACTER',
     location: 'LOCATION',
-    organization: 'FACTION',
+    organization: 'NETWORK',
     event: 'EVENT',
     object: 'ITEM',
     concept: 'CONCEPT',

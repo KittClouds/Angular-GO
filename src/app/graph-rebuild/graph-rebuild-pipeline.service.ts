@@ -35,6 +35,7 @@ const PROJECTION_CAPABILITIES: Array<{ capability: AtlasCapabilityId; mode: Grap
     { capability: 'hybridManifold', mode: 'hybrid' },
     { capability: 'hopfProjection', mode: 'hopf' },
     { capability: 'lorentzForest', mode: 'lorentz' },
+    { capability: 'productManifold', mode: 'product' },
 ];
 
 type PipelineResult = {
@@ -402,6 +403,7 @@ function capabilityLabel(id: AtlasCapabilityId): string {
         case 'hybridManifold': return 'Hybrid Projection';
         case 'hopfProjection': return 'Hopf Projection';
         case 'lorentzForest': return 'Lorentz Forest';
+        case 'productManifold': return 'Product Manifold';
         default: return id;
     }
 }

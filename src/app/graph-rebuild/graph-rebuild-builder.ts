@@ -1,13 +1,10 @@
-import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
 import type {
     BuildGraphRebuildSnapshotInput,
-    GraphRebuildCandidate,
     GraphRebuildChunk,
     GraphRebuildDropReasons,
     GraphRebuildEdge,
     GraphRebuildEntityAnchor,
-    GraphRebuildMention,
     GraphRebuildNode,
     GraphRebuildRelationship,
     GraphRebuildRelationshipHint,
@@ -15,39 +12,13 @@ import type {
 } from './graph-rebuild-snapshot';
 import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
 import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
+import {
+    buildGraphRebuildAliasResolver,
+    normalizeGraphRebuildCandidate,
+    prepareGraphRebuildAnchors,
+} from './graph-rebuild-anchor-hygiene';
 
-export interface GraphRebuildAliasResolver {
-    aliasCount: number;
-    bySurface: Map<string, RegisteredEntity>;
-    resolve(surface: string): RegisteredEntity | null;
-}
-
-export function buildGraphRebuildAliasResolver(entities: RegisteredEntity[]): GraphRebuildAliasResolver {
-    const bySurface = new Map<string, RegisteredEntity>();
-    let aliasCount = 0;
-    for (const entity of entities) {
-        addSurface(bySurface, entity.label, entity);
-        for (const alias of entity.aliases || []) {
-            if (addSurface(bySurface, alias, entity)) aliasCount += 1;
-        }
-    }
-    return {
-        aliasCount,
-        bySurface,
-        resolve: (surface: string) => bySurface.get(normalizeSurface(surface)) ?? null,
-    };
-}
-
-export function normalizeGraphRebuildCandidate(candidate: GraphRebuildCandidate): GraphRebuildCandidate {
-    const label = compactSurface(candidate.label);
-    const aliases = uniqueSurfaces(candidate.aliases || []).filter((alias) => normalizeSurface(alias) !== normalizeSurface(label));
-    return {
-        label,
-        kind: compactSurface(candidate.kind || 'UNKNOWN').toUpperCase(),
-        aliases,
-        confidence: clamp(Number(candidate.confidence ?? 0.75), 0, 1),
-    };
-}
+export { buildGraphRebuildAliasResolver, normalizeGraphRebuildCandidate };
 
 export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput): GraphRebuildSnapshot {
     const builtAt = input.builtAt ?? Date.now();
@@ -56,45 +27,15 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const entitiesById = new Map(input.entities.map((entity) => [entity.id, entity]));
     const resolver = buildGraphRebuildAliasResolver(input.entities);
     const allowedNotes = new Set(input.noteIds || []);
-    const drops: GraphRebuildDropReasons = { missingEntity: 0, invalidSpan: 0, duplicateAnchor: 0, singletonBucket: 0, missingChunk: 0 };
-    const seenAnchors = new Set<string>();
-    const mentions: GraphRebuildMention[] = [];
-    const entityAnchors: GraphRebuildEntityAnchor[] = [];
-
-    for (const occurrence of input.occurrences) {
-        if (allowedNotes.size && !allowedNotes.has(occurrence.noteId)) continue;
-        const mention = occurrenceToMention(occurrence);
-        const entity = entitiesById.get(occurrence.entityId) ?? resolver.resolve(occurrence.surface);
-        if (!entity) {
-            drops.missingEntity += 1;
-            mentions.push({ ...mention, status: 'dropped' });
-            continue;
-        }
-        if (!validSpan(occurrence.sourceStart, occurrence.sourceEnd)) {
-            drops.invalidSpan += 1;
-            mentions.push({ ...mention, entityId: entity.id, status: 'dropped' });
-            continue;
-        }
-        const chunkId = mention.chunkId || findChunkId(chunksByNote.get(occurrence.noteId) || [], occurrence);
-        if (!chunkId && chunks.length) drops.missingChunk += 1;
-        const id = anchorId(occurrence, entity.id);
-        if (seenAnchors.has(id)) {
-            drops.duplicateAnchor += 1;
-            mentions.push({ ...mention, entityId: entity.id, chunkId, status: 'dropped' });
-            continue;
-        }
-        seenAnchors.add(id);
-        const anchor: GraphRebuildEntityAnchor = {
-            ...mention,
-            id,
-            entityId: entity.id,
-            chunkId,
-            status: 'accepted',
-            generation: occurrence.generation || builtAt,
-        };
-        mentions.push(anchor);
-        entityAnchors.push(anchor);
-    }
+    const hygiene = prepareGraphRebuildAnchors({
+        occurrences: input.occurrences,
+        entitiesById,
+        resolver,
+        chunksByNote,
+        allowedNotes,
+        builtAt,
+    });
+    const { mentions, entityAnchors, dropReasons: drops } = hygiene;
 
     const nodes = buildNodes(entityAnchors, entitiesById);
     const cooccurrenceEdges = buildEdges(entityAnchors, drops);
@@ -166,22 +107,9 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             nodes: nodes.length,
             edges: edges.length,
             dropReasons: drops,
+            resolution: hygiene.resolution,
         },
-    };
-}
-
-function occurrenceToMention(occurrence: EntityOccurrence): GraphRebuildMention {
-    return {
-        id: occurrence.id,
-        noteId: occurrence.noteId,
-        chunkId: chunkIdFromOccurrence(occurrence),
-        surface: occurrence.surface,
-        sourceStart: occurrence.sourceStart,
-        sourceEnd: occurrence.sourceEnd,
-        source: occurrence.source,
-        confidence: clamp(Number(occurrence.confidence || 0), 0, 1),
-        entityId: occurrence.entityId,
-        status: 'candidate',
+        resolutionSuggestions: hygiene.suggestions,
     };
 }
 
@@ -372,51 +300,8 @@ function groupChunksByNote(chunks: GraphRebuildChunk[]): Map<string, GraphRebuil
     return byNote;
 }
 
-function findChunkId(chunks: GraphRebuildChunk[], occurrence: EntityOccurrence): string | undefined {
-    const direct = chunks.find((chunk) => occurrence.sourceStart >= chunk.start && occurrence.sourceEnd <= chunk.end);
-    if (direct) return direct.id;
-    return chunks.find((chunk) => occurrence.sourceStart >= chunk.start && occurrence.sourceStart < chunk.end)?.id;
-}
-
-function addSurface(index: Map<string, RegisteredEntity>, surface: string, entity: RegisteredEntity): boolean {
-    const normalized = normalizeSurface(surface);
-    if (!normalized || index.has(normalized)) return false;
-    index.set(normalized, entity);
-    return true;
-}
-
-function anchorId(occurrence: EntityOccurrence, entityId: string): string {
-    return `${occurrence.noteId}:${entityId}:${occurrence.sourceStart}:${occurrence.sourceEnd}:${occurrence.source}`;
-}
-
-function chunkIdFromOccurrence(occurrence: EntityOccurrence): string | undefined {
-    const metadata = occurrence as EntityOccurrence & { chunkId?: string; blockId?: string };
-    return metadata.chunkId || metadata.blockId || undefined;
-}
-
 function validSpan(from: number, to: number): boolean {
     return Number.isFinite(from) && Number.isFinite(to) && from >= 0 && to > from;
-}
-
-function uniqueSurfaces(values: string[]): string[] {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const value of values) {
-        const compact = compactSurface(value);
-        const normalized = normalizeSurface(compact);
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        result.push(compact);
-    }
-    return result;
-}
-
-function compactSurface(value: string): string {
-    return String(value || '').trim().replace(/\s+/g, ' ');
-}
-
-function normalizeSurface(value: string): string {
-    return compactSurface(value).toLocaleLowerCase();
 }
 
 function clamp(value: number, min: number, max: number): number {

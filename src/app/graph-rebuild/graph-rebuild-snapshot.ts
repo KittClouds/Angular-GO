@@ -142,7 +142,7 @@ export interface GraphRebuildEmbeddingVector {
 
 export interface GraphRebuildProjectionRef {
     targetId: string;
-    manifold: 'hybrid' | 'hopf' | 'lorentz' | 'hyperbolic';
+    manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'hyperbolic';
     projectionId: string;
 }
 
@@ -152,6 +152,35 @@ export interface GraphRebuildDropReasons {
     duplicateAnchor: number;
     singletonBucket: number;
     missingChunk: number;
+}
+
+export type GraphRebuildResolutionSuggestionKind =
+    | 'ambiguous_surface'
+    | 'kind_conflict'
+    | 'possible_alias'
+    | 'possible_duplicate'
+    | 'possible_split';
+
+export interface GraphRebuildResolutionSuggestion {
+    id: string;
+    kind: GraphRebuildResolutionSuggestionKind;
+    surface: string;
+    noteId?: string;
+    sourceStart?: number;
+    sourceEnd?: number;
+    entityIds: string[];
+    status: 'review';
+    rationale: string;
+}
+
+export interface GraphRebuildResolutionCounters {
+    resolvedById: number;
+    resolvedByLabel: number;
+    resolvedByAlias: number;
+    ambiguousSurfaces: number;
+    kindConflicts: number;
+    possibleAliases: number;
+    droppedDuplicateSpans: number;
 }
 
 export interface GraphRebuildCounters {
@@ -177,6 +206,7 @@ export interface GraphRebuildCounters {
     nodes: number;
     edges: number;
     dropReasons: GraphRebuildDropReasons;
+    resolution?: GraphRebuildResolutionCounters;
 }
 
 export interface GraphRebuildSnapshot {
@@ -202,12 +232,13 @@ export interface GraphRebuildSnapshot {
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
     counters: GraphRebuildCounters;
+    resolutionSuggestions?: GraphRebuildResolutionSuggestion[];
 }
 
 export type GraphIndexPolicy = 'delta' | 'force';
 export type GraphIndexRunStatus = 'blocked' | 'running' | 'completed' | 'failed';
 export type GraphIndexStageStatus = 'blocked' | 'skipped' | 'running' | 'completed' | 'failed';
-export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz';
+export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz' | 'product';
 
 export interface GraphIndexRunScope {
     kind: GraphRebuildScopeKind;

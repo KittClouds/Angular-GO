@@ -45,9 +45,15 @@ const KIND_ALIASES: Record<string, EntityKind | 'UNKNOWN'> = {
     ITEM: 'ITEM',
     OBJECT: 'ITEM',
     ARTIFACT: 'ITEM',
-    FACTION: 'FACTION',
-    GROUP: 'FACTION',
-    ORGANIZATION: 'FACTION',
+    FACTION: 'NETWORK',
+    GROUP: 'NETWORK',
+    NETWORK: 'NETWORK',
+    ORG: 'NETWORK',
+    ORGANIZATION: 'NETWORK',
+    ORGANISATION: 'NETWORK',
+    ALLIANCE: 'NETWORK',
+    DEPARTMENT: 'NETWORK',
+    INSTITUTION: 'NETWORK',
     SCENE: 'SCENE',
     EVENT: 'EVENT',
     CONCEPT: 'CONCEPT',
@@ -178,11 +184,15 @@ function normalizeSuggestionLabel(label: string): string {
 
 export function normalizeSuggestedEntityKind(kind: string): SuggestedEntityKind {
     const normalized = kind.trim().toUpperCase().replace(/\s+/g, '_');
+    const aliased = KIND_ALIASES[normalized];
+    if (aliased) {
+        return aliased;
+    }
     if (isEntityKind(normalized)) {
         return normalized;
     }
 
-    return KIND_ALIASES[normalized] ?? 'UNKNOWN';
+    return 'UNKNOWN';
 }
 
 function normalizeConfidence(confidence: string): LocalEntitySuggestionConfidence | null {
