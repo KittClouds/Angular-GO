@@ -8,6 +8,7 @@ import type { SemanticAtlasEmbeddingAtlas, SemanticAtlasEmbeddingNode } from '..
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import { GRAPH_RELATION_FAMILY_HSL } from './graph-relation-visual-style';
+import { entityColorStore, normalizeGraphNodeColorKind } from '../../../../../lib/store/entityColorStore';
 
 export interface LorentzKleinProjection {
     coords: [number, number, number, number, number];
@@ -110,7 +111,11 @@ function lorentzNode(
     const projection = projectLorentzKlein(node.vector);
     const memberships = membershipByNode.get(node.id) ?? [];
     const primary = memberships[0];
-    const colorHsl = LORENTZ_TREE_KIND_COLORS[String(primary?.treeKind || 'identity')] ?? '198 74% 64%';
+    const treeKind = String(primary?.treeKind || 'identity');
+    const graphNodeKind = normalizeGraphNodeColorKind(treeKind);
+    const colorHsl = graphNodeKind
+        ? entityColorStore.getRawGraphNodeHsl(graphNodeKind)
+        : LORENTZ_TREE_KIND_COLORS[treeKind] ?? '198 74% 64%';
     const [kx, ky, kz, kw] = projection.klein;
     const point = projection.radius > 1e-6
         ? { x: kx * KLEIN_SCENE_RADIUS, y: ky * KLEIN_SCENE_RADIUS, z: kz * KLEIN_SCENE_RADIUS }

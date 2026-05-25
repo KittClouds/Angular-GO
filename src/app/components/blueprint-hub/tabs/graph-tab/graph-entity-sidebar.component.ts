@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { ScrollingModule } from '@angular/cdk/scrolling';
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, computed, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, signal } from '@angular/core';
 import {
     BookOpen,
     Calendar,
@@ -24,7 +24,7 @@ import {
 } from 'lucide-angular';
 import { LucideAngularModule } from 'lucide-angular';
 
-import { entitySourceLabel, entitySourceSystem, type RegisteredEntity } from '../../../../lib/registry';
+import { entitySourceLabel, type RegisteredEntity } from '../../../../lib/registry';
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 import { entityColorStore } from '../../../../lib/store/entityColorStore';
 import type { NerSuggestion } from '../../../../services/ner.service';
@@ -60,7 +60,7 @@ const ENTITY_ICONS: Record<string, any> = {
     templateUrl: './graph-entity-sidebar.component.html',
     styleUrls: ['./graph-entity-sidebar.component.css'],
 })
-export class GraphEntitySidebarComponent implements OnChanges {
+export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
     @Input() entities: RegisteredEntity[] = [];
     @Input() suggestions: NerSuggestion[] = [];
     @Input() selectedEntity: RegisteredEntity | null = null;
@@ -88,6 +88,9 @@ export class GraphEntitySidebarComponent implements OnChanges {
     readonly entitySearch = signal('');
     readonly expandedKinds = signal<Set<string>>(new Set());
     private readonly dataRevision = signal(0);
+    private readonly unsubscribeColors = entityColorStore.subscribe(() => {
+        this.dataRevision.update((revision) => revision + 1);
+    });
 
     readonly rows = computed<EntitySidebarRow[]>(() => {
         this.dataRevision();
@@ -129,6 +132,10 @@ export class GraphEntitySidebarComponent implements OnChanges {
         }
     }
 
+    ngOnDestroy(): void {
+        this.unsubscribeColors();
+    }
+
     updateEntitySearch(value: string): void {
         this.entitySearch.set(value);
         this.searchTextChange.emit(value);
@@ -163,16 +170,16 @@ export class GraphEntitySidebarComponent implements OnChanges {
         return entityColorStore.getEntityColor(kind);
     }
 
-    getSourceColor(entity: RegisteredEntity): string {
-        return entityColorStore.getSourceColor(entitySourceSystem(entity));
+    getEntityBadgeColor(entity: RegisteredEntity): string {
+        return entityColorStore.getEntityColor(entity.kind);
     }
 
-    getSourceBgColor(entity: RegisteredEntity): string {
-        return entityColorStore.getSourceBgColor(entitySourceSystem(entity), 0.13);
+    getEntityBadgeBgColor(entity: RegisteredEntity): string {
+        return entityColorStore.getEntityBgColor(entity.kind, 0.13);
     }
 
-    getSourceBorderColor(entity: RegisteredEntity): string {
-        return entityColorStore.getSourceBgColor(entitySourceSystem(entity), 0.34);
+    getEntityBadgeBorderColor(entity: RegisteredEntity): string {
+        return entityColorStore.getEntityBgColor(entity.kind, 0.34);
     }
 
     getEntitySourceLabel(entity: RegisteredEntity): string {

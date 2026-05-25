@@ -1,5 +1,6 @@
 import type { GalaxyEdge, GalaxyLorentzGuide, GalaxyNode, Rgb } from './graph-galaxy-engine';
 import { GRAPH_RELATION_FAMILY_HSL, relationFamilyFromText } from './graph-relation-visual-style';
+import { entityColorStore, normalizeGraphNodeColorKind } from '../../../../../lib/store/entityColorStore';
 
 const LORENTZ_SCENE_RADIUS = 2.18;
 const LORENTZ_RING_SEGMENTS = 96;
@@ -399,6 +400,8 @@ function treeKindFromEdge(type: string): string {
 }
 
 function rgbForKind(kind: string): Rgb {
+    const graphNodeKind = normalizeGraphNodeColorKind(kind);
+    if (graphNodeKind) return hslToRgb(entityColorStore.getRawGraphNodeHsl(graphNodeKind));
     return hslToRgb(KIND_HSL[kind] ?? '198 74% 64%');
 }
 

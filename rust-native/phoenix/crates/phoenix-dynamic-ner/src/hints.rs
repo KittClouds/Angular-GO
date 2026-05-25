@@ -2,10 +2,13 @@ use std::collections::BTreeMap;
 
 use compact_str::CompactString;
 use phoenix_types::{SentenceSpan, TextRange};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{MentionEdgeKind, MentionGraph};
-use crate::types::{MentionKind, MentionPacket, MentionSourceKind, NerNeedVector, VoteReason};
+use crate::types::{
+    LocalMentionId, MentionKind, MentionPacket, MentionSourceKind, NerNeedVector, VoteReason,
+};
 
 const MAX_ENTITY_PAIR_HINTS_PER_SENTENCE: usize = 8;
 
@@ -70,10 +73,14 @@ pub(crate) fn build_chunk_hints(
     }
 
     let mut drafts = Vec::<HintDraft>::new();
-    add_sentence_region_hints(&mut drafts, text, sentences, packets, needs);
-    add_pair_and_relationship_hints(&mut drafts, packets);
-    add_graph_hints(&mut drafts, packets, mention_graph);
-    add_role_alias_dialogue_hints(&mut drafts, text, sentences, packets);
+    let by_sentence = packets_by_sentence(sentences, packets);
+    let packet_by_id = packets_by_id(packets);
+    let dialogue_cues = dialogue_cue_flags(text, sentences);
+
+    add_sentence_region_hints(&mut drafts, text, sentences, &by_sentence, needs);
+    add_pair_and_relationship_hints(&mut drafts, &by_sentence);
+    add_graph_hints(&mut drafts, &packet_by_id, mention_graph);
+    add_role_alias_dialogue_hints(&mut drafts, &dialogue_cues, packets);
 
     dedupe_and_sort(drafts)
 }
@@ -82,12 +89,16 @@ fn add_sentence_region_hints(
     drafts: &mut Vec<HintDraft>,
     text: &str,
     sentences: &[SentenceSpan],
-    packets: &[MentionPacket],
+    by_sentence: &[Vec<&MentionPacket>],
     needs: &[NerNeedVector],
 ) {
     for sentence in sentences {
-        let sentence_packets = packets
+        let Some(sentence_bucket) = by_sentence.get(sentence.index) else {
+            continue;
+        };
+        let sentence_packets = sentence_bucket
             .iter()
+            .copied()
             .filter(|packet| {
                 packet.sentence_index == sentence.index as u32 && packet.is_hint_eligible()
             })
@@ -155,19 +166,20 @@ fn add_sentence_region_hints(
     }
 }
 
-fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[MentionPacket]) {
-    let mut by_sentence = BTreeMap::<u32, Vec<&MentionPacket>>::new();
-    for packet in packets {
-        if !packet.is_hint_eligible() && !is_ambiguous_reference(packet) {
+fn add_pair_and_relationship_hints(
+    drafts: &mut Vec<HintDraft>,
+    by_sentence: &[Vec<&MentionPacket>],
+) {
+    for (sentence_index, sentence_bucket) in by_sentence.iter().enumerate() {
+        let mut sentence_packets = sentence_bucket
+            .iter()
+            .copied()
+            .filter(|packet| packet.is_hint_eligible() || is_ambiguous_reference(packet))
+            .collect::<Vec<_>>();
+        if sentence_packets.is_empty() {
             continue;
         }
-        by_sentence
-            .entry(packet.sentence_index)
-            .or_default()
-            .push(packet);
-    }
-
-    for (sentence_index, mut sentence_packets) in by_sentence {
+        let sentence_index = sentence_index as u32;
         sentence_packets
             .sort_by_key(|packet| (packet.range.start, packet.range.end, packet.mention_id.0));
         let entities = sentence_packets
@@ -212,12 +224,13 @@ fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[Menti
         if !ambiguous.is_empty() {
             let mut nearby_entities = entities.clone();
             if nearby_entities.is_empty() {
-                nearby_entities.extend(packets.iter().filter(|packet| {
-                    packet.mention_kind == MentionKind::Named
-                        && packet.is_hint_eligible()
-                        && packet.sentence_index < sentence_index
-                        && sentence_index.saturating_sub(packet.sentence_index) <= 1
-                }));
+                if let Some(previous_sentence) =
+                    sentence_index.checked_sub(1).and_then(|idx| by_sentence.get(idx as usize))
+                {
+                    nearby_entities.extend(previous_sentence.iter().copied().filter(|packet| {
+                        packet.mention_kind == MentionKind::Named && packet.is_hint_eligible()
+                    }));
+                }
             }
             if nearby_entities.is_empty() {
                 continue;
@@ -240,17 +253,14 @@ fn add_pair_and_relationship_hints(drafts: &mut Vec<HintDraft>, packets: &[Menti
 
 fn add_graph_hints(
     drafts: &mut Vec<HintDraft>,
-    packets: &[MentionPacket],
+    packet_by_id: &FxHashMap<LocalMentionId, &MentionPacket>,
     mention_graph: &MentionGraph,
 ) {
     for edge in &mention_graph.edges {
-        let Some(left) = packets.iter().find(|packet| packet.mention_id == edge.left) else {
+        let Some(left) = packet_by_id.get(&edge.left).copied() else {
             continue;
         };
-        let Some(right) = packets
-            .iter()
-            .find(|packet| packet.mention_id == edge.right)
-        else {
+        let Some(right) = packet_by_id.get(&edge.right).copied() else {
             continue;
         };
         if !left.is_hint_eligible() || !right.is_hint_eligible() {
@@ -294,8 +304,7 @@ fn add_graph_hints(
 
 fn add_role_alias_dialogue_hints(
     drafts: &mut Vec<HintDraft>,
-    text: &str,
-    sentences: &[SentenceSpan],
+    dialogue_cues: &[bool],
     packets: &[MentionPacket],
 ) {
     for packet in packets {
@@ -362,8 +371,10 @@ fn add_role_alias_dialogue_hints(
             );
         }
         if packet.mention_kind == MentionKind::Named
-            && sentence_for(sentences, packet.sentence_index)
-                .is_some_and(|sentence| sentence_has_dialogue_cue(text, sentence))
+            && dialogue_cues
+                .get(packet.sentence_index as usize)
+                .copied()
+                .unwrap_or(false)
         {
             push_hint(
                 drafts,
@@ -426,6 +437,60 @@ fn push_hint(
     });
 }
 
+fn packets_by_sentence<'a>(
+    sentences: &[SentenceSpan],
+    packets: &'a [MentionPacket],
+) -> Vec<Vec<&'a MentionPacket>> {
+    let bucket_count = sentence_bucket_count(sentences, packets);
+    let mut by_sentence = vec![Vec::new(); bucket_count];
+    for packet in packets {
+        if let Some(bucket) = by_sentence.get_mut(packet.sentence_index as usize) {
+            bucket.push(packet);
+        }
+    }
+    by_sentence
+}
+
+fn sentence_bucket_count(sentences: &[SentenceSpan], packets: &[MentionPacket]) -> usize {
+    let sentence_count = sentences
+        .iter()
+        .map(|sentence| sentence.index + 1)
+        .max()
+        .unwrap_or_default();
+    let packet_count = packets
+        .iter()
+        .map(|packet| packet.sentence_index as usize + 1)
+        .max()
+        .unwrap_or_default();
+    sentence_count.max(packet_count)
+}
+
+fn packets_by_id(packets: &[MentionPacket]) -> FxHashMap<LocalMentionId, &MentionPacket> {
+    let mut by_id = FxHashMap::default();
+    by_id.reserve(packets.len());
+    for packet in packets {
+        by_id.insert(packet.mention_id, packet);
+    }
+    by_id
+}
+
+fn dialogue_cue_flags(text: &str, sentences: &[SentenceSpan]) -> Vec<bool> {
+    let mut flags = vec![
+        false;
+        sentences
+            .iter()
+            .map(|sentence| sentence.index + 1)
+            .max()
+            .unwrap_or_default()
+    ];
+    for sentence in sentences {
+        if let Some(flag) = flags.get_mut(sentence.index) {
+            *flag = sentence_has_dialogue_cue(text, sentence);
+        }
+    }
+    flags
+}
+
 fn dedupe_and_sort(drafts: Vec<HintDraft>) -> Vec<ChunkHint> {
     let mut by_id = BTreeMap::<CompactString, ChunkHint>::new();
     for draft in drafts {
@@ -475,12 +540,6 @@ fn stable_hash(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
-}
-
-fn sentence_for(sentences: &[SentenceSpan], index: u32) -> Option<&SentenceSpan> {
-    sentences
-        .iter()
-        .find(|sentence| sentence.index as u32 == index)
 }
 
 fn sentence_has_dialogue_cue(text: &str, sentence: &SentenceSpan) -> bool {

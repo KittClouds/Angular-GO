@@ -36,6 +36,11 @@ pub struct GraphRebuildInput<'a> {
 
 pub struct GraphRebuildBuilder;
 
+struct BucketEntity<'a> {
+    entity_id: &'a EntityId,
+    anchor_indexes: SmallVec<[usize; 4]>,
+}
+
 impl GraphRebuildBuilder {
     pub fn build(input: GraphRebuildInput<'_>) -> Result<GraphRebuildSnapshot, GraphRebuildError> {
         build_graph_rebuild_snapshot(input)
@@ -47,10 +52,6 @@ pub fn build_graph_rebuild_snapshot(
 ) -> Result<GraphRebuildSnapshot, GraphRebuildError> {
     let built_at = input.built_at.unwrap_or_else(now_ms);
     let chunks = build_chunks(input.note_id, input.text);
-    let chunk_ranges = chunks
-        .iter()
-        .map(|chunk| (chunk.start, chunk.end, chunk.id.clone()))
-        .collect::<Vec<_>>();
     let lexicon = alex::build_lexicon(input.entities)?;
     let matches = alex::scan_text(&lexicon, input.text, &input.scope);
     let mut drops = GraphDropReasons::default();
@@ -59,7 +60,7 @@ pub fn build_graph_rebuild_snapshot(
     let mut anchors = Vec::with_capacity(matches.len());
 
     for known in matches {
-        let mention = known_to_mention(input.note_id, &chunk_ranges, &known);
+        let mention = known_to_mention(input.note_id, &chunks, &known);
         let Some(entry) = known.entries.first() else {
             drops.missing_entity += 1;
             mentions.push(GraphMention {
@@ -242,11 +243,7 @@ fn build_chunks(note_id: &str, text: &str) -> Vec<GraphChunk> {
         .collect()
 }
 
-fn known_to_mention(
-    note_id: &str,
-    chunks: &[(u32, u32, CompactString)],
-    known: &KnownMatch,
-) -> GraphMention {
+fn known_to_mention(note_id: &str, chunks: &[GraphChunk], known: &KnownMatch) -> GraphMention {
     GraphMention {
         id: format_compact!(
             "mention:{}:{}:{}",
@@ -266,34 +263,30 @@ fn known_to_mention(
     }
 }
 
-fn chunk_for_span(
-    chunks: &[(u32, u32, CompactString)],
-    start: u32,
-    end: u32,
-) -> Option<CompactString> {
-    chunks
-        .iter()
-        .find(|(chunk_start, chunk_end, _)| start >= *chunk_start && end <= *chunk_end)
-        .or_else(|| {
-            chunks
-                .iter()
-                .find(|(chunk_start, chunk_end, _)| start >= *chunk_start && start < *chunk_end)
-        })
-        .map(|(_, _, id)| id.clone())
+fn chunk_for_span(chunks: &[GraphChunk], start: u32, end: u32) -> Option<CompactString> {
+    if chunks.is_empty() {
+        return None;
+    }
+    let index = chunks.partition_point(|chunk| chunk.start <= start);
+    let candidate = index.checked_sub(1).and_then(|slot| chunks.get(slot))?;
+    if start >= candidate.start && (end <= candidate.end || start < candidate.end) {
+        return Some(candidate.id.clone());
+    }
+    None
 }
 
 fn build_nodes(anchors: &[GraphAnchor], entities: &[LexiconEntry]) -> Vec<GraphNode> {
     let entries = entities
         .iter()
-        .map(|entry| (entry.entity_id.clone(), entry))
+        .map(|entry| (&entry.entity_id, entry))
         .collect::<HashMap<_, _>>();
-    let mut by_entity = HashMap::<EntityId, GraphNode>::new();
+    let mut by_entity = HashMap::<&EntityId, GraphNode>::new();
     for anchor in anchors {
         let Some(entry) = entries.get(&anchor.entity_id) else {
             continue;
         };
         let node = by_entity
-            .entry(anchor.entity_id.clone())
+            .entry(&anchor.entity_id)
             .or_insert_with(|| GraphNode {
                 id: entry.entity_id.clone(),
                 entity_id: entry.entity_id.clone(),
@@ -335,19 +328,18 @@ fn build_edges(anchors: &[GraphAnchor], drops: &mut GraphDropReasons) -> Vec<Gra
     }
     let mut edges = HashMap::<CompactString, GraphEdge>::new();
     for (scope_key, indexes) in buckets {
-        let entity_ids = unique_entity_ids(anchors, &indexes);
-        if entity_ids.len() < 2 {
+        let entities = bucket_entities(anchors, &indexes);
+        if entities.len() < 2 {
             drops.singleton_bucket += 1;
             continue;
         }
-        for left_index in 0..entity_ids.len() {
-            for right_index in (left_index + 1)..entity_ids.len() {
+        for left_index in 0..entities.len() {
+            for right_index in (left_index + 1)..entities.len() {
                 upsert_edge(
                     &mut edges,
-                    entity_ids[left_index].clone(),
-                    entity_ids[right_index].clone(),
+                    &entities[left_index],
+                    &entities[right_index],
                     anchors,
-                    &indexes,
                     &scope_key,
                 );
             }
@@ -363,13 +355,19 @@ fn build_edges(anchors: &[GraphAnchor], drops: &mut GraphDropReasons) -> Vec<Gra
     out
 }
 
-fn unique_entity_ids(anchors: &[GraphAnchor], indexes: &[usize]) -> Vec<EntityId> {
-    let mut seen = HashSet::<EntityId>::new();
-    let mut out = Vec::new();
-    for index in indexes {
-        let id = anchors[*index].entity_id.clone();
-        if seen.insert(id.clone()) {
-            out.push(id);
+fn bucket_entities<'a>(anchors: &'a [GraphAnchor], indexes: &[usize]) -> Vec<BucketEntity<'a>> {
+    let mut positions = HashMap::<&'a EntityId, usize>::with_capacity(indexes.len());
+    let mut out = Vec::<BucketEntity<'a>>::new();
+    for &index in indexes {
+        let entity_id = &anchors[index].entity_id;
+        if let Some(position) = positions.get(entity_id).copied() {
+            out[position].anchor_indexes.push(index);
+        } else {
+            positions.insert(entity_id, out.len());
+            out.push(BucketEntity {
+                entity_id,
+                anchor_indexes: smallvec::smallvec![index],
+            });
         }
     }
     out
@@ -377,22 +375,25 @@ fn unique_entity_ids(anchors: &[GraphAnchor], indexes: &[usize]) -> Vec<EntityId
 
 fn upsert_edge(
     edges: &mut HashMap<CompactString, GraphEdge>,
-    left: EntityId,
-    right: EntityId,
+    left: &BucketEntity<'_>,
+    right: &BucketEntity<'_>,
     anchors: &[GraphAnchor],
-    indexes: &[usize],
     scope_key: &CompactString,
 ) {
-    let (source_id, target_id) = if left <= right {
+    let (source, target) = if left.entity_id <= right.entity_id {
         (left, right)
     } else {
         (right, left)
     };
-    let id = format_compact!("{}:anchored-cooccurrence:{}", source_id.0, target_id.0);
+    let id = format_compact!(
+        "{}:anchored-cooccurrence:{}",
+        source.entity_id.0,
+        target.entity_id.0
+    );
     let edge = edges.entry(id.clone()).or_insert_with(|| GraphEdge {
         id,
-        source_id: source_id.clone(),
-        target_id: target_id.clone(),
+        source_id: source.entity_id.clone(),
+        target_id: target.entity_id.clone(),
         edge_type: "anchored-cooccurrence".into(),
         weight: 0,
         confidence: 0.0,
@@ -405,12 +406,14 @@ fn upsert_edge(
     if !edge.scope_keys.iter().any(|key| key == scope_key) {
         edge.scope_keys.push(scope_key.clone());
     }
-    for index in indexes {
-        let anchor = &anchors[*index];
-        if anchor.entity_id == source_id || anchor.entity_id == target_id {
-            push_unique(&mut edge.evidence_anchor_ids, anchor.id.clone());
-            push_unique(&mut edge.note_ids, anchor.note_id.clone());
-        }
+    for &index in source
+        .anchor_indexes
+        .iter()
+        .chain(target.anchor_indexes.iter())
+    {
+        let anchor = &anchors[index];
+        push_unique(&mut edge.evidence_anchor_ids, anchor.id.clone());
+        push_unique(&mut edge.note_ids, anchor.note_id.clone());
     }
 }
 

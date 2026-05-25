@@ -80,12 +80,12 @@
                 </button>
                 } @else {
                 <button type="button" class="atlas-entity-row" [class.atlas-entity-selected]="selectedEntity?.id === row.entity.id" (click)="entitySelected.emit(row.entity)">
-                    <span class="entity-dot entity-source-ring" [style.backgroundColor]="getColor(row.entity.kind)" [style.borderColor]="getSourceColor(row.entity)"></span>
+                    <span class="entity-dot entity-source-ring" [style.backgroundColor]="getColor(row.entity.kind)" [style.borderColor]="getEntityBadgeColor(row.entity)"></span>
                     <span class="min-w-0 flex-1">
                         <span class="block truncate text-sm font-medium text-white">{{ row.entity.label }}</span>
                         <span class="flex min-w-0 items-center gap-2 text-[11px] text-zinc-500">
                             <span class="truncate">{{ row.entity.aliases.length }} aliases</span>
-                            <span class="entity-source-badge" [style.color]="getSourceColor(row.entity)" [style.backgroundColor]="getSourceBgColor(row.entity)" [style.borderColor]="getSourceBorderColor(row.entity)">
+                            <span class="entity-source-badge" [style.color]="getEntityBadgeColor(row.entity)" [style.backgroundColor]="getEntityBadgeBgColor(row.entity)" [style.borderColor]="getEntityBadgeBorderColor(row.entity)">
                                 {{ getEntitySourceLabel(row.entity) }}
                             </span>
                         </span>

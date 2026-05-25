@@ -1,4 +1,4 @@
-use std::{env, fs, process};
+use std::{env, fs, process, time::Instant};
 
 use phoenix_graph_rebuild::{build_graph_rebuild_snapshot, GraphRebuildInput, GraphScopeKind};
 use phoenix_types::{EntityId, EntityKind, LexiconEntry, ScopeKey};
@@ -14,20 +14,31 @@ fn main() {
     } else {
         args.entities
     };
-    let snapshot = build_graph_rebuild_snapshot(GraphRebuildInput {
-        scope_kind: GraphScopeKind::Note,
-        scope_id: &format!("note:{}", args.note_id),
-        note_id: &args.note_id,
-        text: &text,
-        scope: ScopeKey::default(),
-        entities: &entities,
-        candidate_count: 0,
-        built_at: Some(1),
-    })
-    .unwrap_or_else(|error| {
-        eprintln!("graph rebuild failed: {error}");
-        process::exit(1);
-    });
+    let repeat = args.repeat.max(1);
+    let scope_id = format!("note:{}", args.note_id);
+    let started = Instant::now();
+    let mut snapshot = None;
+    for _ in 0..repeat {
+        snapshot = Some(
+            build_graph_rebuild_snapshot(GraphRebuildInput {
+                scope_kind: GraphScopeKind::Note,
+                scope_id: &scope_id,
+                note_id: &args.note_id,
+                text: &text,
+                scope: ScopeKey::default(),
+                entities: &entities,
+                candidate_count: 0,
+                built_at: Some(1),
+            })
+            .unwrap_or_else(|error| {
+                eprintln!("graph rebuild failed: {error}");
+                process::exit(1);
+            }),
+        );
+    }
+    let elapsed_us = started.elapsed().as_micros() as u64;
+    let mean_us = elapsed_us / repeat as u64;
+    let snapshot = snapshot.expect("repeat always runs at least once");
 
     if args.json {
         println!(
@@ -40,6 +51,9 @@ fn main() {
     println!("graph_rebuild_probe");
     println!("schema={}", snapshot.schema_version);
     println!("note_id={}", args.note_id);
+    println!("repeat={repeat}");
+    println!("elapsed_us={elapsed_us}");
+    println!("mean_us={mean_us}");
     println!("chunks={}", snapshot.counters.chunks);
     println!("candidates={}", snapshot.counters.candidates);
     println!("mentions={}", snapshot.counters.mentions);
@@ -97,6 +111,7 @@ struct Args {
     note_id: String,
     text: Option<String>,
     entities: Vec<LexiconEntry>,
+    repeat: usize,
     json: bool,
 }
 
@@ -106,6 +121,7 @@ impl Args {
             note_id: "probe-note".to_owned(),
             text: None,
             entities: Vec::new(),
+            repeat: 1,
             json: false,
         };
         let mut index = 0;
@@ -132,6 +148,13 @@ impl Args {
                     if let Some(raw) = args.get(index) {
                         parsed.entities.push(parse_entity(raw));
                     }
+                }
+                "--repeat" => {
+                    index += 1;
+                    parsed.repeat = args
+                        .get(index)
+                        .and_then(|raw| raw.parse::<usize>().ok())
+                        .unwrap_or(parsed.repeat);
                 }
                 "--json" => parsed.json = true,
                 "--help" | "-h" => print_help_and_exit(),
@@ -201,6 +224,6 @@ fn frontend_payload_rows(snapshot: &phoenix_graph_rebuild::GraphRebuildSnapshot)
 }
 
 fn print_help_and_exit() -> ! {
-    println!("Usage: graph_rebuild_probe --text-file note.txt [--entity id|label|kind|alias1,alias2] [--json]");
+    println!("Usage: graph_rebuild_probe --text-file note.txt [--entity id|label|kind|alias1,alias2] [--repeat N] [--json]");
     process::exit(0);
 }

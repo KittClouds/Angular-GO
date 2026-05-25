@@ -162,6 +162,59 @@ describe('Phoenix graph rebuild builder', () => {
         expect(snapshot.counters.graphAwareLinkSuggestions).toBeGreaterThanOrEqual(2);
     });
 
+    it('adds model-profile-aware embedding graph post-processing without hardcoded dimensions', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:embedding-graph',
+            noteIds: ['note-1'],
+            entities: [
+                entity('e-kai', 'Kai', []),
+                entity('e-rowan', 'Rowan', []),
+                entity('e-allied-table', 'Allied Table', [], 'NETWORK'),
+            ],
+            chunks: [
+                { id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 90, ordinal: 0, source: 'dynamic-chunking' },
+                { id: 'note-1:chunk:1', noteId: 'note-1', start: 91, end: 180, ordinal: 1, source: 'dynamic-chunking' },
+            ],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3),
+                occurrence('note-1', 'e-rowan', 'Rowan', 22, 27),
+                occurrence('note-1', 'e-allied-table', 'Allied Table', 98, 110),
+                occurrence('note-1', 'e-kai', 'Kai', 130, 133),
+            ],
+            noteTexts: {
+                'note-1': 'Kai and Rowan mapped the first authority packet. Allied Table reviewed the network lane while Kai prepared the graph.',
+            },
+            embeddingProfile: {
+                modelId: 'jina-v5-nano-retrieval',
+                modelLabel: 'Jina v5 Nano',
+                modelFamily: 'jina-v5',
+                dimensionLabel: '786d',
+                nativeDimensions: 786,
+                selectedDimensions: 786,
+                taskProfile: 'semantic_topology',
+                vectorSource: 'signature-preview',
+                normalized: true,
+            },
+            builtAt: 15,
+        });
+
+        expect(snapshot.embeddingProfile).toMatchObject({
+            modelId: 'jina-v5-nano-retrieval',
+            selectedDimensions: 786,
+            taskProfile: 'semantic_topology',
+        });
+        expect(snapshot.embeddingGraphPostProcess?.schemaVersion).toBe('phoenix-embedding-graph-postprocess/v1');
+        expect(snapshot.embeddingGraphPostProcess?.vectorDimensions).toBe(786);
+        expect(snapshot.embeddingGraphPostProcess?.clusters.length).toBeGreaterThan(0);
+        expect(snapshot.embeddingGraphPostProcess?.targets[0].productLaneFeatures).toMatchObject({
+            semanticDepth: expect.any(Number),
+            fiberPhase: expect.any(Number),
+        });
+        expect(snapshot.counters.embeddingClusters).toBe(snapshot.embeddingGraphPostProcess?.metrics.clusterCount);
+        expect(snapshot.counters.embeddingBackboneEdges).toBe(snapshot.embeddingGraphPostProcess?.metrics.backboneEdgeCount);
+    });
+
     it('suggests network hub affiliations from semantic status and structural role', () => {
         const snapshot = buildGraphRebuildSnapshot({
             scopeKind: 'note',

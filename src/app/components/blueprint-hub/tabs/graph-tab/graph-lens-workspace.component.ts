@@ -409,9 +409,9 @@ function chunkNodeId(chunkId: string): string {
 
 function graphKindHsl(kind: string): string {
     switch (String(kind || '').toLowerCase()) {
-        case 'chunk': return '176 70% 46%';
-        case 'event': return '25 90% 55%';
-        case 'memory': return '188 76% 52%';
+        case 'chunk': return entityColorStore.getRawGraphNodeHsl('chunk');
+        case 'event': return entityColorStore.getRawGraphNodeHsl('eventNode');
+        case 'memory': return entityColorStore.getRawGraphNodeHsl('memoryState');
         default: return '220 10% 54%';
     }
 }

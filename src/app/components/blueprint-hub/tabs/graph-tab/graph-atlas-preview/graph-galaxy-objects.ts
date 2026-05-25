@@ -8,6 +8,7 @@ export type GalaxyNodeObject = THREE.Sprite | THREE.Mesh;
 export function buildGalaxyNodes(scene: GalaxySceneV2, settings: GalaxyRenderSettings, nodeTexture: THREE.Texture, atomTexture: THREE.Texture): THREE.Group | null {
     if (!scene.ids.length) return null;
     const group = new THREE.Group();
+    const productAtom = settings.nodeShape === 'atom' && scene.layoutMode === 'productManifold';
     for (let index = 0; index < scene.ids.length; index++) {
         const material = settings.nodeShape === 'sphere'
             ? new THREE.MeshBasicMaterial({
@@ -22,7 +23,8 @@ export function buildGalaxyNodes(scene: GalaxySceneV2, settings: GalaxyRenderSet
                 map: settings.nodeShape === 'atom' ? atomTexture : nodeTexture,
                 color: 0xffffff,
                 transparent: true,
-                opacity: 0.96,
+                opacity: productAtom ? 0.98 : 0.96,
+                alphaTest: productAtom ? 0.055 : 0,
                 depthWrite: false,
                 depthTest: true,
                 blending: THREE.NormalBlending,

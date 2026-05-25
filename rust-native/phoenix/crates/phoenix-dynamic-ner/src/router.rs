@@ -49,6 +49,9 @@ impl SurfaceRouter {
             return Vec::new();
         }
         let mut needs = vec![NerNeedVector::default(); num_sentences];
+        let mut known_named_by_sentence = vec![0u16; num_sentences];
+        let mut native_named_by_sentence = vec![0u16; num_sentences];
+        let mut ambiguous_native_by_sentence = vec![false; num_sentences];
 
         // Count normalized surface frequencies across native candidates.
         let mut surface_counts = FxHashMap::<&str, u16>::default();
@@ -64,6 +67,7 @@ impl SurfaceRouter {
             if let Some(need) = needs.get_mut(idx) {
                 need.has_known_seed = true;
                 need.candidate_count = need.candidate_count.saturating_add(1);
+                known_named_by_sentence[idx] = known_named_by_sentence[idx].saturating_add(1);
             }
         }
 
@@ -75,11 +79,18 @@ impl SurfaceRouter {
             };
             need.candidate_count = need.candidate_count.saturating_add(1);
             match c.mention_kind {
-                MentionKind::Pronoun => need.has_pronoun = true,
-                MentionKind::Nominal => need.has_nominal_role = true,
+                MentionKind::Pronoun => {
+                    need.has_pronoun = true;
+                    ambiguous_native_by_sentence[idx] = true;
+                }
+                MentionKind::Nominal => {
+                    need.has_nominal_role = true;
+                    ambiguous_native_by_sentence[idx] = true;
+                }
                 MentionKind::Named => {
                     need.has_unknown_cap_span = true;
                     need.unknown_named_count = need.unknown_named_count.saturating_add(1);
+                    native_named_by_sentence[idx] = native_named_by_sentence[idx].saturating_add(1);
                 }
             }
             if surface_counts
@@ -101,25 +112,9 @@ impl SurfaceRouter {
 
         // Chunk-hint signals used by downstream substrate guidance.
         for (idx, need) in needs.iter_mut().enumerate() {
-            let sentence_index = idx as u32;
-            let known_named = known
-                .iter()
-                .filter(|candidate| candidate.sentence_index == sentence_index)
-                .count();
-            let native_named = native
-                .iter()
-                .filter(|candidate| {
-                    candidate.sentence_index == sentence_index
-                        && candidate.mention_kind == MentionKind::Named
-                })
-                .count();
-            let has_ambiguous_native = native.iter().any(|candidate| {
-                candidate.sentence_index == sentence_index
-                    && matches!(
-                        candidate.mention_kind,
-                        MentionKind::Pronoun | MentionKind::Nominal
-                    )
-            });
+            let known_named = usize::from(known_named_by_sentence[idx]);
+            let native_named = usize::from(native_named_by_sentence[idx]);
+            let has_ambiguous_native = ambiguous_native_by_sentence[idx];
             need.has_entity_pair = known_named + native_named >= 2;
             need.has_ambiguous_reference = has_ambiguous_native && known_named + native_named > 0;
             need.has_named_event_candidate =

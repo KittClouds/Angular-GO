@@ -4,7 +4,28 @@
 // Supports both PILL colors (background/border) and TEXT colors (foreground)
 
 import type { EntityKind } from '../Scanner/types';
-import type { EntitySourceSystem } from '../registry';
+
+export type GraphNodeColorKind =
+    | 'cooccurrence'
+    | 'observation'
+    | 'communication'
+    | 'authority'
+    | 'approval'
+    | 'family'
+    | 'intimacy'
+    | 'transfer'
+    | 'scenePresence'
+    | 'causal'
+    | 'temporal'
+    | 'relationship'
+    | 'document'
+    | 'chunk'
+    | 'anchor'
+    | 'graphFact'
+    | 'eventNode'
+    | 'temporalFact'
+    | 'causalFact'
+    | 'memoryState';
 
 // ============================================
 // DEFAULT COLORS (HSL VALUES)
@@ -60,14 +81,27 @@ export const DEFAULT_ENTITY_TEXT_COLORS: Record<EntityKind, string> = {
     CREATURE: '140 70% 50%',       // Green
 };
 
-export const DEFAULT_ENTITY_SOURCE_COLORS: Record<EntitySourceSystem, string> = {
-    user: '175 65% 45%',
-    dynamic_ner: '280 70% 60%',
-    graph_pipeline: '190 70% 50%',
-    ingestion: '200 75% 55%',
-    auto: '220 10% 50%',
-    import: '45 90% 50%',
-    legacy: '0 0% 50%',
+export const DEFAULT_GRAPH_NODE_COLORS: Record<GraphNodeColorKind, string> = {
+    cooccurrence: '215 10% 62%',
+    observation: '188 82% 62%',
+    communication: '162 72% 57%',
+    authority: '356 78% 62%',
+    approval: '112 72% 55%',
+    family: '338 76% 66%',
+    intimacy: '312 76% 64%',
+    transfer: '58 94% 56%',
+    scenePresence: '18 88% 61%',
+    causal: '12 90% 60%',
+    temporal: '64 84% 52%',
+    relationship: '292 76% 65%',
+    document: '210 82% 58%',
+    chunk: '176 70% 46%',
+    anchor: '262 78% 66%',
+    graphFact: '38 92% 57%',
+    eventNode: '24 92% 58%',
+    temporalFact: '199 80% 58%',
+    causalFact: '345 82% 61%',
+    memoryState: '145 70% 50%',
 };
 
 export function normalizeEntityKind(kind: EntityKind | string | null | undefined): EntityKind | null {
@@ -75,9 +109,56 @@ export function normalizeEntityKind(kind: EntityKind | string | null | undefined
     return Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_COLORS, normalized) ? normalized : null;
 }
 
-export function normalizeEntitySourceSystem(source: EntitySourceSystem | string | null | undefined): EntitySourceSystem | null {
-    const normalized = String(source || '').trim().toLowerCase().replace(/[-\s]+/g, '_') as EntitySourceSystem;
-    return Object.prototype.hasOwnProperty.call(DEFAULT_ENTITY_SOURCE_COLORS, normalized) ? normalized : null;
+const GRAPH_NODE_KIND_ALIASES: Record<string, GraphNodeColorKind> = {
+    co_occurrence: 'cooccurrence',
+    co_occurs: 'cooccurrence',
+    co_occurs_with: 'cooccurrence',
+    cooccurs: 'cooccurrence',
+    cooccurrence: 'cooccurrence',
+    observe: 'observation',
+    observes: 'observation',
+    observation: 'observation',
+    comment: 'communication',
+    comments: 'communication',
+    communication: 'communication',
+    authority: 'authority',
+    command: 'authority',
+    approval: 'approval',
+    family: 'family',
+    intimacy: 'intimacy',
+    transfer: 'transfer',
+    scene_presence: 'scenePresence',
+    scenepresence: 'scenePresence',
+    causal: 'causal',
+    causal_fact: 'causalFact',
+    causalfact: 'causalFact',
+    state: 'memoryState',
+    temporal: 'temporal',
+    temporal_fact: 'temporalFact',
+    temporalfact: 'temporalFact',
+    timeanchor: 'temporal',
+    time_anchor: 'temporal',
+    relationship: 'relationship',
+    document: 'document',
+    note: 'document',
+    chunk: 'chunk',
+    leaf: 'chunk',
+    anchor: 'anchor',
+    mention: 'anchor',
+    graph_fact: 'graphFact',
+    graphfact: 'graphFact',
+    event: 'eventNode',
+    event_node: 'eventNode',
+    eventnode: 'eventNode',
+    memory: 'memoryState',
+    memory_state: 'memoryState',
+    memorystate: 'memoryState',
+};
+
+export function normalizeGraphNodeColorKind(kind: GraphNodeColorKind | string | null | undefined): GraphNodeColorKind | null {
+    const normalized = String(kind || '').trim().replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().replace(/[-\s]+/g, '_');
+    const alias = GRAPH_NODE_KIND_ALIASES[normalized];
+    return alias || (Object.prototype.hasOwnProperty.call(DEFAULT_GRAPH_NODE_COLORS, kind as string) ? kind as GraphNodeColorKind : null);
 }
 
 // ============================================
@@ -88,21 +169,19 @@ export function normalizeEntitySourceSystem(source: EntitySourceSystem | string 
 class EntityColorStore {
     private colors: Record<EntityKind, string>;
     private textColors: Record<EntityKind, string>;
-    private sourceColors: Record<EntitySourceSystem, string>;
+    private graphNodeColors: Record<GraphNodeColorKind, string>;
     private listeners: Set<() => void> = new Set();
     private initialized = false;
     // Cached snapshots for useSyncExternalStore - same reference until data changes
     private snapshot: Record<EntityKind, string>;
     private textSnapshot: Record<EntityKind, string>;
-    private sourceSnapshot: Record<EntitySourceSystem, string>;
 
     constructor() {
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
-        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
+        this.graphNodeColors = { ...DEFAULT_GRAPH_NODE_COLORS };
         this.snapshot = this.colors;
         this.textSnapshot = this.textColors;
-        this.sourceSnapshot = this.sourceColors;
     }
 
     /**
@@ -116,16 +195,15 @@ class EntityColorStore {
         // Always start with defaults - no stale state
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
-        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
+        this.graphNodeColors = { ...DEFAULT_GRAPH_NODE_COLORS };
         this.snapshot = { ...this.colors };
         this.textSnapshot = { ...this.textColors };
-        this.sourceSnapshot = { ...this.sourceColors };
 
         // Sync all colors to CSS variables
         this.syncAllToCssVars();
 
         this.initialized = true;
-        console.log('[EntityColorStore] Initialized with', Object.keys(this.colors).length, 'pill colors, text colors, and source colors');
+        console.log('[EntityColorStore] Initialized with', Object.keys(this.colors).length, 'entity colors and', Object.keys(this.graphNodeColors).length, 'graph node colors');
     }
 
     // ============================================
@@ -159,16 +237,6 @@ class EntityColorStore {
         return `hsl(var(${varName}) / ${opacity})`;
     }
 
-    getSourceColor(source: EntitySourceSystem | string): string {
-        const varName = this.getSourceCssVarName(source);
-        return `hsl(var(${varName}))`;
-    }
-
-    getSourceBgColor(source: EntitySourceSystem | string, opacity = 0.16): string {
-        const varName = this.getSourceCssVarName(source);
-        return `hsl(var(${varName}) / ${opacity})`;
-    }
-
     /**
      * Get CSS variable name for pill color
      * Returns: '--entity-character'
@@ -181,8 +249,8 @@ class EntityColorStore {
         return `--entity-${(normalizeEntityKind(kind) ?? 'UNKNOWN').toLowerCase().replace(/_/g, '-')}-text`;
     }
 
-    getSourceCssVarName(source: EntitySourceSystem | string): string {
-        return `--entity-source-${(normalizeEntitySourceSystem(source) ?? 'legacy').replace(/_/g, '-')}`;
+    getGraphNodeCssVarName(kind: GraphNodeColorKind | string): string {
+        return `--graph-node-${(normalizeGraphNodeColorKind(kind) ?? 'graphFact').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`;
     }
 
     /**
@@ -203,8 +271,9 @@ class EntityColorStore {
         return normalized ? this.textColors[normalized] : '220 10% 50%';
     }
 
-    getRawSourceHsl(source: EntitySourceSystem | string): string {
-        return this.sourceColors[normalizeEntitySourceSystem(source) ?? 'legacy'] || DEFAULT_ENTITY_SOURCE_COLORS.legacy;
+    getRawGraphNodeHsl(kind: GraphNodeColorKind | string): string {
+        const normalized = normalizeGraphNodeColorKind(kind);
+        return normalized ? this.graphNodeColors[normalized] : DEFAULT_GRAPH_NODE_COLORS.graphFact;
     }
 
     /**
@@ -221,10 +290,6 @@ class EntityColorStore {
         return this.textSnapshot;
     }
 
-    getSourceSnapshot(): Record<EntitySourceSystem, string> {
-        return this.sourceSnapshot;
-    }
-
     /**
      * Get all pill colors (creates new object - use getSnapshot for React hooks)
      */
@@ -239,10 +304,6 @@ class EntityColorStore {
         return { ...this.textColors };
     }
 
-    getAllSourceColors(): Record<EntitySourceSystem, string> {
-        return { ...this.sourceColors };
-    }
-
     // ============================================
     // SETTERS - Update CSS variables live (session only)
     // ============================================
@@ -251,9 +312,11 @@ class EntityColorStore {
      * Set pill color for a kind - updates CSS variable immediately
      * Changes are session-only, NOT persisted to localStorage
      */
-    setColor(kind: EntityKind, hslValue: string): void {
-        this.colors[kind] = hslValue;
-        this.setCssVar(kind, hslValue);
+    setColor(kind: EntityKind | string, hslValue: string): void {
+        const normalized = normalizeEntityKind(kind);
+        if (!normalized) return;
+        this.colors[normalized] = hslValue;
+        this.setCssVar(normalized, hslValue);
         this.notify();
     }
 
@@ -261,15 +324,19 @@ class EntityColorStore {
      * Set text color for a kind - updates CSS variable immediately
      * Changes are session-only, NOT persisted to localStorage
      */
-    setTextColor(kind: EntityKind, hslValue: string): void {
-        this.textColors[kind] = hslValue;
-        this.setTextCssVar(kind, hslValue);
+    setTextColor(kind: EntityKind | string, hslValue: string): void {
+        const normalized = normalizeEntityKind(kind);
+        if (!normalized) return;
+        this.textColors[normalized] = hslValue;
+        this.setTextCssVar(normalized, hslValue);
         this.notify();
     }
 
-    setSourceColor(source: EntitySourceSystem, hslValue: string): void {
-        this.sourceColors[source] = hslValue;
-        this.setSourceCssVar(source, hslValue);
+    setGraphNodeColor(kind: GraphNodeColorKind | string, hslValue: string): void {
+        const normalized = normalizeGraphNodeColorKind(kind);
+        if (!normalized) return;
+        this.graphNodeColors[normalized] = hslValue;
+        this.setGraphNodeCssVar(normalized, hslValue);
         this.notify();
     }
 
@@ -305,13 +372,9 @@ class EntityColorStore {
     reset(): void {
         this.colors = { ...DEFAULT_ENTITY_COLORS };
         this.textColors = { ...DEFAULT_ENTITY_TEXT_COLORS };
-        this.sourceColors = { ...DEFAULT_ENTITY_SOURCE_COLORS };
+        this.graphNodeColors = { ...DEFAULT_GRAPH_NODE_COLORS };
         this.syncAllToCssVars();
         this.notify();
-    }
-
-    resetSourceColor(source: EntitySourceSystem): void {
-        this.setSourceColor(source, DEFAULT_ENTITY_SOURCE_COLORS[source]);
     }
 
     // ============================================
@@ -334,8 +397,8 @@ class EntityColorStore {
         }
     }
 
-    private setSourceCssVar(source: EntitySourceSystem | string, hslValue: string): void {
-        const varName = this.getSourceCssVarName(source);
+    private setGraphNodeCssVar(kind: GraphNodeColorKind | string, hslValue: string): void {
+        const varName = this.getGraphNodeCssVarName(kind);
         if (typeof document !== 'undefined') {
             document.documentElement.style.setProperty(varName, hslValue);
         }
@@ -348,8 +411,8 @@ class EntityColorStore {
         for (const [kind, hsl] of Object.entries(this.textColors)) {
             this.setTextCssVar(kind, hsl);
         }
-        for (const [source, hsl] of Object.entries(this.sourceColors)) {
-            this.setSourceCssVar(source, hsl);
+        for (const [kind, hsl] of Object.entries(this.graphNodeColors)) {
+            this.setGraphNodeCssVar(kind, hsl);
         }
     }
 
@@ -366,7 +429,6 @@ class EntityColorStore {
         // Create new snapshot references so useSyncExternalStore detects change
         this.snapshot = { ...this.colors };
         this.textSnapshot = { ...this.textColors };
-        this.sourceSnapshot = { ...this.sourceColors };
         this.listeners.forEach(fn => fn());
     }
 }
@@ -409,16 +471,6 @@ export function getEntityTextColor(kind: EntityKind | string | undefined): strin
 export function getEntityBgColor(kind: EntityKind | string | undefined, opacity = 0.2): string {
     if (!kind) return `hsl(var(--entity-unknown) / ${opacity})`;
     return entityColorStore.getEntityBgColor(kind, opacity);
-}
-
-export function getEntitySourceColor(source: EntitySourceSystem | string | undefined): string {
-    if (!source) return 'hsl(var(--entity-source-legacy))';
-    return entityColorStore.getSourceColor(source);
-}
-
-export function getEntitySourceBgColor(source: EntitySourceSystem | string | undefined, opacity = 0.16): string {
-    if (!source) return `hsl(var(--entity-source-legacy) / ${opacity})`;
-    return entityColorStore.getSourceBgColor(source, opacity);
 }
 
 /**

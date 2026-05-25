@@ -18,7 +18,8 @@ mod traits;
 mod types;
 
 pub use engine::{
-    NerError, PhoenixNerEngine, PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceNerOutput,
+    NerError, PhoenixNerEngine, PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceNerMetrics,
+    SurfaceNerOutput,
 };
 pub use graph::{MentionEdge, MentionEdgeKind, MentionGraph, MentionGraphBuilder};
 pub use hints::{ChunkHint, ChunkHintKind, ChunkHintSource};

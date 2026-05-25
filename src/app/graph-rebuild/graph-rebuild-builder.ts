@@ -12,6 +12,7 @@ import type {
 } from './graph-rebuild-snapshot';
 import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
 import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
+import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import {
@@ -61,6 +62,10 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         derived.causalEdges,
         derived.memoryState,
     );
+    const embeddingGraphPostProcess = buildGraphRebuildEmbeddingGraphPostProcess(
+        embeddingTargets,
+        input.embeddingProfile,
+    );
     const noteIds = input.noteIds ? [...input.noteIds] : unique([
         ...chunks.map((chunk) => chunk.noteId),
         ...entityAnchors.map((anchor) => anchor.noteId),
@@ -85,6 +90,8 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         memoryState: derived.memoryState,
         embeddingTargets,
         embeddingVectors: [],
+        embeddingProfile: embeddingGraphPostProcess.profile,
+        embeddingGraphPostProcess,
         projectionRefs: [],
         nodes,
         edges,
@@ -115,6 +122,11 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             structuralComponents: structuralPostProcess.components.length,
             structuralHubs: structuralPostProcess.hubEntityIds.length,
             structuralBridgeEdges: structuralPostProcess.bridgeEdgeIds.length,
+            embeddingClusters: embeddingGraphPostProcess.metrics.clusterCount,
+            embeddingSingletonClusters: embeddingGraphPostProcess.metrics.singletonCount,
+            embeddingBackboneEdges: embeddingGraphPostProcess.metrics.backboneEdgeCount,
+            embeddingBridgeEdges: embeddingGraphPostProcess.metrics.bridgeEdgeCount,
+            embeddingOutliers: embeddingGraphPostProcess.metrics.outlierCount,
             graphAwareLinkSuggestions: graphAwareLinkSuggestions.length,
             meaningFrameChunks: chunks.filter((chunk) => Boolean(chunk.meaningFrame)).length,
             eventAspects: derived.events.filter((event) => Boolean(event.aspect)).length,

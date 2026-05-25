@@ -3,6 +3,8 @@
 //! Pipeline: known lane → native lane → router plans → model lane →
 //! adjudication → scoring → graph build → SurfaceNerOutput.
 
+use std::time::Instant;
+
 use phoenix_alex::Lexicon;
 use phoenix_types::{Diagnostic, ScopeKey, SentenceSpan, TextRange, TokenSpan};
 use thiserror::Error;
@@ -40,6 +42,27 @@ pub struct SurfaceNerOutput {
     pub surface_memory: SurfaceMemoryReport,
     pub chunk_hints: Vec<ChunkHint>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Coarse timing counters for finding chunk-sized NER work.
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceNerMetrics {
+    pub total_ms: u128,
+    pub known_surface_ms: u128,
+    pub native_discovery_ms: u128,
+    pub route_planning_ms: u128,
+    pub workspace_ingest_ms: u128,
+    pub model_and_adjudication_ms: u128,
+    pub final_packets_ms: u128,
+    pub surface_memory_ms: u128,
+    pub mention_graph_ms: u128,
+    pub chunk_hints_ms: u128,
+    pub known_count: usize,
+    pub native_count: usize,
+    pub route_count: usize,
+    pub packet_count: usize,
+    pub graph_edge_count: usize,
+    pub chunk_hint_count: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -139,19 +162,44 @@ impl PhoenixNerEngine {
         &self,
         input: &SurfaceNerInput<'_>,
     ) -> Result<SurfaceNerOutput, NerError> {
+        self.extract_mentions_inner(input, None)
+    }
+
+    /// Run the full NER pipeline and return coarse phase timings.
+    pub fn extract_mentions_with_metrics(
+        &self,
+        input: &SurfaceNerInput<'_>,
+    ) -> Result<(SurfaceNerOutput, SurfaceNerMetrics), NerError> {
+        let mut metrics = SurfaceNerMetrics::default();
+        let output = self.extract_mentions_inner(input, Some(&mut metrics))?;
+        Ok((output, metrics))
+    }
+
+    fn extract_mentions_inner(
+        &self,
+        input: &SurfaceNerInput<'_>,
+        mut metrics: Option<&mut SurfaceNerMetrics>,
+    ) -> Result<SurfaceNerOutput, NerError> {
+        let total_started = Instant::now();
         let mut diagnostics = Vec::new();
 
         // === Lane 1: Known Surface ===
+        let phase_started = Instant::now();
         let known_candidates = if let Some(lexicon) = input.lexicon {
             KnownSurfaceLane::scan(lexicon, input.scope, input.text, input.sentences, 0)
         } else {
             Vec::new()
         };
         let known_count = known_candidates.len();
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.known_surface_ms = phase_started.elapsed().as_millis();
+            metrics.known_count = known_count;
+        }
 
         // === Lane 2: Native Discovery ===
         let known_ranges: Vec<TextRange> = known_candidates.iter().map(|c| c.range).collect();
         let native_id_base = known_count as u64;
+        let phase_started = Instant::now();
         let native_candidates = NativeDiscoveryLane::discover(
             input.text,
             input.tokens,
@@ -159,9 +207,14 @@ impl PhoenixNerEngine {
             &known_ranges,
             native_id_base,
         );
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.native_discovery_ms = phase_started.elapsed().as_millis();
+            metrics.native_count = native_candidates.len();
+        }
         let workspace_id_base = native_id_base + native_candidates.len() as u64;
 
         // === Router: plan routes ===
+        let phase_started = Instant::now();
         let needs = self.router.build_need_vectors(
             input.text,
             input.sentences,
@@ -175,13 +228,22 @@ impl PhoenixNerEngine {
             &known_candidates,
             &native_candidates,
         );
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.route_planning_ms = phase_started.elapsed().as_millis();
+            metrics.route_count = routes.len();
+        }
 
         // Ingest deterministic lanes into workspace.
+        let phase_started = Instant::now();
         let mut workspace = MentionWorkspace::new(input.document_id, workspace_id_base);
         workspace.add_known(known_candidates);
         workspace.add_native(native_candidates);
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.workspace_ingest_ms = phase_started.elapsed().as_millis();
+        }
 
         // === Lane 3 + 4: Model + Adjudication (optional) ===
+        let phase_started = Instant::now();
         for route in routes {
             match route {
                 NerRoute::DeterministicOnly | NerRoute::NativeDiscovery => {}
@@ -329,11 +391,29 @@ impl PhoenixNerEngine {
                 }
             }
         }
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.model_and_adjudication_ms = phase_started.elapsed().as_millis();
+        }
 
         // === Finalize ===
+        let phase_started = Instant::now();
         let packets = workspace.finalize_packets();
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.final_packets_ms = phase_started.elapsed().as_millis();
+            metrics.packet_count = packets.len();
+        }
+        let phase_started = Instant::now();
         let surface_memory = SurfaceMemoryReport::build(&packets);
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.surface_memory_ms = phase_started.elapsed().as_millis();
+        }
+        let phase_started = Instant::now();
         let mention_graph = MentionGraphBuilder::build(&packets);
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.mention_graph_ms = phase_started.elapsed().as_millis();
+            metrics.graph_edge_count = mention_graph.edge_count();
+        }
+        let phase_started = Instant::now();
         let chunk_hints = build_chunk_hints(
             input.text,
             input.sentences,
@@ -341,6 +421,11 @@ impl PhoenixNerEngine {
             &mention_graph,
             &needs,
         );
+        if let Some(metrics) = metrics.as_deref_mut() {
+            metrics.chunk_hints_ms = phase_started.elapsed().as_millis();
+            metrics.chunk_hint_count = chunk_hints.len();
+            metrics.total_ms = total_started.elapsed().as_millis();
+        }
 
         Ok(SurfaceNerOutput {
             mentions: packets,

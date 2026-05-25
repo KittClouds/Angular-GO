@@ -72,18 +72,18 @@ describe('Graph galaxy canonical colors', () => {
         }
     });
 
-    it('resolves provenance node colors from Style Lab source colors', () => {
-        entityColorStore.setSourceColor('dynamic_ner', '120 100% 50%');
+    it('keeps NER provenance from overriding canonical entity-kind colors', () => {
+        entityColorStore.setColor('NETWORK', '0 100% 50%');
         try {
             const node: GalaxyRenderableNode = {
-                id: 'source:ner',
-                label: 'NER Source',
-                kind: 'source',
+                id: 'network:joint-chiefs',
+                label: 'Joint Chiefs',
+                kind: 'NETWORK',
                 colorHsl: '0 0% 80%',
                 metadata: { sourceSystem: 'dynamic-ner' },
             };
 
-            expect(resolveGalaxyNodeColorHsl(node)).toBe('120 100% 50%');
+            expect(resolveGalaxyNodeColorHsl(node)).toBe('0 100% 50%');
         } finally {
             entityColorStore.reset();
         }

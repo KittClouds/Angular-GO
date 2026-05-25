@@ -1,7 +1,7 @@
 import {
     entityColorStore,
+    normalizeGraphNodeColorKind,
     normalizeEntityKind,
-    normalizeEntitySourceSystem,
 } from '../../../../../lib/store/entityColorStore';
 import { applyLorentzTreeLayout } from './graph-galaxy-lorentz-layout';
 
@@ -75,6 +75,8 @@ export interface GalaxyRenderableNode {
         sourceTitle?: string;
         sourceType?: string;
         sourceSystem?: string;
+        graphColorKind?: string;
+        graphRelationFamily?: string;
         noteId?: string;
         galaxyId?: string;
         galaxyRole?: 'primary' | 'context';
@@ -1185,8 +1187,13 @@ export function resolveGalaxyNodeColorHsl(entity: GalaxyRenderableNode): string 
     const entityKind = normalizeEntityKind(stringValue(metadata['entityKind']) || entity.kind);
     if (entityKind) return entityColorStore.getRawHsl(entityKind);
 
-    const sourceSystem = normalizeEntitySourceSystem(stringValue(metadata['sourceSystem']));
-    if (sourceSystem) return entityColorStore.getRawSourceHsl(sourceSystem);
+    const graphColorKind = normalizeGraphNodeColorKind(
+        stringValue(metadata['graphColorKind'])
+        || stringValue(metadata['graphRelationFamily'])
+        || stringValue(metadata['graphKind'])
+        || entity.kind,
+    );
+    if (graphColorKind) return entityColorStore.getRawGraphNodeHsl(graphColorKind);
 
     return entity.colorHsl || entityColorStore.getRawHsl(entity.kind);
 }

@@ -6,6 +6,7 @@ import type { AtlasCapabilityId } from '../components/search-panel/atlas-capabil
 import type { AtlasBuildScope, AtlasRunOptions } from '../services/atlas-capability-runtime.model';
 import { AtlasCapabilityRuntimeService } from '../services/atlas-capability-runtime.service';
 import { NerService } from '../services/ner.service';
+import { embeddingProfileFromModelSelection } from './graph-rebuild-embedding-signatures';
 import { GraphRebuildService } from './graph-rebuild.service';
 import type {
     GraphIndexModelReadiness,
@@ -141,6 +142,7 @@ export class GraphRebuildPipelineService {
                         ? smartGraphRegistry.getAllEntities()
                         : request.entities,
                     relationshipHints,
+                    embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
                     candidateCount: nerStage.counters['candidates'] || 0,
                 });
                 return {
@@ -153,6 +155,9 @@ export class GraphRebuildPipelineService {
                         acceptedRelationships: snapshot.counters.acceptedRelationships,
                         reviewRelationships: snapshot.counters.reviewRelationships,
                         rejectedRelationships: snapshot.counters.rejectedRelationships,
+                        embeddingClusters: snapshot.counters.embeddingClusters || 0,
+                        embeddingBackboneEdges: snapshot.counters.embeddingBackboneEdges || 0,
+                        embeddingOutliers: snapshot.counters.embeddingOutliers || 0,
                         linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
                         nliHints: relationshipHints.length,
                     },

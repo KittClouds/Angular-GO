@@ -1,12 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use phoenix_types::TextRange;
-use scirs2_text::dependency::ArcStandardParser;
-use scirs2_text::information_extraction::{Entity, EntityType, Event, TemporalExtractor};
+use scirs2_text::information_extraction::TemporalExtractor;
 use scirs2_text::keyword_extraction::{extract_keywords, KeywordMethod};
 use scirs2_text::string_metrics::{DamerauLevenshteinMetric, StringMetric};
-use scirs2_text::topic_modeling::{LatentDirichletAllocation, LdaConfig};
-use scirs2_text::vectorize::{CountVectorizer, Vectorizer};
 use serde::{Deserialize, Serialize};
 
 use crate::{split_sentence_ranges, BaseChunk};
@@ -406,7 +403,6 @@ fn build_relationship_lens(
         add_mentions_in_range(input.mentions, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
         if !draft.trigger_terms.is_empty() || hint.kind != LensChunkHintKind::DialogueSpeaker {
-            parse_dependency_window(input.text, draft.range);
             drafts.push(draft);
         }
     }
@@ -450,7 +446,6 @@ fn build_relationship_lens(
         draft.add_mention(right);
         add_mentions_in_range(input.mentions, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
-        parse_dependency_window(input.text, draft.range);
         drafts.push(draft);
     }
 
@@ -478,7 +473,6 @@ fn build_relationship_lens(
             draft.add_mention(mention);
         }
         draft.trigger_terms.extend(triggers);
-        parse_dependency_window(input.text, draft.range);
         drafts.push(draft);
     }
 }
@@ -515,8 +509,6 @@ fn build_event_lens(
         }
         add_mentions_in_range(input.mentions, draft.range, &mut draft);
         add_event_keywords(input.text, draft.range, &mut draft);
-        materialize_scirs_event(input.text, draft.range, &draft);
-        parse_dependency_window(input.text, draft.range);
         drafts.push(draft);
     }
 }
@@ -573,7 +565,6 @@ fn build_causal_lens(
         );
         draft.trigger_terms.extend(triggers);
         add_mentions_in_range(input.mentions, draft.range, &mut draft);
-        parse_dependency_window(input.text, draft.range);
         drafts.push(draft);
     }
 }
@@ -622,7 +613,6 @@ fn build_worldbuilding_lens(
         draft.trigger_terms.extend(triggers);
         add_mentions_in_range(input.mentions, draft.range, &mut draft);
         add_worldbuilding_keywords(input.text, draft.range, &mut draft);
-        touch_topic_vector_tools(input.text, draft.range);
         drafts.push(draft);
     }
 }
@@ -941,34 +931,6 @@ fn add_worldbuilding_keywords(text: &str, range: (usize, usize), draft: &mut Dra
     }
 }
 
-fn touch_topic_vector_tools(text: &str, range: (usize, usize)) {
-    let Some(slice) = text.get(range.0..range.1) else {
-        return;
-    };
-    let docs = split_sentence_ranges(slice)
-        .into_iter()
-        .filter_map(|(start, end)| slice.get(start..end))
-        .filter(|sentence| !sentence.trim().is_empty())
-        .take(3)
-        .collect::<Vec<_>>();
-    if docs.is_empty() {
-        return;
-    }
-    let mut vectorizer = CountVectorizer::new(true);
-    if let Ok(matrix) = vectorizer.fit_transform(&docs) {
-        if matrix.ncols() > 0 && matrix.nrows() > 0 {
-            let config = LdaConfig {
-                ntopics: 1,
-                maxiter: 1,
-                random_seed: Some(42),
-                ..LdaConfig::default()
-            };
-            let mut lda = LatentDirichletAllocation::new(config);
-            let _ = lda.fit(&matrix);
-        }
-    }
-}
-
 fn contains_citation_marker(slice: &str) -> bool {
     slice
         .as_bytes()
@@ -1037,75 +999,6 @@ fn add_event_keywords(text: &str, range: (usize, usize), draft: &mut DraftLensCh
                     .insert(keyword.text.to_ascii_lowercase());
             }
         }
-    }
-}
-
-fn materialize_scirs_event(text: &str, range: (usize, usize), draft: &DraftLensChunk) {
-    let Some(slice) = text.get(range.0..range.1) else {
-        return;
-    };
-    let participants = draft
-        .surfaces
-        .iter()
-        .enumerate()
-        .map(|(idx, surface)| Entity {
-            text: surface.clone(),
-            entity_type: EntityType::Person,
-            start: idx,
-            end: idx + surface.len(),
-            confidence: 0.5,
-        })
-        .collect::<Vec<_>>();
-    let _event = Event {
-        event_type: draft
-            .trigger_terms
-            .iter()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| "event".to_owned()),
-        participants,
-        location: None,
-        time: None,
-        description: slice.to_owned(),
-        confidence: 0.5,
-    };
-}
-
-fn parse_dependency_window(text: &str, range: (usize, usize)) {
-    let Some(slice) = text.get(range.0..range.1) else {
-        return;
-    };
-    let tokens = slice
-        .split(|ch: char| !(ch.is_alphanumeric() || ch == '\'' || ch == '-'))
-        .filter(|token| !token.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if tokens.is_empty() {
-        return;
-    }
-    let pos_tags = tokens
-        .iter()
-        .map(|token| coarse_pos(token).to_owned())
-        .collect::<Vec<_>>();
-    let parser = ArcStandardParser::new();
-    let _graph = parser.parse(&tokens, &pos_tags);
-}
-
-fn coarse_pos(token: &str) -> &'static str {
-    let lower = token.to_ascii_lowercase();
-    if RELATION_TRIGGERS
-        .iter()
-        .any(|trigger| trigger.trim() == lower)
-        || EVENT_TRIGGERS.iter().any(|trigger| trigger.trim() == lower)
-        || CAUSAL_TRIGGERS
-            .iter()
-            .any(|trigger| trigger.trim() == lower)
-    {
-        "VERB"
-    } else if token.chars().next().is_some_and(char::is_uppercase) {
-        "PROPN"
-    } else {
-        "NOUN"
     }
 }
 

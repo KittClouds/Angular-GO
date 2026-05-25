@@ -7,15 +7,20 @@ import {
     type ManifoldCapabilities,
 } from '../../../../../services/manifold-atlas.types';
 import type {
+    GraphRebuildEmbeddingTargetPostProcess,
     GraphRebuildEmbeddingTarget,
     GraphRebuildSnapshot,
 } from '../../../../../graph-rebuild/graph-rebuild-snapshot';
+import {
+    normalizeEmbeddingProfile,
+    sparseEmbeddingSignature,
+    sparseToDenseVector,
+} from '../../../../../graph-rebuild/graph-rebuild-embedding-signatures';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
-import { relationHslFromText } from './graph-relation-visual-style';
+import { relationFamilyFromText, relationHslFromText } from './graph-relation-visual-style';
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
-const DIMS = 32;
 const LIMIT = 420;
 
 export function buildGraphRebuildEmbeddingAtlas(
@@ -23,13 +28,15 @@ export function buildGraphRebuildEmbeddingAtlas(
     manifold: AtlasManifoldMode,
 ): EmbeddingAtlasData {
     const entityKindById = new Map(snapshot.nodes.map((node) => [node.entityId, node.kind]));
+    const profile = normalizeEmbeddingProfile(snapshot.embeddingProfile);
+    const postByTarget = new Map((snapshot.embeddingGraphPostProcess?.targets || []).map((row) => [row.targetId, row]));
     const selected = snapshot.embeddingTargets
         .filter((target) => target.text.trim() || target.label.trim())
         .slice(0, LIMIT)
         .map((target) => hydrateTargetEntityKind(target, entityKindById));
-    const vectors = selected.map((target) => textVector(targetText(target)));
+    const vectors = selected.map((target) => textVector(target, profile.selectedDimensions));
     const nodes = selected.map((target, index) =>
-        targetNode(target, vectors[index], index, selected.length, manifold),
+        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id)),
     );
     const nodeIds = new Set(nodes.map((node) => node.id));
     return {
@@ -71,8 +78,12 @@ function targetNode(
     index: number,
     total: number,
     manifold: AtlasManifoldMode,
+    post?: GraphRebuildEmbeddingTargetPostProcess,
 ): GalaxyRenderableNode {
     const point = projectVector(vector, target.id, index, total, manifold);
+    const relationFamily = displayKind(target.kind) === 'graph-fact'
+        ? relationFamilyFromText(target.label, target.text, target.sourceId)
+        : null;
     return {
         id: target.id,
         label: target.label || target.id,
@@ -86,9 +97,23 @@ function targetNode(
             sourceType: target.kind,
             sourceId: target.sourceId,
             entityKind: target.entityKind,
+            graphColorKind: relationFamily || targetRenderKind(target),
+            graphRelationFamily: relationFamily || undefined,
             noteId: target.noteId,
             chunkId: target.chunkId,
             sourceEntityId: target.entityId,
+            embeddingClusterId: post?.clusterId,
+            embeddingClusterRole: post?.clusterRole,
+            embeddingMedoidTargetId: post?.medoidTargetId,
+            embeddingOutlierScore: post?.outlierScore,
+            embeddingHubScore: post?.hubScore,
+            product: post ? {
+                role: 'embeddingTarget',
+                clusterId: post.clusterId,
+                clusterRole: post.clusterRole,
+                medoidTargetId: post.medoidTargetId,
+                lanes: post.productLaneFeatures,
+            } : undefined,
             graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
             manifold,
@@ -138,6 +163,9 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
     for (const state of snapshot.memoryState) {
         add(`embed:memory-entity:${state.id}`, `embed:memory:${state.id}`, `embed:entity:${state.entityId}`, 'memory-entity', 0.72);
     }
+    for (const edge of snapshot.embeddingGraphPostProcess?.backboneEdges || []) {
+        add(edge.id, edge.sourceTargetId, edge.targetTargetId, `embedding-${edge.role}`, edge.score);
+    }
     return dedupeEdges(edges);
 }
 
@@ -151,20 +179,8 @@ function dedupeEdges(edges: GalaxyInputEdge[]): GalaxyInputEdge[] {
     });
 }
 
-function targetText(target: GraphRebuildEmbeddingTarget): string {
-    return `${target.kind} ${target.entityKind || ''} ${target.label} ${target.text} ${target.noteId || ''} ${target.chunkId || ''}`;
-}
-
-function textVector(text: string): Float32Array {
-    const vector = new Float32Array(DIMS);
-    const tokens = text.toLowerCase().match(/[a-z0-9_'-]+/g) || [text || 'graph'];
-    for (const token of tokens) {
-        const seed = hash(token);
-        vector[seed % DIMS] += 1;
-        vector[(seed >>> 5) % DIMS] += 0.5;
-    }
-    normalize(vector);
-    return vector;
+function textVector(target: GraphRebuildEmbeddingTarget, dimensions: number): Float32Array {
+    return sparseToDenseVector(sparseEmbeddingSignature(target, dimensions), dimensions);
 }
 
 function projectVector(
@@ -183,13 +199,6 @@ function projectVector(
         y: (vector[1] * 0.7 + y * 0.64) * scale,
         z: (vector[2] * 0.9 + Math.sin(spiral) * radial) * scale,
     };
-}
-
-function normalize(vector: Float32Array): void {
-    let sum = 0;
-    for (const value of vector) sum += value * value;
-    const norm = Math.sqrt(sum) || 1;
-    for (let index = 0; index < vector.length; index++) vector[index] /= norm;
 }
 
 function displayKind(kind: string): string {
@@ -216,15 +225,15 @@ function targetColorHsl(target: GraphRebuildEmbeddingTarget): string {
 
 function kindHsl(kind: string): string {
     switch (displayKind(kind)) {
-        case 'note': return '210 82% 58%';
-        case 'chunk': return '176 70% 46%';
+        case 'note': return entityColorStore.getRawGraphNodeHsl('document');
+        case 'chunk': return entityColorStore.getRawGraphNodeHsl('chunk');
         case 'entity': return '282 70% 62%';
-        case 'anchor': return '262 78% 66%';
-        case 'graph-fact': return '38 92% 57%';
-        case 'event': return '24 92% 58%';
-        case 'temporal-fact': return '199 80% 58%';
-        case 'causal-fact': return '345 82% 61%';
-        case 'memory-state': return '145 70% 50%';
+        case 'anchor': return entityColorStore.getRawGraphNodeHsl('anchor');
+        case 'graph-fact': return entityColorStore.getRawGraphNodeHsl('graphFact');
+        case 'event': return entityColorStore.getRawGraphNodeHsl('eventNode');
+        case 'temporal-fact': return entityColorStore.getRawGraphNodeHsl('temporalFact');
+        case 'causal-fact': return entityColorStore.getRawGraphNodeHsl('causalFact');
+        case 'memory-state': return entityColorStore.getRawGraphNodeHsl('memoryState');
         default: return '220 12% 58%';
     }
 }
@@ -243,6 +252,10 @@ function graphRebuildCapabilities(manifold: AtlasManifoldMode): ManifoldCapabili
     return HYBRID_MANIFOLD_CAPABILITIES;
 }
 
+function unitHash(value: string): number {
+    return hash(value) / 4294967295;
+}
+
 function hash(value: string): number {
     let out = 2166136261;
     for (let index = 0; index < value.length; index++) {
@@ -250,8 +263,4 @@ function hash(value: string): number {
         out = Math.imul(out, 16777619);
     }
     return out >>> 0;
-}
-
-function unitHash(value: string): number {
-    return hash(value) / 4294967295;
 }

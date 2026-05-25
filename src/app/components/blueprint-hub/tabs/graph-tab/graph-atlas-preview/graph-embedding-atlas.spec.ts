@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ENTITY_COLORS } from '../../../../../lib/store/entityColorStore';
+import { DEFAULT_ENTITY_COLORS, DEFAULT_GRAPH_NODE_COLORS } from '../../../../../lib/store/entityColorStore';
 import type { NoteBlockProjection } from '../../../../../lib/dexie/db';
 import { buildLeafEmbeddingAtlas } from './graph-embedding-atlas';
 import { buildGraphRebuildEmbeddingAtlas } from './graph-rebuild-embedding-atlas';
@@ -89,6 +89,7 @@ describe('embedding atlas projection', () => {
                 { id: 'embed:graph-fact:co', kind: 'graphFact', sourceId: 'co', label: 'Kai co_occurs_with Hazel', text: 'Kai co_occurs_with Hazel [review]', evidenceIds: [] },
                 { id: 'embed:graph-fact:observe', kind: 'graphFact', sourceId: 'observe', label: 'Kai observes Hazel', text: 'Kai observes Hazel [accepted]', evidenceIds: [] },
                 { id: 'embed:graph-fact:comment', kind: 'graphFact', sourceId: 'comment', label: 'Kai comments on Hazel', text: 'Kai comments on Hazel [accepted]', evidenceIds: [] },
+                { id: 'embed:graph-fact:authority', kind: 'graphFact', sourceId: 'authority', label: 'authority_chain_event', text: 'Joint Chiefs authority chain event [accepted]', evidenceIds: [] },
             ],
             embeddingVectors: [],
             projectionRefs: [],
@@ -115,9 +116,10 @@ describe('embedding atlas projection', () => {
         expect(nodes.get('embed:anchor:anchor-location')?.kind).toBe('anchor');
         expect(colors.get('embed:entity:baton')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
         expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
-        expect(colors.get('embed:graph-fact:co')).toBe('215 10% 62%');
-        expect(colors.get('embed:graph-fact:observe')).toBe('188 82% 62%');
-        expect(colors.get('embed:graph-fact:comment')).toBe('162 72% 57%');
+        expect(colors.get('embed:graph-fact:co')).toBe(DEFAULT_GRAPH_NODE_COLORS.cooccurrence);
+        expect(colors.get('embed:graph-fact:observe')).toBe(DEFAULT_GRAPH_NODE_COLORS.observation);
+        expect(colors.get('embed:graph-fact:comment')).toBe(DEFAULT_GRAPH_NODE_COLORS.communication);
+        expect(colors.get('embed:graph-fact:authority')).toBe(DEFAULT_GRAPH_NODE_COLORS.authority);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:co') || '')).toBe(false);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:observe') || '')).toBe(false);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:comment') || '')).toBe(false);

@@ -201,6 +201,25 @@ export interface GraphRebuildEmbeddingVector {
     generation: number;
 }
 
+export type GraphRebuildEmbeddingTaskProfile =
+    | 'retrieval'
+    | 'semantic_topology'
+    | 'multi_task'
+    | 'unknown';
+
+export interface GraphRebuildEmbeddingProfile {
+    schemaVersion: 'phoenix-embedding-profile/v1';
+    modelId: string;
+    modelLabel: string;
+    modelFamily: string;
+    dimensionLabel: string;
+    nativeDimensions: number;
+    selectedDimensions: number;
+    taskProfile: GraphRebuildEmbeddingTaskProfile;
+    vectorSource: 'signature-preview' | 'semantic-runner';
+    normalized: boolean;
+}
+
 export interface GraphRebuildProjectionRef {
     targetId: string;
     manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'hyperbolic';
@@ -240,6 +259,83 @@ export interface GraphRebuildStructuralPostProcess {
     edges: GraphRebuildStructuralEdge[];
     hubEntityIds: string[];
     bridgeEdgeIds: string[];
+}
+
+export type GraphRebuildEmbeddingClusterRole =
+    | 'document_region'
+    | 'entity_region'
+    | 'fact_region'
+    | 'event_region'
+    | 'mixed_region';
+
+export type GraphRebuildEmbeddingBackboneRole = 'local' | 'backbone' | 'bridge';
+
+export interface GraphRebuildProductLaneFeatures {
+    semanticDepth: number;
+    documentDepth: number;
+    relationDepth: number;
+    clusterRadius: number;
+    fiberPhase: number;
+    confidence: number;
+}
+
+export interface GraphRebuildEmbeddingCluster {
+    id: string;
+    role: GraphRebuildEmbeddingClusterRole;
+    targetIds: string[];
+    medoidTargetId: string;
+    size: number;
+    density: number;
+    confidence: number;
+    topKinds: string[];
+    outlierTargetIds: string[];
+}
+
+export interface GraphRebuildEmbeddingTargetPostProcess {
+    targetId: string;
+    clusterId: string;
+    clusterRole: GraphRebuildEmbeddingClusterRole;
+    medoidTargetId: string;
+    outlierScore: number;
+    hubScore: number;
+    neighborCount: number;
+    productLaneFeatures: GraphRebuildProductLaneFeatures;
+}
+
+export interface GraphRebuildEmbeddingBackboneEdge {
+    id: string;
+    sourceTargetId: string;
+    targetTargetId: string;
+    role: GraphRebuildEmbeddingBackboneRole;
+    score: number;
+    semanticScore: number;
+    structuralScore: number;
+    reason: string[];
+}
+
+export interface GraphRebuildEmbeddingGraphMetrics {
+    clusterCount: number;
+    singletonCount: number;
+    largestClusterSize: number;
+    largestClusterRatio: number;
+    backboneEdgeCount: number;
+    bridgeEdgeCount: number;
+    outlierCount: number;
+    maxHubScore: number;
+    meanNeighborCount: number;
+}
+
+export interface GraphRebuildEmbeddingGraphPostProcess {
+    schemaVersion: 'phoenix-embedding-graph-postprocess/v1';
+    profile: GraphRebuildEmbeddingProfile;
+    targetCount: number;
+    vectorDimensions: number;
+    clusters: GraphRebuildEmbeddingCluster[];
+    targets: GraphRebuildEmbeddingTargetPostProcess[];
+    backboneEdges: GraphRebuildEmbeddingBackboneEdge[];
+    bridgeEdges: GraphRebuildEmbeddingBackboneEdge[];
+    outlierTargetIds: string[];
+    metrics: GraphRebuildEmbeddingGraphMetrics;
 }
 
 export type GraphRebuildLinkSuggestionKind =
@@ -325,6 +421,11 @@ export interface GraphRebuildCounters {
     structuralComponents?: number;
     structuralHubs?: number;
     structuralBridgeEdges?: number;
+    embeddingClusters?: number;
+    embeddingSingletonClusters?: number;
+    embeddingBackboneEdges?: number;
+    embeddingBridgeEdges?: number;
+    embeddingOutliers?: number;
     graphAwareLinkSuggestions?: number;
     meaningFrameChunks?: number;
     eventAspects?: number;
@@ -351,6 +452,8 @@ export interface GraphRebuildSnapshot {
     memoryState: GraphRebuildMemoryState[];
     embeddingTargets: GraphRebuildEmbeddingTarget[];
     embeddingVectors: GraphRebuildEmbeddingVector[];
+    embeddingProfile?: GraphRebuildEmbeddingProfile;
+    embeddingGraphPostProcess?: GraphRebuildEmbeddingGraphPostProcess;
     projectionRefs: GraphRebuildProjectionRef[];
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
@@ -453,6 +556,7 @@ export interface BuildGraphRebuildSnapshotInput {
     chunks?: GraphRebuildChunk[];
     relationshipHints?: GraphRebuildRelationshipHint[];
     noteTexts?: Record<string, string>;
+    embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
     candidateCount?: number;
     builtAt?: number;
 }

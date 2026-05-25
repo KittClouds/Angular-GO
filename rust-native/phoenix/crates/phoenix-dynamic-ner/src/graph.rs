@@ -93,10 +93,18 @@ impl MentionGraphBuilder {
             if indices.len() < 2 {
                 continue;
             }
+            let mut indices = indices.iter().copied().collect::<Vec<_>>();
+            indices.sort_by_key(|idx| {
+                let packet = &packets[*idx];
+                (packet.sentence_index, packet.range.start, packet.range.end)
+            });
             for (a_pos, &a_idx) in indices.iter().enumerate() {
+                let a = &packets[a_idx];
                 for &b_idx in indices.iter().skip(a_pos + 1) {
-                    let a = &packets[a_idx];
                     let b = &packets[b_idx];
+                    if b.sentence_index > a.sentence_index + CROSS_SENTENCE_WINDOW {
+                        break;
+                    }
                     let sent_dist = a.sentence_index.abs_diff(b.sentence_index);
                     if sent_dist <= CROSS_SENTENCE_WINDOW {
                         let weight = 1.0 / (1.0 + sent_dist as f32);
@@ -113,26 +121,33 @@ impl MentionGraphBuilder {
         }
 
         // Nearby-repetition edges (different surface, same sentence).
-        for (i, a) in packets.iter().enumerate() {
-            if a.mention_kind == MentionKind::Pronoun {
+        let by_sentence = packet_indices_by_sentence(packets);
+        for sentence_packets in by_sentence {
+            if sentence_packets.len() < 2 {
                 continue;
             }
-            for b in packets.iter().skip(i + 1) {
-                if b.mention_kind == MentionKind::Pronoun {
+            for (a_pos, &a_idx) in sentence_packets.iter().enumerate() {
+                let a = &packets[a_idx];
+                if a.mention_kind == MentionKind::Pronoun {
                     continue;
                 }
-                if a.sentence_index == b.sentence_index
-                    && a.normalized != b.normalized
-                    && a.entity_ref.is_some()
-                    && a.entity_ref == b.entity_ref
-                {
-                    edges.push(MentionEdge {
-                        left: a.mention_id,
-                        right: b.mention_id,
-                        kind: MentionEdgeKind::KnownAliasMatch,
-                        weight: 0.85,
-                        evidence: SmallVec::from_buf([a.range, b.range]),
-                    });
+                for &b_idx in sentence_packets.iter().skip(a_pos + 1) {
+                    let b = &packets[b_idx];
+                    if b.mention_kind == MentionKind::Pronoun {
+                        continue;
+                    }
+                    if a.normalized != b.normalized
+                        && a.entity_ref.is_some()
+                        && a.entity_ref == b.entity_ref
+                    {
+                        edges.push(MentionEdge {
+                            left: a.mention_id,
+                            right: b.mention_id,
+                            kind: MentionEdgeKind::KnownAliasMatch,
+                            weight: 0.85,
+                            evidence: SmallVec::from_buf([a.range, b.range]),
+                        });
+                    }
                 }
             }
         }
@@ -165,6 +180,21 @@ impl MentionGraphBuilder {
 
         MentionGraph { edges }
     }
+}
+
+fn packet_indices_by_sentence(packets: &[MentionPacket]) -> Vec<Vec<usize>> {
+    let bucket_count = packets
+        .iter()
+        .map(|packet| packet.sentence_index as usize + 1)
+        .max()
+        .unwrap_or_default();
+    let mut by_sentence = vec![Vec::new(); bucket_count];
+    for (idx, packet) in packets.iter().enumerate() {
+        if let Some(bucket) = by_sentence.get_mut(packet.sentence_index as usize) {
+            bucket.push(idx);
+        }
+    }
+    by_sentence
 }
 
 #[cfg(test)]

@@ -5,14 +5,14 @@ use std::time::Instant;
 
 use phoenix_alex::Lexicon;
 use phoenix_chunker::{
-    build_lens_chunks, build_structural_substrate, ChunkerConfig, GraphBuildContext, GraphDelta,
-    LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind, LensChunkHintSource,
-    LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge, LensMentionEdgeKind,
-    LensMentionGraph, LensMentionKind, LensVoteReason,
+    build_lens_chunks, build_structural_substrate, BaseChunk, ChunkerConfig, GraphBuildContext,
+    GraphDelta, LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind,
+    LensChunkHintSource, LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge,
+    LensMentionEdgeKind, LensMentionGraph, LensMentionKind, LensVoteReason,
 };
 use phoenix_dynamic_ner::{
     ChunkHint, ChunkHintKind, ChunkHintSource, MentionEdgeKind, MentionKind, MentionPacket,
-    PhoenixNerEngineBuilder, SurfaceNerInput, VoteReason,
+    PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceNerMetrics, VoteReason,
 };
 use phoenix_types::{
     EntityId, EntityKind, GenderHint, LexiconEntry, PosTag, ScopeKey, SentenceSpan, TextRange,
@@ -25,6 +25,7 @@ struct Config {
     input_path: PathBuf,
     json: bool,
     fixture: FixtureSelection,
+    profile_lenses: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +50,12 @@ struct BenchCaseReport {
     text_bytes: usize,
     runtime_ms: u128,
     dynamic_ner_ms: u128,
+    ner_profile_ms: BTreeMap<String, u128>,
     rich_graph_ms: u128,
+    rich_prepare_ms: u128,
+    lens_build_ms: u128,
+    phase6_consumer_ms: u128,
+    lens_profile_ms: BTreeMap<String, u128>,
     base_chunk_count: usize,
     lens_chunk_count_by_lens: BTreeMap<String, usize>,
     avg_lens_size_bytes: f64,
@@ -135,7 +141,7 @@ fn run(config: Config) -> Result<DynamicChunkingBenchReport, String> {
 
     let mut reports = Vec::new();
     for case in cases {
-        reports.push(run_case(case)?);
+        reports.push(run_case(case, config.profile_lenses)?);
     }
     let graph_layer_audit = audit_graph_layers(&reports);
 
@@ -159,7 +165,7 @@ fn run(config: Config) -> Result<DynamicChunkingBenchReport, String> {
     })
 }
 
-fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
+fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, String> {
     if case.text.trim().is_empty() {
         return Err(format!("benchmark case {} has empty text", case.name));
     }
@@ -172,8 +178,8 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
     let engine = PhoenixNerEngineBuilder::new().build();
 
     let ner_started = Instant::now();
-    let ner_output = engine
-        .extract_mentions(&SurfaceNerInput {
+    let (ner_output, ner_metrics) = engine
+        .extract_mentions_with_metrics(&SurfaceNerInput {
             document_id: &case.name,
             text: &case.text,
             tokens: &tokens,
@@ -183,8 +189,10 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         })
         .map_err(|error| format!("dynamic NER failed for {}: {error}", case.name))?;
     let dynamic_ner_ms = ner_started.elapsed().as_millis();
+    let ner_profile_ms = ner_profile_map(&ner_metrics);
 
     let rich_started = Instant::now();
+    let prepare_started = Instant::now();
     let active_mentions = ner_output
         .mentions
         .iter()
@@ -206,6 +214,8 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         .map(to_lens_hint)
         .collect::<Vec<_>>();
     let lens_graph = to_lens_graph(&ner_output.mention_graph, &active_mention_ids);
+    let rich_prepare_ms = prepare_started.elapsed().as_millis();
+    let lens_started = Instant::now();
     let lens_chunks = build_lens_chunks(
         &LensChunkInput {
             text: &case.text,
@@ -216,8 +226,23 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         },
         &LensChunkerConfig::default(),
     );
+    let lens_build_ms = lens_started.elapsed().as_millis();
+    let phase6_started = Instant::now();
     let graph_deltas = run_phase6_consumers(&case.name, &lens_chunks);
+    let phase6_consumer_ms = phase6_started.elapsed().as_millis();
     let rich_graph_ms = rich_started.elapsed().as_millis();
+    let runtime_ms = total_started.elapsed().as_millis();
+    let lens_profile_ms = if profile_lenses {
+        profile_lens_build_ms(
+            &case.text,
+            &substrate.base_chunks,
+            &lens_mentions,
+            &lens_hints,
+            &lens_graph,
+        )
+    } else {
+        BTreeMap::new()
+    };
 
     let grounded_entities = active_mentions
         .iter()
@@ -234,9 +259,14 @@ fn run_case(case: BenchCase) -> Result<BenchCaseReport, String> {
         name: case.name,
         input_path: case.input_path.map(|path| path.display().to_string()),
         text_bytes: case.text.len(),
-        runtime_ms: total_started.elapsed().as_millis(),
+        runtime_ms,
         dynamic_ner_ms,
+        ner_profile_ms,
         rich_graph_ms,
+        rich_prepare_ms,
+        lens_build_ms,
+        phase6_consumer_ms,
+        lens_profile_ms,
         base_chunk_count: substrate.base_chunks.len(),
         lens_chunk_count_by_lens: lens_counts(&lens_chunks),
         avg_lens_size_bytes: avg_lens_size(&lens_chunks),
@@ -275,15 +305,22 @@ fn print_text_report(report: &DynamicChunkingBenchReport) {
     for case in &report.cases {
         println!("dynamic chunking bench: {}", case.name);
         println!(
-            "runtime={}ms dynamicNer={}ms richGraph={}ms baseChunks={} mentions={} hints={}",
+            "runtime={}ms dynamicNer={}ms richGraph={}ms prepare={}ms lensBuild={}ms phase6={}ms baseChunks={} mentions={} hints={}",
             case.runtime_ms,
             case.dynamic_ner_ms,
             case.rich_graph_ms,
+            case.rich_prepare_ms,
+            case.lens_build_ms,
+            case.phase6_consumer_ms,
             case.base_chunk_count,
             case.mention_count,
             case.chunk_hint_count
         );
+        println!("nerProfileMs={:?}", case.ner_profile_ms);
         println!("lensCounts={:?}", case.lens_chunk_count_by_lens);
+        if !case.lens_profile_ms.is_empty() {
+            println!("lensProfileMs={:?}", case.lens_profile_ms);
+        }
         println!(
             "avgLensSize={:.1} grounding={:.3} orphans={} coMentionPairs={} relCandidates={} temporalEdges={} causalEdges={} eventIdentities={}",
             case.avg_lens_size_bytes,
@@ -479,6 +516,82 @@ fn run_phase6_consumers(case_name: &str, lens_chunks: &[LensChunk]) -> Vec<Graph
         phoenix_graph_post::WorldProjectionLensChunkConsumer.consume(lens_chunks, context.clone()),
         phoenix_graph_post::EvidenceProjectionLensChunkConsumer.consume(lens_chunks, context),
     ]
+}
+
+fn profile_lens_build_ms(
+    text: &str,
+    base_chunks: &[BaseChunk],
+    mentions: &[LensMention],
+    ner_hints: &[LensChunkHint],
+    mention_graph: &LensMentionGraph,
+) -> BTreeMap<String, u128> {
+    let mut out = BTreeMap::new();
+    for lens in [
+        LensKind::Entity,
+        LensKind::Relationship,
+        LensKind::Event,
+        LensKind::Temporal,
+        LensKind::Causal,
+        LensKind::Attribute,
+        LensKind::Worldbuilding,
+        LensKind::Evidence,
+    ] {
+        let mut config = LensChunkerConfig::default();
+        config.enabled_lenses = vec![lens];
+        let started = Instant::now();
+        let _chunks = build_lens_chunks(
+            &LensChunkInput {
+                text,
+                base_chunks,
+                mentions,
+                ner_hints,
+                mention_graph,
+            },
+            &config,
+        );
+        out.insert(
+            bench_lens_name(lens).to_owned(),
+            started.elapsed().as_millis(),
+        );
+    }
+    out
+}
+
+fn ner_profile_map(metrics: &SurfaceNerMetrics) -> BTreeMap<String, u128> {
+    [
+        ("total", metrics.total_ms),
+        ("knownSurface", metrics.known_surface_ms),
+        ("nativeDiscovery", metrics.native_discovery_ms),
+        ("routePlanning", metrics.route_planning_ms),
+        ("workspaceIngest", metrics.workspace_ingest_ms),
+        ("modelAndAdjudication", metrics.model_and_adjudication_ms),
+        ("finalPackets", metrics.final_packets_ms),
+        ("surfaceMemory", metrics.surface_memory_ms),
+        ("mentionGraph", metrics.mention_graph_ms),
+        ("chunkHints", metrics.chunk_hints_ms),
+        ("knownCount", metrics.known_count as u128),
+        ("nativeCount", metrics.native_count as u128),
+        ("routeCount", metrics.route_count as u128),
+        ("packetCount", metrics.packet_count as u128),
+        ("graphEdgeCount", metrics.graph_edge_count as u128),
+        ("chunkHintCount", metrics.chunk_hint_count as u128),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), value))
+    .collect()
+}
+
+fn bench_lens_name(lens: LensKind) -> &'static str {
+    match lens {
+        LensKind::Entity => "entity",
+        LensKind::Relationship => "relationship",
+        LensKind::Event => "event",
+        LensKind::Temporal => "temporal",
+        LensKind::Causal => "causal",
+        LensKind::Attribute => "attribute",
+        LensKind::Worldbuilding => "worldbuilding",
+        LensKind::Evidence => "evidence",
+    }
 }
 
 fn load_case(name: &str, path: Option<PathBuf>) -> Result<BenchCase, String> {
@@ -886,6 +999,7 @@ fn parse_args(args: Vec<String>) -> Config {
         input_path: root.join("docs").join("shortrun.md"),
         json: false,
         fixture: FixtureSelection::All,
+        profile_lenses: false,
     };
     if let Some(path) = string_arg(&args, "--input") {
         config.input_path = PathBuf::from(path);
@@ -894,6 +1008,7 @@ fn parse_args(args: Vec<String>) -> Config {
     if args.iter().any(|arg| arg == "--shortrun-only") {
         config.fixture = FixtureSelection::ShortrunOnly;
     }
+    config.profile_lenses = args.iter().any(|arg| arg == "--profile-lenses");
     config
 }
 

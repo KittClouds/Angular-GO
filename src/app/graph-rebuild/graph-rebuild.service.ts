@@ -13,6 +13,7 @@ import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames';
 import type {
     GraphIndexRunReceipt,
+    GraphRebuildEmbeddingProfile,
     GraphRebuildChunk,
     GraphRebuildRelationshipHint,
     GraphRebuildScopeKind,
@@ -29,6 +30,7 @@ export interface GraphRebuildBuildRequest {
     noteIds: string[];
     entities: RegisteredEntity[];
     relationshipHints?: GraphRebuildRelationshipHint[];
+    embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
     candidateCount?: number;
 }
 
@@ -58,6 +60,7 @@ export class GraphRebuildService {
                 chunks,
                 noteTexts,
                 relationshipHints: request.relationshipHints,
+                embeddingProfile: request.embeddingProfile,
                 candidateCount: request.candidateCount,
             });
             this.snapshotState.set(snapshot);

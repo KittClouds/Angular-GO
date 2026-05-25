@@ -1335,7 +1335,6 @@ export class GraphAtlasPreviewComponent {
                     ...entity.metadata,
                     sourceType: 'entity',
                     sourceSystem,
-                    sourceColorHsl: entityColorStore.getRawSourceHsl(sourceSystem),
                     sourceEntityId: entity.id,
                     galaxyId: `embed:entity:${entity.id}`,
                     galaxyRole: 'primary',
@@ -1354,7 +1353,6 @@ export class GraphAtlasPreviewComponent {
                 ...entity.metadata,
                 sourceType: entity.metadata?.sourceType || 'registry_entity',
                 sourceSystem,
-                sourceColorHsl: entityColorStore.getRawSourceHsl(sourceSystem),
             },
         };
     }
@@ -1462,6 +1460,7 @@ function graphInventoryFromDelta(delta: PhoenixGraphDeltaBinaryResult): GraphInv
             metadata: {
                 sourceType: 'graph',
                 graphKind: 'leaf',
+                graphColorKind: 'chunk',
                 graphNodeId: id,
                 chunkId: chunk.chunkId,
                 documentId: chunk.documentId,
@@ -1486,6 +1485,7 @@ function graphInventoryFromDelta(delta: PhoenixGraphDeltaBinaryResult): GraphInv
             metadata: {
                 sourceType: 'graph',
                 graphKind: kind,
+                graphColorKind: kind,
                 graphNodeId: id,
                 sourceEntityId: node.entityId,
                 documentId: node.documentId,
@@ -1553,17 +1553,17 @@ function normalizeGraphKind(kind: string): string {
 
 function graphKindHsl(kind: string): string {
     switch (normalizeGraphKind(kind)) {
-        case 'document': return '210 82% 58%';
+        case 'document': return entityColorStore.getRawGraphNodeHsl('document');
         case 'chunk':
-        case 'leaf': return '176 70% 46%';
+        case 'leaf': return entityColorStore.getRawGraphNodeHsl('chunk');
         case 'entity': return '280 70% 60%';
-        case 'mention': return '265 80% 66%';
+        case 'mention': return entityColorStore.getRawGraphNodeHsl('anchor');
         case 'alias': return '315 72% 58%';
-        case 'event': return '25 90% 55%';
-        case 'state': return '145 68% 48%';
-        case 'memory': return '188 76% 52%';
+        case 'event': return entityColorStore.getRawGraphNodeHsl('eventNode');
+        case 'state': return entityColorStore.getRawGraphNodeHsl('memoryState');
+        case 'memory': return entityColorStore.getRawGraphNodeHsl('memoryState');
         case 'timeanchor':
-        case 'time-anchor': return '38 90% 56%';
+        case 'time-anchor': return entityColorStore.getRawGraphNodeHsl('temporal');
         case 'candidate': return '260 28% 58%';
         default: return '220 10% 54%';
     }

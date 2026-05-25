@@ -22,6 +22,7 @@ const LORENTZ_TUBE_SEGMENTS = 36;
 const LORENTZ_TUBE_RADIAL_SEGMENTS = 5;
 const PRODUCT_KLEIN_RADIUS = 2.18;
 const PRODUCT_KLEIN_RING_SEGMENTS = 96;
+const PRODUCT_HOPF_TUBE_SCALE = 0.75;
 type GuideSurface = 'default' | 'product';
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
@@ -344,19 +345,22 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             const core = Math.max(0.038, data.radii[i] * 0.021) * pulse;
             const sphere = this.nodeShape === 'sphere';
             const atom = this.nodeShape === 'atom';
+            const productAtom = atom && data.layoutMode === 'productManifold';
             const halo = atom ? 0 : core * this.settings.glow * (sphere
                     ? (hovered ? 1.94 : active ? 2.12 : neighbor ? 1.28 : dimmed ? 0.52 : 0.94)
                     : (hovered ? 4.9 : active ? 5.05 : neighbor ? 3.1 : dimmed ? 1.15 : 2.45));
             node.position.set(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
             node.scale.setScalar(core * (atom
-                ? (hovered || active ? 2.38 : neighbor ? 1.84 : dimmed ? 1.15 : 1.6)
+                ? (hovered || active ? 2.38 : neighbor ? 1.84 : dimmed ? 1.15 : 1.6) * (productAtom ? 0.93 : 1)
                 : sphere
                     ? (hovered || active ? 0.89 : neighbor ? 0.72 : dimmed ? 0.52 : 0.6)
                     : (hovered || active ? 2.65 : neighbor ? 2.02 : dimmed ? 1.34 : 1.72)));
             this.nodeColor(data, i, active, hovered, neighbor, dimmed);
             const material = node.material as THREE.SpriteMaterial | THREE.MeshBasicMaterial;
             material.color.copy(this.color);
-            material.opacity = dimmed ? 0.18 : neighbor ? 0.82 : hovered || active ? 1 : 0.94;
+            material.opacity = productAtom
+                ? (dimmed ? 0.16 : neighbor ? 0.86 : hovered || active ? 1 : 0.98)
+                : (dimmed ? 0.18 : neighbor ? 0.82 : hovered || active ? 1 : 0.94);
             glow.position.copy(node.position);
             glow.scale.setScalar(halo * (0.82 + densityFactor * 0.18));
             this.glowColor(data, i, active, hovered, dimmed);
@@ -1217,7 +1221,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             transparent: true,
             opacity: this.hopfLayerOpacity(layer, ribbon.guideKind, this.hopfGuideWeightForKind(ribbon.guideKind, surface), surface),
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            depthTest: true,
+            blending: surface === 'product' ? THREE.NormalBlending : THREE.AdditiveBlending,
             toneMapped: false,
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -1292,7 +1297,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             transparent: true,
             opacity: this.hopfGuideOpacity(this.hopfGuideWeightForKind(guideKind, surface), guideKind, surface),
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            depthTest: true,
+            blending: surface === 'product' ? THREE.NormalBlending : THREE.AdditiveBlending,
             toneMapped: false,
         });
         const line = new THREE.LineSegments(geometry, material);
@@ -1356,8 +1362,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const intensity = THREE.MathUtils.clamp(this.settings.hopfSpaceIntensity, 0, 1.4);
         if (surface === 'product') {
             const data = kind === 'dataFiber';
-            const base = data ? 0.0425 + this.settings.glow * 0.0255 : 0.012 + this.settings.glow * 0.006;
-            return THREE.MathUtils.clamp(base * weight * intensity, 0, data ? 0.153 : 0.038);
+            const base = data ? 0.036 + this.settings.glow * 0.0215 : 0.0105 + this.settings.glow * 0.005;
+            return THREE.MathUtils.clamp(base * weight * intensity, 0, data ? 0.13 : 0.032);
         }
         return THREE.MathUtils.clamp((0.035 + this.settings.glow * 0.024) * weight * intensity, 0, 0.16);
     }
@@ -1374,7 +1380,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const globalGlow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
         if (surface === 'product') {
             if (kind === 'dataFiber') {
-                return THREE.MathUtils.clamp((glow ? 0.03825 : 0.132) * intensity * (0.78 + globalGlow * 0.24), 0, glow ? 0.07 : 0.221);
+                return THREE.MathUtils.clamp((glow ? 0.0325 : 0.112) * intensity * (0.78 + globalGlow * 0.24), 0, glow ? 0.052 : 0.168);
             }
             return 0;
         }
@@ -1389,7 +1395,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
 
     private hopfTubeRadius(kind: GalaxyHopfRibbonView['guideKind'], layer: 'tubeCore' | 'tubeGlow', surface: GuideSurface): number {
         if (surface === 'product') {
-            if (kind === 'dataFiber') return layer === 'tubeGlow' ? 0.0216 : 0.00675;
+            if (kind === 'dataFiber') return (layer === 'tubeGlow' ? 0.0216 : 0.00675) * PRODUCT_HOPF_TUBE_SCALE;
             return 0.002;
         }
         if (kind === 'dataFiber') return layer === 'tubeGlow' ? 0.018 : 0.0055;

@@ -1,8 +1,13 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnDestroy, Output, signal } from '@angular/core';
 import type { EntityKind } from '../../../../../lib/Scanner/types';
-import { DEFAULT_ENTITY_COLORS, DEFAULT_ENTITY_SOURCE_COLORS, DEFAULT_ENTITY_TEXT_COLORS, entityColorStore } from '../../../../../lib/store/entityColorStore';
-import { ENTITY_SOURCE_LABELS, type EntitySourceSystem } from '../../../../../lib/registry';
+import {
+    DEFAULT_ENTITY_COLORS,
+    DEFAULT_ENTITY_TEXT_COLORS,
+    DEFAULT_GRAPH_NODE_COLORS,
+    entityColorStore,
+    type GraphNodeColorKind,
+} from '../../../../../lib/store/entityColorStore';
 import {
     DEFAULT_HIGHLIGHT_SETTINGS,
     HIGHLIGHT_MODE_DESCRIPTIONS,
@@ -16,6 +21,11 @@ interface EntityCategory {
     kinds: EntityKind[];
 }
 
+interface GraphNodeColorCategory {
+    name: string;
+    kinds: GraphNodeColorKind[];
+}
+
 const ENTITY_CATEGORIES: EntityCategory[] = [
     { name: 'Characters', kinds: ['CHARACTER', 'NPC', 'CREATURE'] },
     { name: 'Locations', kinds: ['LOCATION'] },
@@ -25,9 +35,36 @@ const ENTITY_CATEGORIES: EntityCategory[] = [
     { name: 'Objects', kinds: ['ITEM', 'CONCEPT'] },
 ];
 
-const MODE_ORDER: HighlightMode[] = ['vivid', 'gradient', 'subtle', 'clean', 'focus', 'off'];
+const GRAPH_NODE_COLOR_CATEGORIES: GraphNodeColorCategory[] = [
+    { name: 'Relationship facts', kinds: ['cooccurrence', 'observation', 'communication', 'authority', 'approval', 'relationship'] },
+    { name: 'Story signals', kinds: ['scenePresence', 'family', 'intimacy', 'transfer', 'causal', 'temporal'] },
+    { name: 'Graph structure', kinds: ['document', 'chunk', 'anchor', 'graphFact', 'eventNode', 'temporalFact', 'causalFact', 'memoryState'] },
+];
 
-const ENTITY_SOURCE_OPTIONS: EntitySourceSystem[] = ['user', 'dynamic_ner', 'graph_pipeline', 'ingestion', 'auto', 'import', 'legacy'];
+const GRAPH_NODE_COLOR_LABELS: Record<GraphNodeColorKind, string> = {
+    cooccurrence: 'Co-occurrence',
+    observation: 'Observation',
+    communication: 'Communication',
+    authority: 'Authority',
+    approval: 'Approval',
+    family: 'Family',
+    intimacy: 'Intimacy',
+    transfer: 'Transfer',
+    scenePresence: 'Scene presence',
+    causal: 'Causal',
+    temporal: 'Temporal',
+    relationship: 'Relationship',
+    document: 'Document',
+    chunk: 'Chunk',
+    anchor: 'Anchor',
+    graphFact: 'Graph fact',
+    eventNode: 'Event node',
+    temporalFact: 'Temporal fact',
+    causalFact: 'Causal fact',
+    memoryState: 'Memory state',
+};
+
+const MODE_ORDER: HighlightMode[] = ['vivid', 'gradient', 'subtle', 'clean', 'focus', 'off'];
 
 function hslToHex(hslString: string): string {
     try {
@@ -106,22 +143,25 @@ function mixHex(hexA: string, hexB: string, ratio: number): string {
 export class GraphStyleDrawerComponent implements OnDestroy {
     @Output() close = new EventEmitter<void>();
 
-    private readonly unsubscribe = highlightingStore.subscribe(() => {
+    private readonly colorRevision = signal(0);
+    private readonly unsubscribeHighlighting = highlightingStore.subscribe(() => {
         const settings = highlightingStore.getSnapshot();
         this.mode.set(settings.mode);
         this.focusKinds.set(settings.focusEntityKinds);
     });
+    private readonly unsubscribeColors = entityColorStore.subscribe(() => {
+        this.colorRevision.update((revision) => revision + 1);
+    });
 
     readonly categories = ENTITY_CATEGORIES;
+    readonly graphNodeColorCategories = GRAPH_NODE_COLOR_CATEGORIES;
     readonly entityColorStore = entityColorStore;
-    readonly sourceOptions = ENTITY_SOURCE_OPTIONS;
-    readonly sourceLabels = ENTITY_SOURCE_LABELS;
     readonly modeLabels = HIGHLIGHT_MODE_LABELS;
     readonly modeDescriptions = HIGHLIGHT_MODE_DESCRIPTIONS;
     readonly modeOrder = MODE_ORDER;
 
     readonly selectedKind = signal<EntityKind>('CHARACTER');
-    readonly selectedSource = signal<EntitySourceSystem>('dynamic_ner');
+    readonly selectedGraphNodeKind = signal<GraphNodeColorKind>('cooccurrence');
     readonly mode = signal<HighlightMode>(highlightingStore.getSnapshot().mode);
     readonly focusKinds = signal<EntityKind[]>(highlightingStore.getSnapshot().focusEntityKinds);
 
@@ -134,15 +174,16 @@ export class GraphStyleDrawerComponent implements OnDestroy {
     }
 
     ngOnDestroy(): void {
-        this.unsubscribe();
+        this.unsubscribeHighlighting();
+        this.unsubscribeColors();
     }
 
     selectKind(kind: EntityKind): void {
         this.selectedKind.set(kind);
     }
 
-    selectSource(source: EntitySourceSystem): void {
-        this.selectedSource.set(source);
+    selectGraphNodeKind(kind: GraphNodeColorKind): void {
+        this.selectedGraphNodeKind.set(kind);
     }
 
     selectMode(mode: HighlightMode): void {
@@ -158,15 +199,18 @@ export class GraphStyleDrawerComponent implements OnDestroy {
     }
 
     getHexColor(kind: EntityKind): string {
+        this.colorRevision();
         return hslToHex(entityColorStore.getRawHsl(kind) || DEFAULT_ENTITY_COLORS[kind]);
     }
 
     getHexTextColor(kind: EntityKind): string {
+        this.colorRevision();
         return hslToHex(entityColorStore.getRawTextHsl(kind) || DEFAULT_ENTITY_TEXT_COLORS[kind]);
     }
 
-    getHexSourceColor(source: EntitySourceSystem): string {
-        return hslToHex(entityColorStore.getRawSourceHsl(source) || DEFAULT_ENTITY_SOURCE_COLORS[source]);
+    getHexGraphNodeColor(kind: GraphNodeColorKind): string {
+        this.colorRevision();
+        return hslToHex(entityColorStore.getRawGraphNodeHsl(kind) || DEFAULT_GRAPH_NODE_COLORS[kind]);
     }
 
     updateColor(kind: EntityKind, hexColor: string): void {
@@ -177,8 +221,8 @@ export class GraphStyleDrawerComponent implements OnDestroy {
         entityColorStore.setTextColor(kind, hexToHsl(hexColor));
     }
 
-    updateSourceColor(source: EntitySourceSystem, hexColor: string): void {
-        entityColorStore.setSourceColor(source, hexToHsl(hexColor));
+    updateGraphNodeColor(kind: GraphNodeColorKind, hexColor: string): void {
+        entityColorStore.setGraphNodeColor(kind, hexToHsl(hexColor));
     }
 
     resetSelected(): void {
@@ -187,12 +231,9 @@ export class GraphStyleDrawerComponent implements OnDestroy {
         entityColorStore.setTextColor(kind, DEFAULT_ENTITY_TEXT_COLORS[kind]);
     }
 
-    resetSource(source: EntitySourceSystem): void {
-        entityColorStore.resetSourceColor(source);
-    }
-
-    resetSelectedSource(): void {
-        this.resetSource(this.selectedSource());
+    resetSelectedGraphNode(): void {
+        const kind = this.selectedGraphNodeKind();
+        entityColorStore.setGraphNodeColor(kind, DEFAULT_GRAPH_NODE_COLORS[kind]);
     }
 
     resetAll(): void {
@@ -216,6 +257,10 @@ export class GraphStyleDrawerComponent implements OnDestroy {
 
     formatKindName(kind: EntityKind): string {
         return kind.charAt(0) + kind.slice(1).toLowerCase().replace(/_/g, ' ');
+    }
+
+    formatGraphNodeKind(kind: GraphNodeColorKind): string {
+        return GRAPH_NODE_COLOR_LABELS[kind];
     }
 
     currentCategoryName(): string {

@@ -26,6 +26,25 @@ struct EntityInChunk {
     anchor_ids: SmallVec<[CompactString; 4]>,
 }
 
+const FAMILY_CUES: &[&str] = &[" father", " daughter", " grandfather", " family"];
+const COMMAND_CUES: &[&str] = &["command", "admiral", "phantom", "military"];
+const ACCEPTANCE_CUES: &[&str] = &["approved", "approval", "accepted", "agreed", "proceed"];
+const RELEASE_CUES: &[&str] = &["packet", "release", "terms", "warning", "coercion"];
+const CONTACT_CUES: &[&str] = &["kiss", "took his hand", "stood beside", "close enough"];
+const OBSERVATION_CUES: &[&str] = &["looked at", "watched", "saw ", "noticed"];
+const TRANSFER_CUES: &[&str] = &["gave", "handed", "took it from", "received"];
+const PRESENCE_CUES: &[&str] = &["entered", "arrived", "came in", "stood near"];
+const RELATION_CUE_GROUPS: &[&[&str]] = &[
+    FAMILY_CUES,
+    COMMAND_CUES,
+    ACCEPTANCE_CUES,
+    RELEASE_CUES,
+    CONTACT_CUES,
+    OBSERVATION_CUES,
+    TRANSFER_CUES,
+    PRESENCE_CUES,
+];
+
 pub fn derive_graph_facts(
     note_id: &str,
     text: &str,
@@ -42,6 +61,8 @@ pub fn derive_graph_facts(
     let mut facts = DerivedGraphFacts::default();
     let mut typed_edges = HashMap::<CompactString, GraphEdge>::new();
     let mut memory_seen = HashSet::<CompactString>::new();
+    let mut causal_chunks = HashSet::<CompactString>::new();
+    let mut lower = String::new();
 
     for chunk in chunks {
         let Some(indexes) = by_chunk.get(&chunk.id) else {
@@ -54,7 +75,15 @@ pub fn derive_graph_facts(
         let chunk_text = text
             .get(chunk.start as usize..chunk.end as usize)
             .unwrap_or_default();
-        let lower = chunk_text.to_ascii_lowercase();
+        lower.clear();
+        lower.push_str(chunk_text);
+        lower.make_ascii_lowercase();
+        if has_any(
+            &lower,
+            &["because", "therefore", "which meant", "that meant", "so "],
+        ) {
+            causal_chunks.insert(chunk.id.clone());
+        }
 
         derive_typed_relationships(
             note_id,
@@ -84,12 +113,12 @@ pub fn derive_graph_facts(
     });
     facts.episodes = build_episodes(note_id, &facts.events);
     facts.temporal_edges = build_temporal_edges(&facts.events);
-    facts.causal_edges = build_causal_edges(chunks, text, &facts.events);
+    facts.causal_edges = build_causal_edges(&facts.events, &causal_chunks);
     facts
 }
 
 fn unique_entities_for_chunk(anchors: &[GraphAnchor], indexes: &[usize]) -> Vec<EntityInChunk> {
-    let mut positions = HashMap::<EntityId, usize>::new();
+    let mut positions = HashMap::<&EntityId, usize>::with_capacity(indexes.len());
     let mut out = Vec::<EntityInChunk>::new();
     for index in indexes {
         let anchor = &anchors[*index];
@@ -99,7 +128,7 @@ fn unique_entities_for_chunk(anchors: &[GraphAnchor], indexes: &[usize]) -> Vec<
             out[existing].first_end = out[existing].first_end.min(anchor.source_end);
             continue;
         }
-        positions.insert(anchor.entity_id.clone(), out.len());
+        positions.insert(&anchor.entity_id, out.len());
         out.push(EntityInChunk {
             id: anchor.entity_id.clone(),
             first_start: anchor.source_start,
@@ -122,6 +151,9 @@ fn derive_typed_relationships(
     if entities.len() < 2 {
         return;
     }
+    if !has_relation_cue(lower) {
+        return;
+    }
     for left_index in 0..entities.len() {
         for right_index in (left_index + 1)..entities.len() {
             let left = &entities[left_index];
@@ -130,6 +162,7 @@ fn derive_typed_relationships(
             let Some(relation_type) = infer_relation_type(evidence_window) else {
                 continue;
             };
+            let confidence = relation_confidence(&relation_type);
             let evidence = pair_evidence(left, right);
             let id = format_compact!(
                 "typed:{}:{}:{}:{}:{}",
@@ -145,10 +178,10 @@ fn derive_typed_relationships(
                 target_entity_id: right.id.clone(),
                 relation_type: relation_type.clone(),
                 evidence_anchor_ids: evidence.clone(),
-                confidence: relation_confidence(&relation_type),
+                confidence,
                 status: "accepted".into(),
                 adjudication_source: "graph-rebuild-typed-cue-policy".into(),
-                adjudication_score: relation_confidence(&relation_type),
+                adjudication_score: confidence,
                 rationale: format_compact!(
                     "accepted: anchored chunk cue promoted {} fact",
                     relation_type
@@ -161,6 +194,12 @@ fn derive_typed_relationships(
             upsert_typed_edge(edges, left, right, &relation_type, &evidence, &chunk.id);
         }
     }
+}
+
+fn has_relation_cue(lower: &str) -> bool {
+    RELATION_CUE_GROUPS
+        .iter()
+        .any(|needles| has_any(lower, needles))
 }
 
 fn pair_window<'a>(
@@ -193,30 +232,21 @@ fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
 }
 
 fn infer_relation_type(lower: &str) -> Option<CompactString> {
-    let relation = if has_any(lower, &[" father", " daughter", " grandfather", " family"]) {
+    let relation = if has_any(lower, FAMILY_CUES) {
         "family_or_house_tie"
-    } else if has_any(lower, &["command", "admiral", "phantom", "military"]) {
+    } else if has_any(lower, COMMAND_CUES) {
         "command_or_service_tie"
-    } else if has_any(
-        lower,
-        &["approved", "approval", "accepted", "agreed", "proceed"],
-    ) {
+    } else if has_any(lower, ACCEPTANCE_CUES) {
         "approves_or_accepts"
-    } else if has_any(
-        lower,
-        &["packet", "release", "terms", "warning", "coercion"],
-    ) {
+    } else if has_any(lower, RELEASE_CUES) {
         "discusses_release_terms"
-    } else if has_any(
-        lower,
-        &["kiss", "took his hand", "stood beside", "close enough"],
-    ) {
+    } else if has_any(lower, CONTACT_CUES) {
         "intimate_or_close_contact"
-    } else if has_any(lower, &["looked at", "watched", "saw ", "noticed"]) {
+    } else if has_any(lower, OBSERVATION_CUES) {
         "observes"
-    } else if has_any(lower, &["gave", "handed", "took it from", "received"]) {
+    } else if has_any(lower, TRANSFER_CUES) {
         "transfers_or_receives"
-    } else if has_any(lower, &["entered", "arrived", "came in", "stood near"]) {
+    } else if has_any(lower, PRESENCE_CUES) {
         "scene_presence"
     } else {
         return None;
@@ -402,26 +432,15 @@ fn build_temporal_edges(events: &[GraphEvent]) -> Vec<GraphTemporalEdge> {
 }
 
 fn build_causal_edges(
-    chunks: &[GraphChunk],
-    text: &str,
     events: &[GraphEvent],
+    causal_chunks: &HashSet<CompactString>,
 ) -> Vec<GraphTemporalEdge> {
     let mut out = Vec::new();
     for pair in events.windows(2) {
         let Some(chunk_id) = &pair[1].chunk_id else {
             continue;
         };
-        let Some(chunk) = chunks.iter().find(|chunk| &chunk.id == chunk_id) else {
-            continue;
-        };
-        let chunk_text = text
-            .get(chunk.start as usize..chunk.end as usize)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if !has_any(
-            &chunk_text,
-            &["because", "therefore", "which meant", "that meant", "so "],
-        ) {
+        if !causal_chunks.contains(chunk_id) {
             continue;
         }
         out.push(GraphTemporalEdge {
