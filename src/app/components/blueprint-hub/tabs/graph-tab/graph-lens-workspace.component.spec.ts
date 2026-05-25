@@ -24,8 +24,21 @@ const dbMock = vi.hoisted(() => ({
     },
 }));
 
+const settingsMock = vi.hoisted(() => ({
+    store: new Map<string, any>(),
+}));
+
 vi.mock('../../../../lib/dexie/db', () => ({
     db: dbMock,
+}));
+
+vi.mock('../../../../lib/dexie/settings.service', () => ({
+    getSetting: vi.fn((key: string, defaultValue: any) => (
+        settingsMock.store.has(key) ? settingsMock.store.get(key) : defaultValue
+    )),
+    setSetting: vi.fn((key: string, value: any) => {
+        settingsMock.store.set(key, value);
+    }),
 }));
 
 import { GraphLensWorkspaceComponent } from './graph-lens-workspace.component';
@@ -42,6 +55,7 @@ describe('GraphLensWorkspaceComponent read-only snapshot loading', () => {
     let snapshotToLoad: any;
 
     beforeEach(() => {
+        settingsMock.store.clear();
         snapshotToLoad = null;
         graphRebuild = createGraphRebuildMock();
         effectScheduler = createImmediateEffectScheduler();
@@ -101,6 +115,36 @@ describe('GraphLensWorkspaceComponent read-only snapshot loading', () => {
             'anchor:a-kai',
         ]));
         expect(inventory.kindCounts).toContainEqual({ kind: 'chunk', count: 1 });
+    });
+
+    it('hydrates the lens from Dexie settings and persists later scope changes', async () => {
+        settingsMock.store.set('graph.lens.state.v1', {
+            mode: 'multiNote',
+            primaryNoteId: 'note-1',
+            selectedNoteIds: ['note-1'],
+        });
+        component?.ngOnDestroy();
+        injector?.destroy();
+        graphRebuild = createGraphRebuildMock();
+        effectScheduler = createImmediateEffectScheduler();
+        latestEffectScheduler = effectScheduler;
+        injector = createEnvironmentInjector([
+            { provide: GraphRebuildService, useValue: graphRebuild },
+            { provide: PhoenixProjectionService, useValue: createProjectionMock() },
+            { provide: ChangeDetectionScheduler, useValue: { notify: vi.fn(), runningTick: false } },
+            { provide: EffectScheduler, useValue: effectScheduler },
+        ], Injector.create({ providers: [] }) as unknown as EnvironmentInjector);
+        component = runInInjectionContext(injector, () => new GraphLensWorkspaceComponent());
+
+        expect(component.lens().mode).toBe('multiNote');
+
+        component.setLensMode('global');
+
+        expect(settingsMock.store.get('graph.lens.state.v1')).toEqual({
+            mode: 'global',
+            primaryNoteId: null,
+            selectedNoteIds: [],
+        });
     });
 
     function createGraphRebuildMock() {

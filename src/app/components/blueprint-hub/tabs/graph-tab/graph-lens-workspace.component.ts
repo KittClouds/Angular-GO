@@ -10,6 +10,7 @@ import type { GraphRebuildSnapshot } from '../../../../graph-rebuild/graph-rebui
 import { entityColorStore } from '../../../../lib/store/entityColorStore';
 import { GraphAtlasPreviewComponent, EMPTY_GRAPH_INVENTORY, type AtlasMode, type AtlasPreviewEdge, type GraphInventory } from './graph-atlas-preview/graph-atlas-preview.component';
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
+import { getSetting, setSetting } from '../../../../lib/dexie/settings.service';
 import {
     DEFAULT_GRAPH_LENS,
     buildGraphLensView,
@@ -19,6 +20,22 @@ import {
     type GraphLensNote,
     type GraphLensState,
 } from './graph-lens';
+
+const GRAPH_LENS_STATE_KEY = 'graph.lens.state.v1';
+const GRAPH_LENS_MODES = new Set<GraphLensMode>(['global', 'narrative', 'note', 'multiNote']);
+
+function readPersistedGraphLensState(): GraphLensState {
+    const stored = getSetting<Partial<GraphLensState>>(GRAPH_LENS_STATE_KEY, {});
+    const mode = GRAPH_LENS_MODES.has(stored.mode as GraphLensMode) ? stored.mode as GraphLensMode : DEFAULT_GRAPH_LENS.mode;
+    const selectedNoteIds = Array.isArray(stored.selectedNoteIds)
+        ? stored.selectedNoteIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [];
+    return {
+        mode,
+        primaryNoteId: typeof stored.primaryNoteId === 'string' && stored.primaryNoteId ? stored.primaryNoteId : null,
+        selectedNoteIds,
+    };
+}
 
 @Component({
     selector: 'app-graph-lens-workspace',
@@ -139,7 +156,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         { id: 'note', label: 'Active Note' },
         { id: 'multiNote', label: 'Compare Notes' },
     ];
-    readonly lens = signal<GraphLensState>({ ...DEFAULT_GRAPH_LENS });
+    readonly lens = signal<GraphLensState>(readPersistedGraphLensState());
     readonly notes = signal<GraphLensNote[]>([]);
     readonly noteQuery = signal('');
     readonly globalEntities = computed(() => this.projection.entities());
@@ -207,6 +224,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
             }
             return { mode, primaryNoteId: null, selectedNoteIds: [] };
         });
+        this.persistLensState();
         if (emitChange) this.lensModeChange.emit(mode);
     }
 
@@ -214,6 +232,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
         const mode = this.lens().mode;
         if (mode === 'note') {
             this.lens.set({ mode, primaryNoteId: noteId, selectedNoteIds: [noteId] });
+            this.persistLensState();
             return;
         }
         if (mode !== 'multiNote') return;
@@ -224,6 +243,7 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
             const primary = selected.includes(current.primaryNoteId ?? '') ? current.primaryNoteId : selected[0] ?? null;
             return { mode, primaryNoteId: primary, selectedNoteIds: selected };
         });
+        this.persistLensState();
     }
 
     setPrimaryNote(noteId: string): void {
@@ -234,6 +254,11 @@ export class GraphLensWorkspaceComponent implements OnDestroy {
                 ? current.selectedNoteIds
                 : [noteId, ...current.selectedNoteIds],
         }));
+        this.persistLensState();
+    }
+
+    private persistLensState(): void {
+        setSetting<GraphLensState>(GRAPH_LENS_STATE_KEY, this.lens());
     }
 
     private async refreshNotes(): Promise<void> {

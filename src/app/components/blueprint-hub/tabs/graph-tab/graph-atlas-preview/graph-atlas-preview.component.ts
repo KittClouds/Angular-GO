@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output, ViewChild, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output, ViewChild, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Plus, Search, SlidersHorizontal, Zap } from 'lucide-angular';
 import { LucideAngularModule } from 'lucide-angular';
@@ -19,7 +19,7 @@ import { manifoldAdapter } from './graph-manifold-atlas';
 import { buildGraphRebuildEmbeddingAtlas } from './graph-rebuild-embedding-atlas';
 import { GraphGalaxyCanvasComponent } from './graph-galaxy-canvas.component';
 import {
-    DEFAULT_GALAXY_SETTINGS,
+    mergeGalaxySettings,
     type GalaxyBackgroundMode,
     type GalaxyEmbeddingTopologyMode,
     type GalaxyEdgeColorMode,
@@ -35,6 +35,7 @@ import {
 import type { GraphLensMode, GraphLensState } from '../graph-lens';
 import { buildGraphAtlasReadContext, graphLensState, type GraphAtlasReadContext } from './graph-atlas-read-context';
 import { projectionSummaryRequestsRefresh } from './graph-atlas-refresh-summary';
+import { getSetting, setSetting } from '../../../../../lib/dexie/settings.service';
 
 export interface AtlasPreviewEdge extends GalaxyInputEdge {}
 
@@ -51,6 +52,21 @@ interface ActiveAtlasGraph {
 }
 
 export type AtlasMode = 'entities' | 'graph' | 'embeddings';
+type AtlasViewMode = '3d' | 'map';
+
+interface PersistedAtlasViewState {
+    atlasMode: AtlasMode;
+    viewMode: AtlasViewMode;
+    manifoldMode: AtlasManifoldMode;
+    settings: Partial<GalaxyRenderSettings>;
+    graphKindFilter: string;
+    controlsCollapsed: boolean;
+}
+
+const GRAPH_ATLAS_VIEW_STATE_KEY = 'graph.atlas.viewState.v1';
+const ATLAS_MODES = new Set<AtlasMode>(['entities', 'graph', 'embeddings']);
+const ATLAS_VIEW_MODES = new Set<AtlasViewMode>(['3d', 'map']);
+const ATLAS_MANIFOLD_MODES = new Set<AtlasManifoldMode>(['hybrid', 'hopf', 'lorentz', 'product']);
 
 export interface GraphInventory {
     nodes: GalaxyRenderableNode[];
@@ -60,6 +76,23 @@ export interface GraphInventory {
 }
 
 export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kindCounts: [], sourceLabel: 'graph rebuild snapshot' };
+
+function readPersistedAtlasViewState(): PersistedAtlasViewState {
+    const stored = getSetting<Partial<PersistedAtlasViewState>>(GRAPH_ATLAS_VIEW_STATE_KEY, {});
+    const atlasMode = ATLAS_MODES.has(stored.atlasMode as AtlasMode) ? stored.atlasMode as AtlasMode : 'graph';
+    const viewMode = ATLAS_VIEW_MODES.has(stored.viewMode as AtlasViewMode) ? stored.viewMode as AtlasViewMode : '3d';
+    const manifoldMode = ATLAS_MANIFOLD_MODES.has(stored.manifoldMode as AtlasManifoldMode)
+        ? stored.manifoldMode as AtlasManifoldMode
+        : 'hybrid';
+    return {
+        atlasMode,
+        viewMode,
+        manifoldMode,
+        settings: stored.settings && typeof stored.settings === 'object' ? stored.settings : {},
+        graphKindFilter: typeof stored.graphKindFilter === 'string' && stored.graphKindFilter ? stored.graphKindFilter : 'all',
+        controlsCollapsed: stored.controlsCollapsed === true,
+    };
+}
 
 @Component({
     selector: 'app-graph-atlas-preview',
@@ -683,7 +716,7 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
         }
     `],
 })
-export class GraphAtlasPreviewComponent {
+export class GraphAtlasPreviewComponent implements OnInit {
     private readonly phoenixUiApi = inject(PhoenixUiApiService);
     private readonly machine = inject(PhoenixMachineControlService);
     private readonly hubService = inject(BlueprintHubService);
@@ -736,12 +769,13 @@ export class GraphAtlasPreviewComponent {
     @Output() atlasSearchChange = new EventEmitter<string>();
     @ViewChild('galaxyCanvas') private galaxyCanvas?: GraphGalaxyCanvasComponent;
 
-    viewMode: '3d' | 'map' = '3d';
-    atlasMode: AtlasMode = 'graph';
-    settings: GalaxyRenderSettings = { ...DEFAULT_GALAXY_SETTINGS };
+    private readonly persistedViewState = readPersistedAtlasViewState();
+    viewMode: AtlasViewMode = this.persistedViewState.viewMode;
+    atlasMode: AtlasMode = this.persistedViewState.atlasMode;
+    settings: GalaxyRenderSettings = mergeGalaxySettings(this.persistedViewState.settings);
     settingsOpen = false;
     lensMenuOpen = false;
-    controlsCollapsed = false;
+    controlsCollapsed = this.persistedViewState.controlsCollapsed;
     isRefreshingProjection = false;
     selectedEntityId: string | null = null;
     hoveredEntity: GalaxyRenderableNode | null = null;
@@ -763,7 +797,7 @@ export class GraphAtlasPreviewComponent {
             : null;
     });
     graphInventory = signal<GraphInventory>(EMPTY_GRAPH_INVENTORY);
-    graphKindFilter = signal('all');
+    graphKindFilter = signal(this.persistedViewState.graphKindFilter || 'all');
     graphKindCounts = computed(() => this.graphInventory().kindCounts.slice(0, 4));
     graphCountReconciliation = computed(() => buildAtlasCountReconciliation({
         committedVertices: this.graphCounters?.nodes ?? this.graphInventory().nodes.length,
@@ -786,6 +820,9 @@ export class GraphAtlasPreviewComponent {
     ];
 
     constructor() {
+        if (this.machine.manifoldMode() !== this.persistedViewState.manifoldMode) {
+            this.machine.setManifoldMode(this.persistedViewState.manifoldMode);
+        }
         effect(() => {
             this.readContextEpoch();
             const manifold = this.manifoldMode();
@@ -808,8 +845,13 @@ export class GraphAtlasPreviewComponent {
         });
     }
 
-    setViewMode(mode: '3d' | 'map'): void {
+    ngOnInit(): void {
+        this.atlasModeChange.emit(this.atlasMode);
+    }
+
+    setViewMode(mode: AtlasViewMode): void {
         this.viewMode = mode;
+        this.persistViewState();
     }
 
     setAtlasMode(mode: AtlasMode): void {
@@ -827,12 +869,14 @@ export class GraphAtlasPreviewComponent {
             }
             void this.refreshEmbeddingAtlas(this.currentReadContext(), this.manifoldMode());
         }
+        this.persistViewState();
     }
 
     setGraphKindFilter(kind: string): void {
         this.graphKindFilter.set(kind);
         this.selectedEntityId = null;
         this.hoveredEntity = null;
+        this.persistViewState();
     }
 
     setLayoutMode(mode: GalaxyLayoutMode): void {
@@ -847,6 +891,7 @@ export class GraphAtlasPreviewComponent {
             this.machine.setManifoldMode('product');
         }
         this.updateSettings({ layoutMode: mode });
+        this.persistViewState();
     }
 
     setManifoldMode(mode: AtlasManifoldMode): void {
@@ -856,6 +901,7 @@ export class GraphAtlasPreviewComponent {
         if (this.settings.layoutMode !== layoutMode) this.updateSettings({ layoutMode });
         this.queryTrace.set(null);
         this.selectedEntityId = null;
+        this.persistViewState();
     }
 
     toggleSettings(): void {
@@ -865,6 +911,7 @@ export class GraphAtlasPreviewComponent {
 
     toggleControlsCollapsed(): void {
         this.controlsCollapsed = !this.controlsCollapsed;
+        this.persistViewState();
     }
 
     toggleLensMenu(): void {
@@ -950,6 +997,7 @@ export class GraphAtlasPreviewComponent {
 
     runAtlasQuery(): void {
         this.atlasMode = 'embeddings';
+        this.persistViewState();
         const trace = manifoldAdapter(this.manifoldMode()).trace(this.queryText(), this.displayEmbeddingAtlas());
         this.queryTrace.set(trace);
         this.selectedEntityId = trace?.queryNode.id ?? null;
@@ -1227,7 +1275,19 @@ export class GraphAtlasPreviewComponent {
     }
 
     private updateSettings(patch: Partial<GalaxyRenderSettings>): void {
-        this.settings = { ...this.settings, ...patch };
+        this.settings = mergeGalaxySettings({ ...this.settings, ...patch });
+        this.persistViewState();
+    }
+
+    private persistViewState(): void {
+        setSetting<PersistedAtlasViewState>(GRAPH_ATLAS_VIEW_STATE_KEY, {
+            atlasMode: this.atlasMode,
+            viewMode: this.viewMode,
+            manifoldMode: this.manifoldMode(),
+            settings: this.settings,
+            graphKindFilter: this.graphKindFilter(),
+            controlsCollapsed: this.controlsCollapsed,
+        });
     }
 
     private setEmbeddingAtlasForMode(mode: AtlasManifoldMode, atlas: EmbeddingAtlasData): void {

@@ -29,7 +29,7 @@ interface GraphNodeColorCategory {
 const ENTITY_CATEGORIES: EntityCategory[] = [
     { name: 'Characters', kinds: ['CHARACTER', 'NPC', 'CREATURE'] },
     { name: 'Locations', kinds: ['LOCATION'] },
-    { name: 'Groups', kinds: ['FACTION', 'ORGANIZATION', 'NETWORK'] },
+    { name: 'Groups', kinds: ['NETWORK'] },
     { name: 'Narrative', kinds: ['NARRATIVE', 'ARC', 'ACT', 'CHAPTER', 'SCENE', 'BEAT'] },
     { name: 'Events', kinds: ['EVENT', 'TIMELINE'] },
     { name: 'Objects', kinds: ['ITEM', 'CONCEPT'] },
