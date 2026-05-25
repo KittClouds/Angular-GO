@@ -101,6 +101,31 @@ describe('Product manifold galaxy visualization data', () => {
         expect(lanes.nodes.some((node) => node.r !== medoids.nodes.find((other) => other.entity.id === node.entity.id)?.r)).toBe(true);
         expect(new Set(backbone.nodes.map((node) => node.entity.id)).size).toBe(3);
     });
+
+    it('turns Product topology regions into layout pressure', () => {
+        const nodes: GalaxyRenderableNode[] = [
+            topologyNode('embed:entity:kai', 'Kai', 'embedding-cluster:0', 'embed:entity:kai', 0.1, 0.9),
+            topologyNode('embed:entity:rowan', 'Rowan', 'embedding-cluster:0', 'embed:entity:kai', 0.2, 0.4),
+            topologyNode('embed:entity:rook', 'Rook', 'embedding-cluster:1', 'embed:entity:rook', 0.84, 0.2),
+        ];
+        const edges: GalaxyInputEdge[] = [
+            { id: 'embedding-backbone:kai:rowan', sourceId: 'embed:entity:kai', targetId: 'embed:entity:rowan', type: 'embedding-backbone', confidence: 0.84 },
+            { id: 'embedding-bridge:rowan:rook', sourceId: 'embed:entity:rowan', targetId: 'embed:entity:rook', type: 'embedding-bridge', confidence: 0.72 },
+        ];
+
+        const baseline = buildGalaxyScene(nodes.map(stripTopology), edges, mergeGalaxySettings({ layoutMode: 'productManifold' }));
+        const scene = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ layoutMode: 'productManifold' }));
+        const core = scene.nodes.find((node) => node.entity.id === 'embed:entity:kai')!;
+        const outlier = scene.nodes.find((node) => node.entity.id === 'embed:entity:rook')!;
+        const baselineOutlier = baseline.nodes.find((node) => node.entity.id === 'embed:entity:rook')!;
+        const backboneEdge = scene.links.find((edge) => edge.type === 'embedding-backbone')!;
+        const bridgeEdge = scene.links.find((edge) => edge.type === 'embedding-bridge')!;
+
+        expect(Math.hypot(outlier.x, outlier.y, outlier.z)).toBeGreaterThan(Math.hypot(baselineOutlier.x, baselineOutlier.y, baselineOutlier.z));
+        expect(outlier.radius).toBeLessThan(core.radius);
+        expect(backboneEdge.curve).toBeLessThan(bridgeEdge.curve);
+        expect(backboneEdge.alpha).toBeGreaterThan(bridgeEdge.alpha * 0.7);
+    });
 });
 
 function productNode(
@@ -209,4 +234,13 @@ function topologyNode(
             },
         },
     };
+}
+
+function stripTopology(node: GalaxyRenderableNode): GalaxyRenderableNode {
+    const metadata = { ...(node.metadata || {}) };
+    delete metadata['embeddingMedoidTargetId'];
+    delete metadata['productRegionRole'];
+    delete metadata['productLaneKind'];
+    delete metadata['product'];
+    return { ...node, metadata };
 }

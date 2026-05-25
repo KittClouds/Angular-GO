@@ -49,6 +49,8 @@ export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[])
         node.baseZ = node.z;
     }
 
+    applyProductTopologyGeometry(nodes, links);
+
     for (const link of links) {
         if (!isLorentzTreeEdge(link)) continue;
         const source = nodes[link.source];
@@ -70,6 +72,56 @@ export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[])
         ...buildLevelShellGuides(nodes),
         buildWAxisGuide(),
     ];
+}
+
+function applyProductTopologyGeometry(nodes: GalaxyNode[], links: GalaxyEdge[]): void {
+    if (!nodes.some(isProductNode)) return;
+    const nodeById = new Map(nodes.map((node) => [node.entity.id, node]));
+    for (const node of nodes) {
+        const role = productRegionRole(node);
+        if (!role) continue;
+        const medoid = nodeById.get(stringMeta(node, 'embeddingMedoidTargetId'));
+        const lane = productLaneKind(node);
+        if (medoid && medoid !== node && role !== 'outlier') {
+            const attraction = role === 'core' ? 0.03 : role === 'backbone' ? 0.09 : role === 'bridge' ? 0.035 : 0.055;
+            node.x += (medoid.x - node.x) * attraction;
+            node.y += (medoid.y - node.y) * attraction;
+            node.z += (medoid.z - node.z) * attraction;
+        }
+        const radial = Math.max(0.001, Math.hypot(node.x, node.y, node.z));
+        const tangent = topologyTangent(node.entity.id, lane);
+        const scale = role === 'core' ? 0.94
+            : role === 'backbone' ? 0.985
+                : role === 'bridge' ? 1.035
+                    : role === 'boundary' ? 1.08
+                        : 1.16;
+        const orbit = role === 'bridge' ? 0.075 : role === 'outlier' ? 0.14 : role === 'boundary' ? 0.035 : 0;
+        node.x = node.x / radial * radial * scale + tangent.x * orbit;
+        node.y = node.y / radial * radial * scale + tangent.y * orbit * 0.72;
+        node.z = node.z / radial * radial * scale + tangent.z * orbit;
+        node.depth = clamp(Math.hypot(node.x, node.y, node.z) / LORENTZ_SCENE_RADIUS, 0, 1);
+        node.radius *= role === 'core' ? 1.08 : role === 'backbone' ? 1.03 : role === 'outlier' ? 0.9 : 0.98;
+        node.baseX = node.x;
+        node.baseY = node.y;
+        node.baseZ = node.z;
+    }
+    for (const link of links) {
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        const sourceRole = productRegionRole(source);
+        const targetRole = productRegionRole(target);
+        if (link.type === 'embedding-backbone' || sourceRole === 'backbone' || targetRole === 'backbone') {
+            link.alpha = Math.min(0.64, link.alpha * 1.18 + 0.025);
+            link.curve *= 0.78;
+        } else if (link.type === 'embedding-bridge' || sourceRole === 'bridge' || targetRole === 'bridge') {
+            link.alpha = Math.min(0.58, link.alpha * 1.12 + 0.018);
+            link.curve *= 1.22;
+        }
+        if (sourceRole === 'outlier' || targetRole === 'outlier') {
+            link.alpha *= 0.82;
+            link.curve *= 1.28;
+        }
+    }
 }
 
 interface LorentzInfo {
@@ -316,6 +368,47 @@ function lorentzNodeScale(info: LorentzInfo): number {
     const levelScale = info.level <= 0 ? 1.16 : Math.max(0.72, 1 - info.level * 0.035);
     const wGlow = Math.min(0.08, Math.abs(info.w) * 0.1);
     return levelScale + membershipBoost + wGlow;
+}
+
+function productRegionRole(node: GalaxyNode | undefined): string {
+    if (!node) return '';
+    const metadata = node.entity.metadata || {};
+    const direct = String(metadata['productRegionRole'] || '').toLowerCase();
+    if (direct) return direct;
+    const product = metadata['product'];
+    if (!product || typeof product !== 'object') return '';
+    const region = (product as Record<string, unknown>)['region'];
+    return region && typeof region === 'object' ? String((region as Record<string, unknown>)['role'] || '').toLowerCase() : '';
+}
+
+function productLaneKind(node: GalaxyNode): string {
+    const metadata = node.entity.metadata || {};
+    const direct = String(metadata['productLaneKind'] || '').toLowerCase();
+    if (direct) return direct;
+    const product = metadata['product'];
+    if (!product || typeof product !== 'object') return '';
+    const region = (product as Record<string, unknown>)['region'];
+    return region && typeof region === 'object' ? String((region as Record<string, unknown>)['laneKind'] || '').toLowerCase() : '';
+}
+
+function stringMeta(node: GalaxyNode, key: string): string {
+    return String(node.entity.metadata?.[key] || '');
+}
+
+function topologyTangent(id: string, lane: string): { x: number; y: number; z: number } {
+    const seed = stableVector(`${id}:topology:${lane || 'mixed'}`);
+    const axis = lane === 'causal' ? { x: 0.8, y: -0.2, z: 0.25 }
+        : lane === 'temporal' ? { x: 0.35, y: 0.75, z: -0.2 }
+            : lane === 'document' ? { x: -0.3, y: 0.2, z: 0.85 }
+                : lane === 'entity' ? { x: 0.2, y: 0.45, z: 0.65 }
+                    : { x: 0.45, y: 0.1, z: -0.55 };
+    const mixed = {
+        x: seed.x * 0.62 + axis.x * 0.38,
+        y: seed.y * 0.62 + axis.y * 0.38,
+        z: seed.z * 0.62 + axis.z * 0.38,
+    };
+    const length = Math.max(0.001, Math.hypot(mixed.x, mixed.y, mixed.z));
+    return { x: mixed.x / length, y: mixed.y / length, z: mixed.z / length };
 }
 
 function isProductNode(node: GalaxyNode): boolean {
