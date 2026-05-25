@@ -216,8 +216,22 @@ export interface GraphRebuildEmbeddingProfile {
     nativeDimensions: number;
     selectedDimensions: number;
     taskProfile: GraphRebuildEmbeddingTaskProfile;
-    vectorSource: 'signature-preview' | 'semantic-runner';
+    vectorSource: 'signature-preview' | 'semantic-runner' | 'external';
     normalized: boolean;
+}
+
+export interface GraphRebuildEmbeddingModelAdapter {
+    schemaVersion: 'phoenix-embedding-model-adapter/v1';
+    modelId: string;
+    modelLabel: string;
+    modelFamily: string;
+    nativeDimensions: number;
+    selectedDimensions: number;
+    taskProfile: GraphRebuildEmbeddingTaskProfile;
+    vectorSource: 'semantic-runner' | 'signature-preview' | 'external';
+    normalized: boolean;
+    supportsTopology: boolean;
+    supportsMultiTask: boolean;
 }
 
 export interface GraphRebuildProjectionRef {
@@ -353,8 +367,11 @@ export interface GraphRebuildLinkSuggestion {
     suggestedRelationType: string;
     status: 'review' | 'confirmed';
     confidence: number;
+    rerankScore?: number;
     semanticStatus: GraphRebuildAdjudicationStatus | 'none';
     structuralRole: GraphRebuildStructuralEdgeRole | GraphRebuildStructuralNodeRole | 'shared_component';
+    embeddingRole?: GraphRebuildEmbeddingBackboneRole | 'same_cluster' | 'cross_cluster' | 'outlier';
+    rerankSignals?: string[];
     rationale: string[];
     evidenceIds: string[];
 }

@@ -12,6 +12,7 @@ export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
 export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
 export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
 export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold';
+export type GalaxyEmbeddingTopologyMode = 'off' | 'clusters' | 'medoids' | 'outliers' | 'backbone' | 'bridges';
 
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
@@ -42,6 +43,7 @@ export interface GalaxyRenderSettings {
     lorentzSpaceVisible: boolean;
     lorentzSpaceIntensity: number;
     productKleinVisible: boolean;
+    embeddingTopologyMode: GalaxyEmbeddingTopologyMode;
 }
 
 export interface GalaxyInputEdge {
@@ -188,6 +190,7 @@ export const DEFAULT_GALAXY_SETTINGS: GalaxyRenderSettings = {
     lorentzSpaceVisible: true,
     lorentzSpaceIntensity: 1,
     productKleinVisible: true,
+    embeddingTopologyMode: 'off',
 };
 
 export function mergeGalaxySettings(settings?: Partial<GalaxyRenderSettings> | null): GalaxyRenderSettings {
@@ -238,6 +241,7 @@ export function buildGalaxyScene(
     });
 
     const links = buildLinks(edges, idToIndex);
+    applyEmbeddingTopologyLens(nodes, links, settings);
     if (settings.layoutMode === 'hybridSpace') {
         applyGalaxyMetadata(nodes);
         applyHybridSpaceLayout(nodes, links);
@@ -330,6 +334,75 @@ function buildLinks(edges: GalaxyInputEdge[], idToIndex: Map<string, number>): G
         }
     }
     return links;
+}
+
+function applyEmbeddingTopologyLens(
+    nodes: GalaxyNode[],
+    links: GalaxyEdge[],
+    settings: GalaxyRenderSettings,
+): void {
+    const mode = settings.embeddingTopologyMode;
+    if (mode === 'off') return;
+    const incident = topologyIncidentIndexes(nodes, links, mode);
+    for (const [index, node] of nodes.entries()) {
+        const meta = node.entity.metadata || {};
+        const isMedoid = meta['embeddingMedoidTargetId'] === node.entity.id;
+        const outlierScore = Number(meta['embeddingOutlierScore'] || 0);
+        const hubScore = Number(meta['embeddingHubScore'] || 0);
+        let boost = 0.72;
+        if (mode === 'clusters' && meta['embeddingClusterId']) boost = 1 + Math.min(0.32, hubScore * 0.18);
+        else if (mode === 'medoids') boost = isMedoid ? 1.55 : 0.62;
+        else if (mode === 'outliers') boost = outlierScore >= 0.72 ? 1.72 : 0.54;
+        else if (incident.has(index)) boost = 1.32;
+        node.radius *= boost;
+        if (mode === 'clusters' && meta['embeddingClusterId']) {
+            const color = hslToRgb(clusterLensHsl(String(meta['embeddingClusterId'])));
+            node.r = Math.round(node.r * 0.58 + color.r * 0.42);
+            node.g = Math.round(node.g * 0.58 + color.g * 0.42);
+            node.b = Math.round(node.b * 0.58 + color.b * 0.42);
+        }
+    }
+    for (const link of links) {
+        const role = embeddingEdgeRole(link);
+        if (!role) {
+            link.alpha *= mode === 'clusters' ? 0.62 : 0.22;
+            continue;
+        }
+        const selected = mode === 'backbone' && role === 'backbone'
+            || mode === 'bridges' && role === 'bridge'
+            || mode === 'clusters';
+        link.alpha = selected ? Math.min(0.5, link.alpha * 2.35 + 0.05) : link.alpha * 0.24;
+        link.curve *= selected ? 1.12 : 0.72;
+    }
+}
+
+function topologyIncidentIndexes(
+    nodes: GalaxyNode[],
+    links: GalaxyEdge[],
+    mode: GalaxyEmbeddingTopologyMode,
+): Set<number> {
+    const out = new Set<number>();
+    if (mode !== 'backbone' && mode !== 'bridges') return out;
+    const acceptedRole = mode === 'backbone' ? 'backbone' : 'bridge';
+    for (const link of links) {
+        if (embeddingEdgeRole(link) !== acceptedRole) continue;
+        out.add(link.source);
+        out.add(link.target);
+    }
+    return out;
+}
+
+function embeddingEdgeRole(link: GalaxyEdge): 'local' | 'backbone' | 'bridge' | '' {
+    const type = String(link.type || '').toLowerCase();
+    if (type === 'embedding-backbone') return 'backbone';
+    if (type === 'embedding-bridge') return 'bridge';
+    if (type === 'embedding-local') return 'local';
+    return '';
+}
+
+function clusterLensHsl(clusterId: string): string {
+    const hue = Math.round(stableUnit(clusterId) * 360);
+    return `${hue} 72% 61%`;
 }
 
 function relaxNodes(nodes: GalaxyNode[], links: GalaxyEdge[], settings: GalaxyRenderSettings): void {

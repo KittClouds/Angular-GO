@@ -55,9 +55,9 @@ describe('Product manifold guide styling', () => {
     it('keeps Product fibers leaner and dimmer while preserving Hopf space control', () => {
         const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
 
-        expect(renderer.hopfTubeRadius('dataFiber', 'tubeCore', 'product')).toBeCloseTo(0.00675);
-        expect(renderer.hopfTubeRadius('dataFiber', 'tubeGlow', 'product')).toBeCloseTo(0.0216);
-        expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBeCloseTo(0.13464);
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeCore', 'product')).toBeCloseTo(0.0050625);
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeGlow', 'product')).toBeCloseTo(0.0162);
+        expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBeCloseTo(0.11424);
 
         renderer.setSettings({ hopfSpaceIntensity: 0 });
         expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBe(0);

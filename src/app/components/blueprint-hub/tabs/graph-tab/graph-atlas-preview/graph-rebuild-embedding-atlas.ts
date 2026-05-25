@@ -114,12 +114,58 @@ function targetNode(
                 medoidTargetId: post.medoidTargetId,
                 lanes: post.productLaneFeatures,
             } : undefined,
+            lorentz: post ? productLorentzMetadata(target, point, post) : undefined,
+            hopf: post ? {
+                role: 'anchor',
+                baseId: target.id,
+                fiberKind: productFiberKind(post.clusterRole),
+                phase: post.productLaneFeatures.fiberPhase,
+            } : undefined,
             graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
             manifold,
             preview: target.text || target.label,
         },
     };
+}
+
+function productLorentzMetadata(
+    target: GraphRebuildEmbeddingTarget,
+    point: { x: number; y: number; z: number },
+    post: GraphRebuildEmbeddingTargetPostProcess,
+): Record<string, unknown> {
+    const lane = post.productLaneFeatures;
+    const radius = Math.max(0.001, Math.hypot(point.x, point.y, point.z));
+    const depth = Math.max(0, Math.min(1, 1 - lane.semanticDepth));
+    const scale = 0.22 + depth * 0.66;
+    const treeKind = productFiberKind(post.clusterRole);
+    const parentNodeId = post.medoidTargetId && post.medoidTargetId !== target.id ? post.medoidTargetId : null;
+    return {
+        klein: [
+            (point.x / radius) * scale,
+            (point.y / radius) * scale,
+            (point.z / radius) * scale,
+            lane.fiberPhase,
+        ],
+        level: parentNodeId ? Math.max(1, Math.round(1 + post.outlierScore * 4)) : 0,
+        primaryTreeKind: treeKind,
+        w: lane.clusterRadius,
+        memberships: [{
+            treeId: post.clusterId,
+            treeKind,
+            parentNodeId,
+            level: parentNodeId ? Math.max(1, Math.round(1 + post.outlierScore * 4)) : 0,
+            pathKey: `${post.clusterId}/${parentNodeId || 'medoid'}/${target.id}`,
+        }],
+    };
+}
+
+function productFiberKind(role: string): string {
+    if (role === 'document_region') return 'documentStructure';
+    if (role === 'event_region') return 'event';
+    if (role === 'fact_region') return 'relationship';
+    if (role === 'entity_region') return 'identity';
+    return 'abstraction';
 }
 
 function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {

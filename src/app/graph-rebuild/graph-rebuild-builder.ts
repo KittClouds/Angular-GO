@@ -50,7 +50,6 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
     const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
     const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
-    const graphAwareLinkSuggestions = buildGraphAwareLinkSuggestions(nodes, edges, relationships, structuralPostProcess);
     const embeddingTargets = buildGraphRebuildEmbeddingTargets(
         input,
         chunks,
@@ -65,6 +64,13 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const embeddingGraphPostProcess = buildGraphRebuildEmbeddingGraphPostProcess(
         embeddingTargets,
         input.embeddingProfile,
+    );
+    const graphAwareLinkSuggestions = buildGraphAwareLinkSuggestions(
+        nodes,
+        edges,
+        relationships,
+        structuralPostProcess,
+        embeddingGraphPostProcess,
     );
     const noteIds = input.noteIds ? [...input.noteIds] : unique([
         ...chunks.map((chunk) => chunk.noteId),

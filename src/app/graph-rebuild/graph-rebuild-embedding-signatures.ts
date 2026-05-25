@@ -1,4 +1,5 @@
 import type {
+    GraphRebuildEmbeddingModelAdapter,
     GraphIndexModelSelection,
     GraphRebuildEmbeddingProfile,
     GraphRebuildEmbeddingTarget,
@@ -12,18 +13,44 @@ export interface SparseEmbeddingSignature {
 export function embeddingProfileFromModelSelection(
     selection: GraphIndexModelSelection,
 ): Partial<GraphRebuildEmbeddingProfile> {
+    return profileFromEmbeddingAdapter(embeddingModelAdapterFromSelection(selection));
+}
+
+export function embeddingModelAdapterFromSelection(
+    selection: GraphIndexModelSelection,
+): GraphRebuildEmbeddingModelAdapter {
     const nativeDimensions = dimensionsFromLabel(selection.embeddingDimensionLabel)
         || defaultNativeDimensions(selection.embeddingModelId);
+    const modelId = selection.embeddingModelId;
+    const modelLabel = selection.embeddingModelLabel || modelId;
+    const task = taskProfile(modelId, modelLabel);
     return {
-        modelId: selection.embeddingModelId,
-        modelLabel: selection.embeddingModelLabel || selection.embeddingModelId,
-        modelFamily: modelFamily(selection.embeddingModelId),
-        dimensionLabel: selection.embeddingDimensionLabel || `${nativeDimensions}d`,
+        schemaVersion: 'phoenix-embedding-model-adapter/v1',
+        modelId,
+        modelLabel,
+        modelFamily: modelFamily(modelId, modelLabel),
         nativeDimensions,
         selectedDimensions: nativeDimensions,
-        taskProfile: taskProfile(selection.embeddingModelId),
+        taskProfile: task,
         vectorSource: 'signature-preview',
         normalized: true,
+        supportsTopology: true,
+        supportsMultiTask: task === 'multi_task',
+    };
+}
+
+export function profileFromEmbeddingAdapter(adapter: GraphRebuildEmbeddingModelAdapter): GraphRebuildEmbeddingProfile {
+    return {
+        schemaVersion: 'phoenix-embedding-profile/v1',
+        modelId: adapter.modelId,
+        modelLabel: adapter.modelLabel,
+        modelFamily: adapter.modelFamily,
+        dimensionLabel: `${adapter.selectedDimensions}d`,
+        nativeDimensions: adapter.nativeDimensions,
+        selectedDimensions: adapter.selectedDimensions,
+        taskProfile: adapter.taskProfile,
+        vectorSource: adapter.vectorSource,
+        normalized: adapter.normalized,
     };
 }
 
@@ -41,11 +68,11 @@ export function normalizeEmbeddingProfile(
         schemaVersion: 'phoenix-embedding-profile/v1',
         modelId,
         modelLabel: profile?.modelLabel || modelId,
-        modelFamily: profile?.modelFamily || modelFamily(modelId),
+        modelFamily: profile?.modelFamily || modelFamily(modelId, profile?.modelLabel),
         dimensionLabel: profile?.dimensionLabel || `${selectedDimensions}d`,
         nativeDimensions,
         selectedDimensions,
-        taskProfile: profile?.taskProfile || taskProfile(modelId),
+        taskProfile: profile?.taskProfile || taskProfile(modelId, profile?.modelLabel),
         vectorSource: profile?.vectorSource || 'signature-preview',
         normalized: profile?.normalized ?? true,
     };
@@ -126,17 +153,20 @@ function defaultNativeDimensions(modelId: string): number {
     return 384;
 }
 
-function modelFamily(modelId: string): string {
-    if (/jina.*v5/i.test(modelId)) return 'jina-v5';
-    if (/mdbr|mongodb.*leaf/i.test(modelId)) return 'mdbr-leaf';
-    if (/bge/i.test(modelId)) return 'bge';
+function modelFamily(modelId: string, modelLabel = ''): string {
+    const text = `${modelId} ${modelLabel}`;
+    if (/jina.*v5/i.test(text)) return 'jina-v5';
+    if (/(mdbr|mongodb.*leaf|leaf).*mt|mt.*(mdbr|leaf)/i.test(text)) return 'mdbr-leaf-mt';
+    if (/mdbr|mongodb.*leaf|leaf/i.test(text)) return 'mdbr-leaf';
+    if (/bge/i.test(text)) return 'bge';
     return 'unknown';
 }
 
-function taskProfile(modelId: string): GraphRebuildEmbeddingProfile['taskProfile'] {
-    if (/mdbr.*mt|leaf.*mt/i.test(modelId)) return 'multi_task';
-    if (/ir|retrieval|bge/i.test(modelId)) return 'retrieval';
-    if (/jina.*v5/i.test(modelId)) return 'semantic_topology';
+function taskProfile(modelId: string, modelLabel = ''): GraphRebuildEmbeddingProfile['taskProfile'] {
+    const text = `${modelId} ${modelLabel}`;
+    if (/(mdbr|mongodb.*leaf|leaf).*mt|mt.*(mdbr|leaf)/i.test(text)) return 'multi_task';
+    if (/ir|retrieval|bge/i.test(text)) return 'retrieval';
+    if (/jina.*v5/i.test(text)) return 'semantic_topology';
     return 'unknown';
 }
 

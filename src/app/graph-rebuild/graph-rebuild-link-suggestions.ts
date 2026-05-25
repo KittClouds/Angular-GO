@@ -1,5 +1,8 @@
 import type {
     GraphRebuildEdge,
+    GraphRebuildEmbeddingBackboneEdge,
+    GraphRebuildEmbeddingGraphPostProcess,
+    GraphRebuildEmbeddingTargetPostProcess,
     GraphRebuildLinkSuggestion,
     GraphRebuildNode,
     GraphRebuildRelationship,
@@ -13,6 +16,7 @@ export function buildGraphAwareLinkSuggestions(
     edges: GraphRebuildEdge[],
     relationships: GraphRebuildRelationship[],
     structure: GraphRebuildStructuralPostProcess,
+    embedding?: GraphRebuildEmbeddingGraphPostProcess,
 ): GraphRebuildLinkSuggestion[] {
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     const relationshipByPair = strongestRelationshipByPair(relationships);
@@ -52,8 +56,11 @@ export function buildGraphAwareLinkSuggestions(
     }
 
     suggestions.push(...missingTriangleSuggestions(nodes, edges, relationshipByPair, structure));
-    return uniqueSuggestions(suggestions)
-        .sort((left, right) => right.confidence - left.confidence || left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))
+    return rerankSuggestions(uniqueSuggestions(suggestions), embedding)
+        .sort((left, right) => (right.rerankScore ?? right.confidence) - (left.rerankScore ?? left.confidence)
+            || right.confidence - left.confidence
+            || left.kind.localeCompare(right.kind)
+            || left.id.localeCompare(right.id))
         .slice(0, MAX_SUGGESTIONS);
 }
 
@@ -166,6 +173,127 @@ function relationshipRank(relationship: GraphRebuildRelationship): number {
 function semanticLine(relationship: GraphRebuildRelationship | undefined): string {
     if (!relationship) return 'semantic: graph edge has no relationship row yet';
     return `semantic: ${relationship.relationType} is ${relationship.status} at ${Math.round(relationship.confidence * 100)}%`;
+}
+
+function rerankSuggestions(
+    suggestions: GraphRebuildLinkSuggestion[],
+    embedding: GraphRebuildEmbeddingGraphPostProcess | undefined,
+): GraphRebuildLinkSuggestion[] {
+    if (!suggestions.length) return suggestions;
+    const embeddingIndex = embedding ? buildEmbeddingIndex(embedding) : null;
+    return suggestions.map((suggestion) => rerankSuggestion(suggestion, embeddingIndex));
+}
+
+interface EmbeddingRerankIndex {
+    rowsByEntityId: Map<string, GraphRebuildEmbeddingTargetPostProcess>;
+    edgeByPair: Map<string, GraphRebuildEmbeddingBackboneEdge>;
+}
+
+function buildEmbeddingIndex(embedding: GraphRebuildEmbeddingGraphPostProcess): EmbeddingRerankIndex {
+    const rowsByTarget = new Map(embedding.targets.map((row) => [row.targetId, row]));
+    const rowsByEntityId = new Map<string, GraphRebuildEmbeddingTargetPostProcess>();
+    for (const row of embedding.targets) {
+        const entityId = entityIdFromTargetId(row.targetId);
+        if (!entityId) continue;
+        const current = rowsByEntityId.get(entityId);
+        if (!current || row.hubScore > current.hubScore || row.outlierScore < current.outlierScore) {
+            rowsByEntityId.set(entityId, row);
+        }
+    }
+    const edgeByPair = new Map<string, GraphRebuildEmbeddingBackboneEdge>();
+    for (const edge of embedding.backboneEdges) {
+        const left = entityIdFromTargetId(edge.sourceTargetId);
+        const right = entityIdFromTargetId(edge.targetTargetId);
+        if (!left || !right) continue;
+        const source = rowsByTarget.get(edge.sourceTargetId);
+        const target = rowsByTarget.get(edge.targetTargetId);
+        if (!source || !target) continue;
+        const key = pairKey(left, right);
+        const current = edgeByPair.get(key);
+        if (!current || embeddingRoleWeight(edge.role) + edge.score > embeddingRoleWeight(current.role) + current.score) {
+            edgeByPair.set(key, edge);
+        }
+    }
+    return { rowsByEntityId, edgeByPair };
+}
+
+function rerankSuggestion(
+    suggestion: GraphRebuildLinkSuggestion,
+    embeddingIndex: EmbeddingRerankIndex | null,
+): GraphRebuildLinkSuggestion {
+    const signals: string[] = [];
+    let score = suggestion.confidence * 0.56;
+    score += semanticWeight(suggestion.semanticStatus);
+    score += structuralWeight(suggestion.structuralRole);
+    score += Math.min(0.08, suggestion.evidenceIds.length * 0.012);
+    if (suggestion.semanticStatus !== 'none') signals.push(`semantic:${suggestion.semanticStatus}`);
+    signals.push(`structure:${suggestion.structuralRole}`);
+
+    let embeddingRole: GraphRebuildLinkSuggestion['embeddingRole'];
+    if (embeddingIndex) {
+        const source = embeddingIndex.rowsByEntityId.get(suggestion.sourceEntityId);
+        const target = embeddingIndex.rowsByEntityId.get(suggestion.targetEntityId);
+        const embeddingEdge = embeddingIndex.edgeByPair.get(pairKey(suggestion.sourceEntityId, suggestion.targetEntityId));
+        if (embeddingEdge) {
+            embeddingRole = embeddingEdge.role;
+            score += embeddingRoleWeight(embeddingEdge.role) + embeddingEdge.score * 0.12;
+            signals.push(`embedding:${embeddingEdge.role}:${Math.round(embeddingEdge.score * 100)}%`);
+        } else if (source && target && source.clusterId === target.clusterId) {
+            embeddingRole = 'same_cluster';
+            score += 0.055 + Math.min(source.hubScore, target.hubScore) * 0.035;
+            signals.push(`embedding:same_cluster:${source.clusterId}`);
+        } else if (source && target) {
+            embeddingRole = 'cross_cluster';
+            score += 0.018;
+            signals.push('embedding:cross_cluster');
+        }
+        if ((source?.outlierScore ?? 0) >= 0.72 || (target?.outlierScore ?? 0) >= 0.72) {
+            embeddingRole = embeddingRole || 'outlier';
+            score -= 0.035;
+            signals.push('embedding:outlier_review');
+        }
+        const lane = source?.productLaneFeatures || target?.productLaneFeatures;
+        if (lane) {
+            score += Math.min(0.045, lane.confidence * 0.035 + lane.semanticDepth * 0.012);
+            signals.push(`product_lane:${Math.round(lane.confidence * 100)}%`);
+        }
+    }
+
+    const rerankScore = clamp(score, 0.22, 0.98);
+    return {
+        ...suggestion,
+        confidence: rerankScore,
+        rerankScore,
+        embeddingRole,
+        rerankSignals: signals,
+        rationale: unique([...suggestion.rationale, ...signals.map((signal) => `rerank: ${signal}`)]),
+    };
+}
+
+function semanticWeight(status: GraphRebuildLinkSuggestion['semanticStatus']): number {
+    if (status === 'accepted') return 0.18;
+    if (status === 'review') return 0.1;
+    if (status === 'rejected') return -0.16;
+    return 0.03;
+}
+
+function structuralWeight(role: GraphRebuildLinkSuggestion['structuralRole']): number {
+    if (role === 'backbone' || role === 'hub') return 0.14;
+    if (role === 'bridge') return 0.11;
+    if (role === 'shared_component' || role === 'connector') return 0.075;
+    if (role === 'leaf') return 0.045;
+    return 0.025;
+}
+
+function embeddingRoleWeight(role: GraphRebuildEmbeddingBackboneEdge['role']): number {
+    if (role === 'backbone') return 0.12;
+    if (role === 'bridge') return 0.095;
+    return 0.045;
+}
+
+function entityIdFromTargetId(targetId: string): string {
+    const prefix = 'embed:entity:';
+    return targetId.startsWith(prefix) ? targetId.slice(prefix.length) : '';
 }
 
 function affiliationRelation(kind: string): string {

@@ -72,6 +72,30 @@ describe('Product manifold galaxy visualization data', () => {
         expect(relationKinds.has('communication')).toBe(true);
         expect(relationGuides.every((guide) => guide.positions3d.length > 0)).toBe(true);
     });
+
+    it('uses embedding topology as a selectable lens without merging nodes', () => {
+        const nodes: GalaxyRenderableNode[] = [
+            topologyNode('embed:entity:kai', 'Kai', 'embedding-cluster:0', 'embed:entity:kai', 0.1, 0.9),
+            topologyNode('embed:entity:rowan', 'Rowan', 'embedding-cluster:0', 'embed:entity:kai', 0.2, 0.4),
+            topologyNode('embed:entity:rook', 'Rook', 'embedding-cluster:1', 'embed:entity:rook', 0.84, 0.2),
+        ];
+        const edges: GalaxyInputEdge[] = [
+            { id: 'embedding-backbone:kai:rowan', sourceId: 'embed:entity:kai', targetId: 'embed:entity:rowan', type: 'embedding-backbone', confidence: 0.84 },
+            { id: 'embedding-bridge:rowan:rook', sourceId: 'embed:entity:rowan', targetId: 'embed:entity:rook', type: 'embedding-bridge', confidence: 0.72 },
+        ];
+
+        const medoids = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'medoids' }));
+        const outliers = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'outliers' }));
+        const backbone = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'backbone' }));
+
+        expect(medoids.nodes.find((node) => node.entity.id === 'embed:entity:kai')?.radius)
+            .toBeGreaterThan(medoids.nodes.find((node) => node.entity.id === 'embed:entity:rowan')?.radius || 0);
+        expect(outliers.nodes.find((node) => node.entity.id === 'embed:entity:rook')?.radius)
+            .toBeGreaterThan(outliers.nodes.find((node) => node.entity.id === 'embed:entity:rowan')?.radius || 0);
+        expect(backbone.links.find((edge) => edge.type === 'embedding-backbone')?.alpha)
+            .toBeGreaterThan(backbone.links.find((edge) => edge.type === 'embedding-bridge')?.alpha || 0);
+        expect(new Set(backbone.nodes.map((node) => node.entity.id)).size).toBe(3);
+    });
 });
 
 function productNode(
@@ -141,6 +165,28 @@ function graphTargetNode(
                     pathKey: `identity/${id}`,
                 }],
             },
+        },
+    };
+}
+
+function topologyNode(
+    id: string,
+    label: string,
+    clusterId: string,
+    medoidTargetId: string,
+    outlierScore: number,
+    hubScore: number,
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind: 'entity',
+        totalMentions: 3,
+        metadata: {
+            embeddingClusterId: clusterId,
+            embeddingMedoidTargetId: medoidTargetId,
+            embeddingOutlierScore: outlierScore,
+            embeddingHubScore: hubScore,
         },
     };
 }

@@ -5,6 +5,7 @@ import {
     buildGraphRebuildSnapshot,
     normalizeGraphRebuildCandidate,
 } from './graph-rebuild-builder';
+import { embeddingModelAdapterFromSelection } from './graph-rebuild-embedding-signatures';
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
 
@@ -215,6 +216,37 @@ describe('Phoenix graph rebuild builder', () => {
         expect(snapshot.counters.embeddingBackboneEdges).toBe(snapshot.embeddingGraphPostProcess?.metrics.backboneEdgeCount);
     });
 
+    it('prepares model adapters for retrieval, multi-task, and high-dimension topology models', () => {
+        const leafMt = embeddingModelAdapterFromSelection({
+            dynamicNerId: 'dynamic_ner',
+            embeddingModelId: 'mongodb-leaf-mt',
+            embeddingModelLabel: 'MDBR Leaf MT',
+            embeddingDimensionLabel: '786d',
+            nliModelId: 'nli',
+        });
+        const jina = embeddingModelAdapterFromSelection({
+            dynamicNerId: 'dynamic_ner',
+            embeddingModelId: 'jina-v5-nano-retrieval',
+            embeddingModelLabel: 'Jina v5 Nano Retrieval',
+            embeddingDimensionLabel: '768d',
+            nliModelId: 'nli',
+        });
+
+        expect(leafMt).toMatchObject({
+            selectedDimensions: 786,
+            modelFamily: 'mdbr-leaf-mt',
+            taskProfile: 'multi_task',
+            supportsTopology: true,
+            supportsMultiTask: true,
+        });
+        expect(jina).toMatchObject({
+            selectedDimensions: 768,
+            modelFamily: 'jina-v5',
+            taskProfile: 'retrieval',
+            supportsTopology: true,
+        });
+    });
+
     it('suggests network hub affiliations from semantic status and structural role', () => {
         const snapshot = buildGraphRebuildSnapshot({
             scopeKind: 'note',
@@ -242,6 +274,8 @@ describe('Phoenix graph rebuild builder', () => {
                 suggestedRelationType: 'affiliated_with',
                 semanticStatus: 'review',
                 structuralRole: 'bridge',
+                rerankScore: expect.any(Number),
+                rerankSignals: expect.arrayContaining(['semantic:review', 'structure:bridge']),
             }),
         ]));
     });

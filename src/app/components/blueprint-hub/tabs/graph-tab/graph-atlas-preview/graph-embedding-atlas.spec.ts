@@ -125,4 +125,96 @@ describe('embedding atlas projection', () => {
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:comment') || '')).toBe(false);
         expect(atlas.sourceLabel).toContain('graph rebuild snapshot');
     });
+
+    it('carries embedding topology into Product manifold metadata without linking identities', () => {
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-product',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai maps Red Mesa', evidenceIds: [] },
+                { id: 'embed:entity:rowan', kind: 'entity', sourceId: 'rowan', entityId: 'rowan', label: 'Rowan', text: 'Rowan reads authority lines', evidenceIds: [] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+            embeddingProfile: {
+                schemaVersion: 'phoenix-embedding-profile/v1',
+                modelId: 'mongodb-leaf-mt',
+                modelLabel: 'MDBR Leaf MT',
+                modelFamily: 'mdbr-leaf-mt',
+                dimensionLabel: '786d',
+                nativeDimensions: 786,
+                selectedDimensions: 786,
+                taskProfile: 'multi_task',
+                vectorSource: 'signature-preview',
+                normalized: true,
+            },
+            embeddingGraphPostProcess: {
+                schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
+                profile: null as any,
+                vectorDimensions: 786,
+                clusters: [],
+                targets: [{
+                    targetId: 'embed:entity:kai',
+                    clusterId: 'embedding-cluster:0',
+                    clusterRole: 'entity_region',
+                    medoidTargetId: 'embed:entity:kai',
+                    outlierScore: 0.1,
+                    hubScore: 0.8,
+                    neighborCount: 1,
+                    productLaneFeatures: {
+                        semanticDepth: 0.9,
+                        documentDepth: 0.25,
+                        relationDepth: 0.2,
+                        clusterRadius: 0.4,
+                        fiberPhase: 0.33,
+                        confidence: 0.88,
+                    },
+                }],
+                backboneEdges: [],
+                bridgeEdges: [],
+                outlierTargetIds: [],
+                metrics: {
+                    clusterCount: 1,
+                    singletonCount: 0,
+                    largestClusterSize: 2,
+                    backboneEdgeCount: 0,
+                    bridgeEdgeCount: 0,
+                    outlierCount: 0,
+                    maxHubScore: 0.8,
+                },
+            },
+        }, 'product');
+
+        const kai = atlas.nodes.find((node) => node.id === 'embed:entity:kai')!;
+        expect(kai.metadata?.product).toMatchObject({
+            role: 'embeddingTarget',
+            clusterId: 'embedding-cluster:0',
+            medoidTargetId: 'embed:entity:kai',
+        });
+        expect(kai.metadata?.lorentz).toMatchObject({
+            level: 0,
+            primaryTreeKind: 'identity',
+        });
+        expect(kai.metadata?.hopf).toMatchObject({
+            fiberKind: 'identity',
+            phase: 0.33,
+        });
+    });
 });

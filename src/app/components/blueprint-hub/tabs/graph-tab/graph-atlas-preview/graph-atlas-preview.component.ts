@@ -21,6 +21,7 @@ import { GraphGalaxyCanvasComponent } from './graph-galaxy-canvas.component';
 import {
     DEFAULT_GALAXY_SETTINGS,
     type GalaxyBackgroundMode,
+    type GalaxyEmbeddingTopologyMode,
     type GalaxyEdgeColorMode,
     type GalaxyEdgeMode,
     type GalaxyInputEdge,
@@ -279,12 +280,15 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                     </div>
                     }
                     @if (settingsOpen) {
-                    <div class="settings-float absolute right-4 top-14 w-[320px] rounded-2xl border border-white/10 p-3 text-xs text-zinc-300">
-                        <div class="grid grid-cols-2 gap-2">
+                    <div class="settings-float absolute bottom-4 right-4 top-14 w-[min(360px,calc(100%-2rem))] overflow-y-auto rounded-2xl border border-white/10 p-3 text-xs text-zinc-300">
+                        <div class="settings-toggle-grid">
                             <button type="button" class="galaxy-control-button" (click)="cycleLabelMode()">Labels<span>{{ settings.labelMode }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleEdgeMode()">Edges<span>{{ settings.edgeMode }}</span></button>
-                          <button type="button" class="galaxy-control-button" (click)="cycleEdgeColorMode()">Palette<span>{{ edgeColorLabel() }}</span></button>
+                            <button type="button" class="galaxy-control-button" (click)="cycleEdgeColorMode()">Palette<span>{{ edgeColorLabel() }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="toggleParticles()">Flow<span>{{ settings.particleFlow ? 'on' : 'off' }}</span></button>
+                            @if (atlasMode === 'embeddings') {
+                            <button type="button" class="galaxy-control-button" (click)="cycleEmbeddingTopologyMode()">Topology<span>{{ embeddingTopologyLabel() }}</span></button>
+                            }
                             <button type="button" class="galaxy-control-button" (click)="cycleNodeDragMode()">Drag<span>{{ settings.nodeDragMode }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="toggleClickFocus()">Dbl Focus<span>{{ settings.clickFocus ? 'on' : 'off' }}</span></button>
                             <button type="button" class="galaxy-control-button" (click)="cycleNodeShape()">Shape<span>{{ settings.nodeShape }}</span></button>
@@ -304,54 +308,54 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
                             }
                         </div>
                         @if ((settings.layoutMode === 'hybridSpace' || settings.layoutMode === 'productManifold') && settings.hybridShellVisible) {
-                        <label class="mt-3 block">
+                        <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Shell opacity</span><span>{{ settings.hybridShellOpacity | number:'1.2-2' }}</span></span>
                             <input type="range" min="0" max="1" step="0.02" [value]="settings.hybridShellOpacity" class="galaxy-slider" (input)="setHybridShellOpacity($any($event.target).value)" />
                         </label>
                         }
                         @if ((settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') && settings.hopfSpaceVisible) {
-                        <label class="mt-3 block">
+                        <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.hopfSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.hopfSpaceIntensity" class="galaxy-slider" (input)="setHopfSpaceIntensity($any($event.target).value)" />
                         </label>
                         }
                         @if ((settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') && settings.lorentzSpaceVisible) {
-                        <label class="mt-3 block">
+                        <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.lorentzSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.lorentzSpaceIntensity" class="galaxy-slider" (input)="setLorentzSpaceIntensity($any($event.target).value)" />
                         </label>
                         }
-                        <label class="mt-3 block">
+                        <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Glow</span><span>{{ settings.glow | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.8" step="0.05" [value]="settings.glow" class="galaxy-slider" (input)="setGlow($any($event.target).value)" />
                         </label>
-                        <label class="mt-2 block">
+                        <label class="settings-slider-row mt-2">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Distance</span><span>{{ settings.nodeDistance | number:'1.1-1' }}</span></span>
                             <input type="range" min="0.15" max="3.2" step="0.05" [value]="settings.nodeDistance" class="galaxy-slider" (input)="setNodeDistance($any($event.target).value)" />
                         </label>
-                        <label class="mt-2 block">
+                        <label class="settings-slider-row mt-2">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Edge length</span><span>{{ settings.edgeLength | number:'1.1-1' }}</span></span>
                             <input type="range" min="0.15" max="3.4" step="0.05" [value]="settings.edgeLength" class="galaxy-slider" (input)="setEdgeLength($any($event.target).value)" />
                         </label>
-                        <label class="mt-2 block">
+                        <label class="settings-slider-row mt-2">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Edge width</span><span>{{ settings.edgeWidth | number:'1.1-1' }}</span></span>
                               <input type="range" min="0.15" max="1.1" step="0.05" [value]="settings.edgeWidth" class="galaxy-slider" (input)="setEdgeWidth($any($event.target).value)" />
                         </label>
-                        <label class="mt-2 block">
+                        <label class="settings-slider-row mt-2">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Curve</span><span>{{ settings.edgeCurveStrength | number:'1.1-1' }}</span></span>
                             <input type="range" min="0.25" max="1.2" step="0.05" [value]="settings.edgeCurveStrength" class="galaxy-slider" (input)="setCurveStrength($any($event.target).value)" />
                         </label>
                         @if (settings.particleFlow) {
                         <div class="mt-3 border-t border-white/10 pt-3">
-                            <label class="block">
+                            <label class="settings-slider-row">
                                 <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Particle size</span><span>{{ settings.particleSize | number:'1.1-1' }}</span></span>
                                 <input type="range" min="0.35" max="2.6" step="0.05" [value]="settings.particleSize" class="galaxy-slider" (input)="setParticleSize($any($event.target).value)" />
                             </label>
-                            <label class="mt-2 block">
+                            <label class="settings-slider-row mt-2">
                                 <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Particle speed</span><span>{{ settings.particleSpeed | number:'1.1-1' }}</span></span>
                                 <input type="range" min="0.2" max="3" step="0.05" [value]="settings.particleSpeed" class="galaxy-slider" (input)="setParticleSpeed($any($event.target).value)" />
                             </label>
-                            <label class="mt-2 block">
+                            <label class="settings-slider-row mt-2">
                                 <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Particle opacity</span><span>{{ settings.particleOpacity | number:'1.1-1' }}</span></span>
                                 <input type="range" min="0.1" max="1" step="0.05" [value]="settings.particleOpacity" class="galaxy-slider" (input)="setParticleOpacity($any($event.target).value)" />
                             </label>
@@ -382,6 +386,12 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
 
         :host section[data-backdrop="nebula"]::before { opacity: 1; background: radial-gradient(circle at 18% 20%, rgba(20,184,166,0.09), transparent 32%), radial-gradient(circle at 82% 20%, rgba(153,27,210,0.11), transparent 30%); }
         :host section[data-backdrop="grid"]::before { opacity: 1; background: radial-gradient(circle at 50% 50%, rgba(20,184,166,0.045), transparent 42%); }
+        .settings-toggle-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
         .galaxy-control-button {
             display: flex;
             min-width: 0;
@@ -390,7 +400,7 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
             border-radius: 12px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: rgba(255, 255, 255, 0.035);
-            padding: 7px 8px;
+            padding: 6px 8px;
             text-align: left;
             font-size: 10px;
             font-weight: 700;
@@ -417,6 +427,12 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
         .galaxy-slider {
             width: 100%;
             accent-color: var(--ui-accent);
+        }
+
+        .settings-slider-row {
+            display: block;
+            min-width: 0;
+            padding: 2px 1px 0;
         }
 
         .canvas-control-rail { pointer-events: none; background: transparent; box-shadow: none; }
@@ -455,7 +471,30 @@ export const EMPTY_GRAPH_INVENTORY: GraphInventory = { nodes: [], edges: [], kin
             transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
         }
 
-        .settings-float { pointer-events: none; background: transparent; box-shadow: none; }
+        .settings-float {
+            pointer-events: auto;
+            background:
+                linear-gradient(180deg, rgba(14, 18, 25, 0.86), rgba(4, 8, 14, 0.78));
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+            backdrop-filter: blur(18px);
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(var(--ui-accent-rgb), 0.42) rgba(255, 255, 255, 0.05);
+        }
+
+        .settings-float::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .settings-float::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 999px;
+        }
+
+        .settings-float::-webkit-scrollbar-thumb {
+            background: rgba(var(--ui-accent-rgb), 0.42);
+            border-radius: 999px;
+        }
 
         .canvas-glass-button:hover {
             border-color: rgba(var(--ui-accent-rgb), 0.24);
@@ -956,6 +995,23 @@ export class GraphAtlasPreviewComponent {
             cyan: 'aqua',
         };
         return labels[this.settings.edgeColorMode];
+    }
+
+    cycleEmbeddingTopologyMode(): void {
+        const modes: GalaxyEmbeddingTopologyMode[] = ['off', 'clusters', 'medoids', 'outliers', 'backbone', 'bridges'];
+        this.updateSettings({ embeddingTopologyMode: modes[(modes.indexOf(this.settings.embeddingTopologyMode) + 1) % modes.length] });
+    }
+
+    embeddingTopologyLabel(): string {
+        const labels: Record<GalaxyEmbeddingTopologyMode, string> = {
+            off: 'off',
+            clusters: 'clusters',
+            medoids: 'medoids',
+            outliers: 'outliers',
+            backbone: 'backbone',
+            bridges: 'bridges',
+        };
+        return labels[this.settings.embeddingTopologyMode || 'off'];
     }
 
     toggleParticles(): void {

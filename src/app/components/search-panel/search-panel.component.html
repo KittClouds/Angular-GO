@@ -140,7 +140,7 @@
           <span class="link-kind">{{ linkSuggestionKindLabel(suggestion.kind) }}</span>
           <span class="link-main">
             <strong>{{ linkSuggestionTitle(suggestion) }}</strong>
-            <small>{{ suggestion.suggestedRelationType }} / {{ suggestion.semanticStatus }} / {{ suggestion.structuralRole }}</small>
+            <small>{{ suggestion.suggestedRelationType }} / {{ suggestion.semanticStatus }} / {{ suggestion.structuralRole }}<ng-container *ngIf="suggestion.embeddingRole"> / {{ suggestion.embeddingRole }}</ng-container></small>
           </span>
           <em>{{ confidencePercent(suggestion.confidence) }}%</em>
           <span class="link-review-actions">
