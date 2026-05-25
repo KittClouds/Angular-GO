@@ -208,9 +208,17 @@ describe('Phoenix graph rebuild builder', () => {
         expect(snapshot.embeddingGraphPostProcess?.schemaVersion).toBe('phoenix-embedding-graph-postprocess/v1');
         expect(snapshot.embeddingGraphPostProcess?.vectorDimensions).toBe(786);
         expect(snapshot.embeddingGraphPostProcess?.clusters.length).toBeGreaterThan(0);
+        expect(snapshot.embeddingGraphPostProcess?.productTopologyRegions.length).toBeGreaterThan(0);
         expect(snapshot.embeddingGraphPostProcess?.targets[0].productLaneFeatures).toMatchObject({
             semanticDepth: expect.any(Number),
             fiberPhase: expect.any(Number),
+            dominantLane: expect.any(String),
+            laneWeights: expect.any(Object),
+        });
+        expect(snapshot.embeddingGraphPostProcess?.targets[0].productTopologyRegion).toMatchObject({
+            id: expect.stringContaining('product-region:'),
+            role: expect.any(String),
+            laneKind: expect.any(String),
         });
         expect(snapshot.counters.embeddingClusters).toBe(snapshot.embeddingGraphPostProcess?.metrics.clusterCount);
         expect(snapshot.counters.embeddingBackboneEdges).toBe(snapshot.embeddingGraphPostProcess?.metrics.backboneEdgeCount);
@@ -275,7 +283,7 @@ describe('Phoenix graph rebuild builder', () => {
                 semanticStatus: 'review',
                 structuralRole: 'bridge',
                 rerankScore: expect.any(Number),
-                rerankSignals: expect.arrayContaining(['semantic:review', 'structure:bridge']),
+                rerankSignals: expect.arrayContaining(['semantic:review', 'structure:bridge', expect.stringContaining('product_')]),
             }),
         ]));
     });

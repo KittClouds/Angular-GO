@@ -107,18 +107,24 @@ function targetNode(
             embeddingMedoidTargetId: post?.medoidTargetId,
             embeddingOutlierScore: post?.outlierScore,
             embeddingHubScore: post?.hubScore,
+            productRegionId: post?.productTopologyRegion.id,
+            productRegionRole: post?.productTopologyRegion.role,
+            productLaneKind: post?.productTopologyRegion.laneKind,
+            productRegionConfidence: post?.productTopologyRegion.confidence,
             product: post ? {
                 role: 'embeddingTarget',
                 clusterId: post.clusterId,
                 clusterRole: post.clusterRole,
                 medoidTargetId: post.medoidTargetId,
+                region: post.productTopologyRegion,
+                dominantLane: post.productLaneFeatures.dominantLane,
                 lanes: post.productLaneFeatures,
             } : undefined,
             lorentz: post ? productLorentzMetadata(target, point, post) : undefined,
             hopf: post ? {
                 role: 'anchor',
                 baseId: target.id,
-                fiberKind: productFiberKind(post.clusterRole),
+                fiberKind: productFiberKind(post.clusterRole, post.productTopologyRegion.laneKind),
                 phase: post.productLaneFeatures.fiberPhase,
             } : undefined,
             graphKind: targetRenderKind(target),
@@ -135,11 +141,13 @@ function productLorentzMetadata(
     post: GraphRebuildEmbeddingTargetPostProcess,
 ): Record<string, unknown> {
     const lane = post.productLaneFeatures;
+    const region = post.productTopologyRegion;
     const radius = Math.max(0.001, Math.hypot(point.x, point.y, point.z));
     const depth = Math.max(0, Math.min(1, 1 - lane.semanticDepth));
     const scale = 0.22 + depth * 0.66;
-    const treeKind = productFiberKind(post.clusterRole);
+    const treeKind = productFiberKind(post.clusterRole, region.laneKind);
     const parentNodeId = post.medoidTargetId && post.medoidTargetId !== target.id ? post.medoidTargetId : null;
+    const level = productRegionLevel(post);
     return {
         klein: [
             (point.x / radius) * scale,
@@ -147,20 +155,46 @@ function productLorentzMetadata(
             (point.z / radius) * scale,
             lane.fiberPhase,
         ],
-        level: parentNodeId ? Math.max(1, Math.round(1 + post.outlierScore * 4)) : 0,
+        level,
         primaryTreeKind: treeKind,
         w: lane.clusterRadius,
+        regionId: region.id,
+        regionRole: region.role,
+        dominantLane: region.laneKind,
         memberships: [{
-            treeId: post.clusterId,
+            treeId: region.id,
             treeKind,
             parentNodeId,
-            level: parentNodeId ? Math.max(1, Math.round(1 + post.outlierScore * 4)) : 0,
-            pathKey: `${post.clusterId}/${parentNodeId || 'medoid'}/${target.id}`,
+            level,
+            pathKey: `${region.id}/${parentNodeId || 'medoid'}/${target.id}`,
+        }, {
+            treeId: `product-lane:${region.laneKind}`,
+            treeKind: region.laneKind,
+            parentNodeId,
+            level,
+            pathKey: `product-lane:${region.laneKind}/${post.clusterId}/${target.id}`,
         }],
     };
 }
 
-function productFiberKind(role: string): string {
+function productRegionLevel(post: GraphRebuildEmbeddingTargetPostProcess): number {
+    const role = post.productTopologyRegion.role;
+    if (post.medoidTargetId === post.targetId && role === 'core') return 0;
+    if (role === 'core') return 1;
+    if (role === 'backbone') return 1;
+    if (role === 'bridge') return 2;
+    if (role === 'boundary') return 3;
+    return 4;
+}
+
+function productFiberKind(role: string, laneKind?: string): string {
+    if (laneKind === 'causal') return 'causal';
+    if (laneKind === 'temporal') return 'timeline';
+    if (laneKind === 'evidence') return 'evidence';
+    if (laneKind === 'entity') return 'identity';
+    if (laneKind === 'document') return 'documentStructure';
+    if (laneKind === 'relation') return 'relationship';
+    if (laneKind === 'semantic') return 'abstraction';
     if (role === 'document_region') return 'documentStructure';
     if (role === 'event_region') return 'event';
     if (role === 'fact_region') return 'relationship';

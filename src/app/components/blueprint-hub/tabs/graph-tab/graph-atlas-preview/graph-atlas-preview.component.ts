@@ -998,7 +998,7 @@ export class GraphAtlasPreviewComponent {
     }
 
     cycleEmbeddingTopologyMode(): void {
-        const modes: GalaxyEmbeddingTopologyMode[] = ['off', 'clusters', 'medoids', 'outliers', 'backbone', 'bridges'];
+        const modes: GalaxyEmbeddingTopologyMode[] = ['off', 'clusters', 'regions', 'lanes', 'medoids', 'outliers', 'backbone', 'bridges'];
         this.updateSettings({ embeddingTopologyMode: modes[(modes.indexOf(this.settings.embeddingTopologyMode) + 1) % modes.length] });
     }
 
@@ -1006,6 +1006,8 @@ export class GraphAtlasPreviewComponent {
         const labels: Record<GalaxyEmbeddingTopologyMode, string> = {
             off: 'off',
             clusters: 'clusters',
+            regions: 'regions',
+            lanes: 'lanes',
             medoids: 'medoids',
             outliers: 'outliers',
             backbone: 'backbone',

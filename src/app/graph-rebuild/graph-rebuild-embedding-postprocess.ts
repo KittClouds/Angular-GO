@@ -6,7 +6,10 @@ import type {
     GraphRebuildEmbeddingProfile,
     GraphRebuildEmbeddingTarget,
     GraphRebuildEmbeddingTargetPostProcess,
+    GraphRebuildProductLaneKind,
     GraphRebuildProductLaneFeatures,
+    GraphRebuildProductTopologyRegion,
+    GraphRebuildProductTopologyRegionRole,
 } from './graph-rebuild-snapshot';
 import {
     normalizeEmbeddingProfile,
@@ -32,8 +35,13 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
     const signatures = targets.map((target) => sparseEmbeddingSignature(target, profile.selectedDimensions));
     const neighbors = buildMutualNeighbors(signatures);
     const clusters = clusterTargets(targets, neighbors);
-    const targetRows = buildTargetRows(targets, clusters, neighbors);
-    const backboneEdges = buildBackboneEdges(targets, targetRows, neighbors);
+    const baseTargetRows = buildTargetRows(targets, clusters, neighbors);
+    const backboneEdges = buildBackboneEdges(targets, baseTargetRows, neighbors);
+    const { rows: targetRows, regions: productTopologyRegions } = attachProductTopologyRegions(
+        baseTargetRows,
+        clusters,
+        backboneEdges,
+    );
     const bridgeEdges = backboneEdges.filter((edge) => edge.role === 'bridge');
     const outlierTargetIds = targetRows.filter((row) => row.outlierScore >= 0.72).map((row) => row.targetId);
     const largestClusterSize = clusters.reduce((max, cluster) => Math.max(max, cluster.size), 0);
@@ -47,6 +55,7 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
         targetCount: targets.length,
         vectorDimensions: profile.selectedDimensions,
         clusters,
+        productTopologyRegions,
         targets: targetRows,
         backboneEdges,
         bridgeEdges,
@@ -142,6 +151,7 @@ function buildTargetRows(
         const cluster = clusterByTarget.get(target.id)!;
         const hubScore = round(Math.min(1, neighbors[index].length / NEIGHBOR_LIMIT));
         const outlier = outlierScore(index, neighbors);
+        const lanes = productLaneFeatures(target, cluster, outlier, hubScore);
         return {
             targetId: target.id,
             clusterId: cluster.id,
@@ -150,7 +160,8 @@ function buildTargetRows(
             outlierScore: outlier,
             hubScore,
             neighborCount: neighbors[index].length,
-            productLaneFeatures: productLaneFeatures(target, cluster, outlier, hubScore),
+            productLaneFeatures: lanes,
+            productTopologyRegion: productTopologyRegion(target.id, cluster, lanes, 'core', [], []),
         };
     });
 }
@@ -190,6 +201,79 @@ function buildBackboneEdges(
     return edges.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
 }
 
+function attachProductTopologyRegions(
+    rows: GraphRebuildEmbeddingTargetPostProcess[],
+    clusters: GraphRebuildEmbeddingCluster[],
+    edges: GraphRebuildEmbeddingBackboneEdge[],
+): { rows: GraphRebuildEmbeddingTargetPostProcess[]; regions: GraphRebuildProductTopologyRegion[] } {
+    const clusterById = new Map(clusters.map((cluster) => [cluster.id, cluster]));
+    const bridgeTargets = new Map<string, Set<string>>();
+    const backboneTargets = new Map<string, Set<string>>();
+    for (const edge of edges) {
+        const leftMap = edge.role === 'bridge' ? bridgeTargets : edge.role === 'backbone' ? backboneTargets : null;
+        if (!leftMap) continue;
+        mapSet(leftMap, edge.sourceTargetId).add(edge.targetTargetId);
+        mapSet(leftMap, edge.targetTargetId).add(edge.sourceTargetId);
+    }
+    const regionById = new Map<string, GraphRebuildProductTopologyRegion>();
+    const updated = rows.map((row) => {
+        const cluster = clusterById.get(row.clusterId);
+        const bridgeTargetIds = sortedIds(bridgeTargets.get(row.targetId));
+        const backboneTargetIds = sortedIds(backboneTargets.get(row.targetId));
+        const role = productRegionRole(row, bridgeTargetIds, backboneTargetIds);
+        const region = productTopologyRegion(
+            row.targetId,
+            cluster,
+            row.productLaneFeatures,
+            role,
+            bridgeTargetIds,
+            backboneTargetIds,
+        );
+        regionById.set(region.id, region);
+        return { ...row, productTopologyRegion: region };
+    });
+    const regions = [...regionById.values()].sort((left, right) => left.id.localeCompare(right.id));
+    return { rows: updated, regions };
+}
+
+function productRegionRole(
+    row: GraphRebuildEmbeddingTargetPostProcess,
+    bridgeTargetIds: string[],
+    backboneTargetIds: string[],
+): GraphRebuildProductTopologyRegionRole {
+    if (row.outlierScore >= 0.72) return 'outlier';
+    if (bridgeTargetIds.length) return 'bridge';
+    if (row.targetId === row.medoidTargetId) return 'core';
+    if (backboneTargetIds.length || row.hubScore >= 0.72) return 'backbone';
+    if (row.outlierScore >= 0.38 || row.neighborCount <= 1) return 'boundary';
+    return 'core';
+}
+
+function productTopologyRegion(
+    targetId: string,
+    cluster: GraphRebuildEmbeddingCluster | undefined,
+    lanes: GraphRebuildProductLaneFeatures,
+    role: GraphRebuildProductTopologyRegionRole,
+    bridgeTargetIds: string[],
+    backboneTargetIds: string[],
+): GraphRebuildProductTopologyRegion {
+    const clusterId = cluster?.id || 'embedding-cluster:unknown';
+    const medoidTargetId = cluster?.medoidTargetId || targetId;
+    const roleConfidence = role === 'core' ? 0.18 : role === 'backbone' ? 0.16 : role === 'bridge' ? 0.15 : role === 'boundary' ? 0.1 : 0.06;
+    return {
+        id: `product-region:${clusterId}:${lanes.dominantLane}:${role}`,
+        role,
+        laneKind: lanes.dominantLane,
+        clusterId,
+        medoidTargetId,
+        memberCount: cluster?.size || 1,
+        density: cluster?.density || 0,
+        confidence: round(Math.min(1, lanes.confidence * 0.68 + (cluster?.confidence || 0.2) * 0.18 + roleConfidence)),
+        bridgeTargetIds,
+        backboneTargetIds,
+    };
+}
+
 function productLaneFeatures(
     target: GraphRebuildEmbeddingTarget,
     cluster: GraphRebuildEmbeddingCluster,
@@ -199,14 +283,42 @@ function productLaneFeatures(
     const kind = normalizeKind(target.kind);
     const relationDepth = /fact|event|memory|causal|temporal/.test(kind) ? 0.78 : kind === 'entity' ? 0.42 : 0.34;
     const documentDepth = target.chunkId ? 0.82 : target.noteId ? 0.68 : 0.22;
+    const laneWeights: Record<GraphRebuildProductLaneKind, number> = {
+        semantic: round(Math.max(0.12, 1 - outlierScoreValue * 0.72)),
+        document: documentDepth,
+        relation: relationDepth,
+        temporal: /temporal|event/.test(kind) ? 0.82 : 0.12,
+        causal: /causal/.test(kind) ? 0.86 : 0.1,
+        evidence: /fact|memory/.test(kind) || target.evidenceIds.length > 1 ? 0.76 : 0.16,
+        entity: /entity|anchor/.test(kind) ? 0.78 : 0.18,
+    };
     return {
-        semanticDepth: round(Math.max(0.12, 1 - outlierScoreValue * 0.72)),
+        semanticDepth: laneWeights.semantic,
         documentDepth,
         relationDepth,
         clusterRadius: round(Math.min(1, Math.sqrt(cluster.size) / 6)),
         fiberPhase: phase(target.id),
         confidence: round(Math.min(1, cluster.confidence * 0.72 + hubScore * 0.28)),
+        dominantLane: dominantLane(laneWeights),
+        laneWeights,
     };
+}
+
+function dominantLane(weights: Record<GraphRebuildProductLaneKind, number>): GraphRebuildProductLaneKind {
+    return (Object.entries(weights) as [GraphRebuildProductLaneKind, number][])
+        .sort((left, right) => right[1] - left[1] || laneRank(left[0]) - laneRank(right[0]))[0][0];
+}
+
+function laneRank(lane: GraphRebuildProductLaneKind): number {
+    switch (lane) {
+        case 'causal': return 0;
+        case 'temporal': return 1;
+        case 'entity': return 2;
+        case 'document': return 3;
+        case 'evidence': return 4;
+        case 'relation': return 5;
+        case 'semantic': return 6;
+    }
 }
 
 function medoidIndex(members: number[], neighbors: Neighbor[][]): number {
@@ -270,6 +382,19 @@ function phase(value: string): number {
         hash = Math.imul(hash, 16777619);
     }
     return round((hash >>> 0) / 4294967295);
+}
+
+function mapSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
+    let set = map.get(key);
+    if (!set) {
+        set = new Set<V>();
+        map.set(key, set);
+    }
+    return set;
+}
+
+function sortedIds(ids: Set<string> | undefined): string[] {
+    return ids ? [...ids].sort().slice(0, 8) : [];
 }
 
 function round(value: number): number {

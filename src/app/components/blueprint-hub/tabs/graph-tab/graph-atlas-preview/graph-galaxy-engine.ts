@@ -12,7 +12,7 @@ export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
 export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
 export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
 export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold';
-export type GalaxyEmbeddingTopologyMode = 'off' | 'clusters' | 'medoids' | 'outliers' | 'backbone' | 'bridges';
+export type GalaxyEmbeddingTopologyMode = 'off' | 'clusters' | 'regions' | 'lanes' | 'medoids' | 'outliers' | 'backbone' | 'bridges';
 
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
@@ -353,6 +353,8 @@ function applyEmbeddingTopologyLens(
         if (mode === 'clusters' && meta['embeddingClusterId']) boost = 1 + Math.min(0.32, hubScore * 0.18);
         else if (mode === 'medoids') boost = isMedoid ? 1.55 : 0.62;
         else if (mode === 'outliers') boost = outlierScore >= 0.72 ? 1.72 : 0.54;
+        else if (mode === 'regions') boost = productRegionBoost(String(meta['productRegionRole'] || ''));
+        else if (mode === 'lanes') boost = 0.72 + productLaneWeight(meta) * 0.58;
         else if (incident.has(index)) boost = 1.32;
         node.radius *= boost;
         if (mode === 'clusters' && meta['embeddingClusterId']) {
@@ -360,17 +362,23 @@ function applyEmbeddingTopologyLens(
             node.r = Math.round(node.r * 0.58 + color.r * 0.42);
             node.g = Math.round(node.g * 0.58 + color.g * 0.42);
             node.b = Math.round(node.b * 0.58 + color.b * 0.42);
+        } else if (mode === 'regions' && meta['productRegionRole']) {
+            mixNodeColor(node, productRegionHsl(String(meta['productRegionRole'])), 0.48);
+        } else if (mode === 'lanes' && meta['productLaneKind']) {
+            mixNodeColor(node, productLaneHsl(String(meta['productLaneKind'])), 0.5);
         }
     }
     for (const link of links) {
         const role = embeddingEdgeRole(link);
         if (!role) {
-            link.alpha *= mode === 'clusters' ? 0.62 : 0.22;
+            link.alpha *= mode === 'clusters' || mode === 'regions' || mode === 'lanes' ? 0.62 : 0.22;
             continue;
         }
         const selected = mode === 'backbone' && role === 'backbone'
             || mode === 'bridges' && role === 'bridge'
-            || mode === 'clusters';
+            || mode === 'clusters'
+            || mode === 'regions'
+            || mode === 'lanes';
         link.alpha = selected ? Math.min(0.5, link.alpha * 2.35 + 0.05) : link.alpha * 0.24;
         link.curve *= selected ? 1.12 : 0.72;
     }
@@ -403,6 +411,51 @@ function embeddingEdgeRole(link: GalaxyEdge): 'local' | 'backbone' | 'bridge' | 
 function clusterLensHsl(clusterId: string): string {
     const hue = Math.round(stableUnit(clusterId) * 360);
     return `${hue} 72% 61%`;
+}
+
+function productRegionBoost(role: string): number {
+    if (role === 'core') return 1.38;
+    if (role === 'backbone') return 1.24;
+    if (role === 'bridge') return 1.44;
+    if (role === 'boundary') return 1.05;
+    if (role === 'outlier') return 1.56;
+    return 0.72;
+}
+
+function productLaneWeight(meta: Record<string, unknown>): number {
+    const product = meta['product'] as { lanes?: { laneWeights?: Record<string, number> } } | undefined;
+    const lane = String(meta['productLaneKind'] || '');
+    return Number(product?.lanes?.laneWeights?.[lane] || 0.55);
+}
+
+function mixNodeColor(node: GalaxyNode, rawHsl: string, amount: number): void {
+    const color = hslToRgb(rawHsl);
+    node.r = Math.round(node.r * (1 - amount) + color.r * amount);
+    node.g = Math.round(node.g * (1 - amount) + color.g * amount);
+    node.b = Math.round(node.b * (1 - amount) + color.b * amount);
+}
+
+function productRegionHsl(role: string): string {
+    switch (role) {
+        case 'core': return '172 72% 56%';
+        case 'backbone': return '206 78% 62%';
+        case 'bridge': return '45 92% 58%';
+        case 'boundary': return '265 72% 64%';
+        case 'outlier': return '340 82% 62%';
+        default: return '220 12% 58%';
+    }
+}
+
+function productLaneHsl(lane: string): string {
+    switch (lane) {
+        case 'document': return entityColorStore.getRawGraphNodeHsl('document');
+        case 'relation': return entityColorStore.getRawGraphNodeHsl('graphFact');
+        case 'temporal': return entityColorStore.getRawGraphNodeHsl('temporalFact');
+        case 'causal': return entityColorStore.getRawGraphNodeHsl('causalFact');
+        case 'evidence': return entityColorStore.getRawGraphNodeHsl('memoryState');
+        case 'entity': return entityColorStore.getRawHsl('UNKNOWN');
+        default: return '180 62% 56%';
+    }
 }
 
 function relaxNodes(nodes: GalaxyNode[], links: GalaxyEdge[], settings: GalaxyRenderSettings): void {

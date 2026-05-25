@@ -284,6 +284,22 @@ export type GraphRebuildEmbeddingClusterRole =
 
 export type GraphRebuildEmbeddingBackboneRole = 'local' | 'backbone' | 'bridge';
 
+export type GraphRebuildProductLaneKind =
+    | 'semantic'
+    | 'document'
+    | 'relation'
+    | 'temporal'
+    | 'causal'
+    | 'evidence'
+    | 'entity';
+
+export type GraphRebuildProductTopologyRegionRole =
+    | 'core'
+    | 'backbone'
+    | 'bridge'
+    | 'boundary'
+    | 'outlier';
+
 export interface GraphRebuildProductLaneFeatures {
     semanticDepth: number;
     documentDepth: number;
@@ -291,6 +307,21 @@ export interface GraphRebuildProductLaneFeatures {
     clusterRadius: number;
     fiberPhase: number;
     confidence: number;
+    dominantLane: GraphRebuildProductLaneKind;
+    laneWeights: Record<GraphRebuildProductLaneKind, number>;
+}
+
+export interface GraphRebuildProductTopologyRegion {
+    id: string;
+    role: GraphRebuildProductTopologyRegionRole;
+    laneKind: GraphRebuildProductLaneKind;
+    clusterId: string;
+    medoidTargetId: string;
+    memberCount: number;
+    density: number;
+    confidence: number;
+    bridgeTargetIds: string[];
+    backboneTargetIds: string[];
 }
 
 export interface GraphRebuildEmbeddingCluster {
@@ -314,6 +345,7 @@ export interface GraphRebuildEmbeddingTargetPostProcess {
     hubScore: number;
     neighborCount: number;
     productLaneFeatures: GraphRebuildProductLaneFeatures;
+    productTopologyRegion: GraphRebuildProductTopologyRegion;
 }
 
 export interface GraphRebuildEmbeddingBackboneEdge {
@@ -345,6 +377,7 @@ export interface GraphRebuildEmbeddingGraphPostProcess {
     targetCount: number;
     vectorDimensions: number;
     clusters: GraphRebuildEmbeddingCluster[];
+    productTopologyRegions: GraphRebuildProductTopologyRegion[];
     targets: GraphRebuildEmbeddingTargetPostProcess[];
     backboneEdges: GraphRebuildEmbeddingBackboneEdge[];
     bridgeEdges: GraphRebuildEmbeddingBackboneEdge[];
@@ -371,6 +404,8 @@ export interface GraphRebuildLinkSuggestion {
     semanticStatus: GraphRebuildAdjudicationStatus | 'none';
     structuralRole: GraphRebuildStructuralEdgeRole | GraphRebuildStructuralNodeRole | 'shared_component';
     embeddingRole?: GraphRebuildEmbeddingBackboneRole | 'same_cluster' | 'cross_cluster' | 'outlier';
+    productRegionRole?: GraphRebuildProductTopologyRegionRole | 'cross_region';
+    productLane?: GraphRebuildProductLaneKind | 'mixed';
     rerankSignals?: string[];
     rationale: string[];
     evidenceIds: string[];

@@ -87,6 +87,8 @@ describe('Product manifold galaxy visualization data', () => {
         const medoids = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'medoids' }));
         const outliers = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'outliers' }));
         const backbone = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'backbone' }));
+        const regions = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'regions' }));
+        const lanes = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ embeddingTopologyMode: 'lanes' }));
 
         expect(medoids.nodes.find((node) => node.entity.id === 'embed:entity:kai')?.radius)
             .toBeGreaterThan(medoids.nodes.find((node) => node.entity.id === 'embed:entity:rowan')?.radius || 0);
@@ -94,6 +96,9 @@ describe('Product manifold galaxy visualization data', () => {
             .toBeGreaterThan(outliers.nodes.find((node) => node.entity.id === 'embed:entity:rowan')?.radius || 0);
         expect(backbone.links.find((edge) => edge.type === 'embedding-backbone')?.alpha)
             .toBeGreaterThan(backbone.links.find((edge) => edge.type === 'embedding-bridge')?.alpha || 0);
+        expect(regions.nodes.find((node) => node.entity.id === 'embed:entity:rook')?.radius)
+            .toBeGreaterThan(regions.nodes.find((node) => node.entity.id === 'embed:entity:rowan')?.radius || 0);
+        expect(lanes.nodes.some((node) => node.r !== medoids.nodes.find((other) => other.entity.id === node.entity.id)?.r)).toBe(true);
         expect(new Set(backbone.nodes.map((node) => node.entity.id)).size).toBe(3);
     });
 });
@@ -187,6 +192,21 @@ function topologyNode(
             embeddingMedoidTargetId: medoidTargetId,
             embeddingOutlierScore: outlierScore,
             embeddingHubScore: hubScore,
+            productRegionRole: outlierScore >= 0.72 ? 'outlier' : id === medoidTargetId ? 'core' : 'boundary',
+            productLaneKind: id.includes('rook') ? 'document' : 'entity',
+            product: {
+                lanes: {
+                    laneWeights: {
+                        semantic: 0.5,
+                        document: id.includes('rook') ? 0.9 : 0.2,
+                        relation: 0.2,
+                        temporal: 0.1,
+                        causal: 0.1,
+                        evidence: 0.2,
+                        entity: id.includes('rook') ? 0.2 : 0.8,
+                    },
+                },
+            },
         },
     };
 }

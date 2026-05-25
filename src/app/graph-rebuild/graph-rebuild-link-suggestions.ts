@@ -5,6 +5,8 @@ import type {
     GraphRebuildEmbeddingTargetPostProcess,
     GraphRebuildLinkSuggestion,
     GraphRebuildNode,
+    GraphRebuildProductLaneKind,
+    GraphRebuildProductTopologyRegionRole,
     GraphRebuildRelationship,
     GraphRebuildStructuralPostProcess,
 } from './graph-rebuild-snapshot';
@@ -230,6 +232,8 @@ function rerankSuggestion(
     signals.push(`structure:${suggestion.structuralRole}`);
 
     let embeddingRole: GraphRebuildLinkSuggestion['embeddingRole'];
+    let productRegionRole: GraphRebuildLinkSuggestion['productRegionRole'];
+    let productLane: GraphRebuildLinkSuggestion['productLane'];
     if (embeddingIndex) {
         const source = embeddingIndex.rowsByEntityId.get(suggestion.sourceEntityId);
         const target = embeddingIndex.rowsByEntityId.get(suggestion.targetEntityId);
@@ -252,11 +256,11 @@ function rerankSuggestion(
             score -= 0.035;
             signals.push('embedding:outlier_review');
         }
-        const lane = source?.productLaneFeatures || target?.productLaneFeatures;
-        if (lane) {
-            score += Math.min(0.045, lane.confidence * 0.035 + lane.semanticDepth * 0.012);
-            signals.push(`product_lane:${Math.round(lane.confidence * 100)}%`);
-        }
+        const region = productRegionCompatibility(source, target, embeddingEdge?.role);
+        score += region.weight;
+        productRegionRole = region.role;
+        productLane = region.lane;
+        signals.push(...region.signals);
     }
 
     const rerankScore = clamp(score, 0.22, 0.98);
@@ -265,8 +269,61 @@ function rerankSuggestion(
         confidence: rerankScore,
         rerankScore,
         embeddingRole,
+        productRegionRole,
+        productLane,
         rerankSignals: signals,
         rationale: unique([...suggestion.rationale, ...signals.map((signal) => `rerank: ${signal}`)]),
+    };
+}
+
+function productRegionCompatibility(
+    source: GraphRebuildEmbeddingTargetPostProcess | undefined,
+    target: GraphRebuildEmbeddingTargetPostProcess | undefined,
+    edgeRole?: GraphRebuildEmbeddingBackboneEdge['role'],
+): { weight: number; role?: GraphRebuildProductTopologyRegionRole | 'cross_region'; lane?: GraphRebuildProductLaneKind | 'mixed'; signals: string[] } {
+    if (!source && !target) return { weight: 0, signals: [] };
+    const sourceRegion = source?.productTopologyRegion;
+    const targetRegion = target?.productTopologyRegion;
+    const sourceLane = sourceRegion?.laneKind || source?.productLaneFeatures.dominantLane;
+    const targetLane = targetRegion?.laneKind || target?.productLaneFeatures.dominantLane;
+    const sameRegion = Boolean(sourceRegion && targetRegion && sourceRegion.id === targetRegion.id);
+    const sameLane = Boolean(sourceLane && targetLane && sourceLane === targetLane);
+    const bridgeLike = edgeRole === 'bridge' || sourceRegion?.role === 'bridge' || targetRegion?.role === 'bridge';
+    const backboneLike = edgeRole === 'backbone' || sourceRegion?.role === 'backbone' || targetRegion?.role === 'backbone';
+    const outlier = sourceRegion?.role === 'outlier' || targetRegion?.role === 'outlier';
+    const signals: string[] = [];
+    let weight = 0;
+    if (sameRegion && sourceRegion) {
+        weight += sourceRegion.role === 'core' ? 0.05 : 0.038;
+        signals.push(`product_region:${sourceRegion.role}`);
+    } else if (sourceRegion && targetRegion) {
+        weight += bridgeLike ? 0.034 : 0.012;
+        signals.push('product_region:cross');
+    }
+    if (bridgeLike) {
+        weight += 0.034;
+        signals.push('product_region:bridge');
+    } else if (backboneLike) {
+        weight += 0.026;
+        signals.push('product_region:backbone');
+    }
+    if (sameLane && sourceLane) {
+        weight += 0.028;
+        signals.push(`product_lane:${sourceLane}`);
+    } else if (sourceLane || targetLane) {
+        signals.push('product_lane:mixed');
+    }
+    if (outlier && !bridgeLike) {
+        weight -= 0.025;
+        signals.push('product_region:outlier_review');
+    }
+    const confidence = Math.max(source?.productLaneFeatures.confidence || 0, target?.productLaneFeatures.confidence || 0);
+    if (confidence) weight += Math.min(0.028, confidence * 0.024);
+    return {
+        weight,
+        role: sameRegion ? sourceRegion?.role : bridgeLike ? 'bridge' : backboneLike ? 'backbone' : sourceRegion || targetRegion ? 'cross_region' : undefined,
+        lane: sameLane ? sourceLane : sourceLane || targetLane ? 'mixed' : undefined,
+        signals,
     };
 }
 
