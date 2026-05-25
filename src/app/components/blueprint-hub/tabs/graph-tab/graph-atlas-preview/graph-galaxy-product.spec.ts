@@ -126,6 +126,29 @@ describe('Product manifold galaxy visualization data', () => {
         expect(backboneEdge.curve).toBeLessThan(bridgeEdge.curve);
         expect(backboneEdge.alpha).toBeGreaterThan(bridgeEdge.alpha * 0.7);
     });
+
+    it('keeps Product topology pressure separate from the Lorentz skeleton', () => {
+        const nodes: GalaxyRenderableNode[] = [
+            topologyNode('embed:entity:kai', 'Kai', 'embedding-cluster:0', 'embed:entity:kai', 0.1, 0.9),
+            topologyNode('embed:entity:rowan', 'Rowan', 'embedding-cluster:0', 'embed:entity:kai', 0.2, 0.4),
+            topologyNode('embed:entity:rook', 'Rook', 'embedding-cluster:1', 'embed:entity:rook', 0.84, 0.2),
+        ];
+        const edges: GalaxyInputEdge[] = [
+            { id: 'embedding-backbone:kai:rowan', sourceId: 'embed:entity:kai', targetId: 'embed:entity:rowan', type: 'embedding-backbone', confidence: 0.84 },
+            { id: 'embedding-bridge:rowan:rook', sourceId: 'embed:entity:rowan', targetId: 'embed:entity:rook', type: 'embedding-bridge', confidence: 0.72 },
+        ];
+
+        const lorentz = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ layoutMode: 'lorentzTree' }));
+        const product = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ layoutMode: 'productManifold' }));
+        const productById = new Map(product.nodes.map((node) => [node.entity.id, node]));
+        const maxDelta = Math.max(...lorentz.nodes.map((node) => {
+            const other = productById.get(node.entity.id)!;
+            return Math.hypot(node.x - other.x, node.y - other.y, node.z - other.z);
+        }));
+
+        expect(maxDelta).toBeGreaterThan(0.04);
+        expect(product.hopfRibbons?.some((ribbon) => ribbon.guideKind === 'dataFiber')).toBe(true);
+    });
 });
 
 function productNode(

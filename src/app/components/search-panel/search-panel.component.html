@@ -110,11 +110,17 @@
           [class.animate-spin]="fullAtlasBusy()"></ng-icon>
         {{ loadModelsButtonLabel() }}
       </button>
-      <button type="button" class="primary-action" (click)="buildFullAtlas()"
+      <button type="button" class="primary-action" (click)="buildCoreAtlas()"
         [disabled]="isFullAtlasBuildDisabled()">
         <ng-icon [name]="fullAtlasBusy() ? 'lucideLoader2' : 'lucideSparkles'" class="h-3.5 w-3.5"
           [class.animate-spin]="fullAtlasBusy()"></ng-icon>
         {{ fullAtlasBuildButtonLabel() }}
+      </button>
+      <button type="button" class="secondary-action postprocess-action" (click)="postProcessAtlas()"
+        [disabled]="isPostProcessDisabled()">
+        <ng-icon [name]="fullAtlasBusy() ? 'lucideLoader2' : 'lucideGitBranch'" class="h-3.5 w-3.5"
+          [class.animate-spin]="fullAtlasBusy()"></ng-icon>
+        {{ postProcessButtonLabel() }}
       </button>
       <button type="button" class="secondary-action" (click)="openGraphLens()">
         <ng-icon name="lucideLayers" class="h-3.5 w-3.5"></ng-icon>
@@ -127,6 +133,23 @@
       <strong>{{ lastRunStatus().label }}</strong>
       <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
           lastRunStatus().durationMs }} ms</ng-container></small>
+    </div>
+
+    <div class="link-suggestion-card" *ngIf="entityLinkSuggestionTotal() > 0">
+      <div class="link-suggestion-head">
+        <span>Entity-link candidates</span>
+        <strong>{{ entityLinkSuggestions().length }} shown / {{ entityLinkSuggestionTotal() }} total</strong>
+      </div>
+      <div class="link-suggestion-rows">
+        <div *ngFor="let suggestion of entityLinkSuggestions()" class="link-suggestion-row entity-link-row">
+          <span class="link-kind">{{ entityLinkDecisionLabel(suggestion.decision) }}</span>
+          <span class="link-main">
+            <strong>{{ entityLinkTitle(suggestion) }}</strong>
+            <small>{{ suggestion.candidateKind || 'untyped' }} / {{ suggestion.status }}<ng-container *ngIf="suggestion.productLane"> / {{ suggestion.productLane }}</ng-container></small>
+          </span>
+          <em>{{ confidencePercent(suggestion.confidence) }}%</em>
+        </div>
+      </div>
     </div>
 
     <div class="link-suggestion-card" *ngIf="graphAwareLinkSuggestionTotal() > 0">

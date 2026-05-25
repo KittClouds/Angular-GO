@@ -5,7 +5,10 @@ import {
     buildGraphRebuildSnapshot,
     normalizeGraphRebuildCandidate,
 } from './graph-rebuild-builder';
-import { embeddingModelAdapterFromSelection } from './graph-rebuild-embedding-signatures';
+import {
+    embeddingModelAdapterFromSelection,
+    normalizeEmbeddingProfile,
+} from './graph-rebuild-embedding-signatures';
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
 
@@ -204,6 +207,12 @@ describe('Phoenix graph rebuild builder', () => {
             modelId: 'jina-v5-nano-retrieval',
             selectedDimensions: 786,
             taskProfile: 'semantic_topology',
+            topologySupport: 'native',
+        });
+        expect(snapshot.embeddingModelAdapter).toMatchObject({
+            modelId: 'jina-v5-nano-retrieval',
+            selectedDimensions: 786,
+            topologySupport: 'native',
         });
         expect(snapshot.embeddingGraphPostProcess?.schemaVersion).toBe('phoenix-embedding-graph-postprocess/v1');
         expect(snapshot.embeddingGraphPostProcess?.vectorDimensions).toBe(786);
@@ -241,18 +250,47 @@ describe('Phoenix graph rebuild builder', () => {
         });
 
         expect(leafMt).toMatchObject({
+            dimensionLabel: '786d',
             selectedDimensions: 786,
             modelFamily: 'mdbr-leaf-mt',
             taskProfile: 'multi_task',
+            topologySupport: 'native',
             supportsTopology: true,
             supportsMultiTask: true,
+            supportsMultiVector: true,
         });
+        expect(leafMt.vectorHeads.map((head) => head.id)).toEqual([
+            'document',
+            'query',
+            'topology',
+            'classification',
+        ]);
         expect(jina).toMatchObject({
             selectedDimensions: 768,
             modelFamily: 'jina-v5',
             taskProfile: 'retrieval',
+            topologySupport: 'native',
             supportsTopology: true,
+            supportsMultiVector: true,
         });
+    });
+
+    it('normalizes embedding profiles through adapter defaults for odd dimensions', () => {
+        const profile = normalizeEmbeddingProfile({
+            modelId: 'jina-v5-topology',
+            modelLabel: 'Jina v5 Topology 786',
+            dimensionLabel: '786d',
+        });
+
+        expect(profile).toMatchObject({
+            selectedDimensions: 786,
+            nativeDimensions: 786,
+            taskProfile: 'semantic_topology',
+            topologySupport: 'native',
+            normalization: 'unit_l2',
+            supportsMultiVector: true,
+        });
+        expect(profile.vectorHeads.every((head) => head.dimensions === 786)).toBe(true);
     });
 
     it('suggests network hub affiliations from semantic status and structural role', () => {

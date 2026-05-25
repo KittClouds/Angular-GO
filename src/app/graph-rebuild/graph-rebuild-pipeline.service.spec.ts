@@ -96,6 +96,29 @@ describe('GraphRebuildPipelineService', () => {
         expect(graphRebuild.buildAndPersistSnapshot).not.toHaveBeenCalled();
     });
 
+    it('builds the clean graph stage with only Dynamic NER warm', async () => {
+        atlasRuntime.capabilityState.mockImplementation((capability: string) => ({
+            requiredModels: [{
+                id: capability === 'semanticAtlas' ? 'semanticEmbedding' : capability === 'nliAdjudication' ? 'nli' : 'dynamicNer',
+                readiness: capability === 'dynamicNer' ? 'ready' : 'idle',
+                statusLabel: capability === 'dynamicNer' ? 'ready' : 'idle',
+            }],
+        }));
+
+        await service.buildCoreGraph(request());
+
+        expect(ner.runDynamicScan).toHaveBeenCalledTimes(1);
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalled();
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            postProcessMode: 'core',
+        }));
+        expect(graphRebuild.persistRunReceipt).toHaveBeenCalledWith(expect.objectContaining({
+            postProcessMode: 'core',
+            projectionReceipts: [],
+            message: expect.stringContaining('Clean graph built'),
+        }));
+    });
+
     it('runs full atlas stages, then builds the final snapshot from NLI hints', async () => {
         await service.buildFullAtlas(request());
 
@@ -129,6 +152,8 @@ describe('GraphRebuildPipelineService', () => {
             status: 'completed',
             snapshotId: 'snapshot-1',
             counters: expect.objectContaining({ nodes: 2, edges: 1 }),
+            postProcessMode: 'full',
+            postProcessFingerprint: expect.any(String),
             projectionReceipts: expect.arrayContaining([
                 expect.objectContaining({ mode: 'hybrid', status: 'synced' }),
                 expect.objectContaining({ mode: 'hopf', status: 'synced' }),
@@ -136,6 +161,49 @@ describe('GraphRebuildPipelineService', () => {
             ]),
         }));
         expect(service.lastSnapshot()?.id).toBe('snapshot-1');
+    });
+
+    it('reuses postprocess cache when the scope and adapter fingerprint match', async () => {
+        const first = await service.postProcessAtlas(request());
+        expect(graphRebuild.persistPostProcessCache).toHaveBeenCalledWith(
+            first.receipt.postProcessFingerprint,
+            first.snapshot,
+            first.receipt,
+        );
+        graphRebuild.loadPostProcessCache.mockResolvedValue({
+            schemaVersion: 'phoenix-graph-postprocess-cache/v1',
+            scopeId: first.snapshot.scopeId,
+            fingerprint: first.receipt.postProcessFingerprint,
+            snapshot: first.snapshot,
+            receipt: first.receipt,
+            updatedAt: 1,
+        });
+        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(null);
+        graphRebuild.loadPersistedSnapshot.mockResolvedValue(null);
+        atlasRuntime.runCapability.mockClear();
+
+        const second = await service.postProcessAtlas(request());
+
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalled();
+        expect(graphRebuild.restorePersistedSnapshot).toHaveBeenCalledWith(first.snapshot);
+        expect(second.receipt.postProcessCacheHit).toBe(true);
+        expect(second.receipt.stageReceipts).toEqual([
+            expect.objectContaining({ id: 'postProcessCache', status: 'skipped' }),
+        ]);
+    });
+
+    it('runs postprocess stages without rescanning NER', async () => {
+        await service.postProcessAtlas(request());
+
+        expect(ner.runDynamicScan).not.toHaveBeenCalled();
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            postProcessMode: 'full',
+            relationshipHints: [expect.objectContaining({
+                sourceId: 'entity-kai',
+                targetId: 'entity-hazel',
+                status: 'accepted',
+            })],
+        }));
     });
 
     it('does not rewrite entity kinds from Angular location context during rebuild', async () => {
@@ -183,6 +251,7 @@ function createGraphRebuildMock() {
     return {
         buildAndPersistSnapshot: vi.fn(async () => ({
             id: 'snapshot-1',
+            embeddingGraphPostProcess: { schemaVersion: 'phoenix-embedding-graph-postprocess/v1' },
             counters: {
                 nodes: 2,
                 edges: 1,
@@ -200,7 +269,12 @@ function createGraphRebuildMock() {
                 },
             },
         })),
+        loadPersistedSnapshot: vi.fn(async () => null),
+        loadPersistedRunReceipt: vi.fn(async () => null),
+        loadPostProcessCache: vi.fn(async () => null),
         persistRunReceipt: vi.fn(async () => undefined),
+        persistPostProcessCache: vi.fn(async () => undefined),
+        restorePersistedSnapshot: vi.fn(async () => undefined),
     };
 }
 

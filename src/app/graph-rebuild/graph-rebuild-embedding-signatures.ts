@@ -1,8 +1,11 @@
 import type {
     GraphRebuildEmbeddingModelAdapter,
+    GraphRebuildEmbeddingNormalization,
     GraphIndexModelSelection,
     GraphRebuildEmbeddingProfile,
     GraphRebuildEmbeddingTarget,
+    GraphRebuildEmbeddingTopologySupport,
+    GraphRebuildEmbeddingVectorHead,
 } from './graph-rebuild-snapshot';
 
 export interface SparseEmbeddingSignature {
@@ -19,24 +22,18 @@ export function embeddingProfileFromModelSelection(
 export function embeddingModelAdapterFromSelection(
     selection: GraphIndexModelSelection,
 ): GraphRebuildEmbeddingModelAdapter {
-    const nativeDimensions = dimensionsFromLabel(selection.embeddingDimensionLabel)
-        || defaultNativeDimensions(selection.embeddingModelId);
-    const modelId = selection.embeddingModelId;
-    const modelLabel = selection.embeddingModelLabel || modelId;
-    const task = taskProfile(modelId, modelLabel);
-    return {
-        schemaVersion: 'phoenix-embedding-model-adapter/v1',
-        modelId,
-        modelLabel,
-        modelFamily: modelFamily(modelId, modelLabel),
-        nativeDimensions,
-        selectedDimensions: nativeDimensions,
-        taskProfile: task,
+    return embeddingModelAdapterFromConfig({
+        modelId: selection.embeddingModelId,
+        modelLabel: selection.embeddingModelLabel || selection.embeddingModelId,
+        dimensionLabel: selection.embeddingDimensionLabel,
         vectorSource: 'signature-preview',
-        normalized: true,
-        supportsTopology: true,
-        supportsMultiTask: task === 'multi_task',
-    };
+    });
+}
+
+export function embeddingModelAdapterFromProfile(
+    profile: Partial<GraphRebuildEmbeddingProfile> | undefined,
+): GraphRebuildEmbeddingModelAdapter {
+    return embeddingModelAdapterFromConfig(profile || {});
 }
 
 export function profileFromEmbeddingAdapter(adapter: GraphRebuildEmbeddingModelAdapter): GraphRebuildEmbeddingProfile {
@@ -45,36 +42,68 @@ export function profileFromEmbeddingAdapter(adapter: GraphRebuildEmbeddingModelA
         modelId: adapter.modelId,
         modelLabel: adapter.modelLabel,
         modelFamily: adapter.modelFamily,
-        dimensionLabel: `${adapter.selectedDimensions}d`,
+        dimensionLabel: adapter.dimensionLabel,
         nativeDimensions: adapter.nativeDimensions,
         selectedDimensions: adapter.selectedDimensions,
         taskProfile: adapter.taskProfile,
         vectorSource: adapter.vectorSource,
         normalized: adapter.normalized,
+        normalization: adapter.normalization,
+        topologySupport: adapter.topologySupport,
+        supportsMultiVector: adapter.supportsMultiVector,
+        vectorHeads: adapter.vectorHeads,
     };
 }
 
 export function normalizeEmbeddingProfile(
     profile: Partial<GraphRebuildEmbeddingProfile> | undefined,
 ): GraphRebuildEmbeddingProfile {
-    const modelId = profile?.modelId || 'mongodb-leaf';
-    const nativeDimensions = positiveInt(profile?.nativeDimensions)
-        || dimensionsFromLabel(profile?.dimensionLabel)
-        || defaultNativeDimensions(modelId);
-    const selectedDimensions = positiveInt(profile?.selectedDimensions)
-        || dimensionsFromLabel(profile?.dimensionLabel)
+    return profileFromEmbeddingAdapter(embeddingModelAdapterFromProfile(profile));
+}
+
+interface EmbeddingAdapterConfig extends Partial<GraphRebuildEmbeddingProfile> {
+    supportsTopology?: boolean;
+    supportsMultiTask?: boolean;
+}
+
+function embeddingModelAdapterFromConfig(config: EmbeddingAdapterConfig): GraphRebuildEmbeddingModelAdapter {
+    const modelId = config.modelId || 'mongodb-leaf';
+    const modelLabel = config.modelLabel || modelId;
+    const family = config.modelFamily || modelFamily(modelId, modelLabel);
+    const nativeDimensions = positiveInt(config.nativeDimensions)
+        || dimensionsFromLabel(config.dimensionLabel)
+        || defaultNativeDimensions(modelId, modelLabel);
+    const selectedDimensions = positiveInt(config.selectedDimensions)
+        || dimensionsFromLabel(config.dimensionLabel)
         || nativeDimensions;
+    const normalized = config.normalized ?? true;
+    const normalization = config.normalization || normalizationMode(normalized);
+    const task = config.taskProfile || taskProfile(modelId, modelLabel);
+    const topologySupport = config.topologySupport || topologySupportForModel(family, task);
+    const vectorHeads = normalizeVectorHeads(
+        config.vectorHeads,
+        family,
+        selectedDimensions,
+        normalized,
+    );
+
     return {
-        schemaVersion: 'phoenix-embedding-profile/v1',
+        schemaVersion: 'phoenix-embedding-model-adapter/v1',
         modelId,
-        modelLabel: profile?.modelLabel || modelId,
-        modelFamily: profile?.modelFamily || modelFamily(modelId, profile?.modelLabel),
-        dimensionLabel: profile?.dimensionLabel || `${selectedDimensions}d`,
+        modelLabel,
+        modelFamily: family,
+        dimensionLabel: config.dimensionLabel || `${selectedDimensions}d`,
         nativeDimensions,
         selectedDimensions,
-        taskProfile: profile?.taskProfile || taskProfile(modelId, profile?.modelLabel),
-        vectorSource: profile?.vectorSource || 'signature-preview',
-        normalized: profile?.normalized ?? true,
+        taskProfile: task,
+        vectorSource: config.vectorSource || 'signature-preview',
+        normalized,
+        normalization,
+        topologySupport,
+        supportsTopology: config.supportsTopology ?? topologySupport !== 'none',
+        supportsMultiTask: config.supportsMultiTask ?? task === 'multi_task',
+        supportsMultiVector: config.supportsMultiVector ?? vectorHeads.length > 1,
+        vectorHeads,
     };
 }
 
@@ -148,8 +177,10 @@ function dimensionsFromLabel(label: string | undefined): number {
     return match ? positiveInt(Number(match[1])) : 0;
 }
 
-function defaultNativeDimensions(modelId: string): number {
-    if (/jina.*v5/i.test(modelId)) return 768;
+function defaultNativeDimensions(modelId: string, modelLabel = ''): number {
+    const text = `${modelId} ${modelLabel}`;
+    if (/jina.*v5/i.test(text)) return 786;
+    if (/(mdbr|mongodb.*leaf|leaf).*mt|mt.*(mdbr|leaf)/i.test(text)) return 768;
     return 384;
 }
 
@@ -165,9 +196,94 @@ function modelFamily(modelId: string, modelLabel = ''): string {
 function taskProfile(modelId: string, modelLabel = ''): GraphRebuildEmbeddingProfile['taskProfile'] {
     const text = `${modelId} ${modelLabel}`;
     if (/(mdbr|mongodb.*leaf|leaf).*mt|mt.*(mdbr|leaf)/i.test(text)) return 'multi_task';
+    if (/jina.*v5/i.test(text) && !/retrieval|query|ir/i.test(text)) return 'semantic_topology';
+    if (/mdbr|mongodb.*leaf|leaf/i.test(text)) return 'retrieval';
     if (/ir|retrieval|bge/i.test(text)) return 'retrieval';
     if (/jina.*v5/i.test(text)) return 'semantic_topology';
     return 'unknown';
+}
+
+function normalizationMode(normalized: boolean): GraphRebuildEmbeddingNormalization {
+    return normalized ? 'unit_l2' : 'none';
+}
+
+function topologySupportForModel(
+    family: string,
+    task: GraphRebuildEmbeddingProfile['taskProfile'],
+): GraphRebuildEmbeddingTopologySupport {
+    if (family === 'mdbr-leaf-mt' || family === 'jina-v5') return 'native';
+    if (task === 'unknown') return 'none';
+    return 'derived';
+}
+
+function normalizeVectorHeads(
+    heads: GraphRebuildEmbeddingVectorHead[] | undefined,
+    family: string,
+    dimensions: number,
+    normalized: boolean,
+): GraphRebuildEmbeddingVectorHead[] {
+    const source = heads && heads.length ? heads : defaultVectorHeads(family, dimensions, normalized);
+    const seen = new Set<string>();
+    const out: GraphRebuildEmbeddingVectorHead[] = [];
+    for (const head of source) {
+        const id = head.id || head.kind;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push({
+            id,
+            kind: head.kind || 'dense',
+            dimensions: positiveInt(head.dimensions) || dimensions,
+            normalized: head.normalized ?? normalized,
+            required: head.required ?? (id === 'dense' || id === 'document'),
+            purpose: head.purpose || headPurpose(id, head.kind || 'dense'),
+        });
+    }
+    return out.length ? out : defaultVectorHeads('unknown', dimensions, normalized);
+}
+
+function defaultVectorHeads(
+    family: string,
+    dimensions: number,
+    normalized: boolean,
+): GraphRebuildEmbeddingVectorHead[] {
+    if (family === 'mdbr-leaf-mt') {
+        return [
+            vectorHead('document', 'document', dimensions, normalized, true, 'document and chunk topology vectors'),
+            vectorHead('query', 'query', dimensions, normalized, false, 'query-side retrieval vectors'),
+            vectorHead('topology', 'topology', dimensions, normalized, false, 'cluster and product-lane vectors'),
+            vectorHead('classification', 'classification', dimensions, normalized, false, 'task or genre classification vectors'),
+        ];
+    }
+    if (family === 'jina-v5') {
+        return [
+            vectorHead('document', 'document', dimensions, normalized, true, 'document and graph topology vectors'),
+            vectorHead('query', 'query', dimensions, normalized, false, 'query-side retrieval vectors'),
+            vectorHead('topology', 'topology', dimensions, normalized, false, 'product manifold topology vectors'),
+        ];
+    }
+    return [
+        vectorHead('dense', 'dense', dimensions, normalized, true, 'single dense semantic vector'),
+    ];
+}
+
+function vectorHead(
+    id: string,
+    kind: GraphRebuildEmbeddingVectorHead['kind'],
+    dimensions: number,
+    normalized: boolean,
+    required: boolean,
+    purpose: string,
+): GraphRebuildEmbeddingVectorHead {
+    return { id, kind, dimensions, normalized, required, purpose };
+}
+
+function headPurpose(id: string, kind: GraphRebuildEmbeddingVectorHead['kind']): string {
+    if (id === 'dense' || kind === 'dense') return 'single dense semantic vector';
+    if (kind === 'query') return 'query-side retrieval vectors';
+    if (kind === 'document') return 'document and graph vectors';
+    if (kind === 'topology') return 'cluster and product-lane vectors';
+    if (kind === 'classification') return 'task or genre classification vectors';
+    return 'embedding vector head';
 }
 
 function positiveInt(value: unknown): number {

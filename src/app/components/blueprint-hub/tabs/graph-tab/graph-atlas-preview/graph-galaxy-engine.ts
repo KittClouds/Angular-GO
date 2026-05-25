@@ -262,7 +262,7 @@ export function buildGalaxyScene(
 
     if (settings.layoutMode === 'productManifold') {
         applyGalaxyMetadata(nodes);
-        const lorentzGuides = applyLorentzTreeLayout(nodes, links);
+        const lorentzGuides = applyLorentzTreeLayout(nodes, links, { productTopologyGeometry: true });
         const hopfNodes = productHopfProjectionNodes(nodes, links);
         const hopfLinks = links.map((link) => ({ ...link }));
         const hopfRibbons = applyHopfProjectionLayout(hopfNodes, hopfLinks);

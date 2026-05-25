@@ -19,7 +19,7 @@
         <section class="atlas-panel">
             <button type="button" class="atlas-action-trigger" (click)="toggleControls()">
                 <lucide-icon [img]="SparklesIcon" class="h-4 w-4"></lucide-icon>
-                Atlas Controls
+                Product Diagnostics
                 <lucide-icon [img]="ChevronDownIcon" class="h-4 w-4 transition" [class.rotate-180]="controlsOpen()"></lucide-icon>
             </button>
             @if (scanError) {
@@ -30,13 +30,85 @@
 
     @if (controlsOpen()) {
     <div class="atlas-controls-shell">
-        @if (selectedEntity) {
-        <app-entity-steward [entity]="selectedEntity" [contextId]="contextId"></app-entity-steward>
+        @if (diagnosticsLoading()) {
+        <div class="atlas-empty atlas-control-empty">
+            <lucide-icon [img]="SparklesIcon" class="h-5 w-5"></lucide-icon>
+            <p>Loading diagnostics</p>
+            <span>Reading the latest graph rebuild snapshot.</span>
+        </div>
+        } @else if (diagnosticsError()) {
+        <p class="atlas-error">{{ diagnosticsError() }}</p>
+        } @else if (productDiagnostics(); as diagnostics) {
+        <section class="diagnostics-panel">
+            <div class="diagnostics-header">
+                <div>
+                    <span class="diagnostics-kicker">Product manifold</span>
+                    <h3>{{ selectedEntity?.label || 'Topology summary' }}</h3>
+                </div>
+                <span class="diagnostics-pill">{{ diagnostics.dimensionLabel }}</span>
+            </div>
+
+            @if (diagnostics.selected; as target) {
+            <div class="diagnostics-grid">
+                <div class="diagnostic-tile"><span>Region</span><strong>{{ target.region }}</strong></div>
+                <div class="diagnostic-tile"><span>Lane</span><strong>{{ target.lane }}</strong></div>
+                <div class="diagnostic-tile diagnostic-wide"><span>Cluster</span><strong>{{ target.cluster }}</strong></div>
+                <div class="diagnostic-tile diagnostic-wide"><span>Medoid</span><strong>{{ target.medoid }}</strong></div>
+                <div class="diagnostic-tile"><span>Outlier</span><strong>{{ scorePercent(target.outlierScore) }}%</strong></div>
+                <div class="diagnostic-tile"><span>Hub</span><strong>{{ scorePercent(target.hubScore) }}%</strong></div>
+            </div>
+
+            <div class="diagnostic-lanes">
+                <span class="diagnostics-kicker">Lane weights</span>
+                @for (weight of target.laneWeights.slice(0, 5); track weight.lane) {
+                <div class="lane-row">
+                    <span>{{ weight.lane }}</span>
+                    <div class="lane-meter"><i [style.width.%]="scorePercent(weight.value)"></i></div>
+                    <strong>{{ scorePercent(weight.value) }}%</strong>
+                </div>
+                }
+            </div>
+            } @else {
+            <div class="diagnostics-grid">
+                <div class="diagnostic-tile"><span>Targets</span><strong>{{ diagnostics.summary.targetCount }}</strong></div>
+                <div class="diagnostic-tile"><span>Clusters</span><strong>{{ diagnostics.summary.clusterCount }}</strong></div>
+                <div class="diagnostic-tile"><span>Regions</span><strong>{{ diagnostics.summary.regionCount }}</strong></div>
+                <div class="diagnostic-tile"><span>Outliers</span><strong>{{ diagnostics.summary.outliers }}</strong></div>
+                <div class="diagnostic-tile"><span>Backbone</span><strong>{{ diagnostics.summary.backboneEdges }}</strong></div>
+                <div class="diagnostic-tile"><span>Bridges</span><strong>{{ diagnostics.summary.bridgeEdges }}</strong></div>
+            </div>
+            <div class="diagnostic-lanes">
+                <span class="diagnostics-kicker">Region pressure</span>
+                @for (region of diagnostics.summary.topRegions; track region.role + ':' + region.lane) {
+                <div class="region-row">
+                    <strong>{{ region.role }}</strong>
+                    <span>{{ region.lane }}</span>
+                    <em>{{ region.count }}</em>
+                </div>
+                }
+            </div>
+            }
+
+            <div class="diagnostic-suggestions">
+                <span class="diagnostics-kicker">Rerank signals</span>
+                @for (suggestion of diagnostics.suggestions; track suggestion.id) {
+                <article class="diagnostic-suggestion">
+                    <div>
+                        <strong>{{ suggestion.label }}</strong>
+                        <span>{{ suggestion.region }} / {{ suggestion.lane }} / {{ scorePercent(suggestion.confidence) }}%</span>
+                    </div>
+                    <p>{{ suggestion.signals.slice(0, 4).join(' | ') || 'no rerank signals' }}</p>
+                </article>
+                } @empty {
+                <div class="empty-row">No graph-aware rerank signals for this scope yet.</div>
+                }
+            </div>
+        </section>
         } @else {
         <div class="atlas-empty atlas-control-empty">
             <lucide-icon [img]="SparklesIcon" class="h-5 w-5"></lucide-icon>
-            <p>Select an entity</p>
-            <span>Atlas Controls opens the steward surface for whichever entity is active.</span>
+            <p>No Product diagnostics yet</p>
+            <span>Run Full Atlas so topology, lanes, and rerank signals can be inspected here.</span>
         </div>
         }
     </div>

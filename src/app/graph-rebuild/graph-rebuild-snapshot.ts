@@ -207,6 +207,31 @@ export type GraphRebuildEmbeddingTaskProfile =
     | 'multi_task'
     | 'unknown';
 
+export type GraphRebuildEmbeddingNormalization =
+    | 'unit_l2'
+    | 'none';
+
+export type GraphRebuildEmbeddingTopologySupport =
+    | 'none'
+    | 'derived'
+    | 'native';
+
+export type GraphRebuildEmbeddingVectorHeadKind =
+    | 'dense'
+    | 'query'
+    | 'document'
+    | 'topology'
+    | 'classification';
+
+export interface GraphRebuildEmbeddingVectorHead {
+    id: string;
+    kind: GraphRebuildEmbeddingVectorHeadKind;
+    dimensions: number;
+    normalized: boolean;
+    required: boolean;
+    purpose: string;
+}
+
 export interface GraphRebuildEmbeddingProfile {
     schemaVersion: 'phoenix-embedding-profile/v1';
     modelId: string;
@@ -218,6 +243,10 @@ export interface GraphRebuildEmbeddingProfile {
     taskProfile: GraphRebuildEmbeddingTaskProfile;
     vectorSource: 'signature-preview' | 'semantic-runner' | 'external';
     normalized: boolean;
+    normalization: GraphRebuildEmbeddingNormalization;
+    topologySupport: GraphRebuildEmbeddingTopologySupport;
+    supportsMultiVector: boolean;
+    vectorHeads: GraphRebuildEmbeddingVectorHead[];
 }
 
 export interface GraphRebuildEmbeddingModelAdapter {
@@ -225,13 +254,18 @@ export interface GraphRebuildEmbeddingModelAdapter {
     modelId: string;
     modelLabel: string;
     modelFamily: string;
+    dimensionLabel: string;
     nativeDimensions: number;
     selectedDimensions: number;
     taskProfile: GraphRebuildEmbeddingTaskProfile;
     vectorSource: 'semantic-runner' | 'signature-preview' | 'external';
     normalized: boolean;
+    normalization: GraphRebuildEmbeddingNormalization;
+    topologySupport: GraphRebuildEmbeddingTopologySupport;
     supportsTopology: boolean;
     supportsMultiTask: boolean;
+    supportsMultiVector: boolean;
+    vectorHeads: GraphRebuildEmbeddingVectorHead[];
 }
 
 export interface GraphRebuildProjectionRef {
@@ -374,6 +408,7 @@ export interface GraphRebuildEmbeddingGraphMetrics {
 export interface GraphRebuildEmbeddingGraphPostProcess {
     schemaVersion: 'phoenix-embedding-graph-postprocess/v1';
     profile: GraphRebuildEmbeddingProfile;
+    adapter: GraphRebuildEmbeddingModelAdapter;
     targetCount: number;
     vectorDimensions: number;
     clusters: GraphRebuildEmbeddingCluster[];
@@ -409,6 +444,50 @@ export interface GraphRebuildLinkSuggestion {
     rerankSignals?: string[];
     rationale: string[];
     evidenceIds: string[];
+}
+
+export type GraphRebuildEntityLinkDecision =
+    | 'same_entity'
+    | 'alias_of'
+    | 'new_entity'
+    | 'ambiguous'
+    | 'reject';
+
+export interface GraphRebuildEntityLinkSuggestion {
+    id: string;
+    mentionId?: string;
+    surface: string;
+    normalizedSurface: string;
+    noteId?: string;
+    chunkId?: string;
+    sourceStart?: number;
+    sourceEnd?: number;
+    candidateEntityId?: string;
+    candidateLabel?: string;
+    candidateKind?: string;
+    decision: GraphRebuildEntityLinkDecision;
+    status: 'review' | 'confirmed';
+    confidence: number;
+    rerankScore: number;
+    structuralRole?: GraphRebuildStructuralEdgeRole | GraphRebuildStructuralNodeRole | 'shared_component';
+    embeddingRole?: GraphRebuildEmbeddingBackboneRole | 'same_cluster' | 'cross_cluster' | 'outlier';
+    productRegionRole?: GraphRebuildProductTopologyRegionRole | 'cross_region';
+    productLane?: GraphRebuildProductLaneKind | 'mixed';
+    competingEntityIds: string[];
+    evidenceIds: string[];
+    rerankSignals: string[];
+    rationale: string[];
+}
+
+export interface GraphRebuildEntityLinkCounters {
+    candidateMentions: number;
+    candidateLinks: number;
+    sameEntity: number;
+    aliasOf: number;
+    newEntity: number;
+    ambiguous: number;
+    rejected: number;
+    autoConfirmable: number;
 }
 
 export interface GraphRebuildDropReasons {
@@ -479,6 +558,8 @@ export interface GraphRebuildCounters {
     embeddingBridgeEdges?: number;
     embeddingOutliers?: number;
     graphAwareLinkSuggestions?: number;
+    entityLinkSuggestions?: number;
+    entityLinking?: GraphRebuildEntityLinkCounters;
     meaningFrameChunks?: number;
     eventAspects?: number;
     dropReasons: GraphRebuildDropReasons;
@@ -505,17 +586,20 @@ export interface GraphRebuildSnapshot {
     embeddingTargets: GraphRebuildEmbeddingTarget[];
     embeddingVectors: GraphRebuildEmbeddingVector[];
     embeddingProfile?: GraphRebuildEmbeddingProfile;
+    embeddingModelAdapter?: GraphRebuildEmbeddingModelAdapter;
     embeddingGraphPostProcess?: GraphRebuildEmbeddingGraphPostProcess;
     projectionRefs: GraphRebuildProjectionRef[];
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
     structuralPostProcess?: GraphRebuildStructuralPostProcess;
     graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
+    entityLinkSuggestions?: GraphRebuildEntityLinkSuggestion[];
     counters: GraphRebuildCounters;
     resolutionSuggestions?: GraphRebuildResolutionSuggestion[];
 }
 
 export type GraphIndexPolicy = 'delta' | 'force';
+export type GraphIndexPostProcessMode = 'core' | 'full';
 export type GraphIndexRunStatus = 'blocked' | 'running' | 'completed' | 'failed';
 export type GraphIndexStageStatus = 'blocked' | 'skipped' | 'running' | 'completed' | 'failed';
 export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz' | 'product';
@@ -538,6 +622,7 @@ export interface GraphIndexModelSelection {
 export interface GraphIndexRunRequest {
     scope: GraphIndexRunScope;
     policy: GraphIndexPolicy;
+    postProcessMode?: GraphIndexPostProcessMode;
     modelSelection: GraphIndexModelSelection;
     entities: RegisteredEntity[];
 }
@@ -580,6 +665,9 @@ export interface GraphIndexRunReceipt {
     delta: boolean;
     status: GraphIndexRunStatus;
     modelSelection: GraphIndexModelSelection;
+    postProcessMode?: GraphIndexPostProcessMode;
+    postProcessFingerprint?: string;
+    postProcessCacheHit?: boolean;
     modelReadiness: GraphIndexModelReadiness[];
     startedAt: number;
     completedAt: number;
@@ -609,6 +697,7 @@ export interface BuildGraphRebuildSnapshotInput {
     relationshipHints?: GraphRebuildRelationshipHint[];
     noteTexts?: Record<string, string>;
     embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
+    postProcessMode?: GraphIndexPostProcessMode;
     candidateCount?: number;
     builtAt?: number;
 }

@@ -254,6 +254,7 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             'hybridManifold',
             'hopfProjection',
             'lorentzForest',
+            'productManifold',
         ]);
         expect(component.isCapabilitySelected('nliAdjudication')).toBe(false);
 
@@ -401,11 +402,12 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
         ]);
 
         component.setBuildScopeMode('note');
-        await component.buildFullAtlas();
+        await component.buildCoreAtlas();
 
-        expect(pipeline.buildFullAtlas).toHaveBeenCalledTimes(1);
-        expect(pipeline.buildFullAtlas.mock.calls[0][0]).toEqual(expect.objectContaining({
+        expect(pipeline.buildCoreGraph).toHaveBeenCalledTimes(1);
+        expect(pipeline.buildCoreGraph.mock.calls[0][0]).toEqual(expect.objectContaining({
             policy: 'delta',
+            postProcessMode: 'core',
             scope: expect.objectContaining({
                 kind: 'note',
                 scopeId: 'note:note-1',
@@ -413,6 +415,22 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             }),
         }));
         expect(machine.requestGraphFocus).toHaveBeenCalled();
+    });
+
+    it('runs the staged postprocess action separately from core graph', async () => {
+        const pipeline = injector.get(GraphRebuildPipelineService) as unknown as ReturnType<typeof createFullAtlasPipelineMock>;
+        pipeline.modelsReady.mockReturnValue(true);
+        pipeline.coreModelsReady.mockReturnValue(true);
+
+        component.setBuildScopeMode('note');
+        await component.postProcessAtlas();
+
+        expect(pipeline.postProcessAtlas).toHaveBeenCalledTimes(1);
+        expect(pipeline.postProcessAtlas.mock.calls[0][0]).toEqual(expect.objectContaining({
+            postProcessMode: 'full',
+            scope: expect.objectContaining({ scopeId: 'note:note-1' }),
+        }));
+        expect(pipeline.buildCoreGraph).not.toHaveBeenCalled();
     });
 });
 
@@ -539,17 +557,45 @@ function createFullAtlasPipelineMock() {
             { id: 'nli', label: 'NLI', status: 'idle', detail: 'idle' },
         ]),
         modelsReady: vi.fn(() => false),
+        coreModelsReady: vi.fn(() => true),
         loadModels: vi.fn(async () => undefined),
-        buildFullAtlas: vi.fn(async () => {
+        buildCoreGraph: vi.fn(async () => {
             const receipt = {
                 status: 'completed',
-                message: 'Full Atlas Index built 2 nodes and 1 edges.',
+                message: 'Clean graph built 2 nodes and 1 edges.',
+                postProcessMode: 'core',
                 durationMs: 12,
             };
             lastReceipt.set(receipt);
             return {
                 receipt,
                 snapshot: { counters: { nodes: 2, edges: 1 } },
+            };
+        }),
+        buildFullAtlas: vi.fn(async () => {
+            const receipt = {
+                status: 'completed',
+                message: 'Full Atlas Index built 2 nodes and 1 edges.',
+                postProcessMode: 'full',
+                durationMs: 12,
+            };
+            lastReceipt.set(receipt);
+            return {
+                receipt,
+                snapshot: { counters: { nodes: 2, edges: 1 } },
+            };
+        }),
+        postProcessAtlas: vi.fn(async () => {
+            const receipt = {
+                status: 'completed',
+                message: 'Postprocess built 3 embedding targets and 2 link suggestions.',
+                postProcessMode: 'full',
+                durationMs: 12,
+            };
+            lastReceipt.set(receipt);
+            return {
+                receipt,
+                snapshot: { counters: { nodes: 2, edges: 1, embeddingTargets: 3 } },
             };
         }),
     };

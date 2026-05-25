@@ -10,10 +10,12 @@ import { embeddingProfileFromModelSelection } from './graph-rebuild-embedding-si
 import { GraphRebuildService } from './graph-rebuild.service';
 import type {
     GraphIndexModelReadiness,
+    GraphIndexPostProcessMode,
     GraphIndexProjectionMode,
     GraphIndexProjectionReceipt,
     GraphIndexRunReceipt,
     GraphIndexRunRequest,
+    GraphIndexRunStatus,
     GraphIndexRunScope,
     GraphIndexStageReceipt,
     GraphRebuildCounters,
@@ -78,6 +80,10 @@ export class GraphRebuildPipelineService {
         return this.modelReadiness(request).every((model) => model.status === 'ready');
     }
 
+    coreModelsReady(request: GraphIndexRunRequest): boolean {
+        return this.modelReadiness(request).find((model) => model.id === 'dynamicNer')?.status === 'ready';
+    }
+
     async loadModels(request: GraphIndexRunRequest): Promise<void> {
         if (this.runningState()) return;
         this.runningState.set(true);
@@ -86,6 +92,109 @@ export class GraphRebuildPipelineService {
             await this.atlasRuntime.warmModelLane('dynamicNer', options);
             await this.atlasRuntime.warmModelLane('semanticEmbedding', options);
             await this.atlasRuntime.warmModelLane('nli', options);
+        } finally {
+            this.runningState.set(false);
+        }
+    }
+
+    async buildCoreGraph(request: GraphIndexRunRequest): Promise<PipelineResult> {
+        if (this.runningState()) {
+            throw new Error('Full Atlas Index is already running.');
+        }
+        if (!this.coreModelsReady(request)) {
+            throw new Error('Load Dynamic NER first.');
+        }
+
+        this.runningState.set(true);
+        const runStarted = Date.now();
+        const stageReceipts: GraphIndexStageReceipt[] = [];
+        const snapshotRef: { value?: GraphRebuildSnapshot } = {};
+        try {
+            const docs = await this.loadScopedDocuments(request.scope.noteIds);
+            const scope = expandScopeNoteIds(request.scope, docs);
+            const nerStage = await this.runStage('dynamicNer', 'Dynamic NER + Alex Deltas', async () => {
+                const counts = await this.runNerDeltas(docs);
+                return {
+                    outputCount: counts['acceptedAnchors'] || 0,
+                    counters: counts,
+                    message: `${counts['acceptedAnchors'] || 0} accepted anchors from ${counts['candidates'] || 0} candidates`,
+                };
+            });
+            stageReceipts.push(nerStage);
+            assertStageCompleted(nerStage);
+
+            const entities = smartGraphRegistry.getAllEntities().length
+                ? smartGraphRegistry.getAllEntities()
+                : request.entities;
+            const graphStage = await this.runStage('coreGraphSnapshot', 'Clean Graph Snapshot', async () => {
+                const snapshot = await this.graphRebuild.buildAndPersistSnapshot({
+                    scopeKind: scope.kind,
+                    scopeId: scope.scopeId,
+                    noteIds: scope.noteIds,
+                    entities,
+                    embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
+                    postProcessMode: 'core',
+                    candidateCount: nerStage.counters['candidates'] || 0,
+                });
+                snapshotRef.value = snapshot;
+                return {
+                    outputCount: snapshot.counters.nodes + snapshot.counters.edges,
+                    counters: {
+                        chunks: snapshot.counters.chunks,
+                        anchors: snapshot.counters.acceptedAnchors,
+                        nodes: snapshot.counters.nodes,
+                        edges: snapshot.counters.edges,
+                    },
+                    message: `${snapshot.counters.nodes} clean nodes / ${snapshot.counters.edges} clean edges`,
+                };
+            });
+            stageReceipts.push(graphStage);
+            assertStageCompleted(graphStage);
+            const completedSnapshot = snapshotRef.value;
+            if (!completedSnapshot) {
+                throw new Error('Clean graph stage completed without a snapshot.');
+            }
+
+            const completedAt = Date.now();
+            const receipt = this.buildRunReceipt({
+                idPrefix: 'core-atlas',
+                scope,
+                policy: request.policy,
+                postProcessMode: 'core',
+                modelSelection: request.modelSelection,
+                modelReadiness: this.modelReadiness({ ...request, scope }),
+                startedAt: runStarted,
+                completedAt,
+                stageReceipts,
+                projectionReceipts: [],
+                snapshot: completedSnapshot,
+                message: `Clean graph built ${completedSnapshot.counters.nodes} nodes and ${completedSnapshot.counters.edges} edges.`,
+            });
+            this.lastSnapshotState.set(completedSnapshot);
+            this.lastReceiptState.set(receipt);
+            await this.graphRebuild.persistRunReceipt(receipt);
+            return { receipt, snapshot: completedSnapshot };
+        } catch (error) {
+            const completedAt = Date.now();
+            const snapshot = snapshotRef.value || null;
+            const failedReceipt = this.buildRunReceipt({
+                idPrefix: 'core-atlas:failed',
+                scope: request.scope,
+                policy: request.policy,
+                postProcessMode: 'core',
+                modelSelection: request.modelSelection,
+                modelReadiness: this.modelReadiness(request),
+                startedAt: runStarted,
+                completedAt,
+                stageReceipts,
+                projectionReceipts: [],
+                snapshot,
+                status: 'failed',
+                message: error instanceof Error ? error.message : String(error),
+            });
+            if (snapshot) this.lastSnapshotState.set(snapshot);
+            this.lastReceiptState.set(failedReceipt);
+            throw error;
         } finally {
             this.runningState.set(false);
         }
@@ -112,6 +221,10 @@ export class GraphRebuildPipelineService {
             const docs = await this.loadScopedDocuments(request.scope.noteIds);
             const scope = expandScopeNoteIds(request.scope, docs);
             const options = this.atlasOptions({ ...request, scope });
+            const entities = smartGraphRegistry.getAllEntities().length
+                ? smartGraphRegistry.getAllEntities()
+                : request.entities;
+            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection);
             const nerStage = await this.runStage('dynamicNer', 'Dynamic NER + Alex Deltas', async () => {
                 const counts = await this.runNerDeltas(docs);
                 return {
@@ -138,11 +251,10 @@ export class GraphRebuildPipelineService {
                     scopeKind: scope.kind,
                     scopeId: scope.scopeId,
                     noteIds: scope.noteIds,
-                    entities: smartGraphRegistry.getAllEntities().length
-                        ? smartGraphRegistry.getAllEntities()
-                        : request.entities,
+                    entities,
                     relationshipHints,
                     embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
+                    postProcessMode: 'full',
                     candidateCount: nerStage.counters['candidates'] || 0,
                 });
                 return {
@@ -159,9 +271,10 @@ export class GraphRebuildPipelineService {
                         embeddingBackboneEdges: snapshot.counters.embeddingBackboneEdges || 0,
                         embeddingOutliers: snapshot.counters.embeddingOutliers || 0,
                         linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
+                        entityLinks: snapshot.counters.entityLinkSuggestions || 0,
                         nliHints: relationshipHints.length,
                     },
-                    message: `${snapshot.counters.nodes} nodes / ${snapshot.counters.edges} edges / ${snapshot.counters.graphAwareLinkSuggestions || 0} link suggestions`,
+                    message: `${snapshot.counters.nodes} nodes / ${snapshot.counters.edges} edges / ${snapshot.counters.graphAwareLinkSuggestions || 0} graph links / ${snapshot.counters.entityLinkSuggestions || 0} entity links`,
                 };
             });
             stageReceipts.push(graphStage);
@@ -181,6 +294,9 @@ export class GraphRebuildPipelineService {
                 delta: request.policy !== 'force',
                 status: 'completed',
                 modelSelection: request.modelSelection,
+                postProcessMode: 'full',
+                postProcessFingerprint: fingerprint,
+                postProcessCacheHit: false,
                 modelReadiness: this.modelReadiness({ ...request, scope }),
                 startedAt: runStarted,
                 completedAt,
@@ -191,7 +307,7 @@ export class GraphRebuildPipelineService {
                 counters: completedSnapshot?.counters || emptyCounters(),
                 dropReasons: completedSnapshot?.counters.dropReasons || emptyDropReasons(),
                 message: completedSnapshot
-                    ? `Full Atlas Index built ${completedSnapshot.counters.nodes} nodes and ${completedSnapshot.counters.edges} edges.`
+                    ? `Full Atlas Index built ${completedSnapshot.counters.nodes} nodes, ${completedSnapshot.counters.edges} edges, and ${completedSnapshot.counters.entityLinkSuggestions || 0} entity links.`
                     : 'Full Atlas Index completed without a graph snapshot.',
             };
             this.lastSnapshotState.set(completedSnapshot);
@@ -209,6 +325,7 @@ export class GraphRebuildPipelineService {
                 delta: request.policy !== 'force',
                 status: 'failed',
                 modelSelection: request.modelSelection,
+                postProcessMode: 'full',
                 modelReadiness,
                 startedAt: runStarted,
                 completedAt,
@@ -225,6 +342,238 @@ export class GraphRebuildPipelineService {
             throw error;
         } finally {
             this.runningState.set(false);
+        }
+    }
+
+    async postProcessAtlas(request: GraphIndexRunRequest): Promise<PipelineResult> {
+        if (this.runningState()) {
+            throw new Error('Full Atlas Index is already running.');
+        }
+        const modelReadiness = this.modelReadiness(request);
+        const cold = modelReadiness.filter((model) => model.status !== 'ready');
+        if (cold.length) {
+            throw new Error(`Load models first: ${cold.map((model) => model.label).join(', ')}.`);
+        }
+
+        this.runningState.set(true);
+        const runStarted = Date.now();
+        const stageReceipts: GraphIndexStageReceipt[] = [];
+        const projectionReceipts: GraphIndexProjectionReceipt[] = [];
+        const snapshotRef: { value?: GraphRebuildSnapshot } = {};
+        try {
+            const docs = await this.loadScopedDocuments(request.scope.noteIds);
+            const scope = expandScopeNoteIds(request.scope, docs);
+            const options = this.atlasOptions({ ...request, scope, postProcessMode: 'full' });
+            const entities = smartGraphRegistry.getAllEntities().length
+                ? smartGraphRegistry.getAllEntities()
+                : request.entities;
+            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection);
+            const postProcessCache = await this.safeLoadPostProcessCache(scope.scopeId, fingerprint);
+            const cachedReceipt = await this.safeLoadReceipt(scope.scopeId);
+            const cachedSnapshot = postProcessCache?.snapshot || await this.safeLoadSnapshot(scope.scopeId);
+            const cacheReceipt = postProcessCache?.receipt || cachedReceipt;
+            if (
+                request.policy !== 'force'
+                && cachedSnapshot?.embeddingGraphPostProcess
+                && (
+                    Boolean(postProcessCache)
+                    || (
+                        cacheReceipt?.postProcessMode === 'full'
+                        && cacheReceipt.postProcessFingerprint === fingerprint
+                    )
+                )
+            ) {
+                const completedAt = Date.now();
+                const cacheStage = skippedStage(
+                    'postProcessCache',
+                    'Postprocess Cache',
+                    runStarted,
+                    completedAt,
+                    'Embedding topology and graph-aware links reused from fingerprint cache',
+                );
+                const receipt = this.buildRunReceipt({
+                    idPrefix: 'postprocess-atlas',
+                    scope,
+                    policy: request.policy,
+                    postProcessMode: 'full',
+                    postProcessFingerprint: fingerprint,
+                    postProcessCacheHit: true,
+                    modelSelection: request.modelSelection,
+                    modelReadiness: this.modelReadiness({ ...request, scope }),
+                    startedAt: runStarted,
+                    completedAt,
+                    stageReceipts: [cacheStage],
+                    projectionReceipts: cacheReceipt?.projectionReceipts || [],
+                    snapshot: cachedSnapshot,
+                    message: 'Postprocess cache reused for this scope.',
+                });
+                this.lastSnapshotState.set(cachedSnapshot);
+                this.lastReceiptState.set(receipt);
+                await this.graphRebuild.restorePersistedSnapshot(cachedSnapshot);
+                await this.graphRebuild.persistRunReceipt(receipt);
+                return { receipt, snapshot: cachedSnapshot };
+            }
+
+            let relationshipHints: GraphRebuildRelationshipHint[] = [];
+            for (const capability of FULL_INDEX_CAPABILITIES) {
+                const receipt = await this.runCapabilityStage(capability, options, capability === 'nliAdjudication'
+                    ? (rawResult) => {
+                        relationshipHints = relationshipHintsFromNliResult(rawResult);
+                    }
+                    : undefined);
+                stageReceipts.push(receipt);
+                assertStageCompleted(receipt);
+            }
+
+            const graphStage = await this.runStage('postProcessSnapshot', 'Postprocess Snapshot', async () => {
+                const snapshot = await this.graphRebuild.buildAndPersistSnapshot({
+                    scopeKind: scope.kind,
+                    scopeId: scope.scopeId,
+                    noteIds: scope.noteIds,
+                    entities,
+                    relationshipHints,
+                    embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
+                    postProcessMode: 'full',
+                    candidateCount: cachedSnapshot?.counters.candidates || 0,
+                });
+                snapshotRef.value = snapshot;
+                return {
+                    outputCount: (snapshot.counters.embeddingTargets || 0)
+                        + (snapshot.counters.graphAwareLinkSuggestions || 0)
+                        + (snapshot.counters.entityLinkSuggestions || 0),
+                    counters: {
+                        embeddingTargets: snapshot.counters.embeddingTargets,
+                        embeddingClusters: snapshot.counters.embeddingClusters || 0,
+                        embeddingBackboneEdges: snapshot.counters.embeddingBackboneEdges || 0,
+                        embeddingOutliers: snapshot.counters.embeddingOutliers || 0,
+                        linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
+                        entityLinks: snapshot.counters.entityLinkSuggestions || 0,
+                        nliHints: relationshipHints.length,
+                    },
+                    message: `${snapshot.counters.embeddingTargets} targets / ${snapshot.counters.graphAwareLinkSuggestions || 0} graph links / ${snapshot.counters.entityLinkSuggestions || 0} entity links`,
+                };
+            });
+            stageReceipts.push(graphStage);
+            assertStageCompleted(graphStage);
+            const completedSnapshot = snapshotRef.value;
+            if (!completedSnapshot) {
+                throw new Error('Postprocess stage completed without a snapshot.');
+            }
+
+            for (const projection of PROJECTION_CAPABILITIES) {
+                projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, completedSnapshot));
+            }
+
+            const completedAt = Date.now();
+            const receipt = this.buildRunReceipt({
+                idPrefix: 'postprocess-atlas',
+                scope,
+                policy: request.policy,
+                postProcessMode: 'full',
+                postProcessFingerprint: fingerprint,
+                postProcessCacheHit: false,
+                modelSelection: request.modelSelection,
+                modelReadiness: this.modelReadiness({ ...request, scope }),
+                startedAt: runStarted,
+                completedAt,
+                stageReceipts,
+                projectionReceipts,
+                snapshot: completedSnapshot,
+                message: `Postprocess built ${completedSnapshot.counters.embeddingTargets} embedding targets, ${completedSnapshot.counters.graphAwareLinkSuggestions || 0} graph links, and ${completedSnapshot.counters.entityLinkSuggestions || 0} entity links.`,
+            });
+            this.lastSnapshotState.set(completedSnapshot);
+            this.lastReceiptState.set(receipt);
+            await this.graphRebuild.persistRunReceipt(receipt);
+            await this.graphRebuild.persistPostProcessCache(fingerprint, completedSnapshot, receipt);
+            return { receipt, snapshot: completedSnapshot };
+        } catch (error) {
+            const completedAt = Date.now();
+            const snapshot = snapshotRef.value || null;
+            const failedReceipt = this.buildRunReceipt({
+                idPrefix: 'postprocess-atlas:failed',
+                scope: request.scope,
+                policy: request.policy,
+                postProcessMode: 'full',
+                modelSelection: request.modelSelection,
+                modelReadiness,
+                startedAt: runStarted,
+                completedAt,
+                stageReceipts,
+                projectionReceipts,
+                snapshot,
+                status: 'failed',
+                message: error instanceof Error ? error.message : String(error),
+            });
+            if (snapshot) this.lastSnapshotState.set(snapshot);
+            this.lastReceiptState.set(failedReceipt);
+            throw error;
+        } finally {
+            this.runningState.set(false);
+        }
+    }
+
+    private buildRunReceipt(input: {
+        idPrefix: string;
+        scope: GraphIndexRunScope;
+        policy: GraphIndexRunRequest['policy'];
+        postProcessMode?: GraphIndexPostProcessMode;
+        postProcessFingerprint?: string;
+        postProcessCacheHit?: boolean;
+        modelSelection: GraphIndexRunRequest['modelSelection'];
+        modelReadiness: GraphIndexModelReadiness[];
+        startedAt: number;
+        completedAt: number;
+        stageReceipts: GraphIndexStageReceipt[];
+        projectionReceipts: GraphIndexProjectionReceipt[];
+        snapshot: GraphRebuildSnapshot | null;
+        status?: GraphIndexRunStatus;
+        message: string;
+    }): GraphIndexRunReceipt {
+        return {
+            schemaVersion: 'phoenix-graph-index-run/v1',
+            id: `${input.idPrefix}:${input.scope.scopeId}:${input.completedAt}`,
+            scope: input.scope,
+            policy: input.policy,
+            delta: input.policy !== 'force',
+            status: input.status || 'completed',
+            modelSelection: input.modelSelection,
+            postProcessMode: input.postProcessMode,
+            postProcessFingerprint: input.postProcessFingerprint,
+            postProcessCacheHit: input.postProcessCacheHit,
+            modelReadiness: input.modelReadiness,
+            startedAt: input.startedAt,
+            completedAt: input.completedAt,
+            durationMs: input.completedAt - input.startedAt,
+            stageReceipts: input.stageReceipts,
+            projectionReceipts: input.projectionReceipts,
+            snapshotId: input.snapshot?.id,
+            counters: input.snapshot?.counters || emptyCounters(),
+            dropReasons: input.snapshot?.counters.dropReasons || emptyDropReasons(),
+            message: input.message,
+        };
+    }
+
+    private async safeLoadSnapshot(scopeId: string): Promise<GraphRebuildSnapshot | null> {
+        try {
+            return await this.graphRebuild.loadPersistedSnapshot(scopeId);
+        } catch {
+            return null;
+        }
+    }
+
+    private async safeLoadReceipt(scopeId: string): Promise<GraphIndexRunReceipt | null> {
+        try {
+            return await this.graphRebuild.loadPersistedRunReceipt(scopeId);
+        } catch {
+            return null;
+        }
+    }
+
+    private async safeLoadPostProcessCache(scopeId: string, fingerprint: string) {
+        try {
+            return await this.graphRebuild.loadPostProcessCache(scopeId, fingerprint);
+        } catch {
+            return null;
         }
     }
 
@@ -492,6 +841,68 @@ function assertStageCompleted(receipt: GraphIndexStageReceipt): void {
     if (receipt.status !== 'completed') {
         throw new Error(receipt.message || `${receipt.label} failed.`);
     }
+}
+
+function skippedStage(
+    id: string,
+    label: string,
+    startedAt: number,
+    completedAt: number,
+    message: string,
+): GraphIndexStageReceipt {
+    return {
+        id,
+        label,
+        status: 'skipped',
+        startedAt,
+        completedAt,
+        durationMs: completedAt - startedAt,
+        outputCount: 0,
+        counters: { cacheHit: 1 },
+        message,
+    };
+}
+
+function postProcessFingerprint(
+    scope: GraphIndexRunScope,
+    docs: ScopedDocument[],
+    entities: Array<{ id: string; label: string; kind: string; aliases?: string[] }>,
+    modelSelection: GraphIndexRunRequest['modelSelection'],
+): string {
+    const payload = JSON.stringify({
+        scope: {
+            kind: scope.kind,
+            scopeId: scope.scopeId,
+            noteIds: [...scope.noteIds].sort(),
+        },
+        docs: docs
+            .map((doc) => ({
+                id: doc.id,
+                version: doc.version || 0,
+                updatedAt: doc.updatedAt || 0,
+                textHash: simpleHash(doc.plainText),
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        entities: entities
+            .map((entity) => ({
+                id: entity.id,
+                label: entity.label,
+                kind: entity.kind,
+                aliases: [...(entity.aliases || [])].sort(),
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        modelSelection,
+    });
+    return simpleHash(payload);
+}
+
+function simpleHash(value: string): string {
+    let out = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        out ^= value.charCodeAt(index);
+        out = Math.imul(out, 16777619);
+    }
+    return (out >>> 0).toString(16).padStart(8, '0');
 }
 
 function emptyCounters(): GraphRebuildCounters {

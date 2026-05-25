@@ -10,6 +10,7 @@ import {
   lucideCpu,
   lucideFileText,
   lucideFolder,
+  lucideGitBranch,
   lucideGlobe,
   lucideLayers,
   lucideLoader2,
@@ -36,7 +37,12 @@ import { BlueprintHubService } from '../blueprint-hub/blueprint-hub.service';
 import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
 import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
-import type { GraphIndexRunRequest, GraphIndexRunScope, GraphRebuildLinkSuggestion } from '../../graph-rebuild/graph-rebuild-snapshot';
+import type {
+  GraphIndexRunRequest,
+  GraphIndexRunScope,
+  GraphRebuildEntityLinkSuggestion,
+  GraphRebuildLinkSuggestion,
+} from '../../graph-rebuild/graph-rebuild-snapshot';
 import { smartGraphRegistry } from '../../lib/registry';
 import type {
   AtlasCapabilityRuntimeState,
@@ -114,6 +120,7 @@ type BuilderCapabilityGroup = {
     lucideCpu,
     lucideFileText,
     lucideFolder,
+    lucideGitBranch,
     lucideGlobe,
     lucideLayers,
     lucideLoader2,
@@ -372,6 +379,15 @@ export class SearchPanelComponent implements OnInit {
       .filter((suggestion) => !this.linkSuggestionDecisions()[this.linkSuggestionDecisionKey(suggestion)])
   );
   readonly graphAwareLinkSuggestionCount = computed(() => this.graphAwareLinkSuggestions().length);
+  readonly entityLinkSuggestionTotal = computed(() =>
+    this.fullAtlasPipeline.lastSnapshot()?.counters.entityLinkSuggestions
+      ?? this.fullAtlasPipeline.lastReceipt()?.counters.entityLinkSuggestions
+      ?? this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions?.length
+      ?? 0
+  );
+  readonly entityLinkSuggestions = computed(() =>
+    (this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions || []).slice(0, 12)
+  );
   readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
   readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
   readonly selectedCapabilityState = computed(() =>
@@ -421,6 +437,7 @@ export class SearchPanelComponent implements OnInit {
   }));
   readonly fullAtlasModelReadiness = computed(() => this.fullAtlasPipeline.modelReadiness(this.fullAtlasRequest()));
   readonly fullAtlasModelsReady = computed(() => this.fullAtlasPipeline.modelsReady(this.fullAtlasRequest()));
+  readonly fullAtlasCoreReady = computed(() => this.fullAtlasPipeline.coreModelsReady(this.fullAtlasRequest()));
   readonly fullAtlasBusy = this.fullAtlasPipeline.running;
   readonly recipeLifecycle = computed(() => buildAtlasRecipeLifecycle(
     this.activeRecipeStep(),
@@ -598,10 +615,32 @@ export class SearchPanelComponent implements OnInit {
   }
 
   async buildFullAtlas(): Promise<void> {
+    await this.buildCoreAtlas();
+  }
+
+  async buildCoreAtlas(): Promise<void> {
     if (this.isFullAtlasBuildDisabled()) return;
     this.error.set(null);
     try {
-      const result = await this.fullAtlasPipeline.buildFullAtlas(this.fullAtlasRequest());
+      const result = await this.fullAtlasPipeline.buildCoreGraph({
+        ...this.fullAtlasRequest(),
+        postProcessMode: 'core',
+      });
+      this.notice.set(result.receipt.message);
+      this.openGraphLens();
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
+  async postProcessAtlas(): Promise<void> {
+    if (this.isPostProcessDisabled()) return;
+    this.error.set(null);
+    try {
+      const result = await this.fullAtlasPipeline.postProcessAtlas({
+        ...this.fullAtlasRequest(),
+        postProcessMode: 'full',
+      });
       this.notice.set(result.receipt.message);
       this.openGraphLens();
     } catch (err) {
@@ -610,13 +649,23 @@ export class SearchPanelComponent implements OnInit {
   }
 
   isFullAtlasBuildDisabled(): boolean {
+    return this.fullAtlasBusy() || !this.fullAtlasCoreReady() || !this.hasRunnableBuildScope();
+  }
+
+  isPostProcessDisabled(): boolean {
     return this.fullAtlasBusy() || !this.fullAtlasModelsReady() || !this.hasRunnableBuildScope();
   }
 
   fullAtlasBuildButtonLabel(): string {
-    if (this.fullAtlasBusy()) return 'Building Atlas';
+    if (this.fullAtlasBusy()) return 'Building Core';
+    if (!this.fullAtlasCoreReady()) return 'Load NER First';
+    return this.buildPolicy() === 'force' ? 'Force Build Core' : 'Build Clean Graph';
+  }
+
+  postProcessButtonLabel(): string {
+    if (this.fullAtlasBusy()) return 'Working';
     if (!this.fullAtlasModelsReady()) return 'Load Models First';
-    return this.buildPolicy() === 'force' ? 'Force Build Full Atlas' : 'Build Full Atlas';
+    return this.buildPolicy() === 'force' ? 'Force Postprocess' : 'Postprocess';
   }
 
   loadModelsButtonLabel(): string {
@@ -859,6 +908,21 @@ export class SearchPanelComponent implements OnInit {
 
   linkSuggestionTitle(suggestion: GraphRebuildLinkSuggestion): string {
     return `${this.compactEntityId(suggestion.sourceEntityId)} -> ${this.compactEntityId(suggestion.targetEntityId)}`;
+  }
+
+  entityLinkDecisionLabel(decision: GraphRebuildEntityLinkSuggestion['decision']): string {
+    switch (decision) {
+      case 'same_entity': return 'Same';
+      case 'alias_of': return 'Alias';
+      case 'new_entity': return 'New';
+      case 'ambiguous': return 'Review';
+      case 'reject': return 'Reject';
+    }
+  }
+
+  entityLinkTitle(suggestion: GraphRebuildEntityLinkSuggestion): string {
+    const target = suggestion.candidateLabel || suggestion.candidateEntityId || 'new entity';
+    return `${suggestion.surface} -> ${target}`;
   }
 
   acceptLinkSuggestion(suggestion: GraphRebuildLinkSuggestion, event?: Event): void {

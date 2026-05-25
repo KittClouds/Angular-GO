@@ -101,7 +101,7 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
             const previous = mergeGalaxySettings(changes['settings'].previousValue);
             const current = mergeGalaxySettings(this.settings);
             if (this.renderer.hasContext()) this.renderer.setSettings(this.settings);
-            if (previous.layoutMode !== current.layoutMode) this.markLayoutDirty();
+            if (galaxySettingsNeedSceneRebuild(previous, current)) this.markLayoutDirty();
             if (this.viewReady) this.syncSurface();
         }
         if (changes['entities'] || changes['edges'] || changes['sourceMode']) this.markLayoutDirty();
@@ -357,4 +357,12 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
         const rect = this.canvasRef.nativeElement.getBoundingClientRect();
         return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
     }
+}
+
+export function galaxySettingsNeedSceneRebuild(previous: GalaxyRenderSettings, current: GalaxyRenderSettings): boolean {
+    return previous.layoutMode !== current.layoutMode ||
+        previous.embeddingTopologyMode !== current.embeddingTopologyMode ||
+        previous.nodeDistance !== current.nodeDistance ||
+        previous.edgeLength !== current.edgeLength ||
+        previous.edgeCurveStrength !== current.edgeCurveStrength;
 }

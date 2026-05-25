@@ -7,6 +7,10 @@ const LORENTZ_RING_SEGMENTS = 96;
 const LORENTZ_MAX_MEMBERSHIP_GUIDES = 220;
 const TAU = Math.PI * 2;
 
+interface LorentzTreeLayoutOptions {
+    productTopologyGeometry?: boolean;
+}
+
 const KIND_HSL: Record<string, string> = {
     identity: '188 80% 66%',
     relationship: '326 76% 66%',
@@ -27,7 +31,7 @@ const KIND_HSL: Record<string, string> = {
     ...GRAPH_RELATION_FAMILY_HSL,
 };
 
-export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
+export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[], options: LorentzTreeLayoutOptions = {}): GalaxyLorentzGuide[] {
     for (const node of nodes) {
         const info = lorentzNodeInfo(node);
         if (info) {
@@ -49,7 +53,7 @@ export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[])
         node.baseZ = node.z;
     }
 
-    applyProductTopologyGeometry(nodes, links);
+    if (options.productTopologyGeometry) applyProductTopologyGeometry(nodes, links);
 
     for (const link of links) {
         if (!isLorentzTreeEdge(link)) continue;

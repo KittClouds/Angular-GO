@@ -5,6 +5,7 @@ import type {
     GraphRebuildDropReasons,
     GraphRebuildEdge,
     GraphRebuildEntityAnchor,
+    GraphRebuildMention,
     GraphRebuildNode,
     GraphRebuildRelationship,
     GraphRebuildRelationshipHint,
@@ -13,6 +14,7 @@ import type {
 import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
 import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
 import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
+import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import {
@@ -61,17 +63,32 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         derived.causalEdges,
         derived.memoryState,
     );
-    const embeddingGraphPostProcess = buildGraphRebuildEmbeddingGraphPostProcess(
-        embeddingTargets,
-        input.embeddingProfile,
-    );
-    const graphAwareLinkSuggestions = buildGraphAwareLinkSuggestions(
-        nodes,
-        edges,
-        relationships,
-        structuralPostProcess,
-        embeddingGraphPostProcess,
-    );
+    const postProcessMode = input.postProcessMode || 'full';
+    const embeddingGraphPostProcess = postProcessMode === 'full'
+        ? buildGraphRebuildEmbeddingGraphPostProcess(
+            embeddingTargets,
+            input.embeddingProfile,
+        )
+        : undefined;
+    const graphAwareLinkSuggestions = postProcessMode === 'full'
+        ? buildGraphAwareLinkSuggestions(
+            nodes,
+            edges,
+            relationships,
+            structuralPostProcess,
+            embeddingGraphPostProcess,
+        )
+        : [];
+    const entityLinking = postProcessMode === 'full'
+        ? buildGraphRebuildEntityLinkSuggestions({
+            mentions,
+            entityAnchors,
+            nodes,
+            edges,
+            structuralPostProcess,
+            embeddingGraphPostProcess,
+        })
+        : { suggestions: [], counters: emptyEntityLinkCounters(mentions) };
     const noteIds = input.noteIds ? [...input.noteIds] : unique([
         ...chunks.map((chunk) => chunk.noteId),
         ...entityAnchors.map((anchor) => anchor.noteId),
@@ -96,13 +113,15 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         memoryState: derived.memoryState,
         embeddingTargets,
         embeddingVectors: [],
-        embeddingProfile: embeddingGraphPostProcess.profile,
+        embeddingProfile: embeddingGraphPostProcess?.profile,
+        embeddingModelAdapter: embeddingGraphPostProcess?.adapter,
         embeddingGraphPostProcess,
         projectionRefs: [],
         nodes,
         edges,
         structuralPostProcess,
         graphAwareLinkSuggestions,
+        entityLinkSuggestions: entityLinking.suggestions,
         counters: {
             entities: input.entities.length,
             aliases: resolver.aliasCount,
@@ -128,12 +147,14 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             structuralComponents: structuralPostProcess.components.length,
             structuralHubs: structuralPostProcess.hubEntityIds.length,
             structuralBridgeEdges: structuralPostProcess.bridgeEdgeIds.length,
-            embeddingClusters: embeddingGraphPostProcess.metrics.clusterCount,
-            embeddingSingletonClusters: embeddingGraphPostProcess.metrics.singletonCount,
-            embeddingBackboneEdges: embeddingGraphPostProcess.metrics.backboneEdgeCount,
-            embeddingBridgeEdges: embeddingGraphPostProcess.metrics.bridgeEdgeCount,
-            embeddingOutliers: embeddingGraphPostProcess.metrics.outlierCount,
+            embeddingClusters: embeddingGraphPostProcess?.metrics.clusterCount || 0,
+            embeddingSingletonClusters: embeddingGraphPostProcess?.metrics.singletonCount || 0,
+            embeddingBackboneEdges: embeddingGraphPostProcess?.metrics.backboneEdgeCount || 0,
+            embeddingBridgeEdges: embeddingGraphPostProcess?.metrics.bridgeEdgeCount || 0,
+            embeddingOutliers: embeddingGraphPostProcess?.metrics.outlierCount || 0,
             graphAwareLinkSuggestions: graphAwareLinkSuggestions.length,
+            entityLinkSuggestions: entityLinking.suggestions.length,
+            entityLinking: entityLinking.counters,
             meaningFrameChunks: chunks.filter((chunk) => Boolean(chunk.meaningFrame)).length,
             eventAspects: derived.events.filter((event) => Boolean(event.aspect)).length,
             dropReasons: drops,
@@ -340,4 +361,17 @@ function clamp(value: number, min: number, max: number): number {
 
 function unique(values: string[]): string[] {
     return [...new Set(values.filter(Boolean))];
+}
+
+function emptyEntityLinkCounters(mentions: GraphRebuildMention[]): GraphRebuildSnapshot['counters']['entityLinking'] {
+    return {
+        candidateMentions: mentions.filter((mention) => mention.status !== 'accepted').length,
+        candidateLinks: 0,
+        sameEntity: 0,
+        aliasOf: 0,
+        newEntity: 0,
+        ambiguous: 0,
+        rejected: 0,
+        autoConfirmable: 0,
+    };
 }

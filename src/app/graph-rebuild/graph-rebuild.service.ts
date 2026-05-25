@@ -13,6 +13,7 @@ import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames';
 import type {
     GraphIndexRunReceipt,
+    GraphIndexPostProcessMode,
     GraphRebuildEmbeddingProfile,
     GraphRebuildChunk,
     GraphRebuildRelationshipHint,
@@ -23,6 +24,16 @@ import type {
 export const GRAPH_REBUILD_NAMESPACE = 'phoenix_graph_rebuild_v1';
 const SNAPSHOT_DOCUMENT_KEY = 'snapshot';
 const RECEIPT_DOCUMENT_KEY = 'receipt';
+const POST_PROCESS_CACHE_PREFIX = 'postprocess-cache';
+
+export interface GraphRebuildPostProcessCache {
+    schemaVersion: 'phoenix-graph-postprocess-cache/v1';
+    scopeId: string;
+    fingerprint: string;
+    snapshot: GraphRebuildSnapshot;
+    receipt: GraphIndexRunReceipt;
+    updatedAt: number;
+}
 
 export interface GraphRebuildBuildRequest {
     scopeKind: GraphRebuildScopeKind;
@@ -31,6 +42,7 @@ export interface GraphRebuildBuildRequest {
     entities: RegisteredEntity[];
     relationshipHints?: GraphRebuildRelationshipHint[];
     embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
+    postProcessMode?: GraphIndexPostProcessMode;
     candidateCount?: number;
 }
 
@@ -61,6 +73,7 @@ export class GraphRebuildService {
                 noteTexts,
                 relationshipHints: request.relationshipHints,
                 embeddingProfile: request.embeddingProfile,
+                postProcessMode: request.postProcessMode,
                 candidateCount: request.candidateCount,
             });
             this.snapshotState.set(snapshot);
@@ -94,6 +107,31 @@ export class GraphRebuildService {
     async loadPersistedRunReceipt(scopeId: string): Promise<GraphIndexRunReceipt | null> {
         const document = await this.store.getScopedDocument(scopeId, GRAPH_REBUILD_NAMESPACE, RECEIPT_DOCUMENT_KEY);
         return document ? scopedDocumentToGraphIndexReceipt(document) : null;
+    }
+
+    async loadPostProcessCache(scopeId: string, fingerprint: string): Promise<GraphRebuildPostProcessCache | null> {
+        const document = await this.store.getScopedDocument(scopeId, GRAPH_REBUILD_NAMESPACE, postProcessCacheDocumentKey(fingerprint));
+        return document ? scopedDocumentToPostProcessCache(document) : null;
+    }
+
+    async persistPostProcessCache(
+        fingerprint: string,
+        snapshot: GraphRebuildSnapshot,
+        receipt: GraphIndexRunReceipt,
+    ): Promise<void> {
+        await this.store.upsertScopedDocument(postProcessCacheToScopedDocument({
+            schemaVersion: 'phoenix-graph-postprocess-cache/v1',
+            scopeId: snapshot.scopeId,
+            fingerprint,
+            snapshot,
+            receipt,
+            updatedAt: Date.now(),
+        }));
+    }
+
+    async restorePersistedSnapshot(snapshot: GraphRebuildSnapshot): Promise<void> {
+        this.snapshotState.set(snapshot);
+        await this.persistSnapshot(snapshot);
     }
 
     private async persistSnapshot(snapshot: GraphRebuildSnapshot): Promise<void> {
@@ -171,6 +209,33 @@ export function scopedDocumentToGraphIndexReceipt(document: StoreScopedDocument)
     try {
         const parsed = JSON.parse(document.payload) as GraphIndexRunReceipt;
         return parsed?.schemaVersion === 'phoenix-graph-index-run/v1' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function postProcessCacheDocumentKey(fingerprint: string): string {
+    return `${POST_PROCESS_CACHE_PREFIX}:${fingerprint}`;
+}
+
+function postProcessCacheToScopedDocument(cache: GraphRebuildPostProcessCache): StoreScopedDocument {
+    const now = Date.now();
+    return {
+        id: `${GRAPH_REBUILD_NAMESPACE}:${cache.scopeId}:${postProcessCacheDocumentKey(cache.fingerprint)}`,
+        scopeFolderId: cache.scopeId,
+        narrativeId: cache.snapshot.scopeKind === 'narrative' ? cache.scopeId : '',
+        namespace: GRAPH_REBUILD_NAMESPACE,
+        documentKey: postProcessCacheDocumentKey(cache.fingerprint),
+        payload: JSON.stringify(cache),
+        createdAt: cache.updatedAt || now,
+        updatedAt: now,
+    };
+}
+
+function scopedDocumentToPostProcessCache(document: StoreScopedDocument): GraphRebuildPostProcessCache | null {
+    try {
+        const parsed = JSON.parse(document.payload) as GraphRebuildPostProcessCache;
+        return parsed?.schemaVersion === 'phoenix-graph-postprocess-cache/v1' ? parsed : null;
     } catch {
         return null;
     }

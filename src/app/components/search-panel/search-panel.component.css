@@ -728,6 +728,10 @@ h3 {
   background: rgba(0, 0, 0, 0.18);
 }
 
+.entity-link-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
 .link-kind {
   min-width: 46px;
   color: #f5d0fe;

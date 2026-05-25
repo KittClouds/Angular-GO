@@ -12,6 +12,7 @@ import type {
     GraphRebuildProductTopologyRegionRole,
 } from './graph-rebuild-snapshot';
 import {
+    embeddingModelAdapterFromProfile,
     normalizeEmbeddingProfile,
     sparseCosine,
     sparseEmbeddingSignature,
@@ -32,6 +33,7 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
     profileInput?: Partial<GraphRebuildEmbeddingProfile>,
 ): GraphRebuildEmbeddingGraphPostProcess {
     const profile = normalizeEmbeddingProfile(profileInput);
+    const adapter = embeddingModelAdapterFromProfile(profile);
     const signatures = targets.map((target) => sparseEmbeddingSignature(target, profile.selectedDimensions));
     const neighbors = buildMutualNeighbors(signatures);
     const clusters = clusterTargets(targets, neighbors);
@@ -52,6 +54,7 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
     return {
         schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
         profile,
+        adapter,
         targetCount: targets.length,
         vectorDimensions: profile.selectedDimensions,
         clusters,

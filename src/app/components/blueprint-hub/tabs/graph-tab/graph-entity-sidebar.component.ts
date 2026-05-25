@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { ScrollingModule } from '@angular/cdk/scrolling';
-import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, inject, signal } from '@angular/core';
 import {
     BookOpen,
     Calendar,
@@ -28,8 +28,10 @@ import { entitySourceLabel, type RegisteredEntity } from '../../../../lib/regist
 import type { EntitySuggestionProviderId } from '../../../../lib/entity-suggestions/entity-suggestion.types';
 import { entityColorStore } from '../../../../lib/store/entityColorStore';
 import type { NerSuggestion } from '../../../../services/ner.service';
-import { EntityStewardComponent } from '../../../fact-sheets/entity-steward/entity-steward.component';
+import { GraphRebuildService } from '../../../../graph-rebuild/graph-rebuild.service';
+import type { GraphRebuildSnapshot } from '../../../../graph-rebuild/graph-rebuild-snapshot';
 import type { GraphLensMode } from './graph-lens';
+import { buildProductDiagnosticsView } from './graph-product-diagnostics';
 
 interface EntityGroup {
     kind: string;
@@ -56,11 +58,13 @@ const ENTITY_ICONS: Record<string, any> = {
 @Component({
     selector: 'app-graph-entity-sidebar',
     standalone: true,
-    imports: [CommonModule, ScrollingModule, LucideAngularModule, EntityStewardComponent],
+    imports: [CommonModule, ScrollingModule, LucideAngularModule],
     templateUrl: './graph-entity-sidebar.component.html',
     styleUrls: ['./graph-entity-sidebar.component.css'],
 })
 export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
+    private readonly graphRebuild = inject(GraphRebuildService);
+
     @Input() entities: RegisteredEntity[] = [];
     @Input() suggestions: NerSuggestion[] = [];
     @Input() selectedEntity: RegisteredEntity | null = null;
@@ -87,6 +91,10 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
     readonly controlsOpen = signal(false);
     readonly entitySearch = signal('');
     readonly expandedKinds = signal<Set<string>>(new Set());
+    readonly diagnosticsSnapshot = signal<GraphRebuildSnapshot | null>(null);
+    readonly diagnosticsLoading = signal(false);
+    readonly diagnosticsError = signal<string | null>(null);
+    private readonly selectedDiagnosticsEntity = signal<RegisteredEntity | null>(null);
     private readonly dataRevision = signal(0);
     private readonly unsubscribeColors = entityColorStore.subscribe(() => {
         this.dataRevision.update((revision) => revision + 1);
@@ -96,6 +104,9 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
         this.dataRevision();
         return this.flattenRows(this.groupedEntities());
     });
+    readonly productDiagnostics = computed(() =>
+        buildProductDiagnosticsView(this.diagnosticsSnapshot(), this.selectedDiagnosticsEntity()),
+    );
 
     readonly lensModes: { id: GraphLensMode; label: string }[] = [
         { id: 'global', label: 'Global' },
@@ -117,6 +128,18 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
     readonly TrashIcon = Trash2;
     readonly XIcon = X;
 
+    private readonly snapshotUpdated = (event: Event) => {
+        const detail = (event as CustomEvent<{ scopeId?: string }>).detail;
+        if (!detail?.scopeId || detail.scopeId === this.contextId) void this.refreshDiagnosticsSnapshot();
+    };
+
+    constructor() {
+        if (typeof window !== 'undefined') {
+            window.addEventListener('graph-rebuild-snapshot-updated', this.snapshotUpdated);
+            window.addEventListener('graph-index-run-completed', this.snapshotUpdated);
+        }
+    }
+
     ngOnChanges(changes: SimpleChanges): void {
         if (changes['entities']) {
             const nextKinds = new Set(this.entities.map((entity) => entity.kind));
@@ -126,14 +149,24 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
         if (changes['suggestions']) {
             this.dataRevision.update((value) => value + 1);
         }
+        if (changes['selectedEntity']) {
+            this.selectedDiagnosticsEntity.set(this.selectedEntity);
+        }
         if (changes['searchText'] && this.searchText !== this.entitySearch()) {
             this.entitySearch.set(this.searchText || '');
             this.dataRevision.update((value) => value + 1);
+        }
+        if (changes['contextId']) {
+            void this.refreshDiagnosticsSnapshot();
         }
     }
 
     ngOnDestroy(): void {
         this.unsubscribeColors();
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('graph-rebuild-snapshot-updated', this.snapshotUpdated);
+            window.removeEventListener('graph-index-run-completed', this.snapshotUpdated);
+        }
     }
 
     updateEntitySearch(value: string): void {
@@ -148,6 +181,7 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
 
     toggleControls(): void {
         this.controlsOpen.update((open) => !open);
+        if (!this.diagnosticsSnapshot()) void this.refreshDiagnosticsSnapshot();
     }
 
     toggleActions(): void {
@@ -216,6 +250,10 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
         return Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
     }
 
+    scorePercent(value: number): number {
+        return this.confidencePercent(value);
+    }
+
     sourceLabel(source: EntitySuggestionProviderId): string {
         if (source === 'atlas_surface') return 'Atlas Surface';
         if (source === 'dynamic_ner') return 'Dynamic NER';
@@ -274,5 +312,19 @@ export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
         return suggestion.label.toLowerCase().includes(query)
             || suggestion.kind.toLowerCase().includes(query)
             || this.sourceLabel(suggestion.source).toLowerCase().includes(query);
+    }
+
+    private async refreshDiagnosticsSnapshot(): Promise<void> {
+        const scopeId = this.contextId || 'global';
+        this.diagnosticsLoading.set(true);
+        try {
+            const snapshot = await this.graphRebuild.loadPersistedSnapshot(scopeId);
+            this.diagnosticsSnapshot.set(snapshot);
+            this.diagnosticsError.set(null);
+        } catch (error) {
+            this.diagnosticsError.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            this.diagnosticsLoading.set(false);
+        }
     }
 }

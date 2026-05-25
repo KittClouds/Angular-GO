@@ -117,6 +117,11 @@ describe('Phoenix graph rebuild parity smoke', () => {
             droppedDuplicateSpans: 1,
         });
         expect(snapshot.resolutionSuggestions?.map((row) => row.kind)).toEqual(expect.arrayContaining(['possible_alias', 'kind_conflict']));
+        expect(snapshot.counters.entityLinking).toMatchObject({
+            candidateMentions: 1,
+        });
+        expect(snapshot.counters.entityLinkSuggestions).toBeGreaterThan(0);
+        expect(snapshot.counters.entityLinking?.autoConfirmable).toBe(0);
     });
 
     it('smokes deterministic pre-linking over docs/shortrun.md baseline text', () => {
@@ -154,6 +159,7 @@ describe('Phoenix graph rebuild parity smoke', () => {
         expect(snapshot.counters.resolution?.resolvedByLabel).toBeGreaterThan(0);
         expect(snapshot.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(['e-ryan', 'e-new-rome', 'e-renesco', 'e-dynamis', 'e-rust-town']));
         expect(kindCounts(snapshot.embeddingTargets.map((target) => target.kind)).graphFact).toBeGreaterThan(0);
+        expect(snapshot.counters.entityLinkSuggestions).toBeGreaterThanOrEqual(0);
     });
 });
 
