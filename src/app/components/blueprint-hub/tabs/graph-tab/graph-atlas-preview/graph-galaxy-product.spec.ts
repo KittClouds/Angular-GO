@@ -154,6 +154,17 @@ describe('Product manifold galaxy visualization data', () => {
         expect(product.hopfRibbons?.some((ribbon) => ribbon.guideKind !== 'dataFiber')).toBe(false);
         expect(product.lorentzGuides?.some((guide) => guide.id.startsWith('lorentz:root-lane:'))).toBe(false);
     });
+
+    it('uses Hopf phase agreement as Product layout pressure', () => {
+        const aligned = productPhaseScene(0.18, 0.2);
+        const mismatched = productPhaseScene(0.18, 0.68);
+        const alignedDistance = sceneDistance(aligned, 'phase:identity', 'phase:context');
+        const mismatchedDistance = sceneDistance(mismatched, 'phase:identity', 'phase:context');
+
+        expect(alignedDistance).toBeLessThan(mismatchedDistance * 0.9);
+        expect(Math.abs(mismatched.links[0].curve)).toBeGreaterThan(Math.abs(aligned.links[0].curve));
+        expect(mismatched.lorentzGuides?.[0]?.positions3d.length).toBeGreaterThan(0);
+    });
 });
 
 function maxRibbonDistanceFromNode(
@@ -169,6 +180,26 @@ function maxRibbonDistanceFromNode(
         ));
     }
     return max;
+}
+
+function productPhaseScene(identityPhase: number, contextPhase: number): ReturnType<typeof buildGalaxyScene> {
+    const nodes: GalaxyRenderableNode[] = [
+        phaseNode('phase:identity', 'Kai identity', 'entity', identityPhase, 'core'),
+        phaseNode('phase:context', 'Kai across context', 'evidence', contextPhase, 'bridge'),
+    ];
+    return buildGalaxyScene(nodes, [{
+        id: 'phase:identity:context',
+        sourceId: 'phase:identity',
+        targetId: 'phase:context',
+        type: 'embedding-bridge',
+        confidence: 0.86,
+    }], mergeGalaxySettings({ layoutMode: 'productManifold' }));
+}
+
+function sceneDistance(scene: ReturnType<typeof buildGalaxyScene>, leftId: string, rightId: string): number {
+    const left = scene.nodes.find((node) => node.entity.id === leftId)!;
+    const right = scene.nodes.find((node) => node.entity.id === rightId)!;
+    return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
 }
 
 function productNode(
@@ -202,6 +233,26 @@ function productNode(
                     pathKey: parentNodeId ? `${fiberKind}/${parentNodeId}/${id}` : `${fiberKind}/${id}`,
                 }],
             },
+        },
+    };
+}
+
+function phaseNode(id: string, label: string, lane: string, phase: number, role: string): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind: 'entity',
+        totalMentions: 3,
+        metadata: {
+            embeddingClusterId: 'embedding-cluster:identity-phase',
+            embeddingMedoidTargetId: 'phase:identity',
+            productRegionRole: role,
+            productLaneKind: lane,
+            product: {
+                fiber: { phase },
+                lanes: { laneWeights: { entity: lane === 'entity' ? 0.9 : 0.25, evidence: lane === 'evidence' ? 0.9 : 0.25 } },
+            },
+            hopf: { role: 'anchor', baseId: 'phase:kai', fiberKind: lane, phase },
         },
     };
 }

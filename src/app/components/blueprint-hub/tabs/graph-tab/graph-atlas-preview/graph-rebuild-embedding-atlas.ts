@@ -23,6 +23,8 @@ import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
 const LIMIT = 420;
 const STORY_TARGET_BUDGET = 120;
+const RELATION_TARGET_BUDGET = 96;
+const CO_OCCURRENCE_TARGET_BUDGET = 48;
 const STORY_TARGET_KINDS = new Set(['causalFact', 'temporalFact', 'event', 'memoryState']);
 
 export function buildGraphRebuildEmbeddingAtlas(
@@ -70,8 +72,16 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
     const selected = new Map<string, GraphRebuildEmbeddingTarget>();
     const byId = new Map(candidates.map((target) => [target.id, target]));
     const temporalById = new Map([...snapshot.temporalEdges, ...snapshot.causalEdges].map((edge) => [edge.id, edge]));
+    const relationshipById = new Map(snapshot.relationships.map((relationship) => [relationship.id, relationship]));
+    const selectedRelationIds = new Set<string>();
     const add = (target?: GraphRebuildEmbeddingTarget) => {
         if (target && selected.size < LIMIT) selected.set(target.id, target);
+    };
+    const addGroup = (targets: Array<GraphRebuildEmbeddingTarget | undefined>) => {
+        const missing = targets.filter((target): target is GraphRebuildEmbeddingTarget => !!target && !selected.has(target.id));
+        if (selected.size + missing.length > LIMIT) return false;
+        for (const target of missing) selected.set(target.id, target);
+        return true;
     };
     const addLinkedEvents = (target: GraphRebuildEmbeddingTarget) => {
         if (target.kind !== 'temporalFact' && target.kind !== 'causalFact') return;
@@ -80,10 +90,35 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
         add(byId.get(`embed:event:${edge.sourceId}`));
         add(byId.get(`embed:event:${edge.targetId}`));
     };
+    const addLinkedRelationship = (target?: GraphRebuildEmbeddingTarget) => {
+        if (!target || selectedRelationIds.has(target.id)) return;
+        if (displayKind(target.kind) !== 'graph-fact') {
+            if (addGroup([target])) selectedRelationIds.add(target.id);
+            return;
+        }
+        const relationship = relationshipById.get(target.sourceId);
+        const group = relationship ? [
+            target,
+            byId.get(`embed:entity:${relationship.sourceEntityId}`),
+            byId.get(`embed:entity:${relationship.targetEntityId}`),
+        ] : [target];
+        if (addGroup(group)) selectedRelationIds.add(target.id);
+    };
 
+    const relationTargets = candidates.filter((candidate) => displayKind(candidate.kind) === 'graph-fact');
+    const cooccurrenceTargets = relationTargets.filter((target) =>
+        relationFamilyFromText(target.label, target.text, target.sourceId) === 'cooccurrence',
+    );
+    for (const target of evenSample(cooccurrenceTargets, CO_OCCURRENCE_TARGET_BUDGET)) {
+        addLinkedRelationship(target);
+    }
     for (const target of evenSample(candidates.filter((candidate) => STORY_TARGET_KINDS.has(candidate.kind)), STORY_TARGET_BUDGET)) {
         add(target);
         addLinkedEvents(target);
+    }
+    const relationBudgetLeft = Math.max(0, RELATION_TARGET_BUDGET - selectedRelationIds.size);
+    for (const target of evenSample(relationTargets.filter((target) => !selectedRelationIds.has(target.id)), relationBudgetLeft)) {
+        addLinkedRelationship(target);
     }
     for (const target of candidates) add(target);
     return [...selected.values()];
@@ -332,7 +367,7 @@ function targetColorHsl(target: GraphRebuildEmbeddingTarget): string {
     if (kind === 'graph-fact') {
         return relationHslFromText(target.label, target.text, target.sourceId) || kindHsl(kind);
     }
-    if ((kind === 'entity' || kind === 'anchor') && target.entityKind) {
+    if (kind === 'entity' && target.entityKind) {
         return entityColorStore.getRawHsl(target.entityKind.toUpperCase() as any);
     }
     return kindHsl(kind);

@@ -1,4 +1,5 @@
 import type { GalaxyEdge, GalaxyLorentzGuide, GalaxyNode, Rgb } from './graph-galaxy-engine';
+import { normalizeProductHopfPhase, productHopfAgreement, productHopfBraidDirection, productHopfTension } from './graph-galaxy-product-hopf';
 import { GRAPH_RELATION_FAMILY_HSL, relationFamilyFromText } from './graph-relation-visual-style';
 import { entityColorStore, normalizeGraphNodeColorKind } from '../../../../../lib/store/entityColorStore';
 
@@ -135,8 +136,17 @@ function relaxConsensus(
             const targetInfo = infos[link.target];
             const sameBasin = sourceInfo.clusterId === targetInfo.clusterId;
             const strength = productAffinity(link, sourceInfo, targetInfo);
-            const ideal = sameBasin ? 0.34 : link.type === 'embedding-bridge' ? 0.86 : 1.08;
+            const hopfAgreement = productHopfAgreement(sourceInfo, targetInfo);
+            const hopfTension = productHopfTension(sourceInfo, targetInfo);
+            const phaseBridge = !sameBasin && hopfAgreement > 0.72;
+            const ideal = sameBasin ? 0.26 + hopfTension * 0.42 : phaseBridge ? 0.64 + hopfTension * 0.22 : link.type === 'embedding-bridge' ? 0.78 + hopfTension * 0.28 : 0.96 + hopfTension * 0.34;
             pullPair(source, target, ideal, strength * (sameBasin ? 0.038 : 0.025));
+            if (hopfTension > 0.28) {
+                const braid = productHopfBraidDirection(sourceInfo, targetInfo, link.id);
+                const offset = (hopfTension - 0.28) * (sameBasin ? 0.024 : 0.024);
+                source.x -= braid.x * offset; source.y -= braid.y * offset; source.z -= braid.z * offset;
+                target.x += braid.x * offset; target.y += braid.y * offset; target.z += braid.z * offset;
+            }
         }
         for (const basin of new Set(basinByNode.values())) {
             const medoid = basin.medoidIndex >= 0 ? nodes[basin.medoidIndex] : undefined;
@@ -192,15 +202,17 @@ function tuneProductLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: Produ
         const targetInfo = infos[link.target];
         const sameBasin = sourceInfo.clusterId === targetInfo.clusterId;
         const strength = productAffinity(link, sourceInfo, targetInfo);
+        const hopfAgreement = productHopfAgreement(sourceInfo, targetInfo);
+        const hopfTension = productHopfTension(sourceInfo, targetInfo);
         if (sameBasin || link.type === 'embedding-backbone') {
-            link.alpha = Math.min(0.62, link.alpha * 1.28 + strength * 0.042);
-            link.curve *= 0.62;
+            link.alpha = Math.min(0.64, link.alpha * 1.28 + strength * 0.042 + hopfAgreement * 0.018);
+            link.curve *= 0.54 + hopfTension * 0.34;
         } else if (link.type === 'embedding-bridge' || sourceInfo.role === 'bridge' || targetInfo.role === 'bridge') {
-            link.alpha = Math.min(0.56, link.alpha * 1.08 + strength * 0.028);
-            link.curve *= 1.34;
+            link.alpha = Math.min(0.58, link.alpha * 1.08 + strength * 0.028 + hopfAgreement * 0.022);
+            link.curve *= 1.08 + hopfTension * 0.58;
         } else {
-            link.alpha = Math.min(0.48, link.alpha * 1.04 + strength * 0.018);
-            link.curve *= 1.08;
+            link.alpha = Math.min(0.5, link.alpha * 1.04 + strength * 0.018 + hopfAgreement * 0.014);
+            link.curve *= 0.92 + hopfTension * 0.48;
         }
         if (sourceInfo.role === 'outlier' || targetInfo.role === 'outlier') link.alpha *= 0.82;
         if (!Number.isFinite(link.curve)) link.curve = 0;
@@ -227,7 +239,7 @@ function buildProductGuides(
         guides.push({
             id: `product:consensus-guide:${link.id}`,
             nodeIds: [source.entity.id, target.entity.id],
-            positions3d: guideSegments(source, target, treeKind, sameBasin, strength, basinByNode.get(link.source), basinByNode.get(link.target)),
+            positions3d: guideSegments(source, target, treeKind, sameBasin, strength, sourceInfo, targetInfo, basinByNode.get(link.source), basinByNode.get(link.target)),
             importance: Math.max(source.radius, target.radius) * 0.54 + strength + link.confidence,
             treeId: sameBasin ? `product:basin:${sourceInfo.clusterId}` : 'product:bridge-consensus',
             treeKind,
@@ -248,6 +260,8 @@ function guideSegments(
     treeKind: string,
     sameBasin: boolean,
     strength: number,
+    sourceInfo: ProductInfo,
+    targetInfo: ProductInfo,
     sourceBasin?: ProductBasin,
     targetBasin?: ProductBasin,
 ): Float32Array {
@@ -258,7 +272,9 @@ function guideSegments(
         ? scale(add(sourceBasin.center, targetBasin.center), 0.5)
         : scale(add(vectorOf(source), vectorOf(target)), 0.5);
     const lift = sameBasin ? 0.035 + strength * 0.03 : 0.11 + strength * 0.08;
-    const midpoint = add(center, scale(laneDirection(treeKind), lift * sign));
+    const tension = productHopfTension(sourceInfo, targetInfo);
+    const braid = productHopfBraidDirection(sourceInfo, targetInfo, `${source.entity.id}:${target.entity.id}:${treeKind}`);
+    const midpoint = add(add(center, scale(laneDirection(treeKind), lift * sign)), scale(braid, (0.026 + tension * 0.12) * sign));
     for (let index = 0; index < steps; index++) {
         const a = index / steps;
         const b = (index + 1) / steps;
@@ -298,7 +314,7 @@ function productInfo(node: GalaxyNode): ProductInfo {
         medoidId,
         outlierScore,
         hubScore,
-        phase: finite(fiber['phase'] ?? lanes['fiberPhase'] ?? hopf['phase']) * TAU,
+        phase: normalizeProductHopfPhase(fiber['phase'] ?? lanes['fiberPhase'] ?? hopf['phase'], `${node.entity.id}:${lane}`),
         laneWeights,
         lorentz: lorentzDirection(node),
     };
@@ -318,7 +334,7 @@ function localOffset(id: string, lane: Vec3, info: ProductInfo): Vec3 {
     const seed = stableVector(`${id}:product:${info.clusterId}:${info.lane}`);
     const tangentA = normalize(cross(lane, Math.abs(lane.y) > 0.72 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 }));
     const tangentB = normalize(cross(lane, tangentA));
-    const phase = info.phase + stableUnit(`${id}:phase`) * TAU;
+    const phase = info.phase + (stableUnit(`${id}:phase`) - 0.5) * 0.52;
     const orbit = add(scale(tangentA, Math.cos(phase)), scale(tangentB, Math.sin(phase)));
     const radius = roleLocalRadius(info.role, info.outlierScore);
     const laneWeight = clamp(info.laneWeights[info.lane] ?? 0.36, 0, 1);
@@ -352,11 +368,16 @@ function nodeScale(info: ProductInfo): number {
 
 function productAffinity(link: GalaxyEdge, source: ProductInfo, target: ProductInfo): number {
     let score = clamp(link.confidence, 0.12, 1) * 0.36;
+    const agreement = productHopfAgreement(source, target);
+    const tension = productHopfTension(source, target);
     if (source.clusterId === target.clusterId) score += 0.34;
     if (source.lane === target.lane) score += 0.16;
     if (link.type === 'embedding-backbone') score += 0.22;
     if (link.type === 'embedding-bridge') score += 0.12;
     if (source.medoidId && source.medoidId === target.medoidId) score += 0.12;
+    score += agreement * 0.14;
+    if (source.clusterId !== target.clusterId && agreement > 0.72) score += 0.08;
+    if (tension > 0.62 && link.type !== 'embedding-bridge') score -= tension * 0.08;
     return clamp(score, 0.1, 1);
 }
 

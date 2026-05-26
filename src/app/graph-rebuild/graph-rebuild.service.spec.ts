@@ -4,11 +4,17 @@ import {
     GRAPH_REBUILD_NAMESPACE,
     graphIndexReceiptToScopedDocument,
     graphRebuildSnapshotToScopedDocument,
+    mergeGraphRebuildOccurrences,
+    postProcessCacheToScopedDocument,
+    recoverGraphRebuildOccurrences,
     scopedDocumentToGraphIndexReceipt,
     scopedDocumentToGraphRebuildSnapshot,
     dynamicChunksForNote,
 } from './graph-rebuild.service';
+import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import type { GraphIndexRunReceipt, GraphRebuildSnapshot } from './graph-rebuild-snapshot';
+import type { EntityOccurrence } from '../lib/dexie/db';
+import type { RegisteredEntity } from '../lib/registry';
 
 describe('GraphRebuildService persistence helpers', () => {
     it('uses the Full Atlas dynamic chunking contract instead of note-block lines', () => {
@@ -29,6 +35,49 @@ describe('GraphRebuildService persistence helpers', () => {
 
         expect(chunks.length).toBeGreaterThanOrEqual(18);
         expect(chunks.length).toBeLessThanOrEqual(28);
+    });
+
+    it('recovers graph anchors from loaded note text when the occurrence table is cold', () => {
+        const entities = [
+            entity('entity-kai', 'Kai', []),
+            entity('entity-red-mesa', 'Red Mesa', [], 'LOCATION'),
+            entity('entity-allied-table', 'Allied Table', [], 'NETWORK'),
+        ];
+        const noteTexts = {
+            'note-1': 'Kai mapped Red Mesa before the Allied Table answered.',
+            'note-2': 'The Allied Table sent Kai back toward Red Mesa.',
+        };
+        const recovered = recoverGraphRebuildOccurrences(noteTexts, entities, 42);
+        const merged = mergeGraphRebuildOccurrences([
+            occurrence('note-1', 'entity-kai', 0, 3),
+        ], recovered);
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1', 'note-2'],
+            entities,
+            occurrences: merged,
+            chunks: [
+                { id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 52, ordinal: 0, source: 'dynamic-chunking' },
+                { id: 'note-2:chunk:0', noteId: 'note-2', start: 0, end: 49, ordinal: 1, source: 'dynamic-chunking' },
+            ],
+            noteTexts,
+            builtAt: 42,
+        });
+
+        expect(recovered.map((row) => row.entityId)).toEqual(expect.arrayContaining([
+            'entity-kai',
+            'entity-red-mesa',
+            'entity-allied-table',
+        ]));
+        expect(merged.filter((row) => row.entityId === 'entity-kai')).toHaveLength(2);
+        expect(snapshot.nodes.map((node) => node.id).sort()).toEqual([
+            'entity-allied-table',
+            'entity-kai',
+            'entity-red-mesa',
+        ]);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'entity')).toHaveLength(3);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').length).toBeGreaterThan(3);
     });
 
     it('roundtrips explicit graph snapshots through Overgraph scoped documents', () => {
@@ -161,6 +210,24 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(document.scopeFolderId).toBe('global');
         expect(scopedDocumentToGraphIndexReceipt(document)).toEqual(receipt);
     });
+
+    it('keeps postprocess cache documents as lightweight snapshot references', () => {
+        const document = postProcessCacheToScopedDocument({
+            schemaVersion: 'phoenix-graph-postprocess-cache/v1',
+            scopeId: 'global',
+            scopeKind: 'global',
+            fingerprint: 'fp-1',
+            snapshotId: 'snapshot-1',
+            receiptId: 'receipt-1',
+            receipt: { id: 'receipt-1' } as GraphIndexRunReceipt,
+            updatedAt: 42,
+        });
+        const payload = JSON.parse(document.payload);
+
+        expect(payload.snapshot).toBeUndefined();
+        expect(payload.snapshotId).toBe('snapshot-1');
+        expect(payload.receiptId).toBe('receipt-1');
+    });
 });
 
 function smokeNarrative(wordCount: number): string {
@@ -171,4 +238,39 @@ function smokeNarrative(wordCount: number): string {
         sentences.push(`${words.slice(index, index + 18).join(' ')}.`);
     }
     return sentences.join(' ');
+}
+
+function entity(id: string, label: string, aliases: string[], kind = 'CHARACTER'): RegisteredEntity {
+    return {
+        id,
+        label,
+        kind: kind as any,
+        aliases,
+        firstNote: `${id}-note`,
+        mentionsByNote: new Map(),
+        totalMentions: 0,
+        lastSeenDate: new Date(1),
+        createdAt: new Date(1),
+        createdBy: 'user',
+        registeredAt: 1,
+    };
+}
+
+function occurrence(noteId: string, entityId: string, sourceStart: number, sourceEnd: number): EntityOccurrence {
+    return {
+        id: `${noteId}:${entityId}:${sourceStart}:${sourceEnd}:dictionary_match`,
+        noteId,
+        entityId,
+        entityLabel: entityId,
+        entityKind: 'CHARACTER',
+        sourceStart,
+        sourceEnd,
+        surface: entityId,
+        source: 'dictionary_match',
+        confidence: 0.9,
+        excerpt: entityId,
+        generation: 1,
+        createdAt: 1,
+        updatedAt: 1,
+    };
 }

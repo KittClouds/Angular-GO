@@ -1427,18 +1427,44 @@ function normalizeRenderKind(kind: string): string {
 
 export function resolveGalaxyNodeColorHsl(entity: GalaxyRenderableNode): string {
     const metadata = entity.metadata || {};
-    const entityKind = normalizeEntityKind(stringValue(metadata['entityKind']) || entity.kind);
-    if (entityKind) return entityColorStore.getRawHsl(entityKind);
-
-    const graphColorKind = normalizeGraphNodeColorKind(
-        stringValue(metadata['graphColorKind'])
-        || stringValue(metadata['graphRelationFamily'])
-        || stringValue(metadata['graphKind'])
-        || entity.kind,
+    const graphColorKind = firstGraphNodeColorKind(
+        stringValue(metadata['graphColorKind']),
+        stringValue(metadata['graphRelationFamily']),
+        stringValue(metadata['graphKind']),
     );
     if (graphColorKind) return entityColorStore.getRawGraphNodeHsl(graphColorKind);
 
+    const entityKind = firstEntityColorKind(
+        stringValue(metadata['entityKind']),
+        stringValue(metadata['graphColorKind']),
+        stringValue(metadata['graphKind']),
+        entity.kind,
+    );
+    if (entityKind) return entityColorStore.getRawHsl(entityKind);
+
+    const fallbackGraphColorKind = firstGraphNodeColorKind(
+        stringValue(metadata['sourceType']),
+        entity.kind,
+    );
+    if (fallbackGraphColorKind) return entityColorStore.getRawGraphNodeHsl(fallbackGraphColorKind);
+
     return entity.colorHsl || entityColorStore.getRawHsl(entity.kind);
+}
+
+function firstGraphNodeColorKind(...values: Array<string | null | undefined>) {
+    for (const value of values) {
+        const kind = normalizeGraphNodeColorKind(value);
+        if (kind) return kind;
+    }
+    return null;
+}
+
+function firstEntityColorKind(...values: Array<string | null | undefined>) {
+    for (const value of values) {
+        const kind = normalizeEntityKind(value);
+        if (kind) return kind;
+    }
+    return null;
 }
 
 export function hslToRgb(rawHsl: string): Rgb {

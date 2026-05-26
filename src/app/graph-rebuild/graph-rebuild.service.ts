@@ -14,8 +14,9 @@ import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames'
 import type {
     GraphIndexRunReceipt,
     GraphIndexPostProcessMode,
-    GraphRebuildEmbeddingProfile,
+    GraphRebuildBuildTimings,
     GraphRebuildChunk,
+    GraphRebuildEmbeddingProfile,
     GraphRebuildRelationshipHint,
     GraphRebuildScopeKind,
     GraphRebuildSnapshot,
@@ -29,9 +30,12 @@ const POST_PROCESS_CACHE_PREFIX = 'postprocess-cache';
 export interface GraphRebuildPostProcessCache {
     schemaVersion: 'phoenix-graph-postprocess-cache/v1';
     scopeId: string;
+    scopeKind?: GraphRebuildScopeKind;
     fingerprint: string;
-    snapshot: GraphRebuildSnapshot;
-    receipt: GraphIndexRunReceipt;
+    snapshot?: GraphRebuildSnapshot;
+    snapshotId?: string;
+    receipt?: GraphIndexRunReceipt;
+    receiptId?: string;
     updatedAt: number;
 }
 
@@ -52,18 +56,34 @@ export class GraphRebuildService {
     private readonly snapshotState = signal<GraphRebuildSnapshot | null>(null);
     private readonly buildingState = signal(false);
     private readonly errorState = signal<string | null>(null);
+    private readonly lastBuildTimingsState = signal<GraphRebuildBuildTimings | null>(null);
 
     readonly snapshot = computed(() => this.snapshotState());
     readonly isBuilding = computed(() => this.buildingState());
     readonly error = computed(() => this.errorState());
+    readonly lastBuildTimings = computed(() => this.lastBuildTimingsState());
 
     async buildAndPersistSnapshot(request: GraphRebuildBuildRequest): Promise<GraphRebuildSnapshot> {
         this.buildingState.set(true);
+        const totalStarted = performance.now();
+        const timings = emptyBuildTimings();
         try {
-            const occurrences = await this.loadOccurrences(request.noteIds, request.entities);
-            const chunks = await this.loadChunks(request.noteIds, occurrences);
-            const noteTexts = await this.loadNoteTexts(request.noteIds, occurrences);
-            const snapshot = buildGraphRebuildSnapshot({
+            const persistedOccurrences = await timedAsync(timings, 'occurrenceLoadMs', () =>
+                this.loadOccurrences(request.noteIds, request.entities)
+            );
+            const chunks = await timedAsync(timings, 'chunkLoadMs', () =>
+                this.loadChunks(request.noteIds, persistedOccurrences)
+            );
+            const noteTexts = await timedAsync(timings, 'noteTextLoadMs', () =>
+                this.loadNoteTexts(request.noteIds, persistedOccurrences)
+            );
+            const recoverStarted = performance.now();
+            const occurrences = mergeGraphRebuildOccurrences(
+                persistedOccurrences,
+                recoverGraphRebuildOccurrences(noteTexts, request.entities),
+            );
+            timings.occurrenceRecoverMs = elapsedMs(recoverStarted);
+            const snapshot = timedSync(timings, 'snapshotBuildMs', () => buildGraphRebuildSnapshot({
                 scopeKind: request.scopeKind,
                 scopeId: request.scopeId,
                 noteIds: request.noteIds,
@@ -75,15 +95,25 @@ export class GraphRebuildService {
                 embeddingProfile: request.embeddingProfile,
                 postProcessMode: request.postProcessMode,
                 candidateCount: request.candidateCount,
-            });
+            }));
+            finalizeBuildTimings(timings, totalStarted);
+            snapshot.buildTimings = timings;
+            const stateStarted = performance.now();
             this.snapshotState.set(snapshot);
-            await this.persistSnapshot(snapshot).then(() => {
+            timings.stateCommitMs = elapsedMs(stateStarted);
+            const persistStarted = performance.now();
+            await this.persistSnapshot(snapshot, timings, false).then(() => {
                 this.errorState.set(null);
             }).catch((error) => {
                 const message = error instanceof Error ? error.message : String(error);
                 this.errorState.set(`Overgraph graph-rebuild snapshot persist failed: ${message}`);
                 console.warn('[GraphRebuild] Snapshot persist failed', error);
+            }).finally(() => {
+                timings.snapshotPersistMs = elapsedMs(persistStarted);
             });
+            finalizeBuildTimings(timings, totalStarted);
+            snapshot.buildTimings = timings;
+            this.lastBuildTimingsState.set(timings);
             return snapshot;
         } finally {
             this.buildingState.set(false);
@@ -122,9 +152,11 @@ export class GraphRebuildService {
         await this.store.upsertScopedDocument(postProcessCacheToScopedDocument({
             schemaVersion: 'phoenix-graph-postprocess-cache/v1',
             scopeId: snapshot.scopeId,
+            scopeKind: snapshot.scopeKind,
             fingerprint,
-            snapshot,
+            snapshotId: snapshot.id,
             receipt,
+            receiptId: receipt.id,
             updatedAt: Date.now(),
         }));
     }
@@ -134,12 +166,28 @@ export class GraphRebuildService {
         await this.persistSnapshot(snapshot);
     }
 
-    private async persistSnapshot(snapshot: GraphRebuildSnapshot): Promise<void> {
-        await this.store.upsertScopedDocument(graphRebuildSnapshotToScopedDocument(snapshot));
-        dispatchGraphRebuildEvent('graph-rebuild-snapshot-updated', {
-            scopeId: snapshot.scopeId,
-            snapshotId: snapshot.id,
-        });
+    private async persistSnapshot(
+        snapshot: GraphRebuildSnapshot,
+        timings?: GraphRebuildBuildTimings,
+        emitEvent = true,
+    ): Promise<void> {
+        const serializeStarted = performance.now();
+        const document = graphRebuildSnapshotToScopedDocument(snapshot);
+        if (timings) {
+            timings.snapshotSerializeMs = elapsedMs(serializeStarted);
+            timings.snapshotPayloadChars = document.payload.length;
+        }
+        const storeStarted = performance.now();
+        await this.store.upsertScopedDocument(document);
+        if (timings) timings.snapshotStoreMs = elapsedMs(storeStarted);
+        if (emitEvent) {
+            const eventStarted = performance.now();
+            dispatchGraphRebuildEvent('graph-rebuild-snapshot-updated', {
+                scopeId: snapshot.scopeId,
+                snapshotId: snapshot.id,
+            });
+            if (timings) timings.snapshotEventMs = elapsedMs(eventStarted);
+        }
     }
 
     private async loadOccurrences(noteIds: string[], entities: RegisteredEntity[]): Promise<EntityOccurrence[]> {
@@ -166,6 +214,127 @@ export class GraphRebuildService {
         if (blockChunks.length) return blockChunks;
         return loadFallbackNoteChunks(scopedNoteIds);
     }
+}
+
+export function recoverGraphRebuildOccurrences(
+    noteTexts: Record<string, string>,
+    entities: RegisteredEntity[],
+    now = Date.now(),
+): EntityOccurrence[] {
+    const rows: EntityOccurrence[] = [];
+    const searchable = entities
+        .filter((entity) => !!entity.id && !!entity.label)
+        .map((entity) => ({ entity, surfaces: entitySurfaces(entity) }))
+        .filter((entry) => entry.surfaces.length);
+
+    for (const [noteId, text] of Object.entries(noteTexts)) {
+        if (!noteId || !text.trim()) continue;
+        const lowerText = text.toLocaleLowerCase();
+        for (const { entity, surfaces } of searchable) {
+            for (const surface of surfaces) {
+                const lowerSurface = surface.toLocaleLowerCase();
+                let start = lowerText.indexOf(lowerSurface);
+                while (start >= 0) {
+                    const end = start + surface.length;
+                    if (isEntityBoundary(text, start - 1) && isEntityBoundary(text, end)) {
+                        rows.push(graphRebuildOccurrence(noteId, text, entity, start, end, now));
+                    }
+                    start = lowerText.indexOf(lowerSurface, Math.max(start + 1, end));
+                }
+            }
+        }
+    }
+    return rows;
+}
+
+export function mergeGraphRebuildOccurrences(
+    persisted: EntityOccurrence[],
+    recovered: EntityOccurrence[],
+): EntityOccurrence[] {
+    if (!persisted.length) return recovered;
+    if (!recovered.length) return persisted;
+    const seen = new Set(persisted.map(occurrenceKey));
+    const merged = [...persisted];
+    for (const occurrence of recovered) {
+        const key = occurrenceKey(occurrence);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(occurrence);
+    }
+    return merged;
+}
+
+function entitySurfaces(entity: RegisteredEntity): string[] {
+    const seen = new Set<string>();
+    const surfaces: string[] = [];
+    for (const value of [entity.label, ...(entity.aliases || [])]) {
+        const surface = normalizeSurface(value);
+        if (surface.length < 2) continue;
+        const key = surface.toLocaleLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        surfaces.push(surface);
+    }
+    return surfaces.sort((left, right) => right.length - left.length || left.localeCompare(right));
+}
+
+function graphRebuildOccurrence(
+    noteId: string,
+    text: string,
+    entity: RegisteredEntity,
+    start: number,
+    end: number,
+    now: number,
+): EntityOccurrence {
+    const surface = text.slice(start, end);
+    return {
+        id: `${noteId}:${entity.id}:${start}:${end}:dictionary_match`,
+        noteId,
+        entityId: entity.id,
+        entityLabel: entity.label,
+        entityKind: entity.kind,
+        targetNoteId: entity.firstNote || undefined,
+        sourceStart: start,
+        sourceEnd: end,
+        surface,
+        source: 'dictionary_match',
+        confidence: 0.82,
+        excerpt: buildGraphRebuildExcerpt(text, start, end),
+        generation: now,
+        createdAt: now,
+        updatedAt: now,
+    };
+}
+
+function occurrenceKey(occurrence: EntityOccurrence): string {
+    return `${occurrence.noteId}:${occurrence.entityId}:${occurrence.sourceStart}:${occurrence.sourceEnd}`;
+}
+
+function normalizeSurface(value: string): string {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function isEntityBoundary(text: string, index: number): boolean {
+    if (index < 0 || index >= text.length) return true;
+    return !isEntityWordChar(text[index]);
+}
+
+function isEntityWordChar(char: string): boolean {
+    const code = char.charCodeAt(0);
+    if (code >= 48 && code <= 57) return true;
+    if (code >= 65 && code <= 90) return true;
+    if (code >= 97 && code <= 122) return true;
+    if (char === '_' || char === '\'' || char === '-') return true;
+    return /[\p{L}\p{N}]/u.test(char);
+}
+
+function buildGraphRebuildExcerpt(text: string, start: number, end: number): string {
+    const radius = 90;
+    const from = Math.max(0, start - radius);
+    const to = Math.min(text.length, end + radius);
+    const prefix = from > 0 ? '...' : '';
+    const suffix = to < text.length ? '...' : '';
+    return `${prefix}${text.slice(from, to).replace(/\s+/g, ' ').trim()}${suffix}`;
 }
 
 export function graphRebuildSnapshotToScopedDocument(snapshot: GraphRebuildSnapshot): StoreScopedDocument {
@@ -218,12 +387,12 @@ function postProcessCacheDocumentKey(fingerprint: string): string {
     return `${POST_PROCESS_CACHE_PREFIX}:${fingerprint}`;
 }
 
-function postProcessCacheToScopedDocument(cache: GraphRebuildPostProcessCache): StoreScopedDocument {
+export function postProcessCacheToScopedDocument(cache: GraphRebuildPostProcessCache): StoreScopedDocument {
     const now = Date.now();
     return {
         id: `${GRAPH_REBUILD_NAMESPACE}:${cache.scopeId}:${postProcessCacheDocumentKey(cache.fingerprint)}`,
         scopeFolderId: cache.scopeId,
-        narrativeId: cache.snapshot.scopeKind === 'narrative' ? cache.scopeId : '',
+        narrativeId: cache.scopeKind === 'narrative' ? cache.scopeId : '',
         namespace: GRAPH_REBUILD_NAMESPACE,
         documentKey: postProcessCacheDocumentKey(cache.fingerprint),
         payload: JSON.stringify(cache),
@@ -239,6 +408,61 @@ function scopedDocumentToPostProcessCache(document: StoreScopedDocument): GraphR
     } catch {
         return null;
     }
+}
+
+function emptyBuildTimings(): GraphRebuildBuildTimings {
+    return {
+        occurrenceLoadMs: 0,
+        chunkLoadMs: 0,
+        noteTextLoadMs: 0,
+        dbLoadMs: 0,
+        occurrenceRecoverMs: 0,
+        snapshotBuildMs: 0,
+        stateCommitMs: 0,
+        snapshotPersistMs: 0,
+        snapshotSerializeMs: 0,
+        snapshotStoreMs: 0,
+        snapshotEventMs: 0,
+        snapshotPayloadChars: 0,
+        dbOpsMs: 0,
+        totalMs: 0,
+    };
+}
+
+async function timedAsync<T>(
+    timings: GraphRebuildBuildTimings,
+    key: keyof GraphRebuildBuildTimings,
+    action: () => Promise<T>,
+): Promise<T> {
+    const started = performance.now();
+    try {
+        return await action();
+    } finally {
+        timings[key] = elapsedMs(started);
+    }
+}
+
+function timedSync<T>(
+    timings: GraphRebuildBuildTimings,
+    key: keyof GraphRebuildBuildTimings,
+    action: () => T,
+): T {
+    const started = performance.now();
+    try {
+        return action();
+    } finally {
+        timings[key] = elapsedMs(started);
+    }
+}
+
+function finalizeBuildTimings(timings: GraphRebuildBuildTimings, totalStarted: number): void {
+    timings.dbLoadMs = timings.occurrenceLoadMs + timings.chunkLoadMs + timings.noteTextLoadMs;
+    timings.dbOpsMs = timings.dbLoadMs + timings.snapshotPersistMs;
+    timings.totalMs = elapsedMs(totalStarted);
+}
+
+function elapsedMs(started: number): number {
+    return Math.max(0, Math.round(performance.now() - started));
 }
 
 async function loadDynamicNoteChunks(noteIds: string[]): Promise<GraphRebuildChunk[]> {

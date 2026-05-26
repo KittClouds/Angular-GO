@@ -19,6 +19,13 @@ export interface ManifoldAtlasSnapshot<TPayload> {
     sourceLabel: string;
     capabilities: ManifoldCapabilities;
     payload: TPayload;
+    timings?: {
+        runtimeLoadMs?: number;
+        nativeSnapshotMs?: number;
+        fallbackLoadMs?: number;
+        totalMs?: number;
+        source?: 'native' | 'fallback';
+    };
 }
 
 export interface IcoCellRecord {

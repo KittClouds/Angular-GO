@@ -38,8 +38,11 @@ import { NliWorkerService } from '../../lib/services/nli-worker.service';
 import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-runtime.service';
 import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
 import type {
+  GraphIndexProjectionReceipt,
   GraphIndexRunRequest,
   GraphIndexRunScope,
+  GraphIndexRunReceipt,
+  GraphIndexStageReceipt,
   GraphRebuildEntityLinkSuggestion,
   GraphRebuildLinkSuggestion,
 } from '../../graph-rebuild/graph-rebuild-snapshot';
@@ -101,6 +104,16 @@ type BuilderCapabilityGroup = {
   selectedCount: number;
   targets: BuilderCapabilityCard[];
 };
+
+interface LastRunReceiptRow {
+  id: string;
+  label: string;
+  detail: string;
+  durationMs: number;
+  outputCount: number;
+  status: string;
+  kind: 'stage' | 'projection';
+}
 
 @Component({
   selector: 'app-search-panel',
@@ -353,7 +366,7 @@ export class SearchPanelComponent implements OnInit {
     const fullAtlasReceipt = this.fullAtlasPipeline.lastReceipt();
     if (fullAtlasReceipt) {
       return {
-        label: fullAtlasReceipt.status === 'completed' ? 'Full Atlas Index complete' : 'Full Atlas Index failed',
+        label: graphIndexReceiptLabel(fullAtlasReceipt),
         detail: fullAtlasReceipt.message,
         durationMs: fullAtlasReceipt.durationMs,
       };
@@ -368,6 +381,9 @@ export class SearchPanelComponent implements OnInit {
     }
     return this.commandStatus().lastRun;
   });
+  readonly lastRunReceiptRows = computed(() =>
+    buildLastRunReceiptRows(this.fullAtlasPipeline.lastReceipt())
+  );
   readonly graphAwareLinkSuggestionTotal = computed(() =>
     this.fullAtlasPipeline.lastSnapshot()?.counters.graphAwareLinkSuggestions
       ?? this.fullAtlasPipeline.lastReceipt()?.counters.graphAwareLinkSuggestions
@@ -1459,4 +1475,133 @@ function buildReceiptDetail(receipt: AtlasBuildReceipt): string {
     .slice(0, 2)
     .join(' / ');
   return proof ? `${receipt.policy}; ${countText}; ${proof}` : `${receipt.policy}; ${countText}`;
+}
+
+function buildLastRunReceiptRows(receipt: GraphIndexRunReceipt | null): LastRunReceiptRow[] {
+  if (!receipt) return [];
+  return [
+    ...(receipt.stageReceipts || []).map(stageReceiptRow),
+    ...(receipt.projectionReceipts || []).map(projectionReceiptRow),
+  ];
+}
+
+function graphIndexReceiptLabel(receipt: GraphIndexRunReceipt): string {
+  const noun = graphIndexReceiptNoun(receipt);
+  return receipt.status === 'completed' ? `${noun} complete` : `${noun} failed`;
+}
+
+function graphIndexReceiptNoun(receipt: GraphIndexRunReceipt): string {
+  const id = receipt.id || '';
+  const message = receipt.message || '';
+  if (id.startsWith('postprocess-atlas') || message.startsWith('Postprocess')) return 'Postprocess';
+  if (id.startsWith('core-atlas') || message.startsWith('Clean graph')) return 'Clean graph';
+  return 'Full Atlas Index';
+}
+
+function stageReceiptRow(stage: GraphIndexStageReceipt): LastRunReceiptRow {
+  return {
+    id: `stage:${stage.id}`,
+    label: stage.label,
+    detail: receiptRowDetail(stage.status, stage.outputCount, stage.counters, stage.id),
+    durationMs: stage.durationMs,
+    outputCount: stage.outputCount,
+    status: stage.status,
+    kind: 'stage',
+  };
+}
+
+function projectionReceiptRow(projection: GraphIndexProjectionReceipt): LastRunReceiptRow {
+  return {
+    id: `projection:${projection.mode}`,
+    label: `${titleCase(projection.mode)} Projection`,
+    detail: projectionReceiptDetail(projection),
+    durationMs: projection.durationMs,
+    outputCount: projection.targetCount,
+    status: projection.status,
+    kind: 'projection',
+  };
+}
+
+function projectionReceiptDetail(projection: GraphIndexProjectionReceipt): string {
+  const counters = projection.counters || {};
+  const backendMs = counters['nativeLoadMs'] || counters['fallbackLoadMs'] || 0;
+  const backendLabel = counters['nativeLoadMs'] ? 'native' : counters['fallbackLoadMs'] ? 'fallback' : '';
+  const uiMs = counters['uiWrapperMs'] || 0;
+  const nodes = counters['payloadNodes'] || 0;
+  const edges = counters['payloadEdges'] || 0;
+  const parts = [
+    projection.status,
+    valueLabel(projection.targetCount, 'target'),
+    valueLabel(projection.vectorCount, 'vector'),
+  ];
+  if (backendMs > 0) parts.push(`${backendLabel} ${formatDuration(backendMs)}`);
+  if (uiMs > 0) parts.push(`ui ${formatDuration(uiMs)}`);
+  if (nodes > 0 || edges > 0) parts.push(`payload ${formatCount(nodes)}n/${formatCount(edges)}e`);
+  return parts.join(' / ');
+}
+
+function receiptRowDetail(
+  status: string,
+  outputCount: number,
+  counters: Record<string, number>,
+  stageId = '',
+): string {
+  const entries = Object.entries(counters || {})
+    .filter(([key, value]) => isVisibleReceiptCounter(key, value));
+  const orderedEntries = stageId === 'snapshotDbOps'
+    ? prioritizeReceiptCounters(entries, ['dbLoadMs', 'snapshotPersistMs', 'snapshotStoreMs', 'snapshotSerializeMs', 'snapshotPayloadChars'])
+    : entries;
+  const counterLimit = stageId === 'snapshotDbOps' ? 5 : 3;
+  const counterText = orderedEntries
+    .slice(0, counterLimit)
+    .map(([key, value]) => `${labelFromKey(key)} ${formatReceiptCounterValue(key, value)}`)
+    .join(' / ');
+  const outputText = valueLabel(outputCount, 'output');
+  return counterText ? `${status} / ${outputText} / ${counterText}` : `${status} / ${outputText}`;
+}
+
+function prioritizeReceiptCounters(
+  entries: Array<[string, number]>,
+  priority: string[],
+): Array<[string, number]> {
+  const rank = new Map(priority.map((key, index) => [key, index]));
+  return [...entries].sort((left, right) => {
+    const leftRank = rank.get(left[0]) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = rank.get(right[0]) ?? Number.MAX_SAFE_INTEGER;
+    return leftRank - rightRank;
+  });
+}
+
+function isVisibleReceiptCounter(key: string, value: number): boolean {
+  if (!Number.isFinite(value) || value <= 0) return false;
+  return !/(started|completed|duration|elapsed|wall|timestamp|time)/i.test(key);
+}
+
+function valueLabel(value: number, singular: string): string {
+  const count = Math.max(0, Math.round(Number(value) || 0));
+  return `${formatCount(count)} ${singular}${count === 1 ? '' : 's'}`;
+}
+
+function formatReceiptCounterValue(key: string, value: number): string {
+  return /ms$/i.test(key) ? formatDuration(value) : formatCount(value);
+}
+
+function formatDuration(value: number): string {
+  return `${formatCount(value)} ms`;
+}
+
+function formatCount(value: number): string {
+  return Math.max(0, Math.round(Number(value) || 0)).toLocaleString('en-US');
+}
+
+function labelFromKey(key: string): string {
+  return key
+    .replace(/Ms$/i, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase();
+}
+
+function titleCase(value: string): string {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
 }

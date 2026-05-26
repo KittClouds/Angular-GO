@@ -29,6 +29,11 @@ interface EntityInChunk {
     anchorIds: string[];
 }
 
+const TYPED_RELATION_MAX_GAP_CHARS = 900;
+const TYPED_RELATION_LINKS_PER_ENTITY = 5;
+const AUTHORITY_RELATION_CUES = ['command', 'admiral', 'phantom', 'military', 'chiefs', 'operator', 'warden', 'table', 'authority'];
+const EVIDENCE_RELATION_CUES = ['documented', 'records', 'packet', 'evidence', 'file', 'files', 'attached', 'report'];
+
 export function deriveGraphRebuildFacts(
     chunks: GraphRebuildChunk[],
     anchors: GraphRebuildEntityAnchor[],
@@ -90,31 +95,45 @@ function deriveRelationships(
     edgeMap: Map<string, GraphRebuildEdge>,
 ): void {
     if (entities.length < 2) return;
-    for (let i = 0; i < entities.length; i += 1) {
-        for (let j = i + 1; j < entities.length; j += 1) {
-            const left = entities[i];
-            const right = entities[j];
-            const relationType = inferRelationType(pairWindow(lower, chunk, left, right), chunk);
-            if (!relationType) continue;
-            const evidence = unique([...left.anchorIds, ...right.anchorIds]);
-            const id = `typed:${chunk.noteId}:${chunk.ordinal}:${left.id}:${relationType}:${right.id}`;
-            const confidence = relationConfidence(relationType);
-            relationships.push({
-                id,
-                sourceEntityId: left.id,
-                targetEntityId: right.id,
-                relationType,
-                evidenceAnchorIds: evidence,
-                confidence,
-                status: 'accepted',
-                adjudicationSource: 'graph-rebuild-typed-cue-policy',
-                adjudicationScore: confidence,
-                rationale: `accepted: anchored chunk cue promoted ${relationType} fact`,
-                decisionEvidence: [`chunk:${chunk.id}`, `cue:${relationType}`],
-            });
-            upsertTypedEdge(edgeMap, left.id, right.id, relationType, evidence, chunk.id);
+    for (const { left, right } of typedRelationPairs(entities)) {
+        const relationType = inferRelationType(pairWindow(lower, chunk, left, right), chunk);
+        if (!relationType) continue;
+        const evidence = unique([...left.anchorIds, ...right.anchorIds]);
+        const id = `typed:${chunk.noteId}:${chunk.ordinal}:${left.id}:${relationType}:${right.id}`;
+        const confidence = relationConfidence(relationType);
+        relationships.push({
+            id,
+            sourceEntityId: left.id,
+            targetEntityId: right.id,
+            relationType,
+            evidenceAnchorIds: evidence,
+            confidence,
+            status: 'accepted',
+            adjudicationSource: 'graph-rebuild-typed-cue-policy',
+            adjudicationScore: confidence,
+            rationale: `accepted: local pair cue promoted ${relationType} fact`,
+            decisionEvidence: [`chunk:${chunk.id}`, `cue:${relationType}`],
+        });
+        upsertTypedEdge(edgeMap, left.id, right.id, relationType, evidence, chunk.id);
+    }
+}
+
+function typedRelationPairs(entities: EntityInChunk[]): Array<{ left: EntityInChunk; right: EntityInChunk }> {
+    const pairs: Array<{ left: EntityInChunk; right: EntityInChunk; gap: number }> = [];
+    const sorted = [...entities].sort((left, right) => left.firstStart - right.firstStart);
+    for (let i = 0; i < sorted.length; i += 1) {
+        const left = sorted[i];
+        let links = 0;
+        for (let j = i + 1; j < sorted.length; j += 1) {
+            const right = sorted[j];
+            const gap = Math.max(0, right.firstStart - left.firstEnd);
+            if (gap > TYPED_RELATION_MAX_GAP_CHARS) break;
+            pairs.push({ left, right, gap });
+            links += 1;
+            if (links >= TYPED_RELATION_LINKS_PER_ENTITY) break;
         }
     }
+    return pairs.sort((left, right) => left.gap - right.gap || left.left.id.localeCompare(right.left.id) || left.right.id.localeCompare(right.right.id));
 }
 
 function pairWindow(lower: string, chunk: GraphRebuildChunk, left: EntityInChunk, right: EntityInChunk): string {
@@ -126,12 +145,13 @@ function pairWindow(lower: string, chunk: GraphRebuildChunk, left: EntityInChunk
 }
 
 function inferRelationType(text: string, chunk?: GraphRebuildChunk): string | null {
-    if (chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) return 'command_or_service_tie';
-    if (chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) return 'documented_in';
+    if ((chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) && hasAny(text, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
+    if ((chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) && hasAny(text, EVIDENCE_RELATION_CUES)) return 'documented_in';
     if (hasAny(text, [' father', ' daughter', ' grandfather', ' family'])) return 'family_or_house_tie';
-    if (hasAny(text, ['command', 'admiral', 'phantom', 'military'])) return 'command_or_service_tie';
+    if (hasAny(text, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
     if (hasAny(text, ['approved', 'approval', 'accepted', 'agreed', 'proceed'])) return 'approves_or_accepts';
-    if (hasAny(text, ['packet', 'release', 'terms', 'warning', 'coercion'])) return 'discusses_release_terms';
+    if (hasAny(text, ['release', 'terms', 'warning', 'coercion'])) return 'discusses_release_terms';
+    if (hasAny(text, EVIDENCE_RELATION_CUES)) return 'documented_in';
     if (hasAny(text, ['kiss', 'took his hand', 'stood beside', 'close enough'])) return 'intimate_or_close_contact';
     if (hasAny(text, ['looked at', 'watched', 'saw ', 'noticed'])) return 'observes';
     if (hasAny(text, ['gave', 'handed', 'took it from', 'received'])) return 'transfers_or_receives';

@@ -133,6 +133,17 @@
       <strong>{{ lastRunStatus().label }}</strong>
       <small>{{ lastRunStatus().detail }}<ng-container *ngIf="lastRunStatus().durationMs !== null"> / {{
           lastRunStatus().durationMs }} ms</ng-container></small>
+      <div class="last-run-receipts" *ngIf="lastRunReceiptRows().length">
+        <div *ngFor="let row of lastRunReceiptRows()" class="last-run-receipt-row"
+          [ngClass]="['receipt-' + row.kind, 'receipt-status-' + row.status]">
+          <em>{{ row.kind === 'projection' ? 'proj' : 'stage' }}</em>
+          <span>
+            <strong>{{ row.label }}</strong>
+            <small>{{ row.detail }}</small>
+          </span>
+          <b>{{ row.durationMs | number:'1.0-0' }} ms</b>
+        </div>
+      </div>
     </div>
 
     <div class="link-suggestion-card" *ngIf="entityLinkSuggestionTotal() > 0">

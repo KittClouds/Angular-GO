@@ -730,15 +730,25 @@ export class PhoenixUiApiService {
         manifold: AtlasManifoldMode,
         scope?: SearchScope,
     ): Promise<ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas> | null> {
+        const totalStarted = performance.now();
+        const runtimeStarted = performance.now();
         await this.loadRuntime();
+        const runtimeLoadMs = elapsedMs(runtimeStarted);
         try {
+            const nativeStarted = performance.now();
             const nativeSnapshot = await this.phoenix.manifoldSnapshot({ manifold, scope: this.toPhoenixScope(scope), limit: 360 });
             if (nativeSnapshot?.payload?.nodes?.length) {
-                return nativeSnapshot as ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>;
+                return withManifoldLoadTimings(nativeSnapshot as ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>, {
+                    runtimeLoadMs,
+                    nativeSnapshotMs: elapsedMs(nativeStarted),
+                    totalMs: elapsedMs(totalStarted),
+                    source: 'native',
+                });
             }
         } catch (error) {
             console.warn('[PhoenixUiApi] Native manifold snapshot unavailable; using Semantic Atlas fallback.', error);
         }
+        const fallbackStarted = performance.now();
         const payload = await this.loadSemanticAtlasEmbeddings(scope);
         if (!payload) return null;
         const isHopf = manifold === 'hopf';
@@ -770,6 +780,12 @@ export class PhoenixUiApiService {
             payload: {
                 ...payload,
                 projectionSource: 'semantic_atlas_rows',
+            },
+            timings: {
+                runtimeLoadMs,
+                fallbackLoadMs: elapsedMs(fallbackStarted),
+                totalMs: elapsedMs(totalStarted),
+                source: 'fallback',
             },
         };
     }
@@ -1559,6 +1575,23 @@ function normalizeScanMentions(text: string, mentions: any[]): any[] {
             },
         };
     });
+}
+
+function withManifoldLoadTimings<TPayload>(
+    snapshot: ManifoldAtlasSnapshot<TPayload>,
+    timings: NonNullable<ManifoldAtlasSnapshot<TPayload>['timings']>,
+): ManifoldAtlasSnapshot<TPayload> {
+    return {
+        ...snapshot,
+        timings: {
+            ...(snapshot.timings || {}),
+            ...timings,
+        },
+    };
+}
+
+function elapsedMs(started: number): number {
+    return Math.max(0, Math.round(performance.now() - started));
 }
 
 export const phoenixUiApiServiceTestHooks = {

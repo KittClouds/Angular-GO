@@ -1758,21 +1758,21 @@ function isMissingNativeBootSnapshot(error: unknown): boolean {
     return message.includes('TauRPC__phoenix.boot_snapshot') && message.includes('not found');
 }
 
-function scopedDocumentToRow(document: StoreScopedDocument): Record<string, unknown> {
+export function scopedDocumentToRow(document: StoreScopedDocument): Record<string, unknown> {
     return {
         id: document.id,
         scope_folder_id: document.scopeFolderId,
         narrative_id: document.narrativeId,
         namespace: document.namespace,
         document_key: document.documentKey,
-        payload: parseJsonString(document.payload),
+        payload: document.payload,
         seeded_from_scope_folder_id: document.seededFromScopeFolderId || null,
         created_at: document.createdAt,
         updated_at: document.updatedAt,
     };
 }
 
-function rowToScopedDocument(row: any): StoreScopedDocument {
+export function rowToScopedDocument(row: any): StoreScopedDocument {
     return {
         id: String(row.id || ''),
         scopeFolderId: String(row.scope_folder_id || ''),

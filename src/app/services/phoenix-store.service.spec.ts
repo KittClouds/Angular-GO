@@ -4,6 +4,8 @@ import {
     derivedGraphRepairPrunedDocuments,
     formatPhoenixPersistenceSummary,
     hasActivePhoenixPersistence,
+    rowToScopedDocument,
+    scopedDocumentToRow,
 } from './phoenix-store.service';
 import type { LoadedPhoenixManifestState } from '../lib/sqlite/persistence/phoenix-wal';
 import { createEmptyPhoenixManifest } from '../lib/sqlite/persistence/phoenix-wal';
@@ -61,5 +63,22 @@ describe('PhoenixStoreService persistence diagnostics helpers', () => {
         expect(derivedGraphRepairPrunedDocuments({ prunedDocuments: 3 })).toBe(3);
         expect(derivedGraphRepairPrunedDocuments({ prunedDocuments: 0 })).toBe(0);
         expect(derivedGraphRepairPrunedDocuments(null)).toBe(0);
+    });
+
+    it('keeps scoped document payloads opaque for fast WAL writes', () => {
+        const payload = JSON.stringify({ nested: { rows: Array.from({ length: 4 }, (_, id) => ({ id })) } });
+        const row = scopedDocumentToRow({
+            id: 'doc-1',
+            scopeFolderId: 'global',
+            narrativeId: '',
+            namespace: 'test',
+            documentKey: 'snapshot',
+            payload,
+            createdAt: 1,
+            updatedAt: 2,
+        });
+
+        expect(row['payload']).toBe(payload);
+        expect(rowToScopedDocument(row).payload).toBe(payload);
     });
 });

@@ -115,7 +115,7 @@ describe('embedding atlas projection', () => {
         expect(nodes.get('embed:entity:baton')?.kind).toBe('location');
         expect(nodes.get('embed:anchor:anchor-location')?.kind).toBe('anchor');
         expect(colors.get('embed:entity:baton')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
-        expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
+        expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_GRAPH_NODE_COLORS.anchor);
         expect(colors.get('embed:graph-fact:co')).toBe(DEFAULT_GRAPH_NODE_COLORS.cooccurrence);
         expect(colors.get('embed:graph-fact:observe')).toBe(DEFAULT_GRAPH_NODE_COLORS.observation);
         expect(colors.get('embed:graph-fact:comment')).toBe(DEFAULT_GRAPH_NODE_COLORS.communication);
@@ -313,7 +313,19 @@ describe('embedding atlas projection', () => {
             chunks: [],
             mentions: [],
             entityAnchors: [],
-            relationships: [],
+            relationships: [{
+                id: 'co-1',
+                sourceEntityId: 'kai',
+                targetEntityId: 'hazel',
+                relationType: 'co_occurs_with',
+                status: 'review',
+                confidence: 0.68,
+                evidenceAnchorIds: [],
+                adjudicationSource: 'graph-rebuild-cooccurrence-policy',
+                adjudicationScore: 0.68,
+                rationale: 'review: repeated co-occurrence',
+                decisionEvidence: [],
+            }],
             events: [
                 { id: 'event:note-1:0:dialogue_event', noteId: 'note-1', chunkId: 'chunk-a', label: 'dialogue event', entityIds: [], evidenceAnchorIds: [], confidence: 0.7 },
                 { id: 'event:note-1:1:process_event', noteId: 'note-1', chunkId: 'chunk-b', label: 'process event', entityIds: [], evidenceAnchorIds: [], confidence: 0.7 },
@@ -338,6 +350,9 @@ describe('embedding atlas projection', () => {
             memoryState: [],
             embeddingTargets: [
                 ...fillerTargets,
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'Kai', evidenceIds: [] },
+                { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', entityKind: 'CHARACTER', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
+                { id: 'embed:graph-fact:co-1', kind: 'graphFact', sourceId: 'co-1', label: 'Kai co_occurs_with Hazel', text: 'Kai co_occurs_with Hazel [review]', evidenceIds: [] },
                 { id: 'embed:event:event:note-1:0:dialogue_event', kind: 'event', sourceId: 'event:note-1:0:dialogue_event', noteId: 'note-1', label: 'dialogue event', text: 'dialogue event', evidenceIds: [] },
                 { id: 'embed:event:event:note-1:1:process_event', kind: 'event', sourceId: 'event:note-1:1:process_event', noteId: 'note-1', label: 'process event', text: 'process event', evidenceIds: [] },
                 { id: 'embed:temporalFact:temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event', kind: 'temporalFact', sourceId: 'temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event', label: 'before', text: 'event before event', evidenceIds: [] },
@@ -352,8 +367,14 @@ describe('embedding atlas projection', () => {
 
         const nodeIds = new Set(atlas.nodes.map((node) => node.id));
         expect(atlas.nodes).toHaveLength(420);
+        expect(nodeIds.has('embed:graph-fact:co-1')).toBe(true);
+        expect([...nodeIds].filter((id) => id.includes('kai') || id.includes('hazel') || id.includes('co-1')).sort()).toEqual([
+            'embed:entity:hazel',
+            'embed:entity:kai',
+            'embed:graph-fact:co-1',
+        ]);
         expect(nodeIds.has('embed:temporalFact:temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);
         expect(nodeIds.has('embed:causalFact:causal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);
-        expect(atlas.edges.map((edge) => edge.type)).toEqual(expect.arrayContaining(['before', 'causes_or_explains']));
+        expect(atlas.edges.map((edge) => edge.type)).toEqual(expect.arrayContaining(['co_occurs_with', 'before', 'causes_or_explains']));
     });
 });

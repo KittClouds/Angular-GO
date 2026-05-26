@@ -211,6 +211,7 @@ describe('AtlasCapabilityRuntimeService', () => {
                 'hybridManifold',
                 'hopfProjection',
                 'lorentzForest',
+                'productManifold',
             ]),
             optionalStages: [],
             expectedOutputs: expect.arrayContaining([
@@ -219,6 +220,7 @@ describe('AtlasCapabilityRuntimeService', () => {
                 expect.objectContaining({ key: 'manifoldSnapshot.hybrid' }),
                 expect.objectContaining({ key: 'manifoldSnapshot.hopf' }),
                 expect.objectContaining({ key: 'manifoldSnapshot.lorentz' }),
+                expect.objectContaining({ key: 'manifoldSnapshot.product' }),
             ]),
         }));
         expect(contract.operations.map((operation) => operation.kind)).toEqual([
@@ -229,11 +231,13 @@ describe('AtlasCapabilityRuntimeService', () => {
             'manifoldSnapshot',
             'manifoldSnapshot',
             'manifoldSnapshot',
+            'manifoldSnapshot',
         ]);
         expect(contract.operations.filter((operation) => operation.kind === 'manifoldSnapshot').map((operation) => operation.manifold)).toEqual([
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(contract.bridgeCommands).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -262,6 +266,10 @@ describe('AtlasCapabilityRuntimeService', () => {
             expect.objectContaining({
                 stageId: 'lorentzForest',
                 backendCommand: 'manifoldSnapshot(lorentz)',
+            }),
+            expect.objectContaining({
+                stageId: 'productManifold',
+                backendCommand: 'manifoldSnapshot(product)',
             }),
         ]));
     });
@@ -336,6 +344,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
     });
 
@@ -360,6 +369,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(nli.initialize).toHaveBeenCalledWith('onnx-community/ModernBERT-base-nli-ONNX');
         expect(phoenix.storeCommand).toHaveBeenNthCalledWith(1, 'semantic:listNliJudgmentInputs', {
@@ -391,7 +401,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             dimensionLabel: '384d',
             policy: 'dirty-only',
         }));
-        expect(phoenixUiApi.loadManifoldAtlasSnapshot).toHaveBeenCalledTimes(3);
+        expect(phoenixUiApi.loadManifoldAtlasSnapshot).toHaveBeenCalledTimes(4);
         expect(machine.loadSemanticModel.mock.invocationCallOrder[0])
             .toBeLessThan(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0]);
         expect(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0])
@@ -421,6 +431,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.invocationCallOrder[2])
             .toBeLessThan(nli.classifyStream.mock.invocationCallOrder[0]);
@@ -562,6 +573,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             ['hybridManifold', 'hybrid'],
             ['hopfProjection', 'hopf'],
             ['lorentzForest', 'lorentz'],
+            ['productManifold', 'product'],
         ];
 
         for (const [capabilityId, mode] of capabilities) {
@@ -584,6 +596,7 @@ describe('AtlasCapabilityRuntimeService', () => {
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(phoenixUiApi.loadManifoldAtlasSnapshot.mock.calls[0][1]).toEqual({ mode: 'note', noteId: 'note-1' });
     });
@@ -597,16 +610,19 @@ describe('AtlasCapabilityRuntimeService', () => {
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(reasoning.operations.filter((operation) => operation.kind === 'manifoldSnapshot').map((operation) => operation.manifold)).toEqual([
             'hybrid',
             'hopf',
             'lorentz',
+            'product',
         ]);
         expect(reasoning.requiredCapabilities).toEqual(expect.arrayContaining([
             'hybridManifold',
             'hopfProjection',
             'lorentzForest',
+            'productManifold',
             'relationGraph',
             'eventIdentity',
             'temporalGraph',
@@ -641,9 +657,9 @@ describe('AtlasCapabilityRuntimeService', () => {
 function createMachineMock() {
     const notice = signal<string | null>(null);
     const graphFocus = signal<unknown>(null);
-    const manifoldStatuses = signal<any>({ hybrid: 'idle', hopf: 'idle', lorentz: 'idle' });
+    const manifoldStatuses = signal<any>({ hybrid: 'idle', hopf: 'idle', lorentz: 'idle', product: 'idle' });
     let manifoldLoadSeq = 0;
-    const loadIds: Record<string, number> = { hybrid: 0, hopf: 0, lorentz: 0 };
+    const loadIds: Record<string, number> = { hybrid: 0, hopf: 0, lorentz: 0, product: 0 };
     return {
         query: signal(''),
         scope: signal('global'),
@@ -771,7 +787,7 @@ function createNoteStoreMock() {
 
 function createPhoenixUiApiMock() {
     return {
-        loadManifoldAtlasSnapshot: vi.fn(async (manifold: 'hybrid' | 'hopf' | 'lorentz') => ({
+        loadManifoldAtlasSnapshot: vi.fn(async (manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product') => ({
             manifold,
             geometryVersion: `${manifold}_test_v1`,
             sourceLabel: `${manifold} test snapshot`,

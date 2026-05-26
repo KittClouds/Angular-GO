@@ -414,6 +414,7 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
                 noteIds: ['note-1'],
             }),
         }));
+        expect(component.lastRunStatus().label).toBe('Clean graph complete');
         expect(machine.requestGraphFocus).toHaveBeenCalled();
     });
 
@@ -431,6 +432,44 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
             scope: expect.objectContaining({ scopeId: 'note:note-1' }),
         }));
         expect(pipeline.buildCoreGraph).not.toHaveBeenCalled();
+    });
+
+    it('surfaces full atlas stage and projection timings in the last run panel model', async () => {
+        const pipeline = injector.get(GraphRebuildPipelineService) as unknown as ReturnType<typeof createFullAtlasPipelineMock>;
+        pipeline.modelsReady.mockReturnValue(true);
+        pipeline.coreModelsReady.mockReturnValue(true);
+
+        await component.postProcessAtlas();
+
+        expect(component.lastRunStatus().label).toBe('Postprocess complete');
+        expect(component.lastRunReceiptRows()[0].detail).not.toContain('started');
+        expect(component.lastRunReceiptRows()[0].detail).not.toContain('completed at');
+        expect(component.lastRunReceiptRows()).toEqual([
+            expect.objectContaining({
+                kind: 'stage',
+                label: 'Semantic Atlas',
+                durationMs: 31,
+                detail: expect.stringContaining('embedding targets 3'),
+            }),
+            expect.objectContaining({
+                kind: 'stage',
+                label: 'Postprocess Snapshot',
+                durationMs: 44,
+                detail: expect.stringContaining('graph links 2'),
+            }),
+            expect.objectContaining({
+                kind: 'stage',
+                label: 'DB Ops',
+                durationMs: 15,
+                detail: 'completed / 0 outputs / db load 2 ms / snapshot persist 13 ms / snapshot store 11 ms / snapshot serialize 2 ms / snapshot payload chars 1,200',
+            }),
+            expect.objectContaining({
+                kind: 'projection',
+                label: 'Product Projection',
+                durationMs: 9,
+                detail: 'synced / 3 targets / 3 vectors',
+            }),
+        ]);
     });
 });
 
@@ -591,6 +630,52 @@ function createFullAtlasPipelineMock() {
                 message: 'Postprocess built 3 embedding targets and 2 link suggestions.',
                 postProcessMode: 'full',
                 durationMs: 12,
+                stageReceipts: [
+                    {
+                        id: 'semanticAtlas',
+                        label: 'Semantic Atlas',
+                status: 'completed',
+                durationMs: 31,
+                outputCount: 3,
+                counters: { startedAt: 167843, completedAt: 278860, embeddingTargets: 3 },
+                message: '3 embedding targets',
+            },
+                    {
+                        id: 'postProcessSnapshot',
+                        label: 'Postprocess Snapshot',
+                        status: 'completed',
+                        durationMs: 44,
+                        outputCount: 5,
+                        counters: { embeddingTargets: 3, graphLinks: 2 },
+                        message: '3 targets / 2 graph links',
+                    },
+                    {
+                        id: 'snapshotDbOps',
+                        label: 'DB Ops',
+                        status: 'completed',
+                        durationMs: 15,
+                        outputCount: 0,
+                        counters: {
+                            occurrenceLoadMs: 1,
+                            dbLoadMs: 2,
+                            snapshotPersistMs: 13,
+                            snapshotStoreMs: 11,
+                            snapshotSerializeMs: 2,
+                            snapshotPayloadChars: 1200,
+                        },
+                        message: 'Snapshot DB reads and persist timing',
+                    },
+                ],
+                projectionReceipts: [
+                    {
+                        mode: 'product',
+                        status: 'synced',
+                        durationMs: 9,
+                        targetCount: 3,
+                        vectorCount: 3,
+                        message: 'Product projection synced',
+                    },
+                ],
             };
             lastReceipt.set(receipt);
             return {

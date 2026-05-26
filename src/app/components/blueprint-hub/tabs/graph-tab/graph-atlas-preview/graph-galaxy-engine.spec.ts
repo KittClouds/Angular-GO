@@ -88,6 +88,69 @@ describe('Graph galaxy canonical colors', () => {
             entityColorStore.reset();
         }
     });
+
+    it('resolves embedding target family colors from graph metadata before stale snapshots', () => {
+        entityColorStore.setColor('ITEM', '0 100% 50%');
+        try {
+            const scene = buildGalaxyScene([
+                {
+                    id: 'embed:entity:phantom-work',
+                    label: 'Phantom work',
+                    kind: 'entity',
+                    colorHsl: '282 70% 62%',
+                    metadata: {
+                        graphRebuildEmbeddingTarget: true,
+                        graphColorKind: 'item',
+                        graphKind: 'item',
+                    },
+                },
+            ], [], mergeGalaxySettings({ layoutMode: 'productManifold' }));
+
+            expect(scene.nodes[0].r).toBe(255);
+            expect(scene.nodes[0].g).toBe(0);
+            expect(scene.nodes[0].b).toBe(0);
+        } finally {
+            entityColorStore.reset();
+        }
+    });
+
+    it('keeps graph node colors from being overridden by contextual entity kinds', () => {
+        entityColorStore.setColor('CHARACTER', '0 100% 50%');
+        entityColorStore.setGraphNodeColor('eventNode', '120 100% 50%');
+        entityColorStore.setGraphNodeColor('cooccurrence', '240 100% 50%');
+        try {
+            const scene = buildGalaxyScene([
+                {
+                    id: 'embed:event:e1',
+                    label: 'Kai enters',
+                    kind: 'event',
+                    metadata: {
+                        entityKind: 'CHARACTER',
+                        graphColorKind: 'event',
+                        graphKind: 'event',
+                        graphRebuildEmbeddingTarget: true,
+                    },
+                },
+                {
+                    id: 'embed:graph-fact:co1',
+                    label: 'Kai co_occurs_with Hazel',
+                    kind: 'graph-fact',
+                    metadata: {
+                        entityKind: 'CHARACTER',
+                        graphColorKind: 'cooccurrence',
+                        graphRelationFamily: 'cooccurrence',
+                        graphKind: 'graph-fact',
+                        graphRebuildEmbeddingTarget: true,
+                    },
+                },
+            ], [], mergeGalaxySettings({ layoutMode: 'productManifold' }));
+
+            expect(scene.nodes.find((node) => node.entity.id === 'embed:event:e1')).toMatchObject({ r: 0, g: 255, b: 0 });
+            expect(scene.nodes.find((node) => node.entity.id === 'embed:graph-fact:co1')).toMatchObject({ r: 0, g: 0, b: 255 });
+        } finally {
+            entityColorStore.reset();
+        }
+    });
 });
 
 function stable(index: number, salt: number): number {

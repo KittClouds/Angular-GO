@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
+import { dynamicChunksForNote } from './graph-rebuild.service';
 import type {
     GraphRebuildChunk,
     GraphRebuildScopeKind,
@@ -161,6 +162,44 @@ describe('Phoenix graph rebuild parity smoke', () => {
         expect(kindCounts(snapshot.embeddingTargets.map((target) => target.kind)).graphFact).toBeGreaterThan(0);
         expect(snapshot.counters.entityLinkSuggestions).toBeGreaterThanOrEqual(0);
     });
+
+    it('keeps dense shortrun embedding targets signal-weighted before graph postprocess', () => {
+        const text = readFileSync(new URL('../../../docs/shortrun.md', import.meta.url), 'utf8');
+        const chunks = dynamicChunksForNote({ id: 'shortrun-dense', markdownContent: text, content: '' });
+        const surfaces = candidateSurfaces(text).slice(0, 48);
+        const entities = surfaces.map((surface, index) =>
+            registeredEntity(`dense-${index}:${normalizeId(surface)}`, surface, likelyKind(surface), []),
+        );
+        const occurrences = entities.flatMap((entity) =>
+            surfaceOccurrences(text, 'shortrun-dense', entity.id, entity.label, entity.kind, 'dictionary_match', 120),
+        );
+        const started = performance.now();
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:shortrun-dense',
+            noteIds: ['shortrun-dense'],
+            entities,
+            chunks,
+            occurrences,
+            candidateCount: occurrences.length,
+            noteTexts: { 'shortrun-dense': text },
+            builtAt: 22,
+        });
+        const elapsedMs = performance.now() - started;
+        const counts = kindCounts(snapshot.embeddingTargets.map((target) => target.kind));
+
+        expect(occurrences.length).toBeGreaterThan(900);
+        expect(snapshot.counters.embeddingTargets).toBeLessThanOrEqual(820);
+        expect(snapshot.embeddingGraphPostProcess?.targetCount).toBe(snapshot.counters.embeddingTargets);
+        expect(counts.entity).toBe(entities.length);
+        expect(counts.graphFact).toBeGreaterThanOrEqual(160);
+        expect(counts.graphFact).toBeLessThanOrEqual(192);
+        expect(counts.anchor).toBeLessThan(occurrences.length);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'entity').every((target) => /mentions:\d+/.test(target.text))).toBe(true);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'graphFact').every((target) => target.text.includes('evidence_context:'))).toBe(true);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').every((target) => target.text.includes('source:') && target.text.includes('evidence_context:'))).toBe(true);
+        expect(elapsedMs).toBeLessThan(8000);
+    });
 });
 
 function loadFixture(): ParityFixture {
@@ -264,6 +303,38 @@ function surfaceOccurrences(
         from = index + surface.length;
     }
     return out;
+}
+
+function candidateSurfaces(text: string): string[] {
+    const stop = new Set([
+        'the', 'this', 'that', 'they', 'their', 'there', 'these', 'those', 'when', 'what',
+        'with', 'then', 'once', 'after', 'also', 'even', 'could', 'would', 'should', 'chapter',
+        'finally', 'however', 'clearly', 'thankfully', 'unfortunately', 'nobody', 'she', 'his',
+        'her', 'you', 'and', 'but', 'not', 'one', 'now', 'having', 'since', 'instead', 'may',
+    ]);
+    const counts = new Map<string, number>();
+    const matches = text.match(/\b[A-Z][A-Za-z'’-]*(?:[-\s]+(?:of\s+|the\s+)?[A-Z][A-Za-z'’-]*){0,3}\b/g) || [];
+    for (const match of matches) {
+        const surface = match.replace(/\s+/g, ' ').trim();
+        const key = surface.toLowerCase();
+        if (surface.length <= 2 || stop.has(key)) continue;
+        counts.set(surface, (counts.get(surface) || 0) + 1);
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count >= 2)
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .map(([surface]) => surface);
+}
+
+function normalizeId(surface: string): string {
+    return surface.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'surface';
+}
+
+function likelyKind(surface: string): string {
+    const lower = surface.toLowerCase();
+    if (/\b(rome|town|italy|plymouth|lanka|maghreb|bloodstream)\b/.test(lower)) return 'LOCATION';
+    if (/\b(security|genome|genomes|gang|dynamis)\b/.test(lower)) return 'ORGANIZATION';
+    return 'CHARACTER';
 }
 
 function structuralDigest(snapshot: GraphRebuildSnapshot): StructuralDigest {

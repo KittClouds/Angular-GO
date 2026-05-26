@@ -97,6 +97,14 @@ describe('Phoenix graph rebuild builder', () => {
             memoryState: 3,
             note: 1,
         });
+        expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
+            .toContain('mentions:1');
+        expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
+            .toContain('evidence_context:Kai approved the packet');
+        const approvedFact = snapshot.embeddingTargets.find((target) => target.id.includes('approves_or_accepts'));
+        expect(approvedFact?.label).toContain('Kai approves_or_accepts Rift');
+        expect(approvedFact?.text).toContain('confidence:');
+        expect(approvedFact?.text).toContain('evidence_context:Kai approved the packet with Rift');
         expect(snapshot.embeddingTargets
             .filter((target) => target.kind === 'entity')
             .map((target) => target.entityKind)
@@ -372,6 +380,61 @@ describe('Phoenix graph rebuild builder', () => {
             'temporalFact',
             'causalFact',
         ]));
+    });
+
+    it('does not promote broad chunk cues into every distant entity pair', () => {
+        const text = `Kai received command from Allied Table. ${'quiet '.repeat(180)}Hazel watched the door.`;
+        const alliedStart = text.indexOf('Allied Table');
+        const hazelStart = text.indexOf('Hazel');
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:local-pair-evidence',
+            noteIds: ['note-1'],
+            entities: [
+                entity('e-kai', 'Kai', []),
+                entity('e-allied-table', 'Allied Table', [], 'NETWORK'),
+                entity('e-hazel', 'Hazel', []),
+            ],
+            chunks: [{
+                id: 'note-1:chunk:0',
+                noteId: 'note-1',
+                start: 0,
+                end: text.length,
+                ordinal: 0,
+                source: 'dynamic-chunking',
+                role: 'authority_chain',
+                meaningFrame: {
+                    role: 'authority_chain',
+                    splitReason: 'test',
+                    breakPressure: 0,
+                    mergePressure: 0,
+                    entityPriors: [],
+                    eventCues: [],
+                    modalCues: [],
+                    temporalCues: [],
+                    authorityCues: ['command', 'table'],
+                    evidenceCues: [],
+                    carryoverIn: [],
+                    carryoverOut: [],
+                },
+            }],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3),
+                occurrence('note-1', 'e-allied-table', 'Allied Table', alliedStart, alliedStart + 12),
+                occurrence('note-1', 'e-hazel', 'Hazel', hazelStart, hazelStart + 5),
+            ],
+            noteTexts: { 'note-1': text },
+            builtAt: 18,
+        });
+        const relationshipPairs = snapshot.relationships.map((relationship) =>
+            [relationship.sourceEntityId, relationship.relationType, relationship.targetEntityId].join('|'),
+        );
+
+        expect(relationshipPairs).toEqual(expect.arrayContaining([
+            'e-allied-table|co_occurs_with|e-kai',
+            'e-kai|command_or_service_tie|e-allied-table',
+        ]));
+        expect(relationshipPairs.some((pair) => pair.includes('e-hazel'))).toBe(false);
     });
 
     it('upgrades matching relationship candidates with explicit NLI hints', () => {

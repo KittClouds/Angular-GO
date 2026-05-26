@@ -34,6 +34,17 @@ const FULL_INDEX_CAPABILITIES: AtlasCapabilityId[] = [
     'causalGraph',
 ];
 
+const POSTPROCESS_FACT_CAPABILITIES: AtlasCapabilityId[] = [
+    'nliAdjudication',
+    'relationGraph',
+    'temporalGraph',
+    'eventIdentity',
+    'memoryState',
+    'causalGraph',
+];
+
+const POSTPROCESS_DISCOVERY_CAPABILITY: AtlasCapabilityId = 'assertedKernel';
+
 const PROJECTION_CAPABILITIES: Array<{ capability: AtlasCapabilityId; mode: GraphIndexProjectionMode }> = [
     { capability: 'hybridManifold', mode: 'hybrid' },
     { capability: 'hopfProjection', mode: 'hopf' },
@@ -154,6 +165,7 @@ export class GraphRebuildPipelineService {
             if (!completedSnapshot) {
                 throw new Error('Clean graph stage completed without a snapshot.');
             }
+            appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             const completedAt = Date.now();
             const receipt = this.buildRunReceipt({
@@ -170,8 +182,7 @@ export class GraphRebuildPipelineService {
                 snapshot: completedSnapshot,
                 message: `Clean graph built ${completedSnapshot.counters.nodes} nodes and ${completedSnapshot.counters.edges} edges.`,
             });
-            this.lastSnapshotState.set(completedSnapshot);
-            this.lastReceiptState.set(receipt);
+            await this.publishRunReceipt(receipt, completedSnapshot);
             await this.graphRebuild.persistRunReceipt(receipt);
             return { receipt, snapshot: completedSnapshot };
         } catch (error) {
@@ -279,6 +290,9 @@ export class GraphRebuildPipelineService {
             });
             stageReceipts.push(graphStage);
             assertStageCompleted(graphStage);
+            if (snapshot) {
+                appendSnapshotTimingStages(stageReceipts, snapshot);
+            }
 
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, snapshot));
@@ -310,8 +324,7 @@ export class GraphRebuildPipelineService {
                     ? `Full Atlas Index built ${completedSnapshot.counters.nodes} nodes, ${completedSnapshot.counters.edges} edges, and ${completedSnapshot.counters.entityLinkSuggestions || 0} entity links.`
                     : 'Full Atlas Index completed without a graph snapshot.',
             };
-            this.lastSnapshotState.set(completedSnapshot);
-            this.lastReceiptState.set(receipt);
+            await this.publishRunReceipt(receipt, completedSnapshot);
             await this.graphRebuild.persistRunReceipt(receipt);
             return { receipt, snapshot: completedSnapshot! };
         } catch (error) {
@@ -364,6 +377,7 @@ export class GraphRebuildPipelineService {
             const docs = await this.loadScopedDocuments(request.scope.noteIds);
             const scope = expandScopeNoteIds(request.scope, docs);
             const options = this.atlasOptions({ ...request, scope, postProcessMode: 'full' });
+            const postProcessStageOptions = { ...options, buildPolicy: 'dirty-only' as const };
             const entities = smartGraphRegistry.getAllEntities().length
                 ? smartGraphRegistry.getAllEntities()
                 : request.entities;
@@ -407,20 +421,24 @@ export class GraphRebuildPipelineService {
                     snapshot: cachedSnapshot,
                     message: 'Postprocess cache reused for this scope.',
                 });
-                this.lastSnapshotState.set(cachedSnapshot);
-                this.lastReceiptState.set(receipt);
+                await this.publishRunReceipt(receipt, cachedSnapshot);
                 await this.graphRebuild.restorePersistedSnapshot(cachedSnapshot);
                 await this.graphRebuild.persistRunReceipt(receipt);
                 return { receipt, snapshot: cachedSnapshot };
             }
 
             let relationshipHints: GraphRebuildRelationshipHint[] = [];
-            for (const capability of FULL_INDEX_CAPABILITIES) {
-                const receipt = await this.runCapabilityStage(capability, options, capability === 'nliAdjudication'
-                    ? (rawResult) => {
+            const discoveryStage = await this.runPostProcessDiscoveryStage(postProcessStageOptions);
+            stageReceipts.push(discoveryStage);
+            assertStageCompleted(discoveryStage);
+
+            for (const capability of POSTPROCESS_FACT_CAPABILITIES) {
+                const captureRelationshipHints = capability === 'nliAdjudication'
+                    ? (rawResult: unknown) => {
                         relationshipHints = relationshipHintsFromNliResult(rawResult);
                     }
-                    : undefined);
+                    : undefined;
+                const receipt = await this.runCapabilityStage(capability, postProcessStageOptions, captureRelationshipHints);
                 stageReceipts.push(receipt);
                 assertStageCompleted(receipt);
             }
@@ -459,9 +477,10 @@ export class GraphRebuildPipelineService {
             if (!completedSnapshot) {
                 throw new Error('Postprocess stage completed without a snapshot.');
             }
+            appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             for (const projection of PROJECTION_CAPABILITIES) {
-                projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, completedSnapshot));
+                projectionReceipts.push(skippedProjectionReceipt(projection.mode, completedSnapshot));
             }
 
             const completedAt = Date.now();
@@ -481,10 +500,8 @@ export class GraphRebuildPipelineService {
                 snapshot: completedSnapshot,
                 message: `Postprocess built ${completedSnapshot.counters.embeddingTargets} embedding targets, ${completedSnapshot.counters.graphAwareLinkSuggestions || 0} graph links, and ${completedSnapshot.counters.entityLinkSuggestions || 0} entity links.`,
             });
-            this.lastSnapshotState.set(completedSnapshot);
-            this.lastReceiptState.set(receipt);
-            await this.graphRebuild.persistRunReceipt(receipt);
-            await this.graphRebuild.persistPostProcessCache(fingerprint, completedSnapshot, receipt);
+            await this.publishRunReceipt(receipt, completedSnapshot);
+            await this.persistRunReceiptWithTiming(receipt);
             return { receipt, snapshot: completedSnapshot };
         } catch (error) {
             const completedAt = Date.now();
@@ -553,6 +570,66 @@ export class GraphRebuildPipelineService {
         };
     }
 
+    private async publishRunReceipt(
+        receipt: GraphIndexRunReceipt,
+        snapshot: GraphRebuildSnapshot | null,
+    ): Promise<void> {
+        const startedAt = Date.now();
+        const uiStage: GraphIndexStageReceipt = {
+            id: 'uiCommit',
+            label: 'UI Commit',
+            status: 'completed',
+            startedAt,
+            completedAt: startedAt,
+            durationMs: 0,
+            outputCount: 0,
+            counters: {},
+            message: 'Receipt and snapshot published to UI signals',
+        };
+        receipt.stageReceipts.push(uiStage);
+        const signalStarted = performance.now();
+        if (snapshot) this.lastSnapshotState.set(snapshot);
+        this.lastReceiptState.set({ ...receipt, stageReceipts: [...receipt.stageReceipts] });
+        const signalCommitMs = elapsedTimingMs(signalStarted);
+        const frameStarted = performance.now();
+        await waitForUiFrame();
+        const uiFrameMs = elapsedTimingMs(frameStarted);
+        const completedAt = Date.now();
+        uiStage.completedAt = completedAt;
+        uiStage.durationMs = completedAt - startedAt;
+        uiStage.counters = {
+            signalCommitMs,
+            uiFrameMs,
+        };
+        receipt.completedAt = Math.max(receipt.completedAt, completedAt);
+        receipt.durationMs = receipt.completedAt - receipt.startedAt;
+        this.lastReceiptState.set({ ...receipt, stageReceipts: [...receipt.stageReceipts] });
+    }
+
+    private async persistRunReceiptWithTiming(receipt: GraphIndexRunReceipt): Promise<void> {
+        const startedAt = Date.now();
+        const started = performance.now();
+        await this.graphRebuild.persistRunReceipt(receipt);
+        const durationMs = elapsedTimingMs(started);
+        const completedAt = Date.now();
+        receipt.stageReceipts.push({
+            id: 'receiptDbOps',
+            label: 'Receipt DB Ops',
+            status: 'completed',
+            startedAt,
+            completedAt,
+            durationMs,
+            outputCount: 0,
+            counters: {
+                receiptPersistMs: durationMs,
+            },
+            message: 'Run receipt persisted to scoped documents',
+        });
+        receipt.completedAt = Math.max(receipt.completedAt, completedAt);
+        receipt.durationMs = receipt.completedAt - receipt.startedAt;
+        this.lastReceiptState.set({ ...receipt, stageReceipts: [...receipt.stageReceipts] });
+    }
+
     private async safeLoadSnapshot(scopeId: string): Promise<GraphRebuildSnapshot | null> {
         try {
             return await this.graphRebuild.loadPersistedSnapshot(scopeId);
@@ -575,6 +652,25 @@ export class GraphRebuildPipelineService {
         } catch {
             return null;
         }
+    }
+
+    private async runPostProcessDiscoveryStage(options: AtlasRunOptions): Promise<GraphIndexStageReceipt> {
+        return this.runStage('postProcessDiscovery', 'Entity Discovery', async () => {
+            const result = await this.atlasRuntime.runCapability(POSTPROCESS_DISCOVERY_CAPABILITY, {
+                ...options,
+                skipModelWarm: true,
+            });
+            const counters = numberCounts(result.rawResult);
+            const suggestions = counters['candidateSuggestions'] || counters['suggestions'] || 0;
+            const documents = counters['indexedDocuments'] || counters['processedDocuments'] || counters['documents'] || 0;
+            return {
+                outputCount: suggestions || sumOutputCounts(counters),
+                counters,
+                message: suggestions
+                    ? `${suggestions} review candidates from ${documents || 0} documents`
+                    : 'Entity discovery refreshed without new review candidates',
+            };
+        });
     }
 
     private async runNerDeltas(docs: ScopedDocument[]): Promise<Record<string, number>> {
@@ -615,7 +711,7 @@ export class GraphRebuildPipelineService {
             onRawResult?.(result.rawResult);
             const counters = numberCounts(result.rawResult);
             return {
-                outputCount: sumCounts(counters),
+                outputCount: sumOutputCounts(counters),
                 counters,
                 message: `${capabilityLabel(capability)} completed`,
             };
@@ -633,14 +729,17 @@ export class GraphRebuildPipelineService {
             const result = await this.atlasRuntime.runCapability(capability, { ...options, skipModelWarm: true });
             const counters = numberCounts(result.rawResult);
             const completedAt = Date.now();
+            const durationMs = completedAt - startedAt;
+            const projectionCounters = projectionTimingCounters(counters, durationMs);
             return {
                 mode,
                 status: 'synced',
                 startedAt,
                 completedAt,
-                durationMs: completedAt - startedAt,
+                durationMs,
                 targetCount: snapshot?.counters.embeddingTargets || counters['manifold.nodes'] || 0,
                 vectorCount: snapshot?.counters.embeddingVectors || counters['manifold.nodes'] || 0,
+                counters: projectionCounters,
                 message: `${capabilityLabel(capability)} synced`,
             };
         } catch (error) {
@@ -653,6 +752,7 @@ export class GraphRebuildPipelineService {
                 durationMs: completedAt - startedAt,
                 targetCount: snapshot?.counters.embeddingTargets || 0,
                 vectorCount: snapshot?.counters.embeddingVectors || 0,
+                counters: {},
                 message: error instanceof Error ? error.message : String(error),
             };
         }
@@ -739,11 +839,90 @@ export class GraphRebuildPipelineService {
 }
 
 function expandScopeNoteIds(scope: GraphIndexRunScope, docs: ScopedDocument[]): GraphIndexRunScope {
-    if (scope.kind === 'global') return scope;
     const loadedNoteIds = docs.map((doc) => doc.id);
+    if (scope.kind === 'global') return { ...scope, noteIds: loadedNoteIds };
     if (!scope.noteIds.length) return { ...scope, noteIds: loadedNoteIds };
     if (scope.kind === 'multiNote' || scope.kind === 'folder') return { ...scope, noteIds: loadedNoteIds };
     return scope;
+}
+
+function appendSnapshotTimingStages(
+    stageReceipts: GraphIndexStageReceipt[],
+    snapshot: GraphRebuildSnapshot,
+): void {
+    const timings = snapshot.buildTimings;
+    if (!timings) return;
+    stageReceipts.push(instrumentationStage(
+        'snapshotDbOps',
+        'DB Ops',
+        Math.round(timings.dbOpsMs),
+        {
+            dbLoadMs: timings.dbLoadMs,
+            snapshotPersistMs: timings.snapshotPersistMs,
+            snapshotStoreMs: timings.snapshotStoreMs || 0,
+            snapshotSerializeMs: timings.snapshotSerializeMs || 0,
+            snapshotPayloadChars: timings.snapshotPayloadChars || 0,
+            occurrenceLoadMs: timings.occurrenceLoadMs,
+            chunkLoadMs: timings.chunkLoadMs,
+            noteTextLoadMs: timings.noteTextLoadMs,
+        },
+        'Snapshot DB reads and persist timing',
+    ));
+    stageReceipts.push(instrumentationStage(
+        'snapshotCpu',
+        'Snapshot CPU',
+        Math.round(timings.occurrenceRecoverMs + timings.snapshotBuildMs),
+        {
+            occurrenceRecoverMs: timings.occurrenceRecoverMs,
+            snapshotBuildMs: timings.snapshotBuildMs,
+            serviceStateCommitMs: timings.stateCommitMs,
+            totalBuildMs: timings.totalMs,
+        },
+        'Graph rebuild CPU and service state timing',
+    ));
+}
+
+function instrumentationStage(
+    id: string,
+    label: string,
+    durationMs: number,
+    counters: Record<string, number>,
+    message: string,
+): GraphIndexStageReceipt {
+    const completedAt = Date.now();
+    const safeDuration = Math.max(0, Math.round(durationMs || 0));
+    return {
+        id,
+        label,
+        status: 'completed',
+        startedAt: completedAt - safeDuration,
+        completedAt,
+        durationMs: safeDuration,
+        outputCount: 0,
+        counters,
+        message,
+    };
+}
+
+function skippedProjectionReceipt(
+    mode: GraphIndexProjectionMode,
+    snapshot: GraphRebuildSnapshot | null,
+): GraphIndexProjectionReceipt {
+    const now = Date.now();
+    return {
+        mode,
+        status: 'skipped',
+        startedAt: now,
+        completedAt: now,
+        durationMs: 0,
+        targetCount: snapshot?.counters.embeddingTargets || 0,
+        vectorCount: snapshot?.counters.embeddingVectors || 0,
+        counters: {
+            graphRebuildTargets: snapshot?.counters.embeddingTargets || 0,
+            nativeSemanticSidecarSkipped: 1,
+        },
+        message: 'Native Semantic Atlas sidecar projection skipped; graph-rebuild snapshot owns postprocess topology',
+    };
 }
 
 function atlasScopeFromGraphScope(scope: GraphIndexRunScope): AtlasBuildScope {
@@ -787,8 +966,40 @@ function numberCounts(value: unknown, prefix = ''): Record<string, number> {
     return counts;
 }
 
-function sumCounts(counts: Record<string, number>): number {
-    return Object.values(counts).reduce((sum, value) => sum + value, 0);
+function projectionTimingCounters(counters: Record<string, number>, durationMs: number): Record<string, number> {
+    const totalLoadMs = counters['timings.totalMs'] || 0;
+    return {
+        wrapperMs: durationMs,
+        nativeLoadMs: counters['timings.nativeSnapshotMs'] || 0,
+        fallbackLoadMs: counters['timings.fallbackLoadMs'] || 0,
+        runtimeLoadMs: counters['timings.runtimeLoadMs'] || 0,
+        uiWrapperMs: totalLoadMs > 0 ? Math.max(0, durationMs - totalLoadMs) : 0,
+        payloadNodes: counters['payload.nodes'] || counters['nodes'] || 0,
+        payloadEdges: counters['payload.edges'] || counters['edges'] || 0,
+        payloadCells: counters['payload.cells'] || counters['cells'] || 0,
+        payloadAnchors: counters['payload.anchorProjections'] || counters['anchorProjections'] || 0,
+        lorentzTrees: counters['payload.lorentzTrees'] || counters['lorentzTrees'] || 0,
+        totalLoadMs,
+    };
+}
+
+function elapsedTimingMs(started: number): number {
+    return Math.max(0, Math.round(performance.now() - started));
+}
+
+function waitForUiFrame(): Promise<void> {
+    if (typeof requestAnimationFrame !== 'function') return Promise.resolve();
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function sumOutputCounts(counts: Record<string, number>): number {
+    return Object.entries(counts)
+        .filter(([key, value]) => isOutputCountKey(key) && Number.isFinite(value) && value > 0)
+        .reduce((sum, [, value]) => sum + value, 0);
+}
+
+function isOutputCountKey(key: string): boolean {
+    return !/(started|completed|duration|elapsed|wall|timestamp|time)/i.test(key);
 }
 
 function relationshipHintsFromNliResult(rawResult: unknown): GraphRebuildRelationshipHint[] {

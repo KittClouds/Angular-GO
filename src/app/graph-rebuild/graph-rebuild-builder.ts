@@ -25,6 +25,9 @@ import {
 
 export { buildGraphRebuildAliasResolver, normalizeGraphRebuildCandidate };
 
+const CO_OCCURRENCE_MAX_GAP_CHARS = 720;
+const CO_OCCURRENCE_LINKS_PER_ANCHOR = 4;
+
 export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput): GraphRebuildSnapshot {
     const builtAt = input.builtAt ?? Date.now();
     const chunks = normalizeChunks(input.chunks || []);
@@ -195,30 +198,56 @@ function buildEdges(anchors: GraphRebuildEntityAnchor[], drops: GraphRebuildDrop
     }
     const byPair = new Map<string, GraphRebuildEdge>();
     for (const [scopeKey, bucket] of buckets) {
-        const entityIds = unique(bucket.map((anchor) => anchor.entityId));
-        if (entityIds.length < 2) {
+        const pairs = coOccurrencePairs(bucket);
+        if (!pairs.length) {
             drops.singletonBucket += 1;
             continue;
         }
-        for (let i = 0; i < entityIds.length; i += 1) {
-            for (let j = i + 1; j < entityIds.length; j += 1) {
-                upsertEdge(byPair, entityIds[i], entityIds[j], bucket, scopeKey);
-            }
+        for (const pair of pairs) {
+            upsertEdge(byPair, pair.leftId, pair.rightId, pair.evidence, scopeKey);
         }
     }
     return [...byPair.values()].sort((left, right) => right.weight - left.weight || left.id.localeCompare(right.id));
+}
+
+function coOccurrencePairs(bucket: GraphRebuildEntityAnchor[]): Array<{
+    leftId: string;
+    rightId: string;
+    evidence: GraphRebuildEntityAnchor[];
+}> {
+    const anchors = [...bucket].sort((left, right) => left.sourceStart - right.sourceStart || left.sourceEnd - right.sourceEnd);
+    const best = new Map<string, { leftId: string; rightId: string; evidence: GraphRebuildEntityAnchor[]; gap: number }>();
+    for (let i = 0; i < anchors.length; i += 1) {
+        const left = anchors[i];
+        let links = 0;
+        for (let j = i + 1; j < anchors.length; j += 1) {
+            const right = anchors[j];
+            const gap = Math.max(0, right.sourceStart - left.sourceEnd);
+            if (gap > CO_OCCURRENCE_MAX_GAP_CHARS) break;
+            if (left.entityId === right.entityId) continue;
+            const [sourceId, targetId] = [left.entityId, right.entityId].sort();
+            const key = `${sourceId}\u0000${targetId}`;
+            const current = best.get(key);
+            if (!current || gap < current.gap) {
+                best.set(key, { leftId: sourceId, rightId: targetId, evidence: [left, right], gap });
+            }
+            links += 1;
+            if (links >= CO_OCCURRENCE_LINKS_PER_ANCHOR) break;
+        }
+    }
+    return [...best.values()].sort((left, right) => left.gap - right.gap || left.leftId.localeCompare(right.leftId) || left.rightId.localeCompare(right.rightId));
 }
 
 function upsertEdge(
     byPair: Map<string, GraphRebuildEdge>,
     leftId: string,
     rightId: string,
-    bucket: GraphRebuildEntityAnchor[],
+    evidenceAnchors: GraphRebuildEntityAnchor[],
     scopeKey: string,
 ): void {
     const [sourceId, targetId] = [leftId, rightId].sort();
     const id = `${sourceId}:anchored-cooccurrence:${targetId}`;
-    const evidence = bucket.filter((anchor) => anchor.entityId === sourceId || anchor.entityId === targetId).map((anchor) => anchor.id);
+    const evidence = evidenceAnchors.map((anchor) => anchor.id);
     const edge = byPair.get(id) ?? {
         id,
         sourceId,
@@ -234,7 +263,7 @@ function upsertEdge(
     edge.confidence = Math.min(1, edge.confidence + 0.2 + evidence.length * 0.08);
     edge.evidenceAnchorIds = unique([...edge.evidenceAnchorIds, ...evidence]);
     edge.scopeKeys = unique([...edge.scopeKeys, scopeKey]);
-    edge.noteIds = unique([...edge.noteIds, ...bucket.map((anchor) => anchor.noteId)]);
+    edge.noteIds = unique([...edge.noteIds, ...evidenceAnchors.map((anchor) => anchor.noteId)]);
     byPair.set(id, edge);
 }
 

@@ -119,7 +119,28 @@ describe('GraphRebuildPipelineService', () => {
         }));
     });
 
-    it('keeps global graph rebuild unbounded even when the visible note list is partial', async () => {
+    it('expands global graph rebuilds to loaded note ids for deterministic chunking', async () => {
+        notesMock.rows = [
+            {
+                id: 'note-1',
+                title: 'First',
+                markdownContent: 'Kai mapped Red Mesa.',
+                content: '',
+                folderId: '',
+                updatedAt: 10,
+                version: 2,
+            },
+            {
+                id: 'note-2',
+                title: 'Second',
+                markdownContent: 'Rowan watched Boundary Keep.',
+                content: '',
+                folderId: '',
+                updatedAt: 11,
+                version: 3,
+            },
+        ];
+
         await service.buildCoreGraph({
             ...request(),
             scope: { kind: 'global', scopeId: 'global', label: 'Global', noteIds: [] },
@@ -127,16 +148,17 @@ describe('GraphRebuildPipelineService', () => {
         });
 
         expect(notesMock.toArray).toHaveBeenCalled();
+        expect(ner.runDynamicScan).toHaveBeenCalledTimes(2);
         expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
             scopeKind: 'global',
             scopeId: 'global',
-            noteIds: [],
+            noteIds: ['note-1', 'note-2'],
         }));
         expect(graphRebuild.persistRunReceipt).toHaveBeenCalledWith(expect.objectContaining({
             scope: expect.objectContaining({
                 kind: 'global',
                 scopeId: 'global',
-                noteIds: [],
+                noteIds: ['note-1', 'note-2'],
             }),
         }));
     });
@@ -217,6 +239,7 @@ describe('GraphRebuildPipelineService', () => {
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hybridManifold', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hopfProjection', expect.objectContaining({ skipModelWarm: true }));
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('lorentzForest', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('productManifold', expect.objectContaining({ skipModelWarm: true }));
         expect(graphRebuild.persistRunReceipt).toHaveBeenCalledWith(expect.objectContaining({
             status: 'completed',
             snapshotId: 'snapshot-1',
@@ -227,28 +250,29 @@ describe('GraphRebuildPipelineService', () => {
                 expect.objectContaining({ mode: 'hybrid', status: 'synced' }),
                 expect.objectContaining({ mode: 'hopf', status: 'synced' }),
                 expect.objectContaining({ mode: 'lorentz', status: 'synced' }),
+                expect.objectContaining({ mode: 'product', status: 'synced' }),
             ]),
+        }));
+        const receipt = graphRebuild.persistRunReceipt.mock.calls[0][0];
+        const semanticStage = receipt.stageReceipts.find((stage: any) => stage.id === 'semanticAtlas');
+        expect(semanticStage).toEqual(expect.objectContaining({
+            outputCount: 15,
+            counters: expect.objectContaining({
+                startedAt: 1000,
+                completedAt: 2000,
+                candidateSuggestions: 2,
+                'nativeResult.embeddingCounts.leafVectors': 7,
+            }),
         }));
         expect(service.lastSnapshot()?.id).toBe('snapshot-1');
     });
 
     it('reuses postprocess cache when the scope and adapter fingerprint match', async () => {
         const first = await service.postProcessAtlas(request());
-        expect(graphRebuild.persistPostProcessCache).toHaveBeenCalledWith(
-            first.receipt.postProcessFingerprint,
-            first.snapshot,
-            first.receipt,
-        );
-        graphRebuild.loadPostProcessCache.mockResolvedValue({
-            schemaVersion: 'phoenix-graph-postprocess-cache/v1',
-            scopeId: first.snapshot.scopeId,
-            fingerprint: first.receipt.postProcessFingerprint,
-            snapshot: first.snapshot,
-            receipt: first.receipt,
-            updatedAt: 1,
-        });
-        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(null);
-        graphRebuild.loadPersistedSnapshot.mockResolvedValue(null);
+        expect(graphRebuild.persistPostProcessCache).not.toHaveBeenCalled();
+        graphRebuild.loadPostProcessCache.mockResolvedValue(null);
+        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(first.receipt);
+        graphRebuild.loadPersistedSnapshot.mockResolvedValue(first.snapshot);
         atlasRuntime.runCapability.mockClear();
 
         const second = await service.postProcessAtlas(request());
@@ -256,15 +280,64 @@ describe('GraphRebuildPipelineService', () => {
         expect(atlasRuntime.runCapability).not.toHaveBeenCalled();
         expect(graphRebuild.restorePersistedSnapshot).toHaveBeenCalledWith(first.snapshot);
         expect(second.receipt.postProcessCacheHit).toBe(true);
-        expect(second.receipt.stageReceipts).toEqual([
+        expect(second.receipt.stageReceipts).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: 'postProcessCache', status: 'skipped' }),
-        ]);
+            expect.objectContaining({ id: 'uiCommit', status: 'completed' }),
+        ]));
     });
 
-    it('runs postprocess stages without rescanning NER', async () => {
-        await service.postProcessAtlas(request());
+    it('force postprocess does not invoke Semantic Atlas', async () => {
+        const result = await service.postProcessAtlas({
+            ...request(),
+            policy: 'force',
+        });
+
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('semanticAtlas', expect.anything());
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('hybridManifold', expect.anything());
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('hopfProjection', expect.anything());
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('lorentzForest', expect.anything());
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('productManifold', expect.anything());
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({ skipModelWarm: true }));
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            postProcessMode: 'full',
+        }));
+        expect(result.receipt.stageReceipts.some((stage) => stage.id === 'semanticAtlas')).toBe(false);
+        expect(result.receipt.stageReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'postProcessDiscovery', label: 'Entity Discovery' }),
+            expect.objectContaining({ id: 'snapshotDbOps', label: 'DB Ops' }),
+            expect.objectContaining({ id: 'snapshotCpu', label: 'Snapshot CPU' }),
+            expect.objectContaining({ id: 'uiCommit', label: 'UI Commit' }),
+            expect.objectContaining({ id: 'receiptDbOps', label: 'Receipt DB Ops' }),
+        ]));
+        expect(result.receipt.projectionReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                mode: 'hybrid',
+                status: 'skipped',
+                counters: expect.objectContaining({ nativeSemanticSidecarSkipped: 1 }),
+            }),
+            expect.objectContaining({ mode: 'hopf', status: 'skipped' }),
+            expect.objectContaining({ mode: 'lorentz', status: 'skipped' }),
+            expect.objectContaining({ mode: 'product', status: 'skipped' }),
+        ]));
+    });
+
+    it('runs postprocess discovery without rescanning Dynamic NER', async () => {
+        const result = await service.postProcessAtlas(request());
 
         expect(ner.runDynamicScan).not.toHaveBeenCalled();
+        expect(ner.acceptSuggestionForContext).not.toHaveBeenCalled();
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({
+            buildPolicy: 'dirty-only',
+            skipModelWarm: true,
+        }));
+        expect(result.receipt.stageReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'postProcessDiscovery',
+                label: 'Entity Discovery',
+                counters: expect.objectContaining({ candidateSuggestions: 3 }),
+            }),
+        ]));
         expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
             postProcessMode: 'full',
             relationshipHints: [expect.objectContaining({
@@ -272,6 +345,54 @@ describe('GraphRebuildPipelineService', () => {
                 targetId: 'entity-hazel',
                 status: 'accepted',
             })],
+        }));
+    });
+
+    it('postprocesses global scopes against loaded note ids instead of an empty occurrence fallback', async () => {
+        notesMock.rows = [
+            {
+                id: 'note-1',
+                title: 'First',
+                markdownContent: 'Kai mapped Red Mesa.',
+                content: '',
+                folderId: '',
+                updatedAt: 10,
+                version: 2,
+            },
+            {
+                id: 'note-2',
+                title: 'Second',
+                markdownContent: 'Rowan watched Boundary Keep.',
+                content: '',
+                folderId: '',
+                updatedAt: 11,
+                version: 3,
+            },
+        ];
+
+        await service.postProcessAtlas({
+            ...request(),
+            scope: { kind: 'global', scopeId: 'global', label: 'Global', noteIds: [] },
+            policy: 'force',
+        });
+
+        expect(notesMock.toArray).toHaveBeenCalled();
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1', 'note-2'],
+            postProcessMode: 'full',
+        }));
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('semanticAtlas', expect.anything());
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({
+            buildPolicy: 'dirty-only',
+            noteIds: ['note-1', 'note-2'],
+            skipModelWarm: true,
+        }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({
+            buildPolicy: 'dirty-only',
+            noteIds: ['note-1', 'note-2'],
+            skipModelWarm: true,
         }));
     });
 
@@ -337,6 +458,22 @@ function createGraphRebuildMock() {
                     missingChunk: 0,
                 },
             },
+            buildTimings: {
+                occurrenceLoadMs: 3,
+                chunkLoadMs: 4,
+                noteTextLoadMs: 5,
+                dbLoadMs: 12,
+                occurrenceRecoverMs: 2,
+                snapshotBuildMs: 8,
+                stateCommitMs: 1,
+                snapshotPersistMs: 6,
+                snapshotSerializeMs: 2,
+                snapshotStoreMs: 4,
+                snapshotEventMs: 0,
+                snapshotPayloadChars: 1200,
+                dbOpsMs: 18,
+                totalMs: 27,
+            },
         })),
         loadPersistedSnapshot: vi.fn(async () => null),
         loadPersistedRunReceipt: vi.fn(async () => null),
@@ -358,7 +495,29 @@ function createAtlasRuntimeMock() {
         })),
         warmModelLane: vi.fn(async () => undefined),
         runCapability: vi.fn(async (capability: string) => ({
-            rawResult: capability === 'nliAdjudication'
+            rawResult: capability === 'semanticAtlas'
+                ? {
+                    startedAt: 1000,
+                    completedAt: 2000,
+                    durationMs: 1000,
+                    candidateSuggestions: 2,
+                    exportableMentions: 2,
+                    nativeResult: {
+                        processedDocuments: 1,
+                        relationCandidateCount: 3,
+                        embeddingCounts: { leafVectors: 7 },
+                    },
+                }
+                : capability === 'assertedKernel'
+                ? {
+                    candidateSuggestions: 3,
+                    indexedDocuments: 1,
+                    nativeResult: {
+                        processedDocuments: 1,
+                        graphDeltaCounts: { nodes: 4, edges: 5 },
+                    },
+                }
+                : capability === 'nliAdjudication'
                 ? {
                     inputCount: 2,
                     resultCount: 2,

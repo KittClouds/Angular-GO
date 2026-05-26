@@ -1498,6 +1498,7 @@ function manifoldModeLabel(mode: AtlasManifoldMode): string {
 function manifoldSnapshotDetails(snapshot: unknown): Record<string, unknown> {
     if (!isRecord(snapshot)) return {};
     const payload = isRecord(snapshot['payload']) ? snapshot['payload'] : snapshot;
+    const timings = isRecord(snapshot['timings']) ? snapshot['timings'] : {};
     return {
         manifold: snapshot['manifold'],
         geometryVersion: snapshot['geometryVersion'] ?? snapshot['geometry_version'],
@@ -1506,6 +1507,10 @@ function manifoldSnapshotDetails(snapshot: unknown): Record<string, unknown> {
         cells: Array.isArray(payload['cells']) ? payload['cells'].length : 0,
         lorentzTrees: Array.isArray(payload['lorentzTrees']) ? payload['lorentzTrees'].length : 0,
         lorentzMemberships: Array.isArray(payload['lorentzMemberships']) ? payload['lorentzMemberships'].length : 0,
+        runtimeLoadMs: timings['runtimeLoadMs'],
+        nativeSnapshotMs: timings['nativeSnapshotMs'],
+        fallbackLoadMs: timings['fallbackLoadMs'],
+        totalLoadMs: timings['totalMs'],
         sourceLabel: snapshot['sourceLabel'] ?? snapshot['source_label'],
     };
 }

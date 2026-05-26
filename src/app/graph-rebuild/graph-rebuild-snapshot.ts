@@ -566,6 +566,23 @@ export interface GraphRebuildCounters {
     resolution?: GraphRebuildResolutionCounters;
 }
 
+export interface GraphRebuildBuildTimings {
+    occurrenceLoadMs: number;
+    chunkLoadMs: number;
+    noteTextLoadMs: number;
+    dbLoadMs: number;
+    occurrenceRecoverMs: number;
+    snapshotBuildMs: number;
+    stateCommitMs: number;
+    snapshotPersistMs: number;
+    snapshotSerializeMs: number;
+    snapshotStoreMs: number;
+    snapshotEventMs: number;
+    snapshotPayloadChars: number;
+    dbOpsMs: number;
+    totalMs: number;
+}
+
 export interface GraphRebuildSnapshot {
     schemaVersion: 'phoenix-graph-rebuild/v1';
     id: string;
@@ -595,6 +612,7 @@ export interface GraphRebuildSnapshot {
     graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
     entityLinkSuggestions?: GraphRebuildEntityLinkSuggestion[];
     counters: GraphRebuildCounters;
+    buildTimings?: GraphRebuildBuildTimings;
     resolutionSuggestions?: GraphRebuildResolutionSuggestion[];
 }
 
@@ -654,6 +672,7 @@ export interface GraphIndexProjectionReceipt {
     durationMs: number;
     targetCount: number;
     vectorCount: number;
+    counters?: Record<string, number>;
     message: string;
 }
 
