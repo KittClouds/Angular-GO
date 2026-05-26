@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use phoenix_types::TextRange;
+use rustc_hash::FxHashMap;
 use scirs2_text::information_extraction::TemporalExtractor;
 use scirs2_text::keyword_extraction::{extract_keywords, KeywordMethod};
 use scirs2_text::string_metrics::{DamerauLevenshteinMetric, StringMetric};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::{split_sentence_ranges, BaseChunk};
 
@@ -281,51 +283,165 @@ struct SentenceIndex {
     ranges: Vec<(usize, usize)>,
 }
 
+#[derive(Clone, Debug)]
+struct LensSentenceFeature {
+    lower: String,
+    padded_lower: String,
+    mention_indices: SmallVec<[usize; 8]>,
+    hint_indices: SmallVec<[usize; 4]>,
+}
+
+#[derive(Clone, Debug)]
+struct LensBuildIndex {
+    sentences: SentenceIndex,
+    features: Vec<LensSentenceFeature>,
+    mention_by_id: FxHashMap<u64, usize>,
+}
+
+impl LensBuildIndex {
+    fn new(input: &LensChunkInput<'_>) -> Self {
+        let sentences = SentenceIndex {
+            ranges: split_sentence_ranges(input.text),
+        };
+        let mut features = sentences
+            .ranges
+            .iter()
+            .map(|range| {
+                let lower = input
+                    .text
+                    .get(range.0..range.1)
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let mut padded_lower = String::with_capacity(lower.len() + 2);
+                padded_lower.push(' ');
+                padded_lower.push_str(&lower);
+                padded_lower.push(' ');
+                LensSentenceFeature {
+                    lower,
+                    padded_lower,
+                    mention_indices: SmallVec::new(),
+                    hint_indices: SmallVec::new(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut mention_by_id = FxHashMap::default();
+        for (index, mention) in input.mentions.iter().enumerate() {
+            mention_by_id.insert(mention.mention_id, index);
+            if features.is_empty() {
+                continue;
+            }
+            let (start, end) = sentences.sentence_span_for_tuple(text_range_tuple(mention.range));
+            for sentence in start..end {
+                features[sentence].mention_indices.push(index);
+            }
+        }
+
+        for (index, hint) in input.ner_hints.iter().enumerate() {
+            let (start, end) = sentences.sentence_span_for_tuple(text_range_tuple(hint.range));
+            for sentence in start..end {
+                features[sentence].hint_indices.push(index);
+            }
+        }
+
+        Self {
+            sentences,
+            features,
+            mention_by_id,
+        }
+    }
+
+    fn mention_by_id<'a>(&self, input: &'a LensChunkInput<'_>, id: u64) -> Option<&'a LensMention> {
+        self.mention_by_id
+            .get(&id)
+            .and_then(|index| input.mentions.get(*index))
+    }
+
+    fn add_mentions_in_range(
+        &self,
+        input: &LensChunkInput<'_>,
+        range: (usize, usize),
+        draft: &mut DraftLensChunk,
+    ) {
+        let (start, end) = self.sentences.sentence_span_for_tuple(range);
+        for sentence in start..end {
+            for &mention_index in &self.features[sentence].mention_indices {
+                let Some(mention) = input.mentions.get(mention_index) else {
+                    continue;
+                };
+                if ranges_overlap_tuple(mention.range, range) {
+                    draft.add_mention(mention);
+                }
+            }
+        }
+    }
+
+    fn add_hints_in_range<F>(
+        &self,
+        input: &LensChunkInput<'_>,
+        range: (usize, usize),
+        draft: &mut DraftLensChunk,
+        keep: F,
+    ) where
+        F: Fn(&LensChunkHint) -> bool,
+    {
+        let (start, end) = self.sentences.sentence_span_for_tuple(range);
+        for sentence in start..end {
+            for &hint_index in &self.features[sentence].hint_indices {
+                let Some(hint) = input.ner_hints.get(hint_index) else {
+                    continue;
+                };
+                if keep(hint) && ranges_overlap_tuple(hint.range, range) {
+                    draft.add_hint(hint);
+                }
+            }
+        }
+    }
+}
+
 pub fn build_lens_chunks(input: &LensChunkInput<'_>, config: &LensChunkerConfig) -> Vec<LensChunk> {
     if input.text.trim().is_empty() {
         return Vec::new();
     }
 
-    let sentences = SentenceIndex {
-        ranges: split_sentence_ranges(input.text),
-    };
-    if sentences.ranges.is_empty() {
+    let index = LensBuildIndex::new(input);
+    if index.sentences.ranges.is_empty() {
         return Vec::new();
     }
 
     let mut drafts = Vec::new();
     if config.enabled_lenses.contains(&LensKind::Entity) {
-        build_entity_lens(input, config, &sentences, &mut drafts);
+        build_entity_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Relationship) {
-        build_relationship_lens(input, config, &sentences, &mut drafts);
+        build_relationship_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Event) {
-        build_event_lens(input, config, &sentences, &mut drafts);
+        build_event_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Temporal) {
-        build_temporal_lens(input, config, &sentences, &mut drafts);
+        build_temporal_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Causal) {
-        build_causal_lens(input, config, &sentences, &mut drafts);
+        build_causal_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Attribute) {
-        build_attribute_lens(input, config, &sentences, &mut drafts);
+        build_attribute_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Worldbuilding) {
-        build_worldbuilding_lens(input, config, &sentences, &mut drafts);
+        build_worldbuilding_lens(input, config, &index, &mut drafts);
     }
     if config.enabled_lenses.contains(&LensKind::Evidence) {
-        build_evidence_lens(input, config, &sentences, &mut drafts);
+        build_evidence_lens(input, config, &index, &mut drafts);
     }
 
-    finalize_lens_chunks(input, config, &sentences, drafts)
+    finalize_lens_chunks(input, config, &index, drafts)
 }
 
 fn build_entity_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
     let metric = DamerauLevenshteinMetric::new();
@@ -335,6 +451,7 @@ fn build_entity_lens(
             LensMentionKind::Named | LensMentionKind::Nominal
         )
     }) {
+        let sentences = &index.sentences;
         let sentence_idx = sentences.index_for_range(mention.range);
         let sentence_window =
             sentence_window(sentences, sentence_idx, config.entity_context_sentences);
@@ -343,32 +460,29 @@ fn build_entity_lens(
 
         let mut draft = DraftLensChunk::new(LensKind::Entity, range, sentence_window);
         draft.add_mention(mention);
-        for nearby in input
-            .mentions
-            .iter()
-            .filter(|candidate| ranges_overlap_tuple(candidate.range, range))
-        {
-            if should_include_entity_context(mention, nearby, &metric) {
-                draft.add_mention(nearby);
-                draft.range = merge_tuple_range(draft.range, text_range_tuple(nearby.range));
+        let (start, end) = sentences.sentence_span_for_tuple(range);
+        for sentence in start..end {
+            for &nearby_index in &index.features[sentence].mention_indices {
+                let Some(nearby) = input.mentions.get(nearby_index) else {
+                    continue;
+                };
+                if !ranges_overlap_tuple(nearby.range, range) {
+                    continue;
+                }
+                if should_include_entity_context(mention, nearby, &metric) {
+                    draft.add_mention(nearby);
+                    draft.range = merge_tuple_range(draft.range, text_range_tuple(nearby.range));
+                }
             }
         }
-        let entity_hints = input
-            .ner_hints
-            .iter()
-            .filter(|hint| {
-                matches!(
-                    hint.kind,
-                    LensChunkHintKind::AliasIdentity
-                        | LensChunkHintKind::RoleTitleAppositive
-                        | LensChunkHintKind::EntityDenseRegion
-                ) && ranges_overlap_tuple(hint.range, draft.range)
-            })
-            .collect::<Vec<_>>();
-        for hint in entity_hints {
-            draft.add_hint(hint);
-            draft.range = merge_tuple_range(draft.range, text_range_tuple(hint.range));
-        }
+        index.add_hints_in_range(input, draft.range, &mut draft, |hint| {
+            matches!(
+                hint.kind,
+                LensChunkHintKind::AliasIdentity
+                    | LensChunkHintKind::RoleTitleAppositive
+                    | LensChunkHintKind::EntityDenseRegion
+            )
+        });
         clamp_to_sentence_like_boundaries(input.text, &mut draft.range);
         drafts.push(draft);
     }
@@ -377,9 +491,10 @@ fn build_entity_lens(
 fn build_relationship_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
+    let sentences = &index.sentences;
     for hint in input.ner_hints.iter().filter(|hint| {
         matches!(
             hint.kind,
@@ -400,7 +515,7 @@ fn build_relationship_lens(
             sentence_window,
         );
         draft.add_hint(hint);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
         if !draft.trigger_terms.is_empty() || hint.kind != LensChunkHintKind::DialogueSpeaker {
             drafts.push(draft);
@@ -417,18 +532,10 @@ fn build_relationship_lens(
         ) {
             continue;
         }
-        let Some(left) = input
-            .mentions
-            .iter()
-            .find(|mention| mention.mention_id == edge.left)
-        else {
+        let Some(left) = index.mention_by_id(input, edge.left) else {
             continue;
         };
-        let Some(right) = input
-            .mentions
-            .iter()
-            .find(|mention| mention.mention_id == edge.right)
-        else {
+        let Some(right) = index.mention_by_id(input, edge.right) else {
             continue;
         };
         let sentence_idx = sentences.index_for_range(merge_text_range(left.range, right.range));
@@ -444,21 +551,23 @@ fn build_relationship_lens(
         );
         draft.add_mention(left);
         draft.add_mention(right);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
         drafts.push(draft);
     }
 
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let sentence_mentions = input
-            .mentions
+    for idx in 0..sentences.ranges.len() {
+        let sentence = sentences.ranges[idx];
+        let sentence_mentions = index.features[idx]
+            .mention_indices
             .iter()
-            .filter(|mention| ranges_overlap_tuple(mention.range, *sentence))
-            .collect::<Vec<_>>();
+            .filter_map(|mention_index| input.mentions.get(*mention_index))
+            .filter(|mention| ranges_overlap_tuple(mention.range, sentence))
+            .collect::<SmallVec<[&LensMention; 8]>>();
         if sentence_mentions.len() < 2 {
             continue;
         }
-        let triggers = relation_triggers_in(input.text, *sentence);
+        let triggers = relation_triggers_for_sentence(&index.features[idx]);
         if triggers.is_empty() {
             continue;
         }
@@ -480,20 +589,20 @@ fn build_relationship_lens(
 fn build_event_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let triggers = event_triggers_in(input.text, *sentence);
-        let hints = input
-            .ner_hints
-            .iter()
-            .filter(|hint| {
+    let sentences = &index.sentences;
+    for idx in 0..sentences.ranges.len() {
+        let sentence = sentences.ranges[idx];
+        let triggers = event_triggers_for_sentence(&index.features[idx]);
+        let has_event_hint = index.features[idx].hint_indices.iter().any(|hint_index| {
+            input.ner_hints.get(*hint_index).is_some_and(|hint| {
                 hint.kind == LensChunkHintKind::NamedEventCandidate
-                    && ranges_overlap_tuple(hint.range, *sentence)
+                    && ranges_overlap_tuple(hint.range, sentence)
             })
-            .collect::<Vec<_>>();
-        if triggers.is_empty() && hints.is_empty() {
+        });
+        if triggers.is_empty() && !has_event_hint {
             continue;
         }
         let sentence_window = sentence_window(sentences, idx, config.event_context_sentences);
@@ -503,11 +612,10 @@ fn build_event_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        for hint in hints {
-            draft.add_hint(hint);
-            draft.range = merge_tuple_range(draft.range, text_range_tuple(hint.range));
-        }
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_hints_in_range(input, sentence, &mut draft, |hint| {
+            hint.kind == LensChunkHintKind::NamedEventCandidate
+        });
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         add_event_keywords(input.text, draft.range, &mut draft);
         drafts.push(draft);
     }
@@ -516,12 +624,19 @@ fn build_event_lens(
 fn build_temporal_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
+    let sentences = &index.sentences;
     let temporal_extractor = TemporalExtractor::new();
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let triggers = temporal_triggers_in(input.text, *sentence, &temporal_extractor);
+    for idx in 0..sentences.ranges.len() {
+        let sentence = sentences.ranges[idx];
+        let triggers = temporal_triggers_for_sentence(
+            input.text,
+            sentence,
+            &index.features[idx],
+            &temporal_extractor,
+        );
         if triggers.is_empty() {
             continue;
         }
@@ -540,7 +655,7 @@ fn build_temporal_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
 }
@@ -548,23 +663,23 @@ fn build_temporal_lens(
 fn build_causal_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let triggers = causal_triggers_in(input.text, *sentence);
+    let sentences = &index.sentences;
+    for idx in 0..sentences.ranges.len() {
+        let triggers = causal_triggers_for_sentence(&index.features[idx]);
         if triggers.is_empty() {
             continue;
         }
-        let sentence_window =
-            causal_sentence_window(input.text, sentences, idx, config.causal_context_sentences);
+        let sentence_window = causal_sentence_window(index, idx, config.causal_context_sentences);
         let mut draft = DraftLensChunk::new(
             LensKind::Causal,
             sentences.covering_range(sentence_window),
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
 }
@@ -572,11 +687,12 @@ fn build_causal_lens(
 fn build_attribute_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let triggers = attribute_triggers_in(input.text, *sentence);
+    let sentences = &index.sentences;
+    for idx in 0..sentences.ranges.len() {
+        let triggers = attribute_triggers_for_sentence(&index.features[idx]);
         if triggers.is_empty() {
             continue;
         }
@@ -587,7 +703,7 @@ fn build_attribute_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
 }
@@ -595,11 +711,12 @@ fn build_attribute_lens(
 fn build_worldbuilding_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let triggers = worldbuilding_triggers_in(input.text, *sentence);
+    let sentences = &index.sentences;
+    for idx in 0..sentences.ranges.len() {
+        let triggers = worldbuilding_triggers_for_sentence(&index.features[idx]);
         if triggers.is_empty() {
             continue;
         }
@@ -611,7 +728,7 @@ fn build_worldbuilding_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         add_worldbuilding_keywords(input.text, draft.range, &mut draft);
         drafts.push(draft);
     }
@@ -620,19 +737,25 @@ fn build_worldbuilding_lens(
 fn build_evidence_lens(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: &mut Vec<DraftLensChunk>,
 ) {
-    for (idx, sentence) in sentences.ranges.iter().enumerate() {
-        let mut triggers = evidence_triggers_in(input.text, *sentence);
+    let sentences = &index.sentences;
+    for idx in 0..sentences.ranges.len() {
+        let sentence = sentences.ranges[idx];
+        let mut triggers = evidence_triggers_for_sentence(&index.features[idx]);
         if triggers.is_empty() {
-            for hint in input.ner_hints.iter().filter(|hint| {
-                matches!(
+            for &hint_index in &index.features[idx].hint_indices {
+                let Some(hint) = input.ner_hints.get(hint_index) else {
+                    continue;
+                };
+                if matches!(
                     hint.kind,
                     LensChunkHintKind::Adjudication | LensChunkHintKind::Relationship
-                ) && ranges_overlap_tuple(hint.range, *sentence)
-            }) {
-                triggers.insert(format!("hint:{:?}", hint.kind).to_ascii_lowercase());
+                ) && ranges_overlap_tuple(hint.range, sentence)
+                {
+                    triggers.insert(format!("hint:{:?}", hint.kind).to_ascii_lowercase());
+                }
             }
         }
         if triggers.is_empty() {
@@ -645,15 +768,8 @@ fn build_evidence_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
-        let evidence_hints = input
-            .ner_hints
-            .iter()
-            .filter(|hint| ranges_overlap_tuple(hint.range, draft.range))
-            .collect::<Vec<_>>();
-        for hint in evidence_hints {
-            draft.add_hint(hint);
-        }
-        add_mentions_in_range(input.mentions, draft.range, &mut draft);
+        index.add_hints_in_range(input, draft.range, &mut draft, |_| true);
+        index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
 }
@@ -661,7 +777,7 @@ fn build_evidence_lens(
 fn finalize_lens_chunks(
     input: &LensChunkInput<'_>,
     config: &LensChunkerConfig,
-    sentences: &SentenceIndex,
+    index: &LensBuildIndex,
     drafts: Vec<DraftLensChunk>,
 ) -> Vec<LensChunk> {
     let mut by_key = BTreeMap::<(LensKind, usize, usize, String), LensChunk>::new();
@@ -689,8 +805,8 @@ fn finalize_lens_chunks(
             end: draft.range.1,
             base_chunk_start: base_window.0,
             base_chunk_end: base_window.1,
-            sentence_start: draft.sentence_range.0.min(sentences.ranges.len()),
-            sentence_end: draft.sentence_range.1.min(sentences.ranges.len()),
+            sentence_start: draft.sentence_range.0.min(index.sentences.ranges.len()),
+            sentence_end: draft.sentence_range.1.min(index.sentences.ranges.len()),
             mention_ids,
             surfaces,
             trigger_terms,
@@ -740,10 +856,36 @@ impl DraftLensChunk {
 impl SentenceIndex {
     fn index_for_range(&self, range: TextRange) -> usize {
         let midpoint = range.start as usize + (range.end.saturating_sub(range.start) as usize / 2);
-        self.ranges
-            .iter()
-            .position(|(start, end)| midpoint >= *start && midpoint <= *end)
-            .unwrap_or_else(|| self.ranges.len().saturating_sub(1))
+        self.index_for_offset(midpoint)
+    }
+
+    fn index_for_offset(&self, offset: usize) -> usize {
+        if self.ranges.is_empty() {
+            return 0;
+        }
+        let mut left = 0usize;
+        let mut right = self.ranges.len();
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let (start, end) = self.ranges[mid];
+            if offset < start {
+                right = mid;
+            } else if offset > end {
+                left = mid + 1;
+            } else {
+                return mid;
+            }
+        }
+        self.ranges.len().saturating_sub(1)
+    }
+
+    fn sentence_span_for_tuple(&self, range: (usize, usize)) -> (usize, usize) {
+        if self.ranges.is_empty() || range.0 >= range.1 {
+            return (0, 0);
+        }
+        let start = self.index_for_offset(range.0);
+        let end = self.index_for_offset(range.1.saturating_sub(1));
+        (start, (end + 1).min(self.ranges.len()))
     }
 
     fn covering_range(&self, sentence_window: (usize, usize)) -> (usize, usize) {
@@ -789,19 +931,6 @@ fn should_include_entity_context(
         .unwrap_or(false)
 }
 
-fn add_mentions_in_range(
-    mentions: &[LensMention],
-    range: (usize, usize),
-    draft: &mut DraftLensChunk,
-) {
-    for mention in mentions
-        .iter()
-        .filter(|mention| ranges_overlap_tuple(mention.range, range))
-    {
-        draft.add_mention(mention);
-    }
-}
-
 fn add_relation_triggers(text: &str, range: (usize, usize), draft: &mut DraftLensChunk) {
     draft
         .trigger_terms
@@ -813,41 +942,25 @@ fn relation_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
         .get(range.0..range.1)
         .unwrap_or("")
         .to_ascii_lowercase();
-    RELATION_TRIGGERS
-        .iter()
-        .filter(|trigger| slice.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect()
+    trigger_set_from_lower(&slice, RELATION_TRIGGERS)
 }
 
-fn event_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    EVENT_TRIGGERS
-        .iter()
-        .filter(|trigger| slice.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect()
+fn relation_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    trigger_set_from_lower(&feature.lower, RELATION_TRIGGERS)
 }
 
-fn temporal_triggers_in(
+fn event_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    trigger_set_from_lower(&feature.lower, EVENT_TRIGGERS)
+}
+
+fn temporal_triggers_for_sentence(
     text: &str,
     range: (usize, usize),
+    feature: &LensSentenceFeature,
     extractor: &TemporalExtractor,
 ) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let padded = format!(" {slice} ");
-    let mut triggers = TEMPORAL_TRIGGERS
-        .iter()
-        .filter(|trigger| padded.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect::<BTreeSet<_>>();
-    if contains_year_anchor(&slice) {
+    let mut triggers = trigger_set_from_padded(&feature.padded_lower, TEMPORAL_TRIGGERS);
+    if contains_year_anchor(&feature.lower) {
         triggers.insert("year-anchor".to_owned());
     }
     if let Ok(entities) = extractor.extract(text.get(range.0..range.1).unwrap_or("")) {
@@ -858,60 +971,40 @@ fn temporal_triggers_in(
     triggers
 }
 
-fn causal_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let padded = format!(" {slice} ");
-    CAUSAL_TRIGGERS
-        .iter()
-        .filter(|trigger| padded.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect()
+fn causal_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    trigger_set_from_padded(&feature.padded_lower, CAUSAL_TRIGGERS)
 }
 
-fn attribute_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let padded = format!(" {slice} ");
-    ATTRIBUTE_TRIGGERS
-        .iter()
-        .filter(|trigger| padded.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect()
+fn attribute_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    trigger_set_from_padded(&feature.padded_lower, ATTRIBUTE_TRIGGERS)
 }
 
-fn worldbuilding_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let padded = format!(" {slice} ");
-    WORLDBUILDING_TRIGGERS
-        .iter()
-        .filter(|trigger| padded.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect()
+fn worldbuilding_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    trigger_set_from_padded(&feature.padded_lower, WORLDBUILDING_TRIGGERS)
 }
 
-fn evidence_triggers_in(text: &str, range: (usize, usize)) -> BTreeSet<String> {
-    let slice = text
-        .get(range.0..range.1)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let padded = format!(" {slice} ");
-    let mut triggers = EVIDENCE_TRIGGERS
-        .iter()
-        .filter(|trigger| padded.contains(**trigger))
-        .map(|trigger| (*trigger).trim().to_owned())
-        .collect::<BTreeSet<_>>();
-    if contains_citation_marker(&slice) {
+fn evidence_triggers_for_sentence(feature: &LensSentenceFeature) -> BTreeSet<String> {
+    let mut triggers = trigger_set_from_padded(&feature.padded_lower, EVIDENCE_TRIGGERS);
+    if contains_citation_marker(&feature.lower) {
         triggers.insert("citation".to_owned());
     }
     triggers
+}
+
+fn trigger_set_from_lower(lower: &str, triggers: &[&str]) -> BTreeSet<String> {
+    triggers
+        .iter()
+        .filter(|trigger| lower.contains(**trigger))
+        .map(|trigger| (*trigger).trim().to_owned())
+        .collect()
+}
+
+fn trigger_set_from_padded(padded_lower: &str, triggers: &[&str]) -> BTreeSet<String> {
+    triggers
+        .iter()
+        .filter(|trigger| padded_lower.contains(**trigger))
+        .map(|trigger| (*trigger).trim().to_owned())
+        .collect()
 }
 
 fn add_worldbuilding_keywords(text: &str, range: (usize, usize), draft: &mut DraftLensChunk) {
@@ -939,19 +1032,14 @@ fn contains_citation_marker(slice: &str) -> bool {
         || slice.contains("chapter ")
 }
 
-fn causal_sentence_window(
-    text: &str,
-    sentences: &SentenceIndex,
-    idx: usize,
-    padding: usize,
-) -> (usize, usize) {
+fn causal_sentence_window(index: &LensBuildIndex, idx: usize, padding: usize) -> (usize, usize) {
+    let sentences = &index.sentences;
     let base = sentence_window(sentences, idx, padding);
-    let sentence_text = sentences
-        .ranges
+    let sentence_text = index
+        .features
         .get(idx)
-        .and_then(|range| text.get(range.0..range.1))
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .map(|feature| feature.lower.as_str())
+        .unwrap_or("");
     let starts_with_effect = EFFECT_LEADING_CAUSAL_TRIGGERS
         .iter()
         .any(|trigger| sentence_text.trim_start().starts_with(trigger.trim_start()));
@@ -1093,16 +1181,28 @@ fn sentence_window(sentences: &SentenceIndex, center: usize, padding: usize) -> 
 }
 
 fn base_chunk_window(base_chunks: &[BaseChunk], range: (usize, usize)) -> (usize, usize) {
-    let start = base_chunks
-        .iter()
-        .position(|chunk| chunk.end > range.0 && chunk.start < range.1)
-        .unwrap_or(0);
-    let end = base_chunks
-        .iter()
-        .rposition(|chunk| chunk.end > range.0 && chunk.start < range.1)
-        .map(|index| index + 1)
-        .unwrap_or(start);
+    let start = lower_bound_by(base_chunks.len(), |index| base_chunks[index].end <= range.0);
+    let end = lower_bound_by(base_chunks.len(), |index| {
+        base_chunks[index].start < range.1
+    });
+    if start >= end {
+        return (0, 0);
+    }
     (start, end)
+}
+
+fn lower_bound_by(len: usize, mut is_before: impl FnMut(usize) -> bool) -> usize {
+    let mut left = 0usize;
+    let mut right = len;
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if is_before(mid) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    left
 }
 
 fn ranges_overlap_tuple(range: TextRange, tuple: (usize, usize)) -> bool {

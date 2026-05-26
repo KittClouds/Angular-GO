@@ -2604,9 +2604,11 @@ version = "0.1.0"
 dependencies = [
  "memchr",
  "phoenix-types",
+ "rustc-hash 1.1.0",
  "scirs2-text",
  "serde",
  "serde_json",
+ "smallvec",
  "wasm-bindgen",
  "wee_alloc",
 ]
