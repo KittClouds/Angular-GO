@@ -4,6 +4,7 @@ import {
     normalizeEntityKind,
 } from '../../../../../lib/store/entityColorStore';
 import { applyLorentzTreeLayout } from './graph-galaxy-lorentz-layout';
+import { applyProductConsensusLayout } from './graph-galaxy-product-layout';
 
 export type GalaxyLabelMode = 'hover' | 'selected' | 'important' | 'always' | 'off';
 export type GalaxyEdgeMode = 'curved' | 'straight' | 'hidden';
@@ -262,10 +263,9 @@ export function buildGalaxyScene(
 
     if (settings.layoutMode === 'productManifold') {
         applyGalaxyMetadata(nodes);
-        const lorentzGuides = applyLorentzTreeLayout(nodes, links, { productTopologyGeometry: true });
+        const lorentzGuides = applyProductConsensusLayout(nodes, links);
         const hopfNodes = productHopfProjectionNodes(nodes, links);
-        const hopfLinks = links.map((link) => ({ ...link }));
-        const hopfRibbons = applyHopfProjectionLayout(hopfNodes, hopfLinks);
+        const hopfRibbons = buildProductLocalHopfRibbons(nodes, hopfNodes);
         return { nodes, links, layoutMode: 'productManifold', groups: [], hopfRibbons, lorentzGuides };
     }
 
@@ -740,6 +740,51 @@ function productHopfProjectionNodes(nodes: GalaxyNode[], links: GalaxyEdge[]): G
     return [...clones, ...samples];
 }
 
+function buildProductLocalHopfRibbons(productNodes: GalaxyNode[], hopfNodes: GalaxyNode[]): GalaxyHopfRibbon[] {
+    const productById = new Map(productNodes.map((node) => [node.entity.id, node]));
+    const baseInfos = new Map<string, HopfBaseInfo>();
+    for (const node of hopfNodes) {
+        const baseKey = hopfBaseKey(node);
+        if (!baseKey) continue;
+        const base = productById.get(baseKey);
+        if (!base) continue;
+        const existing = baseInfos.get(baseKey);
+        const info = existing ?? {
+            key: baseKey,
+            direction: normalizedDirection(base),
+            phases: [],
+            nodeIds: [],
+            importance: 0,
+            r: base.r,
+            g: base.g,
+            b: base.b,
+        };
+        info.phases.push(normalizePhaseRadians(hopfPhase(node, baseKey)));
+        info.nodeIds.push(node.entity.id);
+        info.importance += Math.max(1, Number(node.entity.totalMentions || 1)) * (isHopfFiber(node) ? 1.2 : 0.65);
+        baseInfos.set(baseKey, info);
+    }
+
+    return [...baseInfos.values()]
+        .filter((info) => info.nodeIds.length > 0)
+        .sort((left, right) => right.importance - left.importance)
+        .slice(0, 48)
+        .map((info) => {
+            const base = productById.get(info.key)!;
+            return {
+                id: `product:local-fiber:${info.key}`,
+                nodeIds: [...new Set(info.nodeIds)],
+                positions3d: productLocalFiberSegments(base, info.phases, info.importance),
+                importance: info.importance,
+                guideKind: 'dataFiber' as const,
+                guideWeight: 0.82,
+                r: info.r,
+                g: info.g,
+                b: info.b,
+            };
+        });
+}
+
 function productHopfClone(node: GalaxyNode): GalaxyNode {
     const metadata = node.entity.metadata || {};
     const existingHopf = hopfMetadata(node) || {};
@@ -870,6 +915,78 @@ function productContextFiberKind(context: GalaxyNode, link: GalaxyEdge | null): 
 
 function productPhase(value: string): number {
     return Math.round(stableUnit(value) * 1000000) / 1000000;
+}
+
+function productLocalFiberSegments(base: GalaxyNode, phases: number[], importance: number): Float32Array {
+    const frame = productLocalFrame(base);
+    const phaseSet = new Set<number>();
+    for (let index = 0; index < 40; index++) {
+        phaseSet.add(roundPhase((index / 40) * TAU));
+    }
+    for (const phase of phases) phaseSet.add(roundPhase(phase));
+    const samples = [...phaseSet].sort((left, right) => left - right);
+    const radius = clamp(0.095 + Math.log1p(Math.max(1, importance)) * 0.018, 0.11, 0.26);
+    const positions = new Float32Array(samples.length * 2 * 3);
+    for (let index = 0; index < samples.length; index++) {
+        const current = productLocalFiberPoint(base, frame, samples[index], radius);
+        const next = productLocalFiberPoint(base, frame, samples[(index + 1) % samples.length], radius);
+        const offset = index * 6;
+        positions[offset] = current.x;
+        positions[offset + 1] = current.y;
+        positions[offset + 2] = current.z;
+        positions[offset + 3] = next.x;
+        positions[offset + 4] = next.y;
+        positions[offset + 5] = next.z;
+    }
+    return positions;
+}
+
+function productLocalFiberPoint(
+    base: GalaxyNode,
+    frame: { a: { x: number; y: number; z: number }; b: { x: number; y: number; z: number }; radial: { x: number; y: number; z: number } },
+    phase: number,
+    radius: number,
+): { x: number; y: number; z: number } {
+    const c = Math.cos(phase);
+    const s = Math.sin(phase);
+    const wobble = Math.sin(phase * 2 + stableUnit(`${base.entity.id}:fiber-wobble`) * TAU) * radius * 0.18;
+    return {
+        x: base.x + (frame.a.x * c + frame.b.x * s) * radius + frame.radial.x * wobble,
+        y: base.y + (frame.a.y * c + frame.b.y * s) * radius + frame.radial.y * wobble,
+        z: base.z + (frame.a.z * c + frame.b.z * s) * radius + frame.radial.z * wobble,
+    };
+}
+
+function productLocalFrame(base: GalaxyNode): {
+    radial: { x: number; y: number; z: number };
+    a: { x: number; y: number; z: number };
+    b: { x: number; y: number; z: number };
+} {
+    const radial = normalizeVector({ x: base.x, y: base.y, z: base.z }, stableVector(`${base.entity.id}:product-fiber`));
+    const pole = Math.abs(radial.y) > 0.82 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 };
+    const a = normalizeVector(cross(radial, pole), stableVector(`${base.entity.id}:product-fiber-a`));
+    const b = normalizeVector(cross(radial, a), stableVector(`${base.entity.id}:product-fiber-b`));
+    return { radial, a, b };
+}
+
+function cross(
+    left: { x: number; y: number; z: number },
+    right: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+    return {
+        x: left.y * right.z - left.z * right.y,
+        y: left.z * right.x - left.x * right.z,
+        z: left.x * right.y - left.y * right.x,
+    };
+}
+
+function normalizeVector(
+    value: { x: number; y: number; z: number },
+    fallback: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+    const norm = Math.hypot(value.x, value.y, value.z);
+    if (norm > 0.0001) return { x: value.x / norm, y: value.y / norm, z: value.z / norm };
+    return fallback;
 }
 
 function stringMetadata(node: GalaxyNode, key: string): string {

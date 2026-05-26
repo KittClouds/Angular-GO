@@ -739,7 +739,11 @@ export class GraphRebuildPipelineService {
 }
 
 function expandScopeNoteIds(scope: GraphIndexRunScope, docs: ScopedDocument[]): GraphIndexRunScope {
-    return scope.noteIds.length ? scope : { ...scope, noteIds: docs.map((doc) => doc.id) };
+    if (scope.kind === 'global') return scope;
+    const loadedNoteIds = docs.map((doc) => doc.id);
+    if (!scope.noteIds.length) return { ...scope, noteIds: loadedNoteIds };
+    if (scope.kind === 'multiNote' || scope.kind === 'folder') return { ...scope, noteIds: loadedNoteIds };
+    return scope;
 }
 
 function atlasScopeFromGraphScope(scope: GraphIndexRunScope): AtlasBuildScope {

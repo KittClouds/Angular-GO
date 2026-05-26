@@ -253,29 +253,47 @@ function buildEpisodes(events: GraphRebuildEvent[]): GraphRebuildEpisode[] {
 }
 
 function buildTemporalEdges(events: GraphRebuildEvent[]): GraphRebuildTemporalEdge[] {
-    return events.slice(1).map((event, index) => ({
-        id: `temporal:${events[index].id}:${event.id}`,
-        sourceId: events[index].id,
-        targetId: event.id,
-        relationType: 'before',
-        evidenceIds: [events[index].id, event.id],
-        confidence: Math.max(0.62, 0.74 - index * 0.0001),
-    }));
+    const out: GraphRebuildTemporalEdge[] = [];
+    for (const noteEvents of eventsByNote(events)) {
+        for (let index = 1; index < noteEvents.length; index += 1) {
+            const previous = noteEvents[index - 1];
+            const event = noteEvents[index];
+            out.push({
+                id: `temporal:${previous.id}:${event.id}`,
+                sourceId: previous.id,
+                targetId: event.id,
+                relationType: 'before',
+                evidenceIds: [previous.id, event.id],
+                confidence: Math.max(0.62, 0.74 - index * 0.0001),
+            });
+        }
+    }
+    return out;
 }
 
 function buildCausalEdges(events: GraphRebuildEvent[], chunks: GraphRebuildChunk[], noteTexts: Record<string, string>): GraphRebuildTemporalEdge[] {
     const byChunk = new Map(chunks.map((chunk) => [chunk.id, chunk]));
     const out: GraphRebuildTemporalEdge[] = [];
-    for (let index = 1; index < events.length; index += 1) {
-        const previous = events[index - 1];
-        const current = events[index];
-        if (!previous || !current) continue;
-        const chunk = current.chunkId ? byChunk.get(current.chunkId) : null;
-        const text = chunk ? (noteTexts[chunk.noteId] || '').slice(chunk.start, chunk.end).toLowerCase() : '';
-        if (!hasAny(text, ['because', 'therefore', 'which meant', 'that meant', 'so '])) continue;
-        out.push({ id: `causal:${previous.id}:${current.id}`, sourceId: previous.id, targetId: current.id, relationType: 'causes_or_explains', evidenceIds: [previous.id, current.id], confidence: 0.66 });
+    for (const noteEvents of eventsByNote(events)) {
+        for (let index = 1; index < noteEvents.length; index += 1) {
+            const previous = noteEvents[index - 1];
+            const current = noteEvents[index];
+            if (!previous || !current) continue;
+            const chunk = current.chunkId ? byChunk.get(current.chunkId) : null;
+            const text = chunk ? (noteTexts[chunk.noteId] || '').slice(chunk.start, chunk.end).toLowerCase() : '';
+            if (!hasAny(text, ['because', 'therefore', 'which meant', 'that meant', 'so '])) continue;
+            out.push({ id: `causal:${previous.id}:${current.id}`, sourceId: previous.id, targetId: current.id, relationType: 'causes_or_explains', evidenceIds: [previous.id, current.id], confidence: 0.66 });
+        }
     }
     return out;
+}
+
+function eventsByNote(events: GraphRebuildEvent[]): GraphRebuildEvent[][] {
+    const buckets = new Map<string, GraphRebuildEvent[]>();
+    for (const event of events) {
+        buckets.set(event.noteId, [...(buckets.get(event.noteId) || []), event]);
+    }
+    return [...buckets.values()];
 }
 
 function hasAny(text: string, needles: readonly string[]): boolean {

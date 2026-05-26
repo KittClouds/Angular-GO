@@ -208,10 +208,15 @@ export async function createNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedA
 
 export async function updateNote(id: string, updates: Partial<Note>): Promise<Note | undefined> {
     const store = await waitForStore();
-    const existing = await store.getNote(id);
+    let existing = await store.getNote(id);
     if (!existing) {
-        console.warn(`[Operations] Note ${id} not found`);
-        return undefined;
+        const cached = await db.notes.get(id);
+        if (!cached) {
+            console.warn(`[Operations] Note ${id} not found`);
+            return undefined;
+        }
+        console.warn(`[Operations] Note ${id} missing from Phoenix store; rehydrating from Dexie cache`);
+        existing = PhoenixStoreService.fromDexieNote(cached);
     }
 
     const now = Date.now();
@@ -264,9 +269,10 @@ export async function deleteNote(id: string): Promise<void> {
 
 export async function getNote(id: string): Promise<Note | undefined> {
     const store = getBridge();
-    if (!store) return undefined;
+    if (!store) return db.notes.get(id) as Promise<Note | undefined>;
     const note = await store.getNote(id);
-    return note ? { ...storeNoteToNote(note), hasBody: true } : undefined;
+    if (note) return { ...storeNoteToNote(note), hasBody: true };
+    return db.notes.get(id) as Promise<Note | undefined>;
 }
 
 export async function getNoteHeader(id: string): Promise<Note | undefined> {
@@ -301,9 +307,21 @@ export async function getNotesByNarrative(narrativeId: string): Promise<Note[]> 
 
 export async function getNotesByIds(ids: string[]): Promise<Note[]> {
     const store = getBridge();
-    if (!store || ids.length === 0) return [];
+    if (ids.length === 0) return [];
+    if (!store) {
+        const cached = await db.notes.bulkGet(ids);
+        return cached.filter(Boolean).map((note) => note as unknown as Note);
+    }
     const notes = await store.getNotesByIds(ids);
-    return notes.map((note) => ({ ...storeNoteToNote(note), hasBody: true }));
+    const byId = new Map<string, Note>(notes.map((note) => [note.id, { ...storeNoteToNote(note), hasBody: true }]));
+    const missingIds = ids.filter((id) => !byId.has(id));
+    if (missingIds.length) {
+        const cached = await db.notes.bulkGet(missingIds);
+        for (const note of cached) {
+            if (note) byId.set(note.id, note as unknown as Note);
+        }
+    }
+    return ids.map((id) => byId.get(id)).filter((note): note is Note => !!note);
 }
 
 export async function ensureNoteBodyLoaded(id: string): Promise<Note | undefined> {

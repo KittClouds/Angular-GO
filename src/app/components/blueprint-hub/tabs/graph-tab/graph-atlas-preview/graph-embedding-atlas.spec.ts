@@ -290,4 +290,70 @@ describe('embedding atlas projection', () => {
             phase: 0.33,
         });
     });
+
+    it('keeps story structure targets visible when multi-note targets exceed the render cap', () => {
+        const fillerTargets = Array.from({ length: 470 }, (_, index) => ({
+            id: `embed:chunk:filler-${index}`,
+            kind: 'chunk',
+            sourceId: `filler-${index}`,
+            noteId: 'note-fill',
+            chunkId: `filler-${index}`,
+            label: `Filler ${index}`,
+            text: `filler text ${index}`,
+            evidenceIds: [],
+        }));
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-over-cap',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1', 'note-2'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [
+                { id: 'event:note-1:0:dialogue_event', noteId: 'note-1', chunkId: 'chunk-a', label: 'dialogue event', entityIds: [], evidenceAnchorIds: [], confidence: 0.7 },
+                { id: 'event:note-1:1:process_event', noteId: 'note-1', chunkId: 'chunk-b', label: 'process event', entityIds: [], evidenceAnchorIds: [], confidence: 0.7 },
+            ],
+            episodes: [],
+            temporalEdges: [{
+                id: 'temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event',
+                sourceId: 'event:note-1:0:dialogue_event',
+                targetId: 'event:note-1:1:process_event',
+                relationType: 'before',
+                evidenceIds: ['event:note-1:0:dialogue_event', 'event:note-1:1:process_event'],
+                confidence: 0.7,
+            }],
+            causalEdges: [{
+                id: 'causal:event:note-1:0:dialogue_event:event:note-1:1:process_event',
+                sourceId: 'event:note-1:0:dialogue_event',
+                targetId: 'event:note-1:1:process_event',
+                relationType: 'causes_or_explains',
+                evidenceIds: ['event:note-1:0:dialogue_event', 'event:note-1:1:process_event'],
+                confidence: 0.7,
+            }],
+            memoryState: [],
+            embeddingTargets: [
+                ...fillerTargets,
+                { id: 'embed:event:event:note-1:0:dialogue_event', kind: 'event', sourceId: 'event:note-1:0:dialogue_event', noteId: 'note-1', label: 'dialogue event', text: 'dialogue event', evidenceIds: [] },
+                { id: 'embed:event:event:note-1:1:process_event', kind: 'event', sourceId: 'event:note-1:1:process_event', noteId: 'note-1', label: 'process event', text: 'process event', evidenceIds: [] },
+                { id: 'embed:temporalFact:temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event', kind: 'temporalFact', sourceId: 'temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event', label: 'before', text: 'event before event', evidenceIds: [] },
+                { id: 'embed:causalFact:causal:event:note-1:0:dialogue_event:event:note-1:1:process_event', kind: 'causalFact', sourceId: 'causal:event:note-1:0:dialogue_event:event:note-1:1:process_event', label: 'causes_or_explains', text: 'event causes event', evidenceIds: [] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+        }, 'product');
+
+        const nodeIds = new Set(atlas.nodes.map((node) => node.id));
+        expect(atlas.nodes).toHaveLength(420);
+        expect(nodeIds.has('embed:temporalFact:temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);
+        expect(nodeIds.has('embed:causalFact:causal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);
+        expect(atlas.edges.map((edge) => edge.type)).toEqual(expect.arrayContaining(['before', 'causes_or_explains']));
+    });
 });

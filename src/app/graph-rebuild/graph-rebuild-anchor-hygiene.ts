@@ -122,7 +122,7 @@ export function prepareGraphRebuildAnchors(input: GraphRebuildAnchorHygieneInput
             continue;
         }
 
-        const chunkId = mention.chunkId || findChunkId(input.chunksByNote.get(occurrence.noteId) || [], occurrence);
+        const chunkId = resolveChunkId(input.chunksByNote.get(occurrence.noteId) || [], mention.chunkId, occurrence);
         if (!chunkId && input.chunksByNote.size) dropReasons.missingChunk += 1;
         const canonicalMention = { ...mention, entityId: resolved.entity.id, chunkId };
         const spanKey = `${occurrence.noteId}:${occurrence.sourceStart}:${occurrence.sourceEnd}`;
@@ -221,6 +221,15 @@ function addSurfaceClaim(claims: Map<string, SurfaceClaim[]>, surface: string, e
     if (current.some((claim) => claim.entity.id === entity.id)) return false;
     claims.set(normalized, [...current, { entity, method }]);
     return true;
+}
+
+function resolveChunkId(
+    chunks: GraphRebuildChunk[],
+    candidateChunkId: string | undefined,
+    occurrence: EntityOccurrence,
+): string | undefined {
+    if (candidateChunkId && chunks.some((chunk) => chunk.id === candidateChunkId)) return candidateChunkId;
+    return findChunkId(chunks, occurrence);
 }
 
 function findChunkId(chunks: GraphRebuildChunk[], occurrence: EntityOccurrence): string | undefined {

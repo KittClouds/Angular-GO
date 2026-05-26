@@ -22,6 +22,8 @@ import { relationFamilyFromText, relationHslFromText } from './graph-relation-vi
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
 const LIMIT = 420;
+const STORY_TARGET_BUDGET = 120;
+const STORY_TARGET_KINDS = new Set(['causalFact', 'temporalFact', 'event', 'memoryState']);
 
 export function buildGraphRebuildEmbeddingAtlas(
     snapshot: GraphRebuildSnapshot,
@@ -30,9 +32,7 @@ export function buildGraphRebuildEmbeddingAtlas(
     const entityKindById = new Map(snapshot.nodes.map((node) => [node.entityId, node.kind]));
     const profile = normalizeEmbeddingProfile(snapshot.embeddingProfile);
     const postByTarget = new Map((snapshot.embeddingGraphPostProcess?.targets || []).map((row) => [row.targetId, row]));
-    const selected = snapshot.embeddingTargets
-        .filter((target) => target.text.trim() || target.label.trim())
-        .slice(0, LIMIT)
+    const selected = selectEmbeddingTargets(snapshot)
         .map((target) => hydrateTargetEntityKind(target, entityKindById));
     const vectors = selected.map((target) => textVector(target, profile.selectedDimensions));
     const nodes = selected.map((target, index) =>
@@ -61,6 +61,41 @@ export function buildGraphRebuildEmbeddingAtlas(
             anchorProjections: [],
         },
     };
+}
+
+function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmbeddingTarget[] {
+    const candidates = snapshot.embeddingTargets.filter((target) => target.text.trim() || target.label.trim());
+    if (candidates.length <= LIMIT) return candidates;
+
+    const selected = new Map<string, GraphRebuildEmbeddingTarget>();
+    const byId = new Map(candidates.map((target) => [target.id, target]));
+    const temporalById = new Map([...snapshot.temporalEdges, ...snapshot.causalEdges].map((edge) => [edge.id, edge]));
+    const add = (target?: GraphRebuildEmbeddingTarget) => {
+        if (target && selected.size < LIMIT) selected.set(target.id, target);
+    };
+    const addLinkedEvents = (target: GraphRebuildEmbeddingTarget) => {
+        if (target.kind !== 'temporalFact' && target.kind !== 'causalFact') return;
+        const edge = temporalById.get(target.sourceId);
+        if (!edge) return;
+        add(byId.get(`embed:event:${edge.sourceId}`));
+        add(byId.get(`embed:event:${edge.targetId}`));
+    };
+
+    for (const target of evenSample(candidates.filter((candidate) => STORY_TARGET_KINDS.has(candidate.kind)), STORY_TARGET_BUDGET)) {
+        add(target);
+        addLinkedEvents(target);
+    }
+    for (const target of candidates) add(target);
+    return [...selected.values()];
+}
+
+function evenSample<T>(values: T[], limit: number): T[] {
+    if (values.length <= limit) return values;
+    if (limit <= 0) return [];
+    const step = (values.length - 1) / Math.max(1, limit - 1);
+    const out: T[] = [];
+    for (let index = 0; index < limit; index += 1) out.push(values[Math.round(index * step)]);
+    return out;
 }
 
 function hydrateTargetEntityKind(

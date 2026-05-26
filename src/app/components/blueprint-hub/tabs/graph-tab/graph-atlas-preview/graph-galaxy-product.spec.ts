@@ -14,15 +14,17 @@ const productEdges: GalaxyInputEdge[] = [
 ];
 
 describe('Product manifold galaxy visualization data', () => {
-    it('keeps Lorentz skeleton positions while adding Hopf ribbon guide data', () => {
+    it('uses Product consensus positions while adding Hopf ribbon guide data', () => {
         const scene = buildGalaxyScene(productNodes, productEdges, mergeGalaxySettings({ layoutMode: 'productManifold' }));
 
         expect(scene.layoutMode).toBe('productManifold');
-        expect(scene.lorentzGuides?.length).toBeGreaterThan(3);
-        expect(scene.hopfRibbons?.length).toBeGreaterThan(20);
+        expect(scene.lorentzGuides?.length).toBe(2);
+        expect(scene.hopfRibbons?.length).toBeGreaterThan(0);
         expect(scene.nodes.every((node) => Math.hypot(node.x, node.y, node.z) <= 2.4)).toBe(true);
-        expect(new Set(scene.lorentzGuides?.map((guide) => guide.guideKind))).toContain('levelShell');
-        expect(new Set(scene.hopfRibbons?.map((ribbon) => ribbon.guideKind))).toContain('dataFiber');
+        expect(scene.lorentzGuides?.every((guide) => guide.id.startsWith('product:consensus-guide:'))).toBe(true);
+        expect(scene.lorentzGuides?.some((guide) => guide.id.startsWith('lorentz:'))).toBe(false);
+        expect(new Set(scene.hopfRibbons?.map((ribbon) => ribbon.guideKind))).toEqual(new Set(['dataFiber']));
+        expect(scene.hopfRibbons?.every((ribbon) => ribbon.id.startsWith('product:local-fiber:'))).toBe(true);
     });
 
     it('derives Product entity fibers from evidence context samples without rendering extra nodes', () => {
@@ -54,12 +56,13 @@ describe('Product manifold galaxy visualization data', () => {
             && ribbon.nodeIds.includes('embed:entity:kai')
             && ribbon.nodeIds.some((id) => id.startsWith('product:context:embed:entity:kai')),
         );
-        const relationGuides = scene.lorentzGuides?.filter((guide) => guide.id.startsWith('lorentz:product-guide:')) ?? [];
+        const relationGuides = scene.lorentzGuides?.filter((guide) => guide.id.startsWith('product:consensus-guide:')) ?? [];
         const relationKinds = new Set(relationGuides.map((guide) => guide.treeKind));
 
         expect(entityRibbon).toBeTruthy();
         expect(entityRibbon?.nodeIds.some((id) => id.includes('anchor-entity:a1'))).toBe(true);
         expect(entityRibbon?.nodeIds.some((id) => id.includes('event-entity:e1:kai'))).toBe(true);
+        expect(maxRibbonDistanceFromNode(entityRibbon!, scene.nodes.find((node) => node.entity.id === 'embed:entity:kai')!)).toBeLessThan(0.42);
         expect(scene.nodes.some((node) => node.entity.id.startsWith('product:context:'))).toBe(false);
         expect(relationGuides.length).toBe(8);
         expect(relationKinds.has('documentStructure')).toBe(true);
@@ -146,10 +149,27 @@ describe('Product manifold galaxy visualization data', () => {
             return Math.hypot(node.x - other.x, node.y - other.y, node.z - other.z);
         }));
 
-        expect(maxDelta).toBeGreaterThan(0.04);
+        expect(maxDelta).toBeGreaterThan(0.2);
         expect(product.hopfRibbons?.some((ribbon) => ribbon.guideKind === 'dataFiber')).toBe(true);
+        expect(product.hopfRibbons?.some((ribbon) => ribbon.guideKind !== 'dataFiber')).toBe(false);
+        expect(product.lorentzGuides?.some((guide) => guide.id.startsWith('lorentz:root-lane:'))).toBe(false);
     });
 });
+
+function maxRibbonDistanceFromNode(
+    ribbon: NonNullable<ReturnType<typeof buildGalaxyScene>['hopfRibbons']>[number],
+    node: ReturnType<typeof buildGalaxyScene>['nodes'][number],
+): number {
+    let max = 0;
+    for (let index = 0; index < ribbon.positions3d.length; index += 3) {
+        max = Math.max(max, Math.hypot(
+            ribbon.positions3d[index] - node.x,
+            ribbon.positions3d[index + 1] - node.y,
+            ribbon.positions3d[index + 2] - node.z,
+        ));
+    }
+    return max;
+}
 
 function productNode(
     id: string,
@@ -261,7 +281,10 @@ function topologyNode(
 
 function stripTopology(node: GalaxyRenderableNode): GalaxyRenderableNode {
     const metadata = { ...(node.metadata || {}) };
+    delete metadata['embeddingClusterId'];
     delete metadata['embeddingMedoidTargetId'];
+    delete metadata['embeddingOutlierScore'];
+    delete metadata['embeddingHubScore'];
     delete metadata['productRegionRole'];
     delete metadata['productLaneKind'];
     delete metadata['product'];

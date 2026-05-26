@@ -326,6 +326,54 @@ describe('Phoenix graph rebuild builder', () => {
         ]));
     });
 
+    it('re-resolves stale occurrence chunk ids so multi-note temporal facts survive', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1', 'note-2'],
+            entities: [
+                entity('e-kai', 'Kai', []),
+                entity('e-tempest', 'Tempest', []),
+                entity('e-red-mesa', 'Red Mesa', [], 'LOCATION'),
+                entity('e-hazel', 'Hazel', []),
+            ],
+            chunks: [
+                { id: 'note-1:chunk:0:fresh', noteId: 'note-1', start: 0, end: 80, ordinal: 0, source: 'dynamic-chunking' },
+                { id: 'note-1:chunk:1:fresh', noteId: 'note-1', start: 81, end: 180, ordinal: 1, source: 'dynamic-chunking' },
+                { id: 'note-2:chunk:0:fresh', noteId: 'note-2', start: 0, end: 90, ordinal: 0, source: 'dynamic-chunking' },
+                { id: 'note-2:chunk:1:fresh', noteId: 'note-2', start: 91, end: 180, ordinal: 1, source: 'dynamic-chunking' },
+            ],
+            occurrences: [
+                occurrence('note-1', 'e-kai', 'Kai', 0, 3, 'note-1:chunk:0:stale'),
+                occurrence('note-1', 'e-tempest', 'Tempest', 20, 27, 'note-1:chunk:0:stale'),
+                occurrence('note-1', 'e-kai', 'Kai', 92, 95, 'note-1:chunk:1:stale'),
+                occurrence('note-1', 'e-red-mesa', 'Red Mesa', 121, 129, 'note-1:chunk:1:stale'),
+                occurrence('note-2', 'e-hazel', 'Hazel', 0, 5, 'note-2:chunk:0:stale'),
+                occurrence('note-2', 'e-kai', 'Kai', 35, 38, 'note-2:chunk:0:stale'),
+                occurrence('note-2', 'e-hazel', 'Hazel', 104, 109, 'note-2:chunk:1:stale'),
+                occurrence('note-2', 'e-red-mesa', 'Red Mesa', 130, 138, 'note-2:chunk:1:stale'),
+            ],
+            noteTexts: {
+                'note-1': 'Kai said Tempest watched the room.                                                  Because Kai started tracking Red Mesa and the roads shifted.',
+                'note-2': 'Hazel read while Kai approved the packet.                                                   Hazel continued because Red Mesa kept selecting.',
+            },
+            builtAt: 16,
+        });
+
+        expect(snapshot.counters.dropReasons.missingChunk).toBe(0);
+        expect(snapshot.entityAnchors.every((anchor) => anchor.chunkId?.endsWith(':fresh'))).toBe(true);
+        expect(snapshot.events.map((event) => event.noteId)).toEqual(['note-1', 'note-1', 'note-2', 'note-2']);
+        expect(snapshot.temporalEdges).toHaveLength(2);
+        expect(snapshot.causalEdges).toHaveLength(2);
+        expect(snapshot.temporalEdges.every((edge) => sameNoteEdge(edge, snapshot.events))).toBe(true);
+        expect(snapshot.causalEdges.every((edge) => sameNoteEdge(edge, snapshot.events))).toBe(true);
+        expect(snapshot.embeddingTargets.map((target) => target.kind)).toEqual(expect.arrayContaining([
+            'event',
+            'temporalFact',
+            'causalFact',
+        ]));
+    });
+
     it('upgrades matching relationship candidates with explicit NLI hints', () => {
         const snapshot = buildGraphRebuildSnapshot({
             scopeKind: 'note',
@@ -403,7 +451,7 @@ function entity(id: string, label: string, aliases: string[], kind = 'CHARACTER'
     };
 }
 
-function occurrence(noteId: string, entityId: string, surface: string, sourceStart: number, sourceEnd: number): EntityOccurrence {
+function occurrence(noteId: string, entityId: string, surface: string, sourceStart: number, sourceEnd: number, chunkId?: string): EntityOccurrence {
     return {
         id: `${noteId}:${entityId}:${sourceStart}:${sourceEnd}`,
         noteId,
@@ -419,7 +467,13 @@ function occurrence(noteId: string, entityId: string, surface: string, sourceSta
         generation: 1,
         createdAt: 1,
         updatedAt: 1,
+        ...(chunkId ? { chunkId } : {}),
     };
+}
+
+function sameNoteEdge(edge: { sourceId: string; targetId: string }, events: { id: string; noteId: string }[]): boolean {
+    const byId = new Map(events.map((event) => [event.id, event.noteId]));
+    return byId.get(edge.sourceId) === byId.get(edge.targetId);
 }
 
 function kindCounts(kinds: string[]): Record<string, number> {

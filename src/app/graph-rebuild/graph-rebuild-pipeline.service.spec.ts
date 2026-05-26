@@ -119,6 +119,75 @@ describe('GraphRebuildPipelineService', () => {
         }));
     });
 
+    it('keeps global graph rebuild unbounded even when the visible note list is partial', async () => {
+        await service.buildCoreGraph({
+            ...request(),
+            scope: { kind: 'global', scopeId: 'global', label: 'Global', noteIds: [] },
+            policy: 'force',
+        });
+
+        expect(notesMock.toArray).toHaveBeenCalled();
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: [],
+        }));
+        expect(graphRebuild.persistRunReceipt).toHaveBeenCalledWith(expect.objectContaining({
+            scope: expect.objectContaining({
+                kind: 'global',
+                scopeId: 'global',
+                noteIds: [],
+            }),
+        }));
+    });
+
+    it('removes stale selected ids from multi-note graph rebuild scopes', async () => {
+        notesMock.rows = [
+            {
+                id: 'note-1',
+                title: 'First',
+                markdownContent: 'Kai mapped Red Mesa.',
+                content: '',
+                folderId: '',
+                updatedAt: 10,
+                version: 2,
+            },
+            {
+                id: 'note-2',
+                title: 'Second',
+                markdownContent: 'Rowan watched Boundary Keep.',
+                content: '',
+                folderId: '',
+                updatedAt: 11,
+                version: 3,
+            },
+        ];
+
+        await service.buildCoreGraph({
+            ...request(),
+            scope: {
+                kind: 'multiNote',
+                scopeId: 'multi:note-1|deleted-note|note-2',
+                label: '3 notes',
+                noteIds: ['note-1', 'deleted-note', 'note-2'],
+            },
+            policy: 'force',
+        });
+
+        expect(notesMock.bulkGet).toHaveBeenCalledWith(['note-1', 'deleted-note', 'note-2']);
+        expect(ner.runDynamicScan).toHaveBeenCalledTimes(2);
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            scopeKind: 'multiNote',
+            noteIds: ['note-1', 'note-2'],
+        }));
+        expect(graphRebuild.persistRunReceipt).toHaveBeenCalledWith(expect.objectContaining({
+            scope: expect.objectContaining({
+                kind: 'multiNote',
+                noteIds: ['note-1', 'note-2'],
+            }),
+        }));
+    });
+
     it('runs full atlas stages, then builds the final snapshot from NLI hints', async () => {
         await service.buildFullAtlas(request());
 
