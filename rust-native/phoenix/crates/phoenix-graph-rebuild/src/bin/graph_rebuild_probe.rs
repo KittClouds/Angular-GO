@@ -58,6 +58,9 @@ fn main() {
     println!("candidates={}", snapshot.counters.candidates);
     println!("mentions={}", snapshot.counters.mentions);
     println!("accepted_anchors={}", snapshot.counters.accepted_anchors);
+    println!("anchor_evidence={}", snapshot.counters.anchor_evidence);
+    println!("relation_signals={}", snapshot.counters.relation_signals);
+    println!("promoted_facts={}", snapshot.counters.promoted_facts);
     println!(
         "relationship_candidates={}",
         snapshot.counters.relationship_candidates

@@ -132,6 +132,13 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             mentions: mentions.length,
             acceptedAnchors: entityAnchors.length,
             chunks: chunks.length,
+            anchorEvidence: entityAnchors.length,
+            relationSignals: relationships.length,
+            promotedFacts: acceptedRelationships
+                + derived.events.length
+                + derived.temporalEdges.length
+                + derived.causalEdges.length
+                + derived.memoryState.length,
             relationshipCandidates: relationships.length,
             relationships: relationships.length,
             acceptedRelationships,
@@ -322,12 +329,10 @@ function adjudicateEdge(edge: GraphRebuildEdge): { status: 'accepted' | 'review'
     const evidenceCount = edge.evidenceAnchorIds.length;
     const scopeCount = edge.scopeKeys.length;
     const score = Math.min(1, Math.min(edge.weight / 5, 0.65) + Math.min(evidenceCount / 24, 0.25) + Math.min(scopeCount / 12, 0.1));
-    const status = edge.weight >= 3 || score >= 0.62 ? 'accepted' : evidenceCount >= 2 && scopeCount >= 1 ? 'review' : 'rejected';
-    const rationale = status === 'accepted'
-        ? `accepted: co-occurrence repeated across ${scopeCount} bucket(s) with ${evidenceCount} anchor evidence refs`
-        : status === 'review'
-            ? 'review: one or two co-occurrence buckets; needs typed relation/NLI confirmation'
-            : 'rejected: insufficient anchor evidence for a relationship candidate';
+    const status = evidenceCount >= 2 && scopeCount >= 1 ? 'review' : 'rejected';
+    const rationale = status === 'review'
+        ? `review: anchor evidence across ${scopeCount} bucket(s); needs typed relation/NLI confirmation before fact promotion`
+        : 'rejected: insufficient anchor evidence for a relationship signal';
     return {
         status,
         score,

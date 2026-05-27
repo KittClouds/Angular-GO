@@ -51,23 +51,18 @@ fn decide_edge(edge: &GraphEdge) -> RelationshipDecision {
     let score = relationship_score(edge);
     let evidence_count = edge.evidence_anchor_ids.len();
     let scope_count = edge.scope_keys.len();
-    let status = if edge.weight >= 3 || score >= 0.62 {
-        "accepted"
-    } else if evidence_count >= 2 && scope_count >= 1 {
+    let status = if evidence_count >= 2 && scope_count >= 1 {
         "review"
     } else {
         "rejected"
     };
     let rationale = match status {
-        "accepted" => format_compact!(
-            "accepted: co-occurrence repeated across {} bucket(s) with {} anchor evidence refs",
+        "review" => format_compact!(
+            "review: anchor evidence across {} bucket(s) with {} anchor evidence refs; needs typed relation/NLI confirmation before fact promotion",
             scope_count,
             evidence_count
         ),
-        "review" => format_compact!(
-            "review: one or two co-occurrence buckets; needs typed relation/NLI confirmation"
-        ),
-        _ => format_compact!("rejected: insufficient anchor evidence for a relationship candidate"),
+        _ => format_compact!("rejected: insufficient anchor evidence for a relationship signal"),
     };
     let evidence = vec![
         format_compact!("weight:{}", edge.weight),

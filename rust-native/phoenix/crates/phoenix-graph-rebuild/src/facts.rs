@@ -26,6 +26,11 @@ struct EntityInChunk {
     anchor_ids: SmallVec<[CompactString; 4]>,
 }
 
+struct PairWindow<'a> {
+    between: &'a str,
+}
+
+const TYPED_RELATION_MAX_GAP_CHARS: u32 = 260;
 const FAMILY_CUES: &[&str] = &[" father", " daughter", " grandfather", " family"];
 const COMMAND_CUES: &[&str] = &["command", "admiral", "phantom", "military"];
 const ACCEPTANCE_CUES: &[&str] = &["approved", "approval", "accepted", "agreed", "proceed"];
@@ -154,45 +159,47 @@ fn derive_typed_relationships(
     if !has_relation_cue(lower) {
         return;
     }
-    for left_index in 0..entities.len() {
-        for right_index in (left_index + 1)..entities.len() {
-            let left = &entities[left_index];
-            let right = &entities[right_index];
-            let evidence_window = pair_window(lower, chunk, left, right);
-            let Some(relation_type) = infer_relation_type(evidence_window) else {
-                continue;
-            };
-            let confidence = relation_confidence(&relation_type);
-            let evidence = pair_evidence(left, right);
-            let id = format_compact!(
-                "typed:{}:{}:{}:{}:{}",
-                note_id,
-                chunk.ordinal,
-                left.id.0,
-                relation_type,
-                right.id.0
-            );
-            relationships.push(GraphRelationship {
-                id: id.clone(),
-                source_entity_id: left.id.clone(),
-                target_entity_id: right.id.clone(),
-                relation_type: relation_type.clone(),
-                evidence_anchor_ids: evidence.clone(),
-                confidence,
-                status: "accepted".into(),
-                adjudication_source: "graph-rebuild-typed-cue-policy".into(),
-                adjudication_score: confidence,
-                rationale: format_compact!(
-                    "accepted: anchored chunk cue promoted {} fact",
-                    relation_type
-                ),
-                decision_evidence: vec![
-                    format_compact!("chunk:{}", chunk.id),
-                    format_compact!("cue:{}", relation_type),
-                ],
-            });
-            upsert_typed_edge(edges, left, right, &relation_type, &evidence, &chunk.id);
+    for left_index in 0..entities.len().saturating_sub(1) {
+        let left = &entities[left_index];
+        let right = &entities[left_index + 1];
+        let gap = right.first_start.saturating_sub(left.first_end);
+        if gap > TYPED_RELATION_MAX_GAP_CHARS {
+            continue;
         }
+        let evidence_window = pair_window(lower, chunk, left, right);
+        let Some(relation_type) = infer_relation_type(evidence_window) else {
+            continue;
+        };
+        let confidence = relation_confidence(&relation_type);
+        let evidence = pair_evidence(left, right);
+        let id = format_compact!(
+            "typed:{}:{}:{}:{}:{}",
+            note_id,
+            chunk.ordinal,
+            left.id.0,
+            relation_type,
+            right.id.0
+        );
+        relationships.push(GraphRelationship {
+            id: id.clone(),
+            source_entity_id: left.id.clone(),
+            target_entity_id: right.id.clone(),
+            relation_type: relation_type.clone(),
+            evidence_anchor_ids: evidence.clone(),
+            confidence,
+            status: "accepted".into(),
+            adjudication_source: "graph-rebuild-typed-cue-policy".into(),
+            adjudication_score: confidence,
+            rationale: format_compact!(
+                "accepted: anchored chunk cue promoted {} fact",
+                relation_type
+            ),
+            decision_evidence: vec![
+                format_compact!("chunk:{}", chunk.id),
+                format_compact!("cue:{}", relation_type),
+            ],
+        });
+        upsert_typed_edge(edges, left, right, &relation_type, &evidence, &chunk.id);
     }
 }
 
@@ -207,14 +214,16 @@ fn pair_window<'a>(
     chunk: &GraphChunk,
     left: &EntityInChunk,
     right: &EntityInChunk,
-) -> &'a str {
-    let start = left.first_start.min(right.first_start);
-    let end = left.first_end.max(right.first_end);
-    let local_start = start.saturating_sub(chunk.start) as usize;
-    let local_end = end.saturating_sub(chunk.start) as usize;
-    let window_start = floor_char_boundary(lower, local_start.saturating_sub(160));
-    let window_end = ceil_char_boundary(lower, (local_end + 160).min(lower.len()));
-    lower.get(window_start..window_end).unwrap_or(lower)
+) -> PairWindow<'a> {
+    let between_start =
+        floor_char_boundary(lower, left.first_end.saturating_sub(chunk.start) as usize);
+    let between_end = ceil_char_boundary(
+        lower,
+        right.first_start.saturating_sub(chunk.start) as usize,
+    );
+    PairWindow {
+        between: lower.get(between_start..between_end).unwrap_or_default(),
+    }
 }
 
 fn floor_char_boundary(text: &str, mut index: usize) -> usize {
@@ -231,22 +240,23 @@ fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
-fn infer_relation_type(lower: &str) -> Option<CompactString> {
-    let relation = if has_any(lower, FAMILY_CUES) {
+fn infer_relation_type(window: PairWindow<'_>) -> Option<CompactString> {
+    let between = window.between;
+    let relation = if has_any(between, FAMILY_CUES) {
         "family_or_house_tie"
-    } else if has_any(lower, COMMAND_CUES) {
+    } else if has_any(between, COMMAND_CUES) {
         "command_or_service_tie"
-    } else if has_any(lower, ACCEPTANCE_CUES) {
+    } else if has_any(between, ACCEPTANCE_CUES) {
         "approves_or_accepts"
-    } else if has_any(lower, RELEASE_CUES) {
+    } else if has_any(between, RELEASE_CUES) {
         "discusses_release_terms"
-    } else if has_any(lower, CONTACT_CUES) {
+    } else if has_any(between, CONTACT_CUES) {
         "intimate_or_close_contact"
-    } else if has_any(lower, OBSERVATION_CUES) {
+    } else if has_any(between, OBSERVATION_CUES) {
         "observes"
-    } else if has_any(lower, TRANSFER_CUES) {
+    } else if has_any(between, TRANSFER_CUES) {
         "transfers_or_receives"
-    } else if has_any(lower, PRESENCE_CUES) {
+    } else if has_any(between, PRESENCE_CUES) {
         "scene_presence"
     } else {
         return None;
@@ -312,6 +322,9 @@ fn derive_event(
     let Some(event_type) = infer_event_type(lower) else {
         return;
     };
+    if matches!(event_type.as_str(), "dialogue_event" | "positioning_event") && entities.len() < 2 {
+        return;
+    }
     let mut entity_ids = Vec::new();
     let mut evidence = Vec::new();
     for entity in entities.iter().take(6) {
@@ -420,6 +433,7 @@ fn build_temporal_edges(events: &[GraphEvent]) -> Vec<GraphTemporalEdge> {
     events
         .windows(2)
         .enumerate()
+        .filter(|(_, pair)| shares_entity(&pair[0], &pair[1]))
         .map(|(index, pair)| GraphTemporalEdge {
             id: format_compact!("temporal:{}:{}", pair[0].id, pair[1].id),
             source_id: pair[0].id.clone(),
@@ -437,6 +451,9 @@ fn build_causal_edges(
 ) -> Vec<GraphTemporalEdge> {
     let mut out = Vec::new();
     for pair in events.windows(2) {
+        if !shares_entity(&pair[0], &pair[1]) {
+            continue;
+        }
         let Some(chunk_id) = &pair[1].chunk_id else {
             continue;
         };
@@ -453,6 +470,12 @@ fn build_causal_edges(
         });
     }
     out
+}
+
+fn shares_entity(left: &GraphEvent, right: &GraphEvent) -> bool {
+    left.entity_ids
+        .iter()
+        .any(|entity_id| right.entity_ids.iter().any(|other| other == entity_id))
 }
 
 fn has_any(haystack: &str, needles: &[&str]) -> bool {

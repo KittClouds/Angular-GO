@@ -167,6 +167,13 @@ pub fn build_graph_rebuild_snapshot(
         mentions: mentions.len(),
         accepted_anchors: anchors.len(),
         chunks: chunks.len(),
+        anchor_evidence: anchors.len(),
+        relation_signals: relationships.len(),
+        promoted_facts: accepted_relationships
+            + events.len()
+            + temporal_edges.len()
+            + causal_edges.len()
+            + memory_state.len(),
         relationship_candidates,
         relationships: relationships.len(),
         accepted_relationships,

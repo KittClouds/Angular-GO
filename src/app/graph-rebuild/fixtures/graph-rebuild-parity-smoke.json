@@ -47,9 +47,7 @@
       { "id": "relationship:e-hazel:anchored-cooccurrence:e-kai", "relationType": "co_occurs_with", "status": "review" },
       { "id": "relationship:e-hazel:anchored-cooccurrence:e-rift", "relationType": "co_occurs_with", "status": "review" },
       { "id": "relationship:e-kai:anchored-cooccurrence:e-rift", "relationType": "co_occurs_with", "status": "review" },
-      { "id": "typed:parity-note:0:e-hazel:approves_or_accepts:e-rift", "relationType": "approves_or_accepts", "status": "accepted" },
-      { "id": "typed:parity-note:0:e-kai:approves_or_accepts:e-hazel", "relationType": "approves_or_accepts", "status": "accepted" },
-      { "id": "typed:parity-note:0:e-kai:approves_or_accepts:e-rift", "relationType": "approves_or_accepts", "status": "accepted" }
+      { "id": "typed:parity-note:0:e-kai:approves_or_accepts:e-hazel", "relationType": "approves_or_accepts", "status": "accepted" }
     ],
     "eventCount": 1,
     "memoryStateCount": 3,
@@ -58,7 +56,7 @@
       "chunk": 1,
       "entity": 3,
       "event": 1,
-      "graphFact": 6,
+      "graphFact": 4,
       "memoryState": 3,
       "note": 1
     }

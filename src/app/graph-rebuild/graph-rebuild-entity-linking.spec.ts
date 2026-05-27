@@ -77,9 +77,45 @@ describe('graph rebuild entity linking', () => {
         expect(first.suggestions.map((suggestion) => suggestion.id)).toEqual(second.suggestions.map((suggestion) => suggestion.id));
         expect(new Set(first.suggestions.map((suggestion) => suggestion.id)).size).toBe(first.suggestions.length);
     });
+
+    it('builds narrow linker candidate packets from dynamic mentions without exact surface scans', () => {
+        const anchors = [
+            anchor('a-ryan', 'e-ryan', 'Ryan'),
+            anchor('a-new-rome', 'e-new-rome', 'New Rome'),
+            anchor('a-dynamis', 'e-dynamis', 'Dynamis'),
+        ];
+        const nodes = [
+            node('e-ryan', 'Ryan', 'CHARACTER', ['Quicksave'], 5),
+            node('e-new-rome', 'New Rome', 'LOCATION', [], 4),
+            node('e-dynamis', 'Dynamis', 'NETWORK', [], 3),
+            node('e-red-mesa', 'Red Mesa', 'LOCATION', [], 2),
+        ];
+        const mentions = [
+            ...anchors,
+            mention('m-new-roman', 'New Roman quarter', 'dropped', 900, 917),
+        ];
+
+        const result = buildGraphRebuildEntityLinkSuggestions({
+            mentions,
+            entityAnchors: anchors,
+            nodes,
+            edges: [edge('e-ryan', 'e-new-rome', 2)],
+            structuralPostProcess: buildGraphRebuildStructuralPostProcess(nodes, [edge('e-ryan', 'e-new-rome', 2)]),
+        });
+
+        expect(result.suggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'entity-link:linker:m-new-roman:e-new-rome',
+                candidateEntityId: 'e-new-rome',
+                linkerCandidateEntityIds: ['e-new-rome'],
+                linkerWindowId: 'note:1',
+            }),
+        ]));
+        expect(result.counters.linkerCandidates).toBe(1);
+    });
 });
 
-function node(id: string, label: string, kind: string, aliases: string[]): GraphRebuildNode {
+function node(id: string, label: string, kind: string, aliases: string[], totalMentions = 1): GraphRebuildNode {
     return {
         id,
         entityId: id,
@@ -88,7 +124,7 @@ function node(id: string, label: string, kind: string, aliases: string[]): Graph
         aliases,
         anchorIds: [],
         noteIds: ['note'],
-        totalMentions: 1,
+        totalMentions,
     };
 }
 

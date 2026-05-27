@@ -57,8 +57,8 @@ pub use gliclass_instruct_format::{
     GliclassInstructExample, GliclassInstructLabel,
 };
 pub use gliner_bi::{
-    GlinerBiError, GlinerBiLabelSet, GlinerBiModel, GlinerBiModelMetadata, GlinerBiOverlapPolicy,
-    GlinerBiPredictOptions, GlinerBiPrediction,
+    GlinerBiError, GlinerBiInputSpan, GlinerBiLabelSet, GlinerBiModel, GlinerBiModelMetadata,
+    GlinerBiOverlapPolicy, GlinerBiPredictOptions, GlinerBiPrediction,
 };
 pub use gliner_relex::{
     GlinerRelexEntity, GlinerRelexError, GlinerRelexLabel, GlinerRelexMetadata, GlinerRelexModel,

@@ -71,17 +71,22 @@ describe('Phoenix graph rebuild builder', () => {
             ['e-hazel', 'e-rift'],
             ['e-kai', 'e-rift'],
         ]);
-        expect(snapshot.relationships).toHaveLength(6);
+        expect(snapshot.relationships).toHaveLength(5);
         expect(snapshot.relationships.filter((row) => row.adjudicationSource === 'graph-rebuild-cooccurrence-policy')).toHaveLength(3);
-        expect(snapshot.relationships.filter((row) => row.adjudicationSource === 'graph-rebuild-typed-cue-policy')).toHaveLength(3);
+        expect(snapshot.relationships.filter((row) => row.adjudicationSource === 'graph-rebuild-typed-cue-policy')).toHaveLength(2);
         expect(snapshot.relationships.map((row) => [row.relationType, row.status])).toEqual(expect.arrayContaining([
             ['co_occurs_with', 'review'],
             ['approves_or_accepts', 'accepted'],
         ]));
-        expect(snapshot.counters.relationshipCandidates).toBe(6);
-        expect(snapshot.counters.acceptedRelationships).toBe(3);
+        expect(snapshot.counters.relationshipCandidates).toBe(5);
+        expect(snapshot.counters.acceptedRelationships).toBe(2);
         expect(snapshot.counters.reviewRelationships).toBe(3);
         expect(snapshot.counters.rejectedRelationships).toBe(0);
+        expect(snapshot.counters).toMatchObject({
+            anchorEvidence: 3,
+            relationSignals: 5,
+            promotedFacts: 6,
+        });
         expect(snapshot.events.map((event) => event.id)).toEqual(['event:note-1:0:approval_event']);
         expect(snapshot.memoryState.map((state) => [state.entityId, state.key]).sort()).toEqual([
             ['e-hazel', 'rank_or_status'],
@@ -93,7 +98,7 @@ describe('Phoenix graph rebuild builder', () => {
             chunk: 1,
             entity: 3,
             event: 1,
-            graphFact: 6,
+            graphFact: 5,
             memoryState: 3,
             note: 1,
         });
@@ -118,9 +123,9 @@ describe('Phoenix graph rebuild builder', () => {
             events: 1,
             episodes: 1,
             memoryState: 3,
-            embeddingTargets: 18,
+            embeddingTargets: 17,
             nodes: 3,
-            edges: 6,
+            edges: 5,
             structuralComponents: 1,
             structuralHubs: 3,
         });

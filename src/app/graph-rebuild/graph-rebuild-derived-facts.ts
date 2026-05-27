@@ -29,8 +29,12 @@ interface EntityInChunk {
     anchorIds: string[];
 }
 
-const TYPED_RELATION_MAX_GAP_CHARS = 900;
-const TYPED_RELATION_LINKS_PER_ENTITY = 5;
+interface PairWindow {
+    text: string;
+    between: string;
+}
+
+const TYPED_RELATION_MAX_GAP_CHARS = 260;
 const AUTHORITY_RELATION_CUES = ['command', 'admiral', 'phantom', 'military', 'chiefs', 'operator', 'warden', 'table', 'authority'];
 const EVIDENCE_RELATION_CUES = ['documented', 'records', 'packet', 'evidence', 'file', 'files', 'attached', 'report'];
 
@@ -121,41 +125,40 @@ function deriveRelationships(
 function typedRelationPairs(entities: EntityInChunk[]): Array<{ left: EntityInChunk; right: EntityInChunk }> {
     const pairs: Array<{ left: EntityInChunk; right: EntityInChunk; gap: number }> = [];
     const sorted = [...entities].sort((left, right) => left.firstStart - right.firstStart);
-    for (let i = 0; i < sorted.length; i += 1) {
+    for (let i = 0; i < sorted.length - 1; i += 1) {
         const left = sorted[i];
-        let links = 0;
-        for (let j = i + 1; j < sorted.length; j += 1) {
-            const right = sorted[j];
-            const gap = Math.max(0, right.firstStart - left.firstEnd);
-            if (gap > TYPED_RELATION_MAX_GAP_CHARS) break;
-            pairs.push({ left, right, gap });
-            links += 1;
-            if (links >= TYPED_RELATION_LINKS_PER_ENTITY) break;
-        }
+        const right = sorted[i + 1];
+        const gap = Math.max(0, right.firstStart - left.firstEnd);
+        if (gap <= TYPED_RELATION_MAX_GAP_CHARS) pairs.push({ left, right, gap });
     }
     return pairs.sort((left, right) => left.gap - right.gap || left.left.id.localeCompare(right.left.id) || left.right.id.localeCompare(right.right.id));
 }
 
-function pairWindow(lower: string, chunk: GraphRebuildChunk, left: EntityInChunk, right: EntityInChunk): string {
+function pairWindow(lower: string, chunk: GraphRebuildChunk, left: EntityInChunk, right: EntityInChunk): PairWindow {
     const start = Math.min(left.firstStart, right.firstStart);
     const end = Math.max(left.firstEnd, right.firstEnd);
     const localStart = Math.max(0, start - chunk.start);
     const localEnd = Math.max(localStart, end - chunk.start);
-    return lower.slice(Math.max(0, localStart - 160), Math.min(lower.length, localEnd + 160));
+    return {
+        text: lower.slice(Math.max(0, localStart - 120), Math.min(lower.length, localEnd + 120)),
+        between: lower.slice(Math.min(lower.length, Math.max(0, left.firstEnd - chunk.start)), Math.min(lower.length, Math.max(0, right.firstStart - chunk.start))),
+    };
 }
 
-function inferRelationType(text: string, chunk?: GraphRebuildChunk): string | null {
-    if ((chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) && hasAny(text, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
-    if ((chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) && hasAny(text, EVIDENCE_RELATION_CUES)) return 'documented_in';
-    if (hasAny(text, [' father', ' daughter', ' grandfather', ' family'])) return 'family_or_house_tie';
-    if (hasAny(text, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
-    if (hasAny(text, ['approved', 'approval', 'accepted', 'agreed', 'proceed'])) return 'approves_or_accepts';
-    if (hasAny(text, ['release', 'terms', 'warning', 'coercion'])) return 'discusses_release_terms';
-    if (hasAny(text, EVIDENCE_RELATION_CUES)) return 'documented_in';
-    if (hasAny(text, ['kiss', 'took his hand', 'stood beside', 'close enough'])) return 'intimate_or_close_contact';
-    if (hasAny(text, ['looked at', 'watched', 'saw ', 'noticed'])) return 'observes';
-    if (hasAny(text, ['gave', 'handed', 'took it from', 'received'])) return 'transfers_or_receives';
-    if (hasAny(text, ['entered', 'arrived', 'came in', 'stood near'])) return 'scene_presence';
+function inferRelationType(window: PairWindow, chunk?: GraphRebuildChunk): string | null {
+    const text = window.text;
+    const between = window.between;
+    if ((chunk?.meaningFrame?.role === 'authority_chain' || chunk?.meaningFrame?.authorityCues.length) && hasAny(between, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
+    if ((chunk?.meaningFrame?.role === 'evidence_block' || chunk?.meaningFrame?.evidenceCues.length) && hasAny(between, EVIDENCE_RELATION_CUES)) return 'documented_in';
+    if (hasAny(between, [' father', ' daughter', ' grandfather', ' family'])) return 'family_or_house_tie';
+    if (hasAny(between, AUTHORITY_RELATION_CUES)) return 'command_or_service_tie';
+    if (hasAny(between, ['approved', 'approval', 'accepted', 'agreed', 'proceed'])) return 'approves_or_accepts';
+    if (hasAny(between, ['release', 'terms', 'warning', 'coercion'])) return 'discusses_release_terms';
+    if (hasAny(between, EVIDENCE_RELATION_CUES)) return 'documented_in';
+    if (hasAny(between, ['kiss', 'took his hand', 'stood beside', 'close enough'])) return 'intimate_or_close_contact';
+    if (hasAny(between, ['looked at', 'watched', 'saw ', 'noticed'])) return 'observes';
+    if (hasAny(between, ['gave', 'handed', 'took it from', 'received'])) return 'transfers_or_receives';
+    if (hasAny(between, ['entered', 'arrived', 'came in', 'stood near'])) return 'scene_presence';
     return null;
 }
 
@@ -181,6 +184,7 @@ function upsertTypedEdge(edgeMap: Map<string, GraphRebuildEdge>, left: string, r
 function deriveEvent(chunk: GraphRebuildChunk, lower: string, entities: EntityInChunk[], events: GraphRebuildEvent[]): void {
     const type = inferEventType(lower, chunk);
     if (!type) return;
+    if ((type === 'dialogue_event' || type === 'positioning_event') && entities.length < 2) return;
     const picked = entities.slice(0, 6);
     events.push({
         id: `event:${chunk.noteId}:${chunk.ordinal}:${type}`,
@@ -278,6 +282,7 @@ function buildTemporalEdges(events: GraphRebuildEvent[]): GraphRebuildTemporalEd
         for (let index = 1; index < noteEvents.length; index += 1) {
             const previous = noteEvents[index - 1];
             const event = noteEvents[index];
+            if (!sharesEntity(previous, event)) continue;
             out.push({
                 id: `temporal:${previous.id}:${event.id}`,
                 sourceId: previous.id,
@@ -299,6 +304,7 @@ function buildCausalEdges(events: GraphRebuildEvent[], chunks: GraphRebuildChunk
             const previous = noteEvents[index - 1];
             const current = noteEvents[index];
             if (!previous || !current) continue;
+            if (!sharesEntity(previous, current)) continue;
             const chunk = current.chunkId ? byChunk.get(current.chunkId) : null;
             const text = chunk ? (noteTexts[chunk.noteId] || '').slice(chunk.start, chunk.end).toLowerCase() : '';
             if (!hasAny(text, ['because', 'therefore', 'which meant', 'that meant', 'so '])) continue;
@@ -306,6 +312,10 @@ function buildCausalEdges(events: GraphRebuildEvent[], chunks: GraphRebuildChunk
         }
     }
     return out;
+}
+
+function sharesEntity(left: GraphRebuildEvent, right: GraphRebuildEvent): boolean {
+    return left.entityIds.some((entityId) => right.entityIds.includes(entityId));
 }
 
 function eventsByNote(events: GraphRebuildEvent[]): GraphRebuildEvent[][] {

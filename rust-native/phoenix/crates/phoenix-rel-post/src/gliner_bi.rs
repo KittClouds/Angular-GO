@@ -11,7 +11,10 @@ use thiserror::Error;
 use tokenizers::Tokenizer;
 
 use crate::gliner_bi_tensors::{
-    build_label_set, build_span_tensors, build_text_tensors, decode_predictions, extract_logits,
+    build_constrained_span_tensors, build_label_set, build_span_tensors, build_text_tensors,
+    decode_predictions, decode_predictions_for_word_ranges, decode_token_predictions,
+    decode_token_predictions_for_word_ranges, extract_logits, word_ranges_for_input_spans,
+    GlinerBiTextTensors,
 };
 use crate::ort_runtime::{load_session_with_intra_threads, recommended_thread_count};
 
@@ -39,6 +42,7 @@ pub struct GlinerBiPrediction {
 #[serde(rename_all = "camelCase")]
 pub struct GlinerBiModelMetadata {
     pub max_width: usize,
+    pub model_mode: String,
     pub model_path: String,
     pub text_tokenizer_path: String,
     pub labels_tokenizer_path: String,
@@ -52,6 +56,13 @@ pub struct GlinerBiLabelSet {
     pub(crate) input_ids: Vec<i64>,
     pub(crate) attention_mask: Vec<i64>,
     pub(crate) max_label_len: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlinerBiInputSpan {
+    pub start: usize,
+    pub end: usize,
 }
 
 impl GlinerBiLabelSet {
@@ -117,6 +128,7 @@ pub struct GlinerBiModel {
     label_cache: Mutex<GlinerBiLabelCache>,
     span_cache: Mutex<GlinerBiSpanCache>,
     label_inputs: GlinerBiLabelInputs,
+    output_mode: GlinerBiOutputMode,
     metadata: GlinerBiModelMetadata,
 }
 
@@ -139,6 +151,21 @@ struct GlinerBiSpanCache {
 enum GlinerBiLabelInputs {
     Tokenized,
     Embeddings(Arc<GlinerBiLabelEmbeddingStore>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GlinerBiOutputMode {
+    Span,
+    Token,
+}
+
+impl GlinerBiOutputMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Span => "span",
+            Self::Token => "token",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +215,14 @@ struct GlinerRootConfig {
     #[serde(default)]
     max_width: Option<usize>,
     #[serde(default)]
+    bos_token_id: Option<i64>,
+    #[serde(default)]
+    eos_token_id: Option<i64>,
+    #[serde(default)]
+    cls_token_id: Option<i64>,
+    #[serde(default)]
+    sep_token_id: Option<i64>,
+    #[serde(default)]
     encoder_config: Option<GlinerEncoderConfig>,
     #[serde(default)]
     labels_encoder_config: Option<GlinerLabelsEncoderConfig>,
@@ -198,14 +233,15 @@ impl GlinerBiModel {
         let model_path = find_model_asset(model_dir)?;
         let text_tokenizer_path =
             find_existing_path(model_dir, &["tokenizer.json", "onnx/tokenizer.json"])?;
-        let labels_tokenizer_path = find_existing_path(
+        let labels_tokenizer_path = find_existing_path_optional(
             model_dir,
             &[
                 "labels_tokenizer/tokenizer.json",
                 "labels_tokenizer.json",
                 "onnx/labels_tokenizer.json",
             ],
-        )?;
+        )
+        .unwrap_or_else(|| text_tokenizer_path.clone());
 
         let text_tokenizer = Tokenizer::from_file(&text_tokenizer_path)
             .map_err(|error| GlinerBiError::ModelLoad(format!("text tokenizer: {error}")))?;
@@ -219,37 +255,46 @@ impl GlinerBiModel {
             .or_else(|| load_json::<GlinerRootConfig>(&model_dir.join("config.json")))
             .unwrap_or_default();
         let max_width = root_config.max_width.unwrap_or(12);
+        let root_cls_id = root_config.cls_token_id.or(root_config.bos_token_id);
+        let root_sep_id = root_config.sep_token_id.or(root_config.eos_token_id);
         let text_cls_id = root_config
             .encoder_config
             .as_ref()
             .and_then(|config| config.cls_token_id.or(config.bos_token_id))
+            .or(root_cls_id)
             .unwrap_or(50281);
         let text_sep_id = root_config
             .encoder_config
             .as_ref()
             .and_then(|config| config.sep_token_id.or(config.eos_token_id))
+            .or(root_sep_id)
             .unwrap_or(50282);
         let labels_cls_id = root_config
             .labels_encoder_config
             .as_ref()
             .and_then(|config| config.cls_token_id.or(config.bos_token_id))
+            .or(root_cls_id)
             .unwrap_or(101);
         let labels_sep_id = root_config
             .labels_encoder_config
             .as_ref()
             .and_then(|config| config.sep_token_id.or(config.eos_token_id))
+            .or(root_sep_id)
             .unwrap_or(102);
 
+        let input_names = session
+            .inputs
+            .iter()
+            .map(|input| input.name.clone())
+            .collect::<Vec<_>>();
+        let output_mode = detect_output_mode(&input_names);
         let metadata = GlinerBiModelMetadata {
             max_width,
+            model_mode: output_mode.as_str().to_owned(),
             model_path: model_path.display().to_string(),
             text_tokenizer_path: text_tokenizer_path.display().to_string(),
             labels_tokenizer_path: labels_tokenizer_path.display().to_string(),
-            input_names: session
-                .inputs
-                .iter()
-                .map(|input| input.name.clone())
-                .collect(),
+            input_names,
             output_names: session
                 .outputs
                 .iter()
@@ -269,6 +314,7 @@ impl GlinerBiModel {
             label_cache: Mutex::default(),
             span_cache: Mutex::default(),
             label_inputs,
+            output_mode,
             metadata,
         })
     }
@@ -339,11 +385,112 @@ impl GlinerBiModel {
         else {
             return Ok(Vec::new());
         };
+        match self.output_mode {
+            GlinerBiOutputMode::Span => {
+                let num_words = text_tensors.word_count();
+                let span_tensors = self.cached_span_tensors(num_words)?;
+                let num_spans = num_words * self.max_width;
+                self.predict_with_span_tensors(
+                    text,
+                    label_set,
+                    options,
+                    text_tensors,
+                    span_tensors.span_idx.as_ref().clone(),
+                    span_tensors.span_mask.as_ref().clone(),
+                    num_spans,
+                    None,
+                )
+            }
+            GlinerBiOutputMode::Token => {
+                self.predict_with_token_tensors(text, label_set, options, text_tensors, None)
+            }
+        }
+    }
+
+    pub fn predict_constrained(
+        &self,
+        text: &str,
+        labels: &[String],
+        spans: &[GlinerBiInputSpan],
+        options: &GlinerBiPredictOptions,
+    ) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+        if text.trim().is_empty() || labels.is_empty() || spans.is_empty() {
+            return Ok(Vec::new());
+        }
+        let label_set = self.cached_label_set(labels)?;
+        self.predict_constrained_with_label_set(text, label_set.as_ref(), spans, options)
+    }
+
+    pub fn predict_constrained_with_label_set(
+        &self,
+        text: &str,
+        label_set: &GlinerBiLabelSet,
+        spans: &[GlinerBiInputSpan],
+        options: &GlinerBiPredictOptions,
+    ) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+        if text.trim().is_empty() || label_set.label_count() == 0 || spans.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(text_tensors) = build_text_tensors(
+            text,
+            &self.text_tokenizer,
+            self.text_cls_id,
+            self.text_sep_id,
+        )?
+        else {
+            return Ok(Vec::new());
+        };
+        match self.output_mode {
+            GlinerBiOutputMode::Span => {
+                let (span_idx, span_mask, word_ranges) =
+                    build_constrained_span_tensors(&text_tensors.words, spans, self.max_width);
+                if word_ranges.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let num_spans = span_mask.len();
+                self.predict_with_span_tensors(
+                    text,
+                    label_set,
+                    options,
+                    text_tensors,
+                    span_idx,
+                    span_mask,
+                    num_spans,
+                    Some(&word_ranges),
+                )
+            }
+            GlinerBiOutputMode::Token => {
+                let word_ranges = word_ranges_for_input_spans(&text_tensors.words, spans);
+                if word_ranges.is_empty() {
+                    return Ok(Vec::new());
+                }
+                self.predict_with_token_tensors(
+                    text,
+                    label_set,
+                    options,
+                    text_tensors,
+                    Some(&word_ranges),
+                )
+            }
+        }
+    }
+
+    fn predict_with_span_tensors(
+        &self,
+        text: &str,
+        label_set: &GlinerBiLabelSet,
+        options: &GlinerBiPredictOptions,
+        text_tensors: GlinerBiTextTensors,
+        span_idx: Vec<i64>,
+        span_mask: Vec<bool>,
+        num_spans: usize,
+        constrained_ranges: Option<&[(usize, usize)]>,
+    ) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
         let text_seq_len = text_tensors.seq_len();
         let num_words = text_tensors.word_count();
-        let span_tensors = self.cached_span_tensors(num_words)?;
-        let num_spans = num_words * self.max_width;
-
+        if num_spans == 0 {
+            return Ok(Vec::new());
+        }
         let input_ids_tensor = Tensor::from_array(([1, text_seq_len], text_tensors.input_ids))
             .map_err(|error| GlinerBiError::Inference(format!("input_ids: {error}")))?;
         let attention_mask_tensor =
@@ -353,12 +500,10 @@ impl GlinerBiModel {
             .map_err(|error| GlinerBiError::Inference(format!("words_mask: {error}")))?;
         let text_lengths_tensor = Tensor::from_array(([1, 1], vec![num_words as i64]))
             .map_err(|error| GlinerBiError::Inference(format!("text_lengths: {error}")))?;
-        let span_idx_tensor =
-            Tensor::from_array(([1, num_spans, 2], span_tensors.span_idx.as_ref().clone()))
-                .map_err(|error| GlinerBiError::Inference(format!("span_idx: {error}")))?;
-        let span_mask_tensor =
-            Tensor::from_array(([1, num_spans], span_tensors.span_mask.as_ref().clone()))
-                .map_err(|error| GlinerBiError::Inference(format!("span_mask: {error}")))?;
+        let span_idx_tensor = Tensor::from_array(([1, num_spans, 2], span_idx))
+            .map_err(|error| GlinerBiError::Inference(format!("span_idx: {error}")))?;
+        let span_mask_tensor = Tensor::from_array(([1, num_spans], span_mask))
+            .map_err(|error| GlinerBiError::Inference(format!("span_mask: {error}")))?;
         let outputs = match &self.label_inputs {
             GlinerBiLabelInputs::Tokenized => {
                 let labels_input_ids_tensor = Tensor::from_array((
@@ -419,15 +564,126 @@ impl GlinerBiModel {
                 .get("logits")
                 .ok_or_else(|| GlinerBiError::Inference("missing logits output".to_owned()))?,
         )?;
-        decode_predictions(
-            text,
-            &text_tensors.words,
-            label_set,
-            self.max_width,
-            options.threshold,
-            options.overlap_policy,
-            &logits,
-        )
+        if let Some(word_ranges) = constrained_ranges {
+            decode_predictions_for_word_ranges(
+                text,
+                &text_tensors.words,
+                label_set,
+                self.max_width,
+                word_ranges,
+                options.threshold,
+                options.overlap_policy,
+                &logits,
+            )
+        } else {
+            decode_predictions(
+                text,
+                &text_tensors.words,
+                label_set,
+                self.max_width,
+                options.threshold,
+                options.overlap_policy,
+                &logits,
+            )
+        }
+    }
+
+    fn predict_with_token_tensors(
+        &self,
+        text: &str,
+        label_set: &GlinerBiLabelSet,
+        options: &GlinerBiPredictOptions,
+        text_tensors: GlinerBiTextTensors,
+        constrained_ranges: Option<&[(usize, usize)]>,
+    ) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+        let text_seq_len = text_tensors.seq_len();
+        let num_words = text_tensors.word_count();
+        let input_ids_tensor = Tensor::from_array(([1, text_seq_len], text_tensors.input_ids))
+            .map_err(|error| GlinerBiError::Inference(format!("input_ids: {error}")))?;
+        let attention_mask_tensor =
+            Tensor::from_array(([1, text_seq_len], text_tensors.attention_mask))
+                .map_err(|error| GlinerBiError::Inference(format!("attention_mask: {error}")))?;
+        let words_mask_tensor = Tensor::from_array(([1, text_seq_len], text_tensors.words_mask))
+            .map_err(|error| GlinerBiError::Inference(format!("words_mask: {error}")))?;
+        let text_lengths_tensor = Tensor::from_array(([1, 1], vec![num_words as i64]))
+            .map_err(|error| GlinerBiError::Inference(format!("text_lengths: {error}")))?;
+
+        let outputs = match &self.label_inputs {
+            GlinerBiLabelInputs::Tokenized => {
+                let labels_input_ids_tensor = Tensor::from_array((
+                    [label_set.label_count(), label_set.max_label_len],
+                    label_set.input_ids.clone(),
+                ))
+                .map_err(|error| GlinerBiError::Inference(format!("labels_input_ids: {error}")))?;
+                let labels_attention_mask_tensor = Tensor::from_array((
+                    [label_set.label_count(), label_set.max_label_len],
+                    label_set.attention_mask.clone(),
+                ))
+                .map_err(|error| {
+                    GlinerBiError::Inference(format!("labels_attention_mask: {error}"))
+                })?;
+
+                let inputs = ort::inputs! {
+                    "input_ids" => input_ids_tensor,
+                    "attention_mask" => attention_mask_tensor,
+                    "words_mask" => words_mask_tensor,
+                    "text_lengths" => text_lengths_tensor,
+                    "labels_input_ids" => labels_input_ids_tensor,
+                    "labels_attention_mask" => labels_attention_mask_tensor,
+                }
+                .map_err(|error| GlinerBiError::Inference(format!("build inputs: {error}")))?;
+
+                self.session
+                    .run(inputs)
+                    .map_err(|error| GlinerBiError::Inference(format!("session run: {error}")))?
+            }
+            GlinerBiLabelInputs::Embeddings(store) => {
+                let labels_embeds = store.embeddings_for(&label_set.labels)?;
+                let labels_embeds_tensor = Tensor::from_array((
+                    [label_set.label_count(), store.hidden_size],
+                    labels_embeds,
+                ))
+                .map_err(|error| GlinerBiError::Inference(format!("labels_embeds: {error}")))?;
+
+                let inputs = ort::inputs! {
+                    "input_ids" => input_ids_tensor,
+                    "attention_mask" => attention_mask_tensor,
+                    "words_mask" => words_mask_tensor,
+                    "text_lengths" => text_lengths_tensor,
+                    "labels_embeds" => labels_embeds_tensor,
+                }
+                .map_err(|error| GlinerBiError::Inference(format!("build inputs: {error}")))?;
+
+                self.session
+                    .run(inputs)
+                    .map_err(|error| GlinerBiError::Inference(format!("session run: {error}")))?
+            }
+        };
+        let logits = extract_logits(
+            outputs
+                .get("logits")
+                .ok_or_else(|| GlinerBiError::Inference("missing logits output".to_owned()))?,
+        )?;
+        if let Some(word_ranges) = constrained_ranges {
+            decode_token_predictions_for_word_ranges(
+                text,
+                &text_tensors.words,
+                label_set,
+                word_ranges,
+                options.threshold,
+                options.overlap_policy,
+                &logits,
+            )
+        } else {
+            decode_token_predictions(
+                text,
+                &text_tensors.words,
+                label_set,
+                options.threshold,
+                options.overlap_policy,
+                &logits,
+            )
+        }
     }
 
     fn cached_label_set(&self, labels: &[String]) -> Result<Arc<GlinerBiLabelSet>, GlinerBiError> {
@@ -593,6 +849,16 @@ fn detect_label_input_mode(
     Ok(GlinerBiLabelInputs::Tokenized)
 }
 
+fn detect_output_mode(input_names: &[String]) -> GlinerBiOutputMode {
+    let has_span_idx = input_names.iter().any(|name| name == "span_idx");
+    let has_span_mask = input_names.iter().any(|name| name == "span_mask");
+    if has_span_idx && has_span_mask {
+        GlinerBiOutputMode::Span
+    } else {
+        GlinerBiOutputMode::Token
+    }
+}
+
 fn gliner_bi_thread_count() -> usize {
     env::var("PHOENIX_GLINER_BI_THREADS")
         .ok()
@@ -618,6 +884,13 @@ fn find_existing_path(dir: &Path, candidates: &[&str]) -> Result<PathBuf, Gliner
         candidates,
         dir.display()
     )))
+}
+
+fn find_existing_path_optional(dir: &Path, candidates: &[&str]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .map(|candidate| dir.join(candidate))
+        .find(|path| path.exists())
 }
 
 #[cfg(test)]

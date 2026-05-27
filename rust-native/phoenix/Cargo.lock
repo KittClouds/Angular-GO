@@ -2895,6 +2895,8 @@ version = "0.1.0"
 dependencies = [
  "gline-rs",
  "half",
+ "hashbrown 0.15.5",
+ "memmap2",
  "openrouter-rs",
  "orp",
  "ort",

@@ -13,6 +13,8 @@ import type {
 } from './graph-rebuild-snapshot';
 
 const MAX_ENTITY_LINK_SUGGESTIONS = 48;
+const MAX_LINKER_CANDIDATES_PER_MENTION = 4;
+const MIN_LINKER_CANDIDATE_SCORE = 0.42;
 
 interface EntityLinkIndex {
     nodesById: Map<string, GraphRebuildNode>;
@@ -35,6 +37,7 @@ export function buildGraphRebuildEntityLinkSuggestions(input: {
     const index = buildIndex(input);
     const suggestions = [
         ...unresolvedMentionSuggestions(input.mentions, index),
+        ...linkerCandidateSuggestions(input.mentions, index),
         ...aliasSuggestions(input.entityAnchors, index),
         ...duplicateEntitySuggestions(input.nodes, index),
     ];
@@ -91,6 +94,32 @@ function unresolvedMentionSuggestions(mentions: GraphRebuildMention[], index: En
         } else if (mention.status === 'dropped') {
             out.push(newEntitySuggestion(mention));
         }
+    }
+    return out;
+}
+
+function linkerCandidateSuggestions(mentions: GraphRebuildMention[], index: EntityLinkIndex): GraphRebuildEntityLinkSuggestion[] {
+    const out: GraphRebuildEntityLinkSuggestion[] = [];
+    for (const mention of mentions) {
+        if (!shouldProbeLinkerCandidates(mention)) continue;
+        const candidates = retrieveLinkerCandidates(mention, index).slice(0, MAX_LINKER_CANDIDATES_PER_MENTION);
+        if (!candidates.length) continue;
+        const best = candidates[0];
+        const decision: GraphRebuildEntityLinkDecision = best.score >= 0.72 ? 'same_entity' : 'ambiguous';
+        const suggestion = suggestionForMention(mention, best.node, decision, index, [
+            `linker: narrow candidate set ${candidates.length}`,
+            `linker: lexical prior ${Math.round(best.score * 100)}%`,
+        ]);
+        suggestion.id = `entity-link:linker:${mention.id}:${best.node.id}`;
+        suggestion.status = 'review';
+        suggestion.confidence = clamp(suggestion.confidence * 0.72 + best.score * 0.28, 0.2, 0.97);
+        suggestion.rerankScore = clamp(suggestion.rerankScore + best.score * 0.08, 0.2, 0.98);
+        suggestion.competingEntityIds = candidates.map((candidate) => candidate.node.id);
+        suggestion.linkerCandidateEntityIds = suggestion.competingEntityIds;
+        suggestion.linkerWindowId = linkerWindowId(mention);
+        suggestion.rerankSignals = unique([...suggestion.rerankSignals, `linker:candidate_set:${candidates.length}`, `linker:window:${suggestion.linkerWindowId}`]);
+        suggestion.rationale = unique([...suggestion.rationale, ...best.reasons.map((reason) => `linker: ${reason}`)]);
+        out.push(suggestion);
     }
     return out;
 }
@@ -229,6 +258,70 @@ function pairSuggestion(left: GraphRebuildNode, right: GraphRebuildNode, index: 
     };
 }
 
+function shouldProbeLinkerCandidates(mention: GraphRebuildMention): boolean {
+    if (mention.status === 'accepted') return false;
+    const normalized = normalize(mention.surface);
+    if (normalized.length < 3) return false;
+    const source = String(mention.source || '').toLowerCase();
+    return source.includes('machine') || source.includes('suggestion') || source.includes('ner') || source.includes('atlas');
+}
+
+function retrieveLinkerCandidates(mention: GraphRebuildMention, index: EntityLinkIndex): Array<{
+    node: GraphRebuildNode;
+    score: number;
+    reasons: string[];
+}> {
+    const surface = normalize(mention.surface);
+    if (!surface || index.nodeSurfaceClaims.has(surface)) return [];
+    const mentionTokens = normalizedTokens(surface);
+    const candidates: Array<{ node: GraphRebuildNode; score: number; reasons: string[] }> = [];
+    for (const node of index.nodesById.values()) {
+        const scored = scoreLinkerCandidate(mentionTokens, surface, node);
+        if (scored.score < MIN_LINKER_CANDIDATE_SCORE) continue;
+        candidates.push({ node, score: scored.score, reasons: scored.reasons });
+    }
+    return candidates.sort((left, right) =>
+        right.score - left.score ||
+        right.node.totalMentions - left.node.totalMentions ||
+        left.node.id.localeCompare(right.node.id));
+}
+
+function scoreLinkerCandidate(mentionTokens: string[], surface: string, node: GraphRebuildNode): { score: number; reasons: string[] } {
+    const reasons: string[] = [];
+    let score = 0;
+    const surfaces = unique([node.label, ...(node.aliases || [])]).map((value) => normalize(value)).filter(Boolean);
+    for (const candidate of surfaces) {
+        const candidateTokens = normalizedTokens(candidate);
+        const tokenOverlap = jaccard(mentionTokens, candidateTokens);
+        const contains = candidate.includes(surface) || surface.includes(candidate);
+        const prefix = candidateTokens.some((token) => mentionTokens.some((mentionToken) =>
+            token.startsWith(mentionToken) ||
+            mentionToken.startsWith(token) ||
+            (token.length > 3 && mentionToken.length > 3 && token.slice(0, 3) === mentionToken.slice(0, 3))));
+        let candidateScore = tokenOverlap;
+        if (contains) candidateScore = Math.max(candidateScore, 0.78);
+        if (prefix) candidateScore = Math.max(candidateScore, 0.48);
+        if (candidateScore > score) {
+            score = candidateScore;
+            reasons.length = 0;
+            if (tokenOverlap > 0) reasons.push(`token overlap ${Math.round(tokenOverlap * 100)}%`);
+            if (contains) reasons.push('surface containment');
+            if (prefix) reasons.push('token prefix');
+        }
+    }
+    if (score > 0 && node.totalMentions > 1) {
+        score += Math.min(0.08, Math.log2(node.totalMentions) * 0.012);
+        reasons.push(`anchor support ${node.totalMentions}`);
+    }
+    return { score: clamp(score, 0, 1), reasons };
+}
+
+function linkerWindowId(mention: GraphRebuildMention): string {
+    const note = mention.noteId || 'note';
+    const start = Math.max(0, Math.floor((mention.sourceStart || 0) / 900));
+    return `${note}:${start}`;
+}
+
 function scoreEntityLink(leftId: string, rightId: string | undefined, index: EntityLinkIndex, base: number): {
     score: number;
     structuralRole?: GraphRebuildEntityLinkSuggestion['structuralRole'];
@@ -284,6 +377,7 @@ function countersFor(suggestions: GraphRebuildEntityLinkSuggestion[], mentions: 
         newEntity: countDecision(suggestions, 'new_entity'),
         ambiguous: countDecision(suggestions, 'ambiguous'),
         rejected: countDecision(suggestions, 'reject'),
+        linkerCandidates: suggestions.filter((suggestion) => suggestion.linkerCandidateEntityIds?.length).length,
         autoConfirmable: suggestions.filter((suggestion) => suggestion.status === 'confirmed').length,
     };
 }

@@ -5,7 +5,7 @@ use ort::value::DynValue;
 use tokenizers::Tokenizer;
 
 use crate::gliner_bi::{
-    GlinerBiError, GlinerBiLabelSet, GlinerBiOverlapPolicy, GlinerBiPrediction,
+    GlinerBiError, GlinerBiInputSpan, GlinerBiLabelSet, GlinerBiOverlapPolicy, GlinerBiPrediction,
 };
 
 #[derive(Clone, Debug)]
@@ -205,6 +205,73 @@ pub(super) fn build_span_tensors(num_words: usize, max_width: usize) -> (Vec<i64
     (span_idx, span_mask)
 }
 
+pub(super) fn build_constrained_span_tensors(
+    words: &[WordSpan],
+    spans: &[GlinerBiInputSpan],
+    max_width: usize,
+) -> (Vec<i64>, Vec<bool>, Vec<(usize, usize)>) {
+    let mut ranges = word_ranges_for_input_spans(words, spans);
+    let (span_idx, mut span_mask) = build_span_tensors(words.len(), max_width);
+    span_mask.fill(false);
+    ranges.retain(|&(start_idx, end_idx)| {
+        let width = end_idx.saturating_sub(start_idx);
+        if width >= max_width {
+            return false;
+        }
+        let dim = start_idx * max_width + width;
+        if let Some(mask) = span_mask.get_mut(dim) {
+            *mask = true;
+            true
+        } else {
+            false
+        }
+    });
+    if ranges.is_empty() {
+        span_mask.fill(false);
+    }
+    (span_idx, span_mask, ranges)
+}
+
+pub(super) fn word_ranges_for_input_spans(
+    words: &[WordSpan],
+    spans: &[GlinerBiInputSpan],
+) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::<(usize, usize)>::with_capacity(spans.len());
+    for span in spans {
+        if span.end <= span.start {
+            continue;
+        }
+        let Some(range) = word_range_for_char_span(words, span.start, span.end) else {
+            continue;
+        };
+        if ranges.last().copied() != Some(range) && !ranges.contains(&range) {
+            ranges.push(range);
+        }
+    }
+    ranges.sort_unstable();
+    ranges
+}
+
+fn word_range_for_char_span(
+    words: &[WordSpan],
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize)> {
+    let mut first = None;
+    let mut last = None;
+    for (idx, word) in words.iter().enumerate() {
+        if word.end <= start {
+            continue;
+        }
+        if word.start >= end {
+            break;
+        }
+        first.get_or_insert(idx);
+        last = Some(idx);
+    }
+    first.zip(last)
+}
+
 pub(super) fn extract_logits(value: &DynValue) -> Result<Vec<f32>, GlinerBiError> {
     if let Ok(view) = value.try_extract_tensor::<f32>() {
         return view
@@ -269,6 +336,195 @@ pub(super) fn decode_predictions(
         }
     }
     Ok(apply_overlap_policy(predictions, overlap_policy))
+}
+
+pub(super) fn decode_predictions_for_word_ranges(
+    text: &str,
+    words: &[WordSpan],
+    label_set: &GlinerBiLabelSet,
+    max_width: usize,
+    word_ranges: &[(usize, usize)],
+    threshold: f32,
+    overlap_policy: GlinerBiOverlapPolicy,
+    logits: &[f32],
+) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+    let num_labels = label_set.labels.len();
+    let expected_len = words.len() * max_width * num_labels;
+    if logits.len() < expected_len {
+        return Err(GlinerBiError::Inference(format!(
+            "logits too short: expected {expected_len}, got {}",
+            logits.len()
+        )));
+    }
+
+    let mut predictions = Vec::new();
+    let threshold_logit = logit_threshold(threshold);
+    for &(start_idx, end_idx) in word_ranges {
+        let width = end_idx.saturating_sub(start_idx);
+        if width >= max_width {
+            continue;
+        }
+        for label_idx in 0..num_labels {
+            let offset = (start_idx * max_width + width) * num_labels + label_idx;
+            let logit = logits[offset];
+            if logit < threshold_logit {
+                continue;
+            }
+            let score = sigmoid(logit);
+            if score < threshold {
+                continue;
+            }
+            let start_char = words[start_idx].start;
+            let end_char = words[end_idx].end;
+            predictions.push(GlinerBiPrediction {
+                text: text[start_char..end_char].to_owned(),
+                label: label_set.labels[label_idx].clone(),
+                span_start: start_char,
+                span_end: end_char,
+                score,
+            });
+        }
+    }
+    Ok(apply_overlap_policy(predictions, overlap_policy))
+}
+
+pub(super) fn decode_token_predictions(
+    text: &str,
+    words: &[WordSpan],
+    label_set: &GlinerBiLabelSet,
+    threshold: f32,
+    overlap_policy: GlinerBiOverlapPolicy,
+    logits: &[f32],
+) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+    let num_labels = label_set.labels.len();
+    let expected_len = words.len() * num_labels * 3;
+    if logits.len() < expected_len {
+        return Err(GlinerBiError::Inference(format!(
+            "token logits too short: expected {expected_len}, got {}",
+            logits.len()
+        )));
+    }
+
+    let mut predictions = Vec::new();
+    let threshold_logit = logit_threshold(threshold);
+    for label_idx in 0..num_labels {
+        for start_idx in 0..words.len() {
+            let start_logit = token_logit(logits, num_labels, start_idx, label_idx, 0);
+            if start_logit < threshold_logit {
+                continue;
+            }
+            for end_idx in start_idx..words.len() {
+                let end_logit = token_logit(logits, num_labels, end_idx, label_idx, 1);
+                if end_logit < threshold_logit {
+                    continue;
+                }
+                let Some(score) = token_span_score(
+                    logits,
+                    num_labels,
+                    start_idx,
+                    end_idx,
+                    label_idx,
+                    threshold_logit,
+                ) else {
+                    continue;
+                };
+                let start_char = words[start_idx].start;
+                let end_char = words[end_idx].end;
+                predictions.push(GlinerBiPrediction {
+                    text: text[start_char..end_char].to_owned(),
+                    label: label_set.labels[label_idx].clone(),
+                    span_start: start_char,
+                    span_end: end_char,
+                    score,
+                });
+            }
+        }
+    }
+    Ok(apply_overlap_policy(predictions, overlap_policy))
+}
+
+pub(super) fn decode_token_predictions_for_word_ranges(
+    text: &str,
+    words: &[WordSpan],
+    label_set: &GlinerBiLabelSet,
+    word_ranges: &[(usize, usize)],
+    threshold: f32,
+    overlap_policy: GlinerBiOverlapPolicy,
+    logits: &[f32],
+) -> Result<Vec<GlinerBiPrediction>, GlinerBiError> {
+    let num_labels = label_set.labels.len();
+    let expected_len = words.len() * num_labels * 3;
+    if logits.len() < expected_len {
+        return Err(GlinerBiError::Inference(format!(
+            "token logits too short: expected {expected_len}, got {}",
+            logits.len()
+        )));
+    }
+
+    let mut predictions = Vec::new();
+    let threshold_logit = logit_threshold(threshold);
+    for &(start_idx, end_idx) in word_ranges {
+        if start_idx >= words.len() || end_idx >= words.len() || end_idx < start_idx {
+            continue;
+        }
+        for label_idx in 0..num_labels {
+            let start_logit = token_logit(logits, num_labels, start_idx, label_idx, 0);
+            let end_logit = token_logit(logits, num_labels, end_idx, label_idx, 1);
+            if start_logit < threshold_logit || end_logit < threshold_logit {
+                continue;
+            }
+            let Some(score) = token_span_score(
+                logits,
+                num_labels,
+                start_idx,
+                end_idx,
+                label_idx,
+                threshold_logit,
+            ) else {
+                continue;
+            };
+            let start_char = words[start_idx].start;
+            let end_char = words[end_idx].end;
+            predictions.push(GlinerBiPrediction {
+                text: text[start_char..end_char].to_owned(),
+                label: label_set.labels[label_idx].clone(),
+                span_start: start_char,
+                span_end: end_char,
+                score,
+            });
+        }
+    }
+    Ok(apply_overlap_policy(predictions, overlap_policy))
+}
+
+fn token_span_score(
+    logits: &[f32],
+    num_labels: usize,
+    start_idx: usize,
+    end_idx: usize,
+    label_idx: usize,
+    threshold_logit: f32,
+) -> Option<f32> {
+    let mut min_logit = token_logit(logits, num_labels, start_idx, label_idx, 0)
+        .min(token_logit(logits, num_labels, end_idx, label_idx, 1));
+    for word_idx in start_idx..=end_idx {
+        let inside = token_logit(logits, num_labels, word_idx, label_idx, 2);
+        if inside < threshold_logit {
+            return None;
+        }
+        min_logit = min_logit.min(inside);
+    }
+    Some(sigmoid(min_logit))
+}
+
+fn token_logit(
+    logits: &[f32],
+    num_labels: usize,
+    word_idx: usize,
+    label_idx: usize,
+    component: usize,
+) -> f32 {
+    logits[((word_idx * num_labels + label_idx) * 3) + component]
 }
 
 fn apply_overlap_policy(
@@ -358,6 +614,61 @@ mod tests {
     }
 
     #[test]
+    fn constrained_spans_map_char_offsets_to_word_ranges() {
+        let text = "Ryan met New Rome at dawn.";
+        let words = words_splitter(text);
+        let new_rome = text.find("New Rome").unwrap();
+        let spans = [
+            GlinerBiInputSpan { start: 0, end: 5 },
+            GlinerBiInputSpan {
+                start: new_rome,
+                end: new_rome + "New Rome".len(),
+            },
+        ];
+
+        let (span_idx, span_mask, ranges) = build_constrained_span_tensors(&words, &spans, 4);
+
+        assert_eq!(span_idx.len(), words.len() * 4 * 2);
+        assert_eq!(span_mask.iter().filter(|&&value| value).count(), 2);
+        assert!(span_mask[0]);
+        assert!(span_mask[9]);
+        assert_eq!(ranges, vec![(0, 0), (2, 3)]);
+    }
+
+    #[test]
+    fn token_decoder_scores_only_requested_ranges() {
+        let text = "Ryan met New Rome.";
+        let words = words_splitter(text);
+        let label_set = GlinerBiLabelSet {
+            labels: vec!["Ryan".to_owned(), "New Rome".to_owned()],
+            input_ids: Vec::new(),
+            attention_mask: Vec::new(),
+            max_label_len: 0,
+        };
+        let mut logits = vec![-10.0; words.len() * label_set.labels.len() * 3];
+        set_token(&mut logits, label_set.labels.len(), 0, 0, [4.0, 4.0, 4.0]);
+        set_token(&mut logits, label_set.labels.len(), 2, 1, [4.0, -10.0, 4.0]);
+        set_token(&mut logits, label_set.labels.len(), 3, 1, [-10.0, 4.0, 4.0]);
+
+        let predictions = decode_token_predictions_for_word_ranges(
+            text,
+            &words,
+            &label_set,
+            &[(0, 0), (2, 3)],
+            0.5,
+            GlinerBiOverlapPolicy::KeepAll,
+            &logits,
+        )
+        .unwrap();
+
+        let pieces = predictions
+            .iter()
+            .map(|row| (row.text.as_str(), row.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(pieces, vec![("Ryan", "Ryan"), ("New Rome", "New Rome")]);
+    }
+
+    #[test]
     fn overlap_policy_highest_score_keeps_stronger_span() {
         let predictions = vec![pred("full name", 0, 9, 0.71), pred("name", 5, 9, 0.93)];
         let filtered = apply_overlap_policy(predictions, GlinerBiOverlapPolicy::HighestScore);
@@ -387,5 +698,16 @@ mod tests {
             span_end,
             score,
         }
+    }
+
+    fn set_token(
+        logits: &mut [f32],
+        num_labels: usize,
+        word_idx: usize,
+        label_idx: usize,
+        values: [f32; 3],
+    ) {
+        let offset = (word_idx * num_labels + label_idx) * 3;
+        logits[offset..offset + 3].copy_from_slice(&values);
     }
 }

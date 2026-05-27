@@ -473,6 +473,8 @@ export interface GraphRebuildEntityLinkSuggestion {
     embeddingRole?: GraphRebuildEmbeddingBackboneRole | 'same_cluster' | 'cross_cluster' | 'outlier';
     productRegionRole?: GraphRebuildProductTopologyRegionRole | 'cross_region';
     productLane?: GraphRebuildProductLaneKind | 'mixed';
+    linkerCandidateEntityIds?: string[];
+    linkerWindowId?: string;
     competingEntityIds: string[];
     evidenceIds: string[];
     rerankSignals: string[];
@@ -487,6 +489,7 @@ export interface GraphRebuildEntityLinkCounters {
     newEntity: number;
     ambiguous: number;
     rejected: number;
+    linkerCandidates?: number;
     autoConfirmable: number;
 }
 
@@ -534,6 +537,9 @@ export interface GraphRebuildCounters {
     mentions: number;
     acceptedAnchors: number;
     chunks: number;
+    anchorEvidence?: number;
+    relationSignals?: number;
+    promotedFacts?: number;
     relationshipCandidates: number;
     relationships: number;
     acceptedRelationships: number;
