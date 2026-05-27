@@ -646,36 +646,76 @@ export class AtlasCapabilityRuntimeService {
 
     private async runNliAdjudication(options: AtlasRunOptions): Promise<unknown> {
         const documentIds = Array.from(new Set((options.noteIds || noteIdsFromBuildScope(options.buildScope)).filter(Boolean)));
+        const planStarted = performance.now();
         const inputsPayload = await this.phoenix.storeCommand('semantic:listNliJudgmentInputs', {
             documentIds,
         });
+        const rawInputCount = Array.isArray(inputsPayload) ? inputsPayload.length : 0;
         const inputs = normalizeNliInputs(inputsPayload);
-        if (!inputs.length) {
+        const plannedInputs = uniqueNliInputs(inputs);
+        const stageSummaries = [nliStageSummary('candidatePlan', planStarted, {
+            rawInputs: rawInputCount,
+            validInputs: inputs.length,
+            plannedInputs: plannedInputs.length,
+            duplicateInputs: Math.max(0, inputs.length - plannedInputs.length),
+            uniquePairs: uniqueNliPairCount(plannedInputs),
+            documentIds: documentIds.length,
+        })];
+        if (!plannedInputs.length) {
             this.machine.setNotice('NLI adjudication queue is empty for the current scope. No graph data was mutated.');
-            return { inputCount: 0, applied: null };
+            return {
+                inputCount: inputs.length,
+                plannedInputCount: 0,
+                duplicateInputCount: Math.max(0, inputs.length - plannedInputs.length),
+                applied: null,
+                stageSummaries,
+            };
         }
 
+        const warmStarted = performance.now();
         await this.warmModel('nli', options);
+        stageSummaries.push(nliStageSummary('modelWarm', warmStarted, {
+            plannedInputs: plannedInputs.length,
+        }));
+
+        const classifyStarted = performance.now();
         const results: NliClassificationResult[] = [];
         await this.nli.classifyStream(
-            inputs,
+            plannedInputs,
             (batch) => results.push(...batch.results),
             NLI_BATCH_SIZE,
         );
+        const labelCounts = results.reduce((counts, result) => {
+            counts[result.predictedLabel] = (counts[result.predictedLabel] || 0) + 1;
+            return counts;
+        }, {} as Record<string, number>);
+        stageSummaries.push(nliStageSummary('classification', classifyStarted, {
+            plannedInputs: plannedInputs.length,
+            results: results.length,
+            batches: Math.ceil(plannedInputs.length / NLI_BATCH_SIZE),
+            entailment: labelCounts['entailment'] || 0,
+            neutral: labelCounts['neutral'] || 0,
+            contradiction: labelCounts['contradiction'] || 0,
+        }));
+
+        const applyStarted = performance.now();
         const applied = await this.phoenix.storeCommand('semantic:applyNliJudgments', {
             modelId: NLI_MODEL_ID,
             device: this.nli.device(),
             results,
         });
+        stageSummaries.push(nliStageSummary('apply', applyStarted, {
+            results: results.length,
+            appliedRows: appliedRowCount(applied),
+        }));
         this.machine.setNotice(`NLI adjudication classified ${results.length} pair${results.length === 1 ? '' : 's'} and applied native candidate-edge judgments.`);
-        const labelCounts = results.reduce((counts, result) => {
-            counts[result.predictedLabel] = (counts[result.predictedLabel] || 0) + 1;
-            return counts;
-        }, {} as Record<string, number>);
         return {
             inputCount: inputs.length,
+            plannedInputCount: plannedInputs.length,
+            duplicateInputCount: Math.max(0, inputs.length - plannedInputs.length),
             resultCount: results.length,
             labelCounts,
+            stageSummaries,
             judgments: results.map((result) => ({
                 judgmentId: result.judgmentId,
                 groupId: result.groupId,
@@ -1490,7 +1530,7 @@ function manifoldModeForCapability(id: AtlasCapabilityId | undefined): AtlasMani
 
 function manifoldModeLabel(mode: AtlasManifoldMode): string {
     if (mode === 'hopf') return 'Hopf';
-    if (mode === 'lorentz') return 'Lorentz';
+    if (mode === 'lorentz') return 'Caps';
     if (mode === 'product') return 'Product';
     return 'Hybrid';
 }
@@ -1646,6 +1686,49 @@ function normalizeNliInput(row: unknown): NliPairClassificationInput | null {
     return input.judgmentId && input.groupId && input.sourceId && input.targetId && input.edgeType && input.premise && input.hypothesis
         ? input
         : null;
+}
+
+function uniqueNliInputs(inputs: NliPairClassificationInput[]): NliPairClassificationInput[] {
+    const seen = new Set<string>();
+    const out: NliPairClassificationInput[] = [];
+    for (const input of inputs) {
+        const key = [
+            input.sourceId,
+            input.targetId,
+            input.edgeType,
+            input.direction,
+            input.premise,
+            input.hypothesis,
+        ].join('\u001f');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(input);
+    }
+    return out;
+}
+
+function uniqueNliPairCount(inputs: NliPairClassificationInput[]): number {
+    return new Set(inputs.map((input) => `${input.sourceId}\u001f${input.targetId}\u001f${input.edgeType}`)).size;
+}
+
+function nliStageSummary(stage: string, startedAt: number, counts: Record<string, number>) {
+    return {
+        stage,
+        status: 'completed',
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        counts,
+    };
+}
+
+function appliedRowCount(applied: unknown): number {
+    if (Array.isArray(applied)) return applied.length;
+    if (!isRecord(applied)) return 0;
+    const direct = applied['count'] ?? applied['applied'] ?? applied['appliedRows'] ?? applied['rows'];
+    if (typeof direct === 'number' && Number.isFinite(direct)) return direct;
+    for (const value of Object.values(applied)) {
+        if (Array.isArray(value)) return value.length;
+    }
+    return 0;
 }
 
 function stringField(record: Record<string, unknown>, primary: string, fallback?: string): string {

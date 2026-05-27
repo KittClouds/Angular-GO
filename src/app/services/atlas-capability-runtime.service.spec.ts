@@ -640,16 +640,38 @@ describe('AtlasCapabilityRuntimeService', () => {
         expect(state.runPolicy).toBe('native-only');
         expect(state.requiredModels.map((model) => model.id)).toEqual(['nli']);
 
-        await service.runCapability('nliAdjudication', { noteIds: ['note-1'] });
+        const result = await service.runCapability('nliAdjudication', { noteIds: ['note-1'] });
 
         expect(phoenix.storeCommand).toHaveBeenNthCalledWith(1, 'semantic:listNliJudgmentInputs', {
             documentIds: ['note-1'],
         });
         expect(nli.initialize).toHaveBeenCalledWith('onnx-community/ModernBERT-base-nli-ONNX');
-        expect(nli.classifyStream).toHaveBeenCalled();
+        expect(nli.classifyStream).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ judgmentId: 'judgment-1' })]),
+            expect.any(Function),
+            4,
+        );
+        expect(nli.classifyStream.mock.calls[0][0]).toHaveLength(1);
         expect(phoenix.storeCommand).toHaveBeenNthCalledWith(2, 'semantic:applyNliJudgments', expect.objectContaining({
             modelId: 'onnx-community/ModernBERT-base-nli-ONNX',
             results: expect.arrayContaining([expect.objectContaining({ predictedLabel: 'entailment' })]),
+        }));
+        expect(result.rawResult).toEqual(expect.objectContaining({
+            inputCount: 2,
+            plannedInputCount: 1,
+            duplicateInputCount: 1,
+            stageSummaries: expect.arrayContaining([
+                expect.objectContaining({
+                    stage: 'candidatePlan',
+                    counts: expect.objectContaining({
+                        rawInputs: 2,
+                        plannedInputs: 1,
+                        duplicateInputs: 1,
+                    }),
+                }),
+                expect.objectContaining({ stage: 'classification' }),
+                expect.objectContaining({ stage: 'apply' }),
+            ]),
         }));
     });
 });
@@ -812,6 +834,15 @@ function createPhoenixBackendMock() {
             if (command === 'semantic:listNliJudgmentInputs') {
                 return [{
                     judgmentId: 'judgment-1',
+                    groupId: 'group-1',
+                    sourceId: 'source-1',
+                    targetId: 'target-1',
+                    edgeType: 'supports',
+                    direction: 'forward',
+                    premise: 'Aella met Kai near the harbor.',
+                    hypothesis: 'Aella encountered Kai.',
+                }, {
+                    judgmentId: 'judgment-duplicate',
                     groupId: 'group-1',
                     sourceId: 'source-1',
                     targetId: 'target-1',

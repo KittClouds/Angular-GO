@@ -25,7 +25,17 @@ const LIMIT = 420;
 const STORY_TARGET_BUDGET = 120;
 const RELATION_TARGET_BUDGET = 96;
 const CO_OCCURRENCE_TARGET_BUDGET = 48;
+const HOPF_BASE_SPLIT_TARGET_LIMIT = 56;
+const HOPF_BASE_SPLIT_MEMBER_LIMIT = 96;
+const HOPF_SUBFIBER_TARGET_LIMIT = 28;
 const STORY_TARGET_KINDS = new Set(['causalFact', 'temporalFact', 'event', 'memoryState']);
+
+type HopfBaseAssignment = {
+    rootBaseId: string;
+    baseId: string;
+    anchorTargetId?: string;
+    splitKey?: string;
+};
 
 export function buildGraphRebuildEmbeddingAtlas(
     snapshot: GraphRebuildSnapshot,
@@ -36,15 +46,16 @@ export function buildGraphRebuildEmbeddingAtlas(
     const postByTarget = new Map((snapshot.embeddingGraphPostProcess?.targets || []).map((row) => [row.targetId, row]));
     const selected = selectEmbeddingTargets(snapshot)
         .map((target) => hydrateTargetEntityKind(target, entityKindById));
+    const hopfBasePlan = manifold === 'hopf' ? buildHopfBasePlan(selected, postByTarget) : undefined;
     const vectors = selected.map((target) => textVector(target, profile.selectedDimensions));
     const nodes = selected.map((target, index) =>
-        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id)),
+        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id), hopfBasePlan?.get(target.id)),
     );
     const nodeIds = new Set(nodes.map((node) => node.id));
     return {
         nodes,
         edges: buildTargetEdges(snapshot).filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId)),
-        sourceLabel: `graph rebuild snapshot -> ${manifold} projection`,
+        sourceLabel: `graph rebuild snapshot -> ${graphRebuildProjectionLabel(manifold)} projection`,
         searchIndex: nodes.map((node, index): EmbeddingAtlasSearchItem => ({
             nodeId: node.id,
             vector: vectors[index],
@@ -149,6 +160,7 @@ function targetNode(
     total: number,
     manifold: AtlasManifoldMode,
     post?: GraphRebuildEmbeddingTargetPostProcess,
+    hopfBase?: HopfBaseAssignment,
 ): GalaxyRenderableNode {
     const point = projectVector(vector, target.id, index, total, manifold);
     const relationFamily = displayKind(target.kind) === 'graph-fact'
@@ -169,6 +181,7 @@ function targetNode(
             entityKind: target.entityKind,
             graphColorKind: relationFamily || targetRenderKind(target),
             graphRelationFamily: relationFamily || undefined,
+            targetConfidence: targetConfidence(target),
             noteId: target.noteId,
             chunkId: target.chunkId,
             sourceEntityId: target.entityId,
@@ -191,18 +204,157 @@ function targetNode(
                 lanes: post.productLaneFeatures,
             } : undefined,
             lorentz: post ? productLorentzMetadata(target, point, post) : undefined,
-            hopf: post ? {
-                role: 'anchor',
-                baseId: target.id,
-                fiberKind: productFiberKind(post.clusterRole, post.productTopologyRegion.laneKind),
-                phase: post.productLaneFeatures.fiberPhase,
-            } : undefined,
+            hopf: post ? graphRebuildHopfMetadata(target, post, manifold, hopfBase) : undefined,
             graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
             manifold,
             preview: target.text || target.label,
         },
     };
+}
+
+function targetConfidence(target: GraphRebuildEmbeddingTarget): number {
+    const match = target.text.match(/\bconfidence:([0-9.]+)/i);
+    if (match) return clamp01(Number(match[1]));
+    if (target.kind === 'entity') {
+        const mentions = target.text.match(/\bmentions:(\d+)/i);
+        const mentionCount = mentions ? Number(mentions[1]) : target.evidenceIds.length;
+        return clamp01(0.68 + Math.min(0.24, Math.log1p(Math.max(0, mentionCount)) * 0.08));
+    }
+    if (target.kind === 'anchor') return 0.86;
+    if (target.kind === 'chunk') return 0.78;
+    return 0.62;
+}
+
+function graphRebuildHopfMetadata(
+    target: GraphRebuildEmbeddingTarget,
+    post: GraphRebuildEmbeddingTargetPostProcess,
+    manifold: AtlasManifoldMode,
+    assignment?: HopfBaseAssignment,
+): Record<string, unknown> {
+    const fiberKind = productFiberKind(post.clusterRole, post.productTopologyRegion.laneKind);
+    if (manifold !== 'hopf') {
+        return {
+            role: 'anchor',
+            baseId: target.id,
+            fiberKind,
+            phase: post.productLaneFeatures.fiberPhase,
+        };
+    }
+
+    const baseId = assignment?.baseId || hopfRootBaseId(target, post);
+    const role = target.id === (assignment?.anchorTargetId || baseId) ? 'anchor' : 'fiber';
+    return {
+        role,
+        baseId,
+        fiberKind,
+        phase: role === 'anchor' ? 0 : stableHopfFiberPhase(target, post, assignment?.splitKey),
+        clusterId: post.clusterId,
+        medoidTargetId: post.medoidTargetId,
+        regionId: post.productTopologyRegion.id,
+        laneKind: post.productTopologyRegion.laneKind,
+        rootBaseId: assignment?.rootBaseId,
+        splitKey: assignment?.splitKey,
+    };
+}
+
+function buildHopfBasePlan(
+    targets: GraphRebuildEmbeddingTarget[],
+    postByTarget: Map<string, GraphRebuildEmbeddingTargetPostProcess>,
+): Map<string, HopfBaseAssignment> {
+    const byRoot = new Map<string, Array<{ target: GraphRebuildEmbeddingTarget; post: GraphRebuildEmbeddingTargetPostProcess }>>();
+    for (const target of targets) {
+        const post = postByTarget.get(target.id);
+        if (!post) continue;
+        const root = hopfRootBaseId(target, post);
+        const bucket = byRoot.get(root) || [];
+        bucket.push({ target, post });
+        byRoot.set(root, bucket);
+    }
+
+    const plan = new Map<string, HopfBaseAssignment>();
+    for (const [rootBaseId, entries] of byRoot) {
+        const shouldSplit = entries.length > HOPF_BASE_SPLIT_TARGET_LIMIT
+            || entries.some(({ post }) => post.productTopologyRegion.memberCount > HOPF_BASE_SPLIT_MEMBER_LIMIT);
+        if (!shouldSplit) continue;
+
+        const bySplitKey = new Map<string, typeof entries>();
+        for (const entry of entries) {
+            const coarseKey = hopfSemanticSubfiberKey(entry.target, entry.post);
+            const bucket = bySplitKey.get(coarseKey) || [];
+            bucket.push(entry);
+            bySplitKey.set(coarseKey, bucket);
+        }
+
+        for (const [coarseKey, coarseEntries] of bySplitKey) {
+            const shardCount = Math.max(1, Math.ceil(coarseEntries.length / HOPF_SUBFIBER_TARGET_LIMIT));
+            const byShard = new Map<string, typeof entries>();
+            for (const entry of coarseEntries) {
+                const shard = shardCount > 1
+                    ? Math.min(shardCount - 1, Math.floor(unitHash(`${coarseKey}:${entry.target.entityId || entry.target.noteId || entry.target.sourceId || entry.target.id}`) * shardCount))
+                    : 0;
+                const splitKey = shardCount > 1 ? `${coarseKey}:shard-${shard}` : coarseKey;
+                const bucket = byShard.get(splitKey) || [];
+                bucket.push(entry);
+                byShard.set(splitKey, bucket);
+            }
+
+            for (const [splitKey, splitEntries] of byShard) {
+                const anchorTargetId = hopfSubfiberAnchor(rootBaseId, splitEntries);
+                const baseId = anchorTargetId === rootBaseId ? rootBaseId : `${rootBaseId}:hopf:${splitKey}`;
+                for (const { target } of splitEntries) {
+                    plan.set(target.id, { rootBaseId, baseId, anchorTargetId, splitKey });
+                }
+            }
+        }
+    }
+    return plan;
+}
+
+function hopfRootBaseId(
+    target: GraphRebuildEmbeddingTarget,
+    post: GraphRebuildEmbeddingTargetPostProcess,
+): string {
+    return post.medoidTargetId || post.productTopologyRegion.medoidTargetId || post.clusterId || post.productTopologyRegion.id || target.id;
+}
+
+function hopfSubfiberAnchor(
+    rootBaseId: string,
+    entries: Array<{ target: GraphRebuildEmbeddingTarget; post: GraphRebuildEmbeddingTargetPostProcess }>,
+): string {
+    const root = entries.find(({ target }) => target.id === rootBaseId);
+    if (root) return root.target.id;
+    return [...entries]
+        .sort((left, right) => right.post.hubScore - left.post.hubScore
+            || right.post.neighborCount - left.post.neighborCount
+            || left.target.id.localeCompare(right.target.id))[0]?.target.id || rootBaseId;
+}
+
+function hopfSemanticSubfiberKey(
+    target: GraphRebuildEmbeddingTarget,
+    post: GraphRebuildEmbeddingTargetPostProcess,
+): string {
+    const lane = post.productTopologyRegion.laneKind || post.productLaneFeatures.dominantLane;
+    const kind = targetRenderKind(target);
+    if (kind === 'graph-fact') return `relation:${relationFamilyFromText(target.label, target.text, target.sourceId)}`;
+    if (target.kind === 'chunk') return `document:${target.noteId || target.chunkId || 'unknown'}`;
+    if (target.kind === 'entity') return `entity:${normalizeHopfToken(target.entityKind || target.kind || 'entity')}`;
+    if (target.entityId) return `${lane}:${kind}:entity-${normalizeHopfToken(target.entityId)}`;
+    return `${lane}:${kind}`;
+}
+
+function stableHopfFiberPhase(
+    target: GraphRebuildEmbeddingTarget,
+    post: GraphRebuildEmbeddingTargetPostProcess,
+    splitKey?: string,
+): number {
+    const raw = unitPhase(post.productLaneFeatures.fiberPhase);
+    const lane = unitHash(`${post.clusterId}:${post.productTopologyRegion.laneKind}:hopf-lane`);
+    const split = splitKey ? unitHash(`${post.clusterId}:${splitKey}:hopf-subfiber`) : 0;
+    const order = unitHash(`${post.clusterId}:${post.productTopologyRegion.laneKind}:${target.id}:hopf-order`);
+    return splitKey
+        ? unitPhase(raw * 0.46 + lane * 0.14 + split * 0.16 + order * 0.24)
+        : unitPhase(raw * 0.74 + lane * 0.18 + order * 0.08);
 }
 
 function productLorentzMetadata(
@@ -218,13 +370,21 @@ function productLorentzMetadata(
     const treeKind = productFiberKind(post.clusterRole, region.laneKind);
     const parentNodeId = post.medoidTargetId && post.medoidTargetId !== target.id ? post.medoidTargetId : null;
     const level = productRegionLevel(post);
+    const specificity = productHierarchySpecificity(target, post);
+    const ambiguity = productHierarchyAmbiguity(post);
     return {
+        geometry: 'hierarchy_caps_v1',
         klein: [
             (point.x / radius) * scale,
             (point.y / radius) * scale,
             (point.z / radius) * scale,
             lane.fiberPhase,
         ],
+        capId: region.id,
+        capDirection: [point.x / radius, point.y / radius, point.z / radius],
+        capPhase: lane.fiberPhase,
+        specificity,
+        ambiguity,
         level,
         primaryTreeKind: treeKind,
         w: lane.clusterRadius,
@@ -245,6 +405,28 @@ function productLorentzMetadata(
             pathKey: `product-lane:${region.laneKind}/${post.clusterId}/${target.id}`,
         }],
     };
+}
+
+function productHierarchySpecificity(
+    target: GraphRebuildEmbeddingTarget,
+    post: GraphRebuildEmbeddingTargetPostProcess,
+): number {
+    const kind = displayKind(target.kind);
+    let base = 0.58;
+    if (kind === 'note') base = 0.22;
+    else if (kind === 'chunk' || kind === 'anchor') base = 0.9;
+    else if (kind === 'entity') base = 0.82;
+    else if (kind === 'event' || kind === 'temporal-fact' || kind === 'causal-fact') base = 0.74;
+    else if (kind === 'graph-fact' || kind === 'memory-state') base = 0.64;
+    const role = post.productTopologyRegion.role;
+    const roleBoost = role === 'outlier' ? 0.14 : role === 'boundary' ? 0.08 : role === 'bridge' ? 0.05 : role === 'core' ? -0.04 : 0;
+    return clamp01(base + roleBoost + post.productLaneFeatures.semanticDepth * 0.08);
+}
+
+function productHierarchyAmbiguity(post: GraphRebuildEmbeddingTargetPostProcess): number {
+    const role = post.productTopologyRegion.role;
+    const roleBoost = role === 'outlier' ? 0.22 : role === 'bridge' ? 0.12 : role === 'boundary' ? 0.08 : 0;
+    return clamp01(post.productLaneFeatures.clusterRadius * 0.52 + post.outlierScore * 0.28 + roleBoost);
 }
 
 function productRegionLevel(post: GraphRebuildEmbeddingTargetPostProcess): number {
@@ -355,6 +537,10 @@ function displayKind(kind: string): string {
     return String(kind || 'target').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
+function normalizeHopfToken(value: string): string {
+    return String(value || 'unknown').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
 function targetRenderKind(target: GraphRebuildEmbeddingTarget): string {
     if (displayKind(target.kind) === 'entity' && target.entityKind) {
         return displayKind(target.entityKind);
@@ -390,9 +576,14 @@ function kindHsl(kind: string): string {
 
 function graphRebuildGeometryVersion(manifold: AtlasManifoldMode): string {
     if (manifold === 'hopf') return 'graph_rebuild_hopf_v1';
-    if (manifold === 'lorentz') return 'graph_rebuild_lorentz_v1';
+    if (manifold === 'lorentz') return 'graph_rebuild_hierarchy_caps_v1';
     if (manifold === 'product') return 'graph_rebuild_product_lorentz_hopf_v1';
     return 'graph_rebuild_hybrid_v1';
+}
+
+function graphRebuildProjectionLabel(manifold: AtlasManifoldMode): string {
+    if (manifold === 'lorentz') return 'hierarchy caps';
+    return manifold;
 }
 
 function graphRebuildCapabilities(manifold: AtlasManifoldMode): ManifoldCapabilities {
@@ -404,6 +595,15 @@ function graphRebuildCapabilities(manifold: AtlasManifoldMode): ManifoldCapabili
 
 function unitHash(value: string): number {
     return hash(value) / 4294967295;
+}
+
+function unitPhase(value: number): number {
+    const finite = Number.isFinite(value) ? value : 0;
+    return ((finite % 1) + 1) % 1;
+}
+
+function clamp01(value: number): number {
+    return Math.min(1, Math.max(0, value));
 }
 
 function hash(value: string): number {

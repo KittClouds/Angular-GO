@@ -7,6 +7,8 @@ import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
 const MAX_FLOW_PARTICLES = 1800;
 const EMPTY_VEC3 = new Float32Array(0);
 const EMPTY_SCALAR = new Float32Array(0);
+const CAPS_SURFACE_EDGE_MIN_RADIUS = 1.72;
+const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
 
 export class GraphGalaxyParticles {
     readonly points: THREE.Points;
@@ -115,7 +117,7 @@ export class GraphGalaxyParticles {
             const target = data.edgePairs[edge * 2 + 1];
             const t = (this.seeds[i] + time * 0.001 * this.speeds[i] * settings.particleSpeed) % 1;
             const lift = curved ? this.edgeLift(data, settings, edge, source, target) : 0;
-            positionAttr.setXYZ(i, this.edgeX(positions, source, target, t), this.edgeY(positions, source, target, lift, t), this.edgeZ(positions, source, target, t));
+            this.writeEdgePosition(positionAttr, i, data, positions, source, target, lift, t);
             this.writeTargetColor(colorAttr, data, edge, i);
             alphaAttr.setX(i, focus?.hasFocus && focus.edgeLevels[edge] === 0 ? 0 : baseAlpha);
             sizeAttr.setX(i, flowSize);
@@ -142,6 +144,70 @@ export class GraphGalaxyParticles {
         const interGalaxy = data.edgeKinds[edge] === 1;
         const curveScale = THREE.MathUtils.clamp(settings.edgeCurveStrength, 0.25, 1.2) * (interGalaxy ? 0.92 : 0.58);
         return (0.08 + Math.abs(source - target) * 0.002) * curveScale + (interGalaxy ? 0.18 : 0);
+    }
+
+    private writeEdgePosition(
+        positionAttr: THREE.BufferAttribute,
+        particle: number,
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        source: number,
+        target: number,
+        lift: number,
+        t: number,
+    ): void {
+        if (this.capsSurfaceParticle(data, positions, source, target)) {
+            const point = this.capsSurfacePoint(positions, source, target, t);
+            if (point) {
+                positionAttr.setXYZ(particle, point.x, point.y, point.z);
+                return;
+            }
+        }
+        positionAttr.setXYZ(particle, this.edgeX(positions, source, target, t), this.edgeY(positions, source, target, lift, t), this.edgeZ(positions, source, target, t));
+    }
+
+    private capsSurfaceParticle(data: GalaxySceneV2, positions: Float32Array, source: number, target: number): boolean {
+        if (data.layoutMode !== 'lorentzTree' || positions !== data.positions3d) return false;
+        const ax = positions[source * 3], ay = positions[source * 3 + 1], az = positions[source * 3 + 2];
+        const bx = positions[target * 3], by = positions[target * 3 + 1], bz = positions[target * 3 + 2];
+        const ar = Math.hypot(ax, ay, az);
+        const br = Math.hypot(bx, by, bz);
+        if (ar < CAPS_SURFACE_EDGE_MIN_RADIUS || br < CAPS_SURFACE_EDGE_MIN_RADIUS) return false;
+        if (Math.abs(ar - br) > CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
+        return dot > -0.985;
+    }
+
+    private capsSurfacePoint(positions: Float32Array, source: number, target: number, t: number): { x: number; y: number; z: number } | null {
+        const ax = positions[source * 3], ay = positions[source * 3 + 1], az = positions[source * 3 + 2];
+        const bx = positions[target * 3], by = positions[target * 3 + 1], bz = positions[target * 3 + 2];
+        const ar = Math.hypot(ax, ay, az);
+        const br = Math.hypot(bx, by, bz);
+        if (ar <= 0.000001 || br <= 0.000001) return null;
+        const anx = ax / ar, any = ay / ar, anz = az / ar;
+        const bnx = bx / br, bny = by / br, bnz = bz / br;
+        const radius = THREE.MathUtils.lerp(ar, br, t);
+        const dot = THREE.MathUtils.clamp(anx * bnx + any * bny + anz * bnz, -1, 1);
+
+        if (dot > 0.9995) {
+            const x = THREE.MathUtils.lerp(anx, bnx, t);
+            const y = THREE.MathUtils.lerp(any, bny, t);
+            const z = THREE.MathUtils.lerp(anz, bnz, t);
+            const len = Math.hypot(x, y, z);
+            return len <= 0.000001 ? null : { x: x / len * radius, y: y / len * radius, z: z / len * radius };
+        }
+
+        if (dot < -0.985) return null;
+        const theta = Math.acos(dot);
+        const sinTheta = Math.sin(theta);
+        if (Math.abs(sinTheta) <= 0.000001) return null;
+        const sourceScale = Math.sin((1 - t) * theta) / sinTheta;
+        const targetScale = Math.sin(t * theta) / sinTheta;
+        return {
+            x: (anx * sourceScale + bnx * targetScale) * radius,
+            y: (any * sourceScale + bny * targetScale) * radius,
+            z: (anz * sourceScale + bnz * targetScale) * radius,
+        };
     }
 
     private edgeX(positions: Float32Array, source: number, target: number, t: number): number {

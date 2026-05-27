@@ -34,6 +34,8 @@ type RendererProbe = {
     writeLorentzGuideColor(colors: Float32Array, offset: number, guide: Record<string, unknown>, index: number, phase: number, surface: string): void;
     nodeDensityFactors(data: { ids: string[] }, positions: Float32Array): Float32Array;
     productKleinLayerOpacity(layer: string): number;
+    capsSurfaceEdge(data: { layoutMode: string }, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
+    capsSurfacePoint(out: THREE.Vector3, ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): boolean;
 };
 
 describe('Product manifold guide styling', () => {
@@ -61,6 +63,18 @@ describe('Product manifold guide styling', () => {
 
         renderer.setSettings({ hopfSpaceIntensity: 0 });
         expect(renderer.hopfTubeOpacity('dataFiber', false, 'product')).toBe(0);
+    });
+
+    it('keeps default Hopf glow sleeves lean while preserving the space slider', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeCore', 'default')).toBeCloseTo(0.0055);
+        expect(renderer.hopfTubeRadius('dataFiber', 'tubeGlow', 'default')).toBeCloseTo(0.012);
+        expect(renderer.hopfTubeOpacity('dataFiber', false, 'default')).toBeGreaterThan(0.08);
+
+        renderer.setSettings({ hopfSpaceIntensity: 0 });
+        expect(renderer.hopfTubeOpacity('dataFiber', false, 'default')).toBe(0);
+        expect(renderer.hopfLayerOpacity('line', 'dataFiber', renderer.hopfGuideWeightForKind('dataFiber'), 'default')).toBe(0);
     });
 
     it('makes Lorentz space and Glow sliders affect visible Product geometry', () => {
@@ -164,5 +178,20 @@ describe('Product manifold guide styling', () => {
 
         expect(Math.max(...factors)).toBeLessThan(1);
         expect(Math.min(...factors)).toBeGreaterThanOrEqual(0.28);
+    });
+
+    it('keeps spherical edge routing scoped to shell nodes in the Caps view', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const caps = { layoutMode: 'lorentzTree' };
+        const hybrid = { layoutMode: 'hybridSpace' };
+        const mid = new THREE.Vector3();
+
+        expect(renderer.capsSurfaceEdge(caps, 2.08, 0, 0, 0, 2.04, 0)).toBe(true);
+        expect(renderer.capsSurfaceEdge(hybrid, 2.08, 0, 0, 0, 2.04, 0)).toBe(false);
+        expect(renderer.capsSurfaceEdge(caps, 2.08, 0, 0, 0.6, 0.24, 0)).toBe(false);
+        expect(renderer.capsSurfacePoint(mid, 2.08, 0, 0, 0, 2.08, 0, 0.5)).toBe(true);
+        expect(mid.length()).toBeCloseTo(2.08);
+        expect(mid.x).toBeGreaterThan(1.4);
+        expect(mid.y).toBeGreaterThan(1.4);
     });
 });

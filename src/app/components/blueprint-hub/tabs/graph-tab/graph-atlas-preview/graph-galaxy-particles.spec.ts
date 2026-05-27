@@ -51,6 +51,28 @@ describe('GraphGalaxyParticles', () => {
 
         particles.dispose();
     });
+
+    it('keeps Caps particles on spherical shell edges without affecting map paths', () => {
+        const scene = capsParticleScene();
+        const particles = new GraphGalaxyParticles();
+        const settings = { ...DEFAULT_GALAXY_SETTINGS, particleFlow: true, particleSpeed: 0, particleOpacity: 1, edgeMode: 'straight' as const };
+        const probe = particles as unknown as { seeds: number[] };
+
+        particles.bind(scene, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(scene, scene.positions3d, settings, 0);
+
+        const position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(Math.hypot(position.getX(0), position.getY(0), position.getZ(0))).toBeCloseTo(2.08);
+        expect(position.getX(0)).toBeGreaterThan(1.4);
+        expect(position.getY(0)).toBeGreaterThan(1.4);
+
+        particles.update(scene, scene.positions2d, settings, 0);
+        expect(position.getX(0)).toBeCloseTo(1.04);
+        expect(position.getY(0)).toBeCloseTo(1.04);
+
+        particles.dispose();
+    });
 });
 
 function particleScene(): GalaxySceneV2 {
@@ -75,5 +97,24 @@ function particleScene(): GalaxySceneV2 {
         ]),
         edgeAlpha: new Float32Array([1, 1]),
         edgeKinds: new Uint8Array([0, 0]),
+    };
+}
+
+function capsParticleScene(): GalaxySceneV2 {
+    return {
+        ...particleScene(),
+        layoutMode: 'lorentzTree',
+        ids: ['a', 'b'],
+        labels: ['A', 'B'],
+        kinds: ['character', 'location'],
+        groupIds: ['', ''],
+        positions3d: new Float32Array([2.08, 0, 0, 0, 2.08, 0]),
+        positions2d: new Float32Array([2.08, 0, 0, 0, 2.08, 0]),
+        radii: new Float32Array([0.08, 0.08]),
+        colors: new Float32Array([1, 0, 0, 0.1, 0.8, 1]),
+        edgePairs: new Uint32Array([0, 1]),
+        edgeColors: new Float32Array([1, 0, 0, 0.1, 0.8, 1]),
+        edgeAlpha: new Float32Array([1]),
+        edgeKinds: new Uint8Array([0]),
     };
 }

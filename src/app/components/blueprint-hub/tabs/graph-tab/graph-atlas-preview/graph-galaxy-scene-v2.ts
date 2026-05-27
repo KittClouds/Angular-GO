@@ -45,6 +45,8 @@ export interface GalaxySceneV2 {
     labels: string[];
     kinds: string[];
     groupIds: string[];
+    hopfBaseIds?: string[];
+    hopfRoles?: Uint8Array;
     groups: GalaxySceneGroupView[];
     hopfRibbons: GalaxyHopfRibbonView[];
     lorentzGuides: GalaxyLorentzGuideView[];
@@ -64,6 +66,8 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
     const labels: string[] = new Array(nodeCount);
     const kinds: string[] = new Array(nodeCount);
     const groupIds: string[] = new Array(nodeCount);
+    const hopfBaseIds: string[] = new Array(nodeCount);
+    const hopfRoles = new Uint8Array(nodeCount);
     const positions3d = new Float32Array(nodeCount * 3);
     const positions2d = new Float32Array(nodeCount * 3);
     const radii = new Float32Array(nodeCount);
@@ -75,6 +79,9 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         labels[index] = node.entity.label;
         kinds[index] = node.entity.kind;
         groupIds[index] = node.groupId || '';
+        const hopf = hopfMetadata(node);
+        hopfBaseIds[index] = String(hopf?.['baseId'] || '');
+        hopfRoles[index] = hopf?.['role'] === 'anchor' ? 1 : hopf?.['role'] === 'fiber' ? 2 : 0;
         writePosition(positions3d, index, node.x, node.y, node.z);
         writePosition(positions2d, index, node.x, node.y, 0);
         radii[index] = node.radius;
@@ -104,6 +111,8 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         labels,
         kinds,
         groupIds,
+        hopfBaseIds,
+        hopfRoles,
         groups: scene.groups.map(groupView),
         hopfRibbons: (scene.hopfRibbons ?? []).map(hopfRibbonView),
         lorentzGuides: (scene.lorentzGuides ?? []).map(lorentzGuideView),
@@ -116,6 +125,11 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         edgeAlpha,
         edgeKinds,
     };
+}
+
+function hopfMetadata(node: GalaxyNode): Record<string, unknown> | null {
+    const value = node.entity.metadata?.['hopf'];
+    return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
 function groupView(group: GalaxyGroup): GalaxySceneGroupView {

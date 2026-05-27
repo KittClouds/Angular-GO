@@ -135,7 +135,7 @@ function lorentzNode(
             documentId: node.documentId,
             narrativeId: node.narrativeId,
             folderId: node.folderId,
-            preview: node.preview || `${node.label || node.id} in Lorentz H4 forest space.`,
+            preview: node.preview || `${node.label || node.id} in hierarchy cap space.`,
             lorentz: {
                 coords: projection.coords,
                 klein: projection.klein,

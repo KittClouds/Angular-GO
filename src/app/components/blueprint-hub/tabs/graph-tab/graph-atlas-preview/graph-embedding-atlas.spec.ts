@@ -23,6 +23,66 @@ function block(id: string, text: string, ordinal: number): NoteBlockProjection {
     };
 }
 
+function hopfPost(targetId: string, medoidTargetId: string, phase: number) {
+    return {
+        targetId,
+        clusterId: 'embedding-cluster:0',
+        clusterRole: 'entity_region',
+        medoidTargetId,
+        outlierScore: 0.1,
+        hubScore: 0.6,
+        neighborCount: 1,
+        productLaneFeatures: {
+            semanticDepth: 0.8,
+            documentDepth: 0.2,
+            relationDepth: 0.2,
+            clusterRadius: 0.35,
+            fiberPhase: phase,
+            confidence: 0.86,
+            dominantLane: 'entity',
+            laneWeights: {
+                semantic: 0.8,
+                document: 0.2,
+                relation: 0.2,
+                temporal: 0.1,
+                causal: 0.1,
+                evidence: 0.12,
+                entity: 0.9,
+            },
+        },
+        productTopologyRegion: {
+            id: 'product-region:embedding-cluster:0:entity:core',
+            role: 'core',
+            laneKind: 'entity',
+            clusterId: 'embedding-cluster:0',
+            medoidTargetId,
+            memberCount: 2,
+            density: 0.8,
+            confidence: 0.9,
+            bridgeTargetIds: [],
+            backboneTargetIds: [],
+        },
+    };
+}
+
+function overloadedHopfPost(targetId: string, medoidTargetId: string, phase: number, kind: string) {
+    const laneKind = kind === 'chunk' ? 'document' : kind === 'graphFact' ? 'relation' : 'entity';
+    const post = hopfPost(targetId, medoidTargetId, phase);
+    return {
+        ...post,
+        productLaneFeatures: {
+            ...post.productLaneFeatures,
+            dominantLane: laneKind,
+        },
+        productTopologyRegion: {
+            ...post.productTopologyRegion,
+            id: `product-region:embedding-cluster:0:${laneKind}:core`,
+            laneKind,
+            memberCount: 140,
+        },
+    };
+}
+
 describe('embedding atlas projection', () => {
     it('places embedding nodes on a sphere shell instead of an axis-clamped box', () => {
         const atlas = buildLeafEmbeddingAtlas([
@@ -289,6 +349,151 @@ describe('embedding atlas projection', () => {
             fiberKind: 'identity',
             phase: 0.33,
         });
+    });
+
+    it('uses postprocess clusters as Hopf bases instead of making every target its own anchor', () => {
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-hopf',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai maps Red Mesa', evidenceIds: [] },
+                { id: 'embed:entity:rowan', kind: 'entity', sourceId: 'rowan', entityId: 'rowan', label: 'Rowan', text: 'Rowan reads authority lines', evidenceIds: [] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+            embeddingGraphPostProcess: {
+                schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
+                profile: null as any,
+                adapter: null as any,
+                targetCount: 2,
+                vectorDimensions: 786,
+                clusters: [],
+                productTopologyRegions: [],
+                targets: [
+                    hopfPost('embed:entity:kai', 'embed:entity:kai', 0.2),
+                    hopfPost('embed:entity:rowan', 'embed:entity:kai', 0.8),
+                ],
+                backboneEdges: [],
+                bridgeEdges: [],
+                outlierTargetIds: [],
+                metrics: null as any,
+            },
+        }, 'hopf');
+
+        const kai = atlas.nodes.find((node) => node.id === 'embed:entity:kai')!;
+        const rowan = atlas.nodes.find((node) => node.id === 'embed:entity:rowan')!;
+        expect(kai.metadata?.hopf).toMatchObject({
+            role: 'anchor',
+            baseId: 'embed:entity:kai',
+            phase: 0,
+        });
+        expect(rowan.metadata?.hopf).toMatchObject({
+            role: 'fiber',
+            baseId: 'embed:entity:kai',
+            fiberKind: 'identity',
+            clusterId: 'embedding-cluster:0',
+        });
+        expect(rowan.metadata?.hopf?.['phase']).not.toBe(0.8);
+    });
+
+    it('splits overloaded graph-rebuild Hopf bases into semantic subfibers', () => {
+        const rootId = 'embed:entity:kai';
+        const targets = [
+            { id: rootId, kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'Kai maps Red Mesa', evidenceIds: [] },
+            ...Array.from({ length: 35 }, (_, index) => ({
+                id: `embed:entity:character-${index}`,
+                kind: 'entity',
+                sourceId: `character-${index}`,
+                entityId: `character-${index}`,
+                entityKind: 'CHARACTER',
+                label: `Character ${index}`,
+                text: `Character ${index} crosses the boundary`,
+                evidenceIds: [],
+            })),
+            ...Array.from({ length: 35 }, (_, index) => ({
+                id: `embed:relationship:co-${index}`,
+                kind: 'graphFact',
+                sourceId: `co-${index}`,
+                label: `Co-occurrence ${index}`,
+                text: `Kai co-occurs with Hazel near Red Mesa ${index}`,
+                evidenceIds: [],
+            })),
+            ...Array.from({ length: 35 }, (_, index) => ({
+                id: `embed:chunk:${index}`,
+                kind: 'chunk',
+                sourceId: `chunk-${index}`,
+                noteId: `note-${index % 4}`,
+                chunkId: `chunk-${index}`,
+                label: `Chunk ${index}`,
+                text: `Chunk text ${index}`,
+                evidenceIds: [],
+            })),
+        ];
+        const posts = targets.map((target, index) => overloadedHopfPost(target.id, rootId, (index % 17) / 17, target.kind));
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-overloaded-hopf',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-0', 'note-1', 'note-2', 'note-3'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: targets,
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+            embeddingGraphPostProcess: {
+                schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
+                profile: null as any,
+                adapter: null as any,
+                targetCount: targets.length,
+                vectorDimensions: 786,
+                clusters: [],
+                productTopologyRegions: posts.map((post) => post.productTopologyRegion),
+                targets: posts,
+                backboneEdges: [],
+                bridgeEdges: [],
+                outlierTargetIds: [],
+                metrics: null as any,
+            },
+        }, 'hopf');
+
+        const counts = new Map<string, number>();
+        for (const node of atlas.nodes) {
+            const baseId = String(node.metadata?.hopf?.['baseId'] || '');
+            counts.set(baseId, (counts.get(baseId) || 0) + 1);
+        }
+        expect(counts.size).toBeGreaterThan(4);
+        expect(Math.max(...counts.values())).toBeLessThanOrEqual(28);
+        expect(atlas.nodes.some((node) => String(node.metadata?.hopf?.['splitKey'] || '').includes('relation:cooccurrence'))).toBe(true);
     });
 
     it('keeps story structure targets visible when multi-note targets exceed the render cap', () => {

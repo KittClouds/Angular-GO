@@ -692,6 +692,7 @@ export interface GraphIndexRunReceipt {
     modelSelection: GraphIndexModelSelection;
     postProcessMode?: GraphIndexPostProcessMode;
     postProcessFingerprint?: string;
+    postProcessDiscoveryFingerprint?: string;
     postProcessCacheHit?: boolean;
     modelReadiness: GraphIndexModelReadiness[];
     startedAt: number;

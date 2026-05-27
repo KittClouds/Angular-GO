@@ -154,7 +154,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                                 [class.text-zinc-500]="manifoldMode() !== 'hopf'" (click)="setManifoldMode('hopf')">Hopf</button>
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
                                 [class.bg-violet-500/20]="manifoldMode() === 'lorentz'" [class.text-violet-100]="manifoldMode() === 'lorentz'"
-                                [class.text-zinc-500]="manifoldMode() !== 'lorentz'" (click)="setManifoldMode('lorentz')">Lorentz</button>
+                                [class.text-zinc-500]="manifoldMode() !== 'lorentz'" (click)="setManifoldMode('lorentz')">Caps</button>
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
                                 [class.bg-violet-500/20]="manifoldMode() === 'product'" [class.text-violet-100]="manifoldMode() === 'product'"
                                 [class.text-zinc-500]="manifoldMode() !== 'product'" (click)="setManifoldMode('product')">Product</button>
@@ -176,7 +176,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                         } @else if (manifoldMode() === 'lorentz') {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
-                                (click)="setLayoutMode('lorentzTree')">Tree</button>
+                                (click)="setLayoutMode('lorentzTree')">Caps</button>
                         </div>
                         } @else {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
@@ -334,7 +334,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             <button type="button" class="galaxy-control-button" (click)="toggleHopfSpace()">Hopf Space<span>{{ settings.hopfSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
                             @if (settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') {
-                            <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Lorentz Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
+                            <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Cap Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
                             @if (settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleProductKlein()">Klein Ball<span>{{ settings.productKleinVisible ? 'on' : 'off' }}</span></button>
@@ -981,7 +981,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
             this.manifoldMode() === 'hopf'
                 ? 'hopf_ico_r5_v1'
                 : this.manifoldMode() === 'lorentz'
-                    ? 'lorentz_h4_forest_v1'
+                    ? 'hierarchy_caps_v1'
                     : 'hybrid_semantic_v1'
         );
     }
@@ -1182,21 +1182,21 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'entities') return 'registry entities';
         if (this.atlasMode === 'graph') return 'graph nodes';
         if (this.usesGraphRebuildEmbeddingAtlas()) return 'embedding targets';
-        return this.manifoldMode() === 'lorentz' ? 'forest nodes' : 'semantic vectors';
+        return this.manifoldMode() === 'lorentz' ? 'cap nodes' : 'semantic vectors';
     }
 
     secondaryCountLabel(): string {
         if (this.atlasMode === 'entities') return 'registry links';
         if (this.atlasMode === 'graph') return 'graph edges';
         if (this.usesGraphRebuildEmbeddingAtlas()) return 'snapshot links';
-        return this.manifoldMode() === 'lorentz' ? 'tree links' : 'candidate links';
+        return this.manifoldMode() === 'lorentz' ? 'cap links' : 'candidate links';
     }
 
     dataSourceLabel(): string {
         if (this.atlasMode === 'entities') return 'Registry';
         if (this.atlasMode === 'graph') return 'Graph Rebuild Snapshot';
         if (this.usesGraphRebuildEmbeddingAtlas()) return `Graph Rebuild Snapshot -> ${this.currentProjectionLabel()} Space`;
-        if (this.manifoldMode() === 'lorentz') return 'Lorentz Forest Sidecar';
+        if (this.manifoldMode() === 'lorentz') return 'Hierarchy Caps Sidecar';
         if (this.manifoldMode() === 'hopf') return 'Semantic Atlas -> Hopf Projection';
         return 'Semantic Atlas -> Hybrid Space';
     }
@@ -1232,7 +1232,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'graph') return 'No accepted graph anchors yet';
         if (this.atlasMode === 'entities') return 'No entities yet';
         if (this.manifoldMode() === 'hopf') return 'No Hopf manifold yet';
-        if (this.manifoldMode() === 'lorentz') return 'No Lorentz forest yet';
+        if (this.manifoldMode() === 'lorentz') return 'No hierarchy caps yet';
         return 'No Semantic Atlas embeddings yet';
     }
 
@@ -1240,7 +1240,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'graph') return this.graphEmptyMessage();
         if (this.atlasMode === 'entities') return 'Add or extract entities and the atlas will start drawing the scope.';
         if (this.manifoldMode() === 'hopf') return 'Index the Semantic Atlas from the rendered graph, then project the existing vectors into Hopf space.';
-        if (this.manifoldMode() === 'lorentz') return 'Index the Semantic Atlas from the rendered graph, then refresh the Lorentz forest sidecar only when the native cache exists.';
+        if (this.manifoldMode() === 'lorentz') return 'Index the Semantic Atlas from the rendered graph, then project it into hierarchy caps.';
         return 'Index the Semantic Atlas from rendered leaves, documents, entities, and context lanes. A local preview is shown only when native vectors are unavailable.';
     }
 

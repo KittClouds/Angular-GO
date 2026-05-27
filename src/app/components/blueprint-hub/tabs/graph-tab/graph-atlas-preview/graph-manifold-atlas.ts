@@ -68,19 +68,19 @@ export const HOPF_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
 
 export const LORENTZ_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
     mode: 'lorentz',
-    label: 'Lorentz',
-    traceLabel: 'Tree trace',
+    label: 'Caps',
+    traceLabel: 'Cap trace',
     async load(phoenixUiApi, scope) {
         const snapshot = await phoenixUiApi.loadManifoldAtlasSnapshot('lorentz', scope);
         if (snapshot?.payload.nodes.length) {
             return withManifoldMetadata(snapshot, buildLorentzAtlas(snapshot));
         }
         return {
-            ...emptyBackendAtlas('lorentz semantic atlas unavailable'),
+            ...emptyBackendAtlas('hierarchy caps semantic atlas unavailable'),
             manifold: {
                 mode: 'lorentz',
-                geometryVersion: 'lorentz_h4_forest_v1',
-                sourceLabel: 'lorentz semantic atlas unavailable',
+                geometryVersion: 'hierarchy_caps_v1',
+                sourceLabel: 'hierarchy caps semantic atlas unavailable',
                 capabilities: LORENTZ_MANIFOLD_CAPABILITIES,
                 projectionSource: 'semantic_atlas_rows',
                 cells: [],

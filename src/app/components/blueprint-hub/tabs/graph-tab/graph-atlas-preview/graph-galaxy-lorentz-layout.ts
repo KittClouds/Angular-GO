@@ -1,541 +1,454 @@
 import type { GalaxyEdge, GalaxyLorentzGuide, GalaxyNode, Rgb } from './graph-galaxy-engine';
-import { GRAPH_RELATION_FAMILY_HSL, relationFamilyFromText } from './graph-relation-visual-style';
-import { entityColorStore, normalizeGraphNodeColorKind } from '../../../../../lib/store/entityColorStore';
+import { relationFamilyFromText } from './graph-relation-visual-style';
+import {
+    TAU,
+    add,
+    capBridgeSegments,
+    capRingSegments,
+    causalConeDirection,
+    clamp,
+    derivedRole,
+    documentTreeDirection,
+    dominantLane,
+    fallbackLane,
+    finite,
+    firstNumber,
+    firstText,
+    laneDirection,
+    length,
+    lineSegments,
+    normalize,
+    normalizeLane,
+    numberRecord,
+    projectNodeToRadius,
+    pullPair,
+    rawDirection,
+    record,
+    rgbForKind,
+    scale,
+    shellRingSegments,
+    stableUnit,
+    tangentFrame,
+    temporalRingDirection,
+    vectorOf,
+    type Vec3,
+} from './graph-galaxy-hierarchy-caps';
 
-const LORENTZ_SCENE_RADIUS = 2.18;
-const LORENTZ_RING_SEGMENTS = 96;
-const LORENTZ_MAX_MEMBERSHIP_GUIDES = 220;
-const TAU = Math.PI * 2;
+const CAP_SCENE_RADIUS = 2.18;
+const MAX_CAP_GUIDES = 40;
+const MAX_MEMBERSHIP_GUIDES = 260;
 
-interface LorentzTreeLayoutOptions {
-    productTopologyGeometry?: boolean;
+interface CapInfo extends Rgb {
+    id: string;
+    lane: string;
+    center: Vec3;
+    indexes: number[];
+    radiusSum: number;
+    ambiguitySum: number;
+    importance: number;
 }
 
-const KIND_HSL: Record<string, string> = {
-    identity: '188 80% 66%',
-    relationship: '326 76% 66%',
-    location: '166 66% 58%',
-    event: '42 88% 62%',
-    temporal: '260 76% 68%',
-    causal: '24 82% 62%',
-    mechanical: '206 76% 62%',
-    emotional: '318 74% 66%',
-    political: '356 72% 62%',
-    evidence: '136 70% 62%',
-    provenance: '92 58% 60%',
-    contradiction: '2 86% 65%',
-    abstraction: '228 66% 66%',
-    species: '286 64% 66%',
-    powerSystem: '292 80% 66%',
-    documentStructure: '214 78% 62%',
-    ...GRAPH_RELATION_FAMILY_HSL,
-};
+interface HierarchyInfo {
+    id: string;
+    capId: string;
+    lane: string;
+    role: string;
+    treeKind: string;
+    level: number;
+    phase: number;
+    specificity: number;
+    ambiguity: number;
+    targetRadius: number;
+    direction: Vec3;
+    confidence: number;
+}
 
-export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[], options: LorentzTreeLayoutOptions = {}): GalaxyLorentzGuide[] {
-    for (const node of nodes) {
-        const info = lorentzNodeInfo(node);
-        if (info) {
-            node.x = clamp(info.klein[0] * LORENTZ_SCENE_RADIUS, -2.35, 2.35);
-            node.y = clamp(info.klein[1] * LORENTZ_SCENE_RADIUS, -2.0, 2.0);
-            node.z = clamp(info.klein[2] * LORENTZ_SCENE_RADIUS, -2.35, 2.35);
-            node.depth = clamp(Math.hypot(info.klein[0], info.klein[1], info.klein[2]) / 0.96, 0, 1);
-            node.radius *= lorentzNodeScale(info);
-        } else {
-            const fallback = stableVector(node.entity.id);
-            node.x = fallback.x * 0.7;
-            node.y = fallback.y * 0.48;
-            node.z = fallback.z * 0.7;
-            node.depth = 0.25;
-            node.radius *= 0.86;
-        }
-        node.baseX = node.x;
-        node.baseY = node.y;
-        node.baseZ = node.z;
+export function applyLorentzTreeLayout(nodes: GalaxyNode[], links: GalaxyEdge[], options: { productTopologyGeometry?: boolean } = {}): GalaxyLorentzGuide[] {
+    void options;
+    if (!nodes.length) return [];
+
+    const infos = nodes.map(hierarchyInfo);
+    const caps = buildCaps(nodes, infos);
+    const capById = new Map(caps.map((cap) => [cap.id, cap]));
+
+    for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index];
+        const info = infos[index];
+        const cap = capById.get(info.capId) ?? caps[0];
+        const direction = hierarchyDirection(info, cap);
+        const radius = info.targetRadius;
+        node.x = direction.x * radius;
+        node.y = direction.y * radius;
+        node.z = direction.z * radius;
+        node.depth = clamp(radius / CAP_SCENE_RADIUS, 0, 1);
+        node.radius *= hierarchyNodeScale(info);
     }
 
-    if (options.productTopologyGeometry) applyProductTopologyGeometry(nodes, links);
-
-    for (const link of links) {
-        if (!isLorentzTreeEdge(link)) continue;
-        const source = nodes[link.source];
-        const target = nodes[link.target];
-        const sourceLevel = lorentzNodeInfo(source)?.level ?? 0;
-        const targetLevel = lorentzNodeInfo(target)?.level ?? 0;
-        const levelDelta = Math.abs(sourceLevel - targetLevel);
-        link.alpha = Math.min(0.44, link.alpha * 1.36 + 0.035);
-        link.curve *= 0.82 + Math.min(0.5, levelDelta * 0.12);
+    relaxCapLinks(nodes, links, infos);
+    for (let index = 0; index < nodes.length; index++) {
+        projectNodeToRadius(nodes[index], infos[index].targetRadius);
+        nodes[index].depth = clamp(length(vectorOf(nodes[index])) / CAP_SCENE_RADIUS, 0, 1);
+        nodes[index].baseX = nodes[index].x;
+        nodes[index].baseY = nodes[index].y;
+        nodes[index].baseZ = nodes[index].z;
     }
-
-    const membershipGuides = buildMembershipGuides(nodes, links);
-    const productRelationGuides = membershipGuides.length ? [] : buildProductRelationGuides(nodes, links);
+    tuneCapLinks(nodes, links, infos);
 
     return [
-        ...membershipGuides,
-        ...productRelationGuides,
-        ...buildRootLaneGuides(nodes),
-        ...buildLevelShellGuides(nodes),
-        buildWAxisGuide(),
+        ...buildCapBoundaryGuides(caps),
+        ...buildMembershipGuides(nodes, links, infos),
+        ...buildLevelShellGuides(),
+        buildConcentrationAxisGuide(caps),
     ];
 }
 
-function applyProductTopologyGeometry(nodes: GalaxyNode[], links: GalaxyEdge[]): void {
-    if (!nodes.some(isProductNode)) return;
-    const nodeById = new Map(nodes.map((node) => [node.entity.id, node]));
-    for (const node of nodes) {
-        const role = productRegionRole(node);
-        if (!role) continue;
-        const medoid = nodeById.get(stringMeta(node, 'embeddingMedoidTargetId'));
-        const lane = productLaneKind(node);
-        if (medoid && medoid !== node && role !== 'outlier') {
-            const attraction = role === 'core' ? 0.03 : role === 'backbone' ? 0.09 : role === 'bridge' ? 0.035 : 0.055;
-            node.x += (medoid.x - node.x) * attraction;
-            node.y += (medoid.y - node.y) * attraction;
-            node.z += (medoid.z - node.z) * attraction;
-        }
-        const radial = Math.max(0.001, Math.hypot(node.x, node.y, node.z));
-        const tangent = topologyTangent(node.entity.id, lane);
-        const scale = role === 'core' ? 0.94
-            : role === 'backbone' ? 0.985
-                : role === 'bridge' ? 1.035
-                    : role === 'boundary' ? 1.08
-                        : 1.16;
-        const orbit = role === 'bridge' ? 0.075 : role === 'outlier' ? 0.14 : role === 'boundary' ? 0.035 : 0;
-        node.x = node.x / radial * radial * scale + tangent.x * orbit;
-        node.y = node.y / radial * radial * scale + tangent.y * orbit * 0.72;
-        node.z = node.z / radial * radial * scale + tangent.z * orbit;
-        node.depth = clamp(Math.hypot(node.x, node.y, node.z) / LORENTZ_SCENE_RADIUS, 0, 1);
-        node.radius *= role === 'core' ? 1.08 : role === 'backbone' ? 1.03 : role === 'outlier' ? 0.9 : 0.98;
-        node.baseX = node.x;
-        node.baseY = node.y;
-        node.baseZ = node.z;
-    }
-    for (const link of links) {
-        const source = nodes[link.source];
-        const target = nodes[link.target];
-        const sourceRole = productRegionRole(source);
-        const targetRole = productRegionRole(target);
-        if (link.type === 'embedding-backbone' || sourceRole === 'backbone' || targetRole === 'backbone') {
-            link.alpha = Math.min(0.64, link.alpha * 1.18 + 0.025);
-            link.curve *= 0.78;
-        } else if (link.type === 'embedding-bridge' || sourceRole === 'bridge' || targetRole === 'bridge') {
-            link.alpha = Math.min(0.58, link.alpha * 1.12 + 0.018);
-            link.curve *= 1.22;
-        }
-        if (sourceRole === 'outlier' || targetRole === 'outlier') {
-            link.alpha *= 0.82;
-            link.curve *= 1.28;
-        }
-    }
+function hierarchyInfo(node: GalaxyNode): HierarchyInfo {
+    const metadata = node.entity.metadata || {};
+    const product = record(metadata['product']);
+    const region = record(product['region']);
+    const lanes = record(product['lanes']);
+    const hopf = record(metadata['hopf']);
+    const lorentz = record(metadata['lorentz']);
+    const memberships = Array.isArray(lorentz['memberships']) ? lorentz['memberships'] as Array<Record<string, unknown>> : [];
+    const primary = memberships[0] ?? {};
+    const laneWeights = numberRecord(lanes['laneWeights']);
+    const lane = normalizeLane(firstText(
+        metadata['productLaneKind'],
+        product['dominantLane'],
+        region['laneKind'],
+        lanes['dominantLane'],
+        primary['treeKind'],
+        lorentz['primaryTreeKind'],
+        dominantLane(laneWeights),
+        fallbackLane(node),
+    ));
+    const role = firstText(metadata['productRegionRole'], region['role'], lorentz['regionRole'], derivedRole(node));
+    const treeKind = normalizeLane(firstText(primary['treeKind'], lorentz['primaryTreeKind'], lane));
+    const phase = normalizePhase(firstNumber(lorentz['capPhase'], lanes['fiberPhase'], hopf['phase'], stableUnit(`${node.entity.id}:${lane}:phase`)));
+    const specificity = hierarchySpecificity(node, role, laneWeights, lorentz);
+    const ambiguity = hierarchyAmbiguity(node, role, lanes, lorentz);
+    const confidence = hierarchyConfidence(node, region, primary, lorentz);
+    const level = hierarchyLevel(node, role, lane, lorentz, primary, specificity);
+    return {
+        id: node.entity.id,
+        capId: capIdFor(node, lane, product, region, lorentz, primary),
+        lane,
+        role,
+        treeKind,
+        level,
+        phase,
+        specificity,
+        ambiguity,
+        targetRadius: hierarchyRadius(node, specificity, role, lane, confidence, ambiguity),
+        direction: rawDirection(node, lorentz),
+        confidence,
+    };
 }
 
-interface LorentzInfo {
-    klein: [number, number, number, number];
-    level: number;
-    memberships: Array<Record<string, unknown>>;
-    primaryTreeKind: string;
-    treeId: string;
-    w: number;
-}
-
-function buildMembershipGuides(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
-    const guides: GalaxyLorentzGuide[] = [];
-    for (const link of links) {
-        if (!isLorentzTreeEdge(link)) continue;
-        const source = nodes[link.source];
-        const target = nodes[link.target];
-        const sourceInfo = lorentzNodeInfo(source);
-        const targetInfo = lorentzNodeInfo(target);
-        const treeKind = treeKindFromEdge(link.type) || targetInfo?.primaryTreeKind || sourceInfo?.primaryTreeKind || 'identity';
-        const level = Math.max(sourceInfo?.level ?? 0, targetInfo?.level ?? 0);
-        guides.push({
-            id: `lorentz:guide:${link.id}`,
-            nodeIds: [source.entity.id, target.entity.id],
-            positions3d: laneSegments(source, target, level, treeKind),
-            importance: Math.max(source.radius, target.radius) + link.confidence,
-            treeId: targetInfo?.treeId || sourceInfo?.treeId || 'lorentz',
-            treeKind,
-            level,
-            guideKind: 'membership',
-            guideWeight: 0.72 + Math.min(0.5, link.confidence * 0.2),
-            ...rgbForKind(treeKind),
-        });
-    }
-    return guides
-        .sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id))
-        .slice(0, LORENTZ_MAX_MEMBERSHIP_GUIDES);
-}
-
-function buildProductRelationGuides(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
-    if (!nodes.some(isProductNode)) return [];
-    const guides: GalaxyLorentzGuide[] = [];
-    const seen = new Set<string>();
-    for (const link of links) {
-        const source = nodes[link.source];
-        const target = nodes[link.target];
-        if (!source || !target) continue;
-        const key = `${source.entity.id}->${target.entity.id}:${link.type}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const sourceInfo = lorentzNodeInfo(source);
-        const targetInfo = lorentzNodeInfo(target);
-        const treeKind = productTreeKind(link, source, target, sourceInfo, targetInfo);
-        const level = Math.max(
-            1,
-            sourceInfo?.level ?? productFallbackLevel(source),
-            targetInfo?.level ?? productFallbackLevel(target),
-        );
-        const confidence = clamp(finite(link.confidence), 0.12, 1);
-        guides.push({
-            id: `lorentz:product-guide:${link.id}`,
-            nodeIds: [source.entity.id, target.entity.id],
-            positions3d: laneSegments(source, target, level, treeKind),
-            importance: Math.max(source.radius, target.radius) * 0.62 + confidence,
-            treeId: 'product:graph-relations',
-            treeKind,
-            level,
-            guideKind: 'membership',
-            guideWeight: 0.52 + Math.min(0.3, confidence * 0.24),
-            ...rgbForKind(treeKind),
-        });
-    }
-    return guides
-        .sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id))
-        .slice(0, LORENTZ_MAX_MEMBERSHIP_GUIDES);
-}
-
-function buildRootLaneGuides(nodes: GalaxyNode[]): GalaxyLorentzGuide[] {
-    return nodes
-        .filter((node) => {
-            const info = lorentzNodeInfo(node);
-            return info && info.memberships.some((membership) => !membership['parentNodeId']);
-        })
-        .sort((left, right) => left.entity.id.localeCompare(right.entity.id))
-        .slice(0, 32)
-        .map((node) => {
-            const info = lorentzNodeInfo(node)!;
-            const treeKind = info.primaryTreeKind;
-            return {
-                id: `lorentz:root-lane:${node.entity.id}`,
-                nodeIds: [node.entity.id],
-                positions3d: rootLaneSegments(node, info),
-                importance: 1.8 + node.radius,
-                treeId: info.treeId,
-                treeKind,
-                level: 0,
-                guideKind: 'rootLane' as const,
-                guideWeight: 0.92,
-                ...rgbForKind(treeKind),
+function buildCaps(nodes: GalaxyNode[], infos: HierarchyInfo[]): CapInfo[] {
+    const byId = new Map<string, CapInfo>();
+    for (let index = 0; index < nodes.length; index++) {
+        const info = infos[index];
+        let cap = byId.get(info.capId);
+        if (!cap) {
+            const color = rgbForKind(info.treeKind);
+            cap = {
+                id: info.capId,
+                lane: info.lane,
+                center: { x: 0, y: 0, z: 0 },
+                indexes: [],
+                radiusSum: 0,
+                ambiguitySum: 0,
+                importance: 0,
+                ...color,
             };
-        });
+            byId.set(info.capId, cap);
+        }
+        const lane = laneDirection(info.lane);
+        cap.center.x += info.direction.x * 0.74 + lane.x * 0.26;
+        cap.center.y += info.direction.y * 0.74 + lane.y * 0.26;
+        cap.center.z += info.direction.z * 0.74 + lane.z * 0.26;
+        cap.indexes.push(index);
+        cap.radiusSum += info.targetRadius;
+        cap.ambiguitySum += info.ambiguity;
+        cap.importance += 1 + Math.max(0, nodes[index].entity.totalMentions || 0) * 0.15 + info.confidence;
+    }
+    return [...byId.values()]
+        .map((cap) => ({ ...cap, center: normalize(cap.center, laneDirection(cap.lane)) }))
+        .sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id));
 }
 
-function buildLevelShellGuides(nodes: GalaxyNode[]): GalaxyLorentzGuide[] {
-    const levels = new Set<number>();
-    for (const node of nodes) {
-        const info = lorentzNodeInfo(node);
-        if (info) levels.add(Math.min(8, Math.max(0, Math.round(info.level))));
+function hierarchyDirection(info: HierarchyInfo, cap: CapInfo): Vec3 {
+    const lane = laneDirection(info.lane);
+    const frame = tangentFrame(cap.center);
+    const orbit = add(scale(frame.a, Math.cos(info.phase * TAU)), scale(frame.b, Math.sin(info.phase * TAU)));
+    const spread = clamp(0.08 + info.ambiguity * 0.28 + (info.role === 'bridge' ? 0.08 : 0), 0.06, 0.42);
+    let shaped = normalize(add(add(scale(info.direction, 0.58), scale(cap.center, 0.34)), add(scale(lane, 0.18), scale(orbit, spread))), cap.center);
+    if (info.lane === 'temporal') {
+        shaped = normalize(add(scale(shaped, 0.56), scale(temporalRingDirection(info.phase), 0.44)), shaped);
+    } else if (info.lane === 'causal') {
+        shaped = normalize(add(scale(shaped, 0.64), scale(causalConeDirection(info.phase, info.level), 0.36)), shaped);
+    } else if (info.lane === 'document') {
+        shaped = normalize(add(scale(shaped, 0.7), scale(documentTreeDirection(info.phase, info.level), 0.3)), shaped);
     }
-    return [...levels].sort((left, right) => left - right).slice(0, 7).map((level) => {
-        const radius = levelRadius(level);
+    return shaped;
+}
+
+function relaxCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: HierarchyInfo[]): void {
+    for (let pass = 0; pass < 3; pass++) {
+        for (const link of links) {
+            const source = nodes[link.source];
+            const target = nodes[link.target];
+            if (!source || !target) continue;
+            const sourceInfo = infos[link.source];
+            const targetInfo = infos[link.target];
+            const sameCap = sourceInfo.capId === targetInfo.capId;
+            const bridge = isBridgeLink(link, sourceInfo, targetInfo);
+            const ideal = sameCap ? 0.26 : bridge ? 0.74 : 0.52;
+            const strength = sameCap ? 0.018 : bridge ? 0.01 : 0.012;
+            pullPair(source, target, ideal, strength);
+            projectNodeToRadius(source, sourceInfo.targetRadius);
+            projectNodeToRadius(target, targetInfo.targetRadius);
+        }
+    }
+}
+
+function tuneCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: HierarchyInfo[]): void {
+    for (const link of links) {
+        const sourceInfo = infos[link.source];
+        const targetInfo = infos[link.target];
+        const sameCap = sourceInfo?.capId === targetInfo?.capId;
+        const bridge = sourceInfo && targetInfo && isBridgeLink(link, sourceInfo, targetInfo);
+        if (sameCap) {
+            link.alpha = Math.min(0.52, link.alpha * 1.22 + 0.035);
+            link.curve *= 0.62;
+        } else if (bridge) {
+            link.alpha = Math.min(0.5, link.alpha * 1.18 + 0.028);
+            link.curve *= 1.42;
+        } else {
+            link.alpha = Math.min(0.42, link.alpha * 0.92 + 0.018);
+            link.curve *= 0.96;
+        }
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        const radiusDelta = source && target ? Math.abs(source.depth - target.depth) : 0;
+        link.curve *= 0.82 + radiusDelta * 0.42;
+    }
+}
+
+function buildCapBoundaryGuides(caps: CapInfo[]): GalaxyLorentzGuide[] {
+    return caps.slice(0, MAX_CAP_GUIDES).map((cap) => {
+        const count = cap.indexes.length || 1;
+        const radius = cap.radiusSum / count;
+        const ambiguity = cap.ambiguitySum / count;
         return {
-            id: `lorentz:level-shell:${level}`,
+            id: `caps:boundary:${cap.id}`,
             nodeIds: [],
-            positions3d: shellRingSegments(radius),
-            importance: 0.2,
-            treeId: 'lorentz:levels',
-            treeKind: 'documentStructure',
-            level,
-            guideKind: 'levelShell' as const,
-            guideWeight: Math.max(0.22, 0.62 - level * 0.045),
-            ...rgbForKind(level % 2 === 0 ? 'documentStructure' : 'identity'),
+            positions3d: capRingSegments(cap.center, radius, clamp(0.18 + Math.sqrt(count) * 0.018 + ambiguity * 0.22, 0.2, 0.64)),
+            importance: cap.importance,
+            treeId: cap.id,
+            treeKind: cap.lane,
+            level: 1,
+            guideKind: 'rootLane',
+            guideWeight: clamp(0.48 + Math.log1p(count) * 0.045, 0.5, 0.86),
+            r: cap.r,
+            g: cap.g,
+            b: cap.b,
         };
     });
 }
 
-function buildWAxisGuide(): GalaxyLorentzGuide {
-    const positions = new Float32Array(48 * 6);
-    for (let index = 0; index < 48; index++) {
-        const a = -2.08 + (index / 48) * 4.16;
-        const b = -2.08 + ((index + 1) / 48) * 4.16;
-        const offset = index * 6;
-        positions[offset] = 0;
-        positions[offset + 1] = a;
-        positions[offset + 2] = -0.03;
-        positions[offset + 3] = 0;
-        positions[offset + 4] = b;
-        positions[offset + 5] = 0.03;
+function buildMembershipGuides(nodes: GalaxyNode[], links: GalaxyEdge[], infos: HierarchyInfo[]): GalaxyLorentzGuide[] {
+    const guides: GalaxyLorentzGuide[] = [];
+    for (const link of links) {
+        const source = nodes[link.source];
+        const target = nodes[link.target];
+        if (!source || !target) continue;
+        const sourceInfo = infos[link.source];
+        const targetInfo = infos[link.target];
+        const treeKind = guideKindForLink(link, source, target, sourceInfo, targetInfo);
+        const confidence = clamp(link.confidence, 0.12, 1);
+        guides.push({
+            id: `caps:bridge:${link.id}`,
+            nodeIds: [source.entity.id, target.entity.id],
+            positions3d: capBridgeSegments(source, target, treeKind, sourceInfo, targetInfo),
+            importance: Math.max(source.radius, target.radius) * 0.48 + confidence,
+            treeId: sourceInfo.capId === targetInfo.capId ? sourceInfo.capId : 'caps:overlap',
+            treeKind,
+            level: Math.max(sourceInfo.level, targetInfo.level),
+            guideKind: 'membership',
+            guideWeight: 0.42 + Math.min(0.36, confidence * 0.24),
+            ...rgbForKind(treeKind),
+        });
     }
-    return {
-        id: 'lorentz:w-axis',
+    return guides.sort((left, right) => right.importance - left.importance || left.id.localeCompare(right.id)).slice(0, MAX_MEMBERSHIP_GUIDES);
+}
+
+function buildLevelShellGuides(): GalaxyLorentzGuide[] {
+    const shells = [
+        { level: 0, radius: 0.52, kind: 'documentStructure', weight: 0.32 },
+        { level: 1, radius: 1.04, kind: 'semantic', weight: 0.38 },
+        { level: 2, radius: 1.55, kind: 'relationship', weight: 0.44 },
+        { level: 3, radius: 2.08, kind: 'identity', weight: 0.52 },
+    ];
+    return shells.map((shell) => ({
+        id: `caps:shell:${shell.level}`,
         nodeIds: [],
-        positions3d: positions,
+        positions3d: shellRingSegments(shell.radius),
+        importance: 0.2,
+        treeId: 'caps:shells',
+        treeKind: shell.kind,
+        level: shell.level,
+        guideKind: 'levelShell',
+        guideWeight: shell.weight,
+        ...rgbForKind(shell.kind),
+    }));
+}
+
+function buildConcentrationAxisGuide(caps: CapInfo[]): GalaxyLorentzGuide {
+    const dominant = caps[0]?.center ?? { x: 0.32, y: 0.76, z: 0.56 };
+    return {
+        id: 'caps:concentration-axis',
+        nodeIds: [],
+        positions3d: lineSegments(scale(dominant, -0.42), scale(dominant, CAP_SCENE_RADIUS * 0.98), 32),
         importance: 0.1,
-        treeId: 'lorentz:w',
-        treeKind: 'identity',
+        treeId: 'caps:axis',
+        treeKind: 'semantic',
         level: 0,
         guideKind: 'wAxis',
-        guideWeight: 0.24,
-        r: 130,
-        g: 238,
-        b: 255,
+        guideWeight: 0.18,
+        ...rgbForKind('semantic'),
     };
 }
 
-function laneSegments(source: GalaxyNode, target: GalaxyNode, level: number, treeKind: string): Float32Array {
-    const steps = 12;
-    const positions = new Float32Array(steps * 6);
-    const lift = (0.06 + level * 0.018) * (stableUnit(`${source.entity.id}:${target.entity.id}:${treeKind}`) > 0.5 ? 1 : -1);
-    const midpoint = {
-        x: (source.x + target.x) * 0.5,
-        y: (source.y + target.y) * 0.5 + lift,
-        z: (source.z + target.z) * 0.5,
-    };
-    for (let index = 0; index < steps; index++) {
-        const a = index / steps;
-        const b = (index + 1) / steps;
-        writeQuadratic(positions, index * 6, source, midpoint, target, a);
-        writeQuadratic(positions, index * 6 + 3, source, midpoint, target, b);
-    }
-    return positions;
+function hierarchySpecificity(node: GalaxyNode, role: string, laneWeights: Record<string, number>, lorentz: Record<string, unknown>): number {
+    const direct = firstNumber(lorentz['specificity'], NaN);
+    if (Number.isFinite(direct)) return clamp(direct, 0, 1);
+    const sourceType = String(node.entity.metadata?.sourceType || node.entity.kind || '').toLowerCase();
+    let base = 0.58;
+    if (/note|document|doc/.test(sourceType)) base = 0.22;
+    else if (/chunk|anchor/.test(sourceType)) base = 0.9;
+    else if (/entity|character|location|creature|concept/.test(sourceType)) base = 0.82;
+    else if (/causal|temporal|event/.test(sourceType)) base = 0.74;
+    else if (/graph.?fact|relationship|relation|memory|state/.test(sourceType)) base = 0.64;
+    const semantic = clamp(laneWeights['semantic'] || 0, 0, 1);
+    const roleBoost = role === 'outlier' ? 0.14 : role === 'boundary' ? 0.08 : role === 'bridge' ? 0.05 : role === 'core' ? -0.04 : 0;
+    return clamp(base + roleBoost + semantic * 0.08, 0.12, 0.98);
 }
 
-function rootLaneSegments(node: GalaxyNode, info: LorentzInfo): Float32Array {
-    const positions = new Float32Array(8 * 6);
-    const bias = info.w * 0.06;
-    const center = { x: bias, y: -bias, z: 0 };
-    for (let index = 0; index < 8; index++) {
-        const a = index / 8;
-        const b = (index + 1) / 8;
-        writeQuadratic(positions, index * 6, center, { x: node.x * 0.24, y: node.y * 0.24 + 0.05, z: node.z * 0.24 }, node, a);
-        writeQuadratic(positions, index * 6 + 3, center, { x: node.x * 0.24, y: node.y * 0.24 + 0.05, z: node.z * 0.24 }, node, b);
-    }
-    return positions;
+function hierarchyAmbiguity(node: GalaxyNode, role: string, lanes: Record<string, unknown>, lorentz: Record<string, unknown>): number {
+    const direct = firstNumber(lorentz['ambiguity'], NaN);
+    if (Number.isFinite(direct)) return clamp(direct, 0, 1);
+    const radius = clamp(firstNumber(lanes['clusterRadius'], lorentz['w'], 0.36), 0, 1);
+    const outlier = clamp(firstNumber(node.entity.metadata?.['embeddingOutlierScore'], 0), 0, 1);
+    const roleBoost = role === 'outlier' ? 0.22 : role === 'bridge' ? 0.12 : role === 'boundary' ? 0.08 : 0;
+    return clamp(radius * 0.48 + outlier * 0.28 + roleBoost, 0.04, 0.9);
 }
 
-function shellRingSegments(radius: number): Float32Array {
-    const planes = 3;
-    const positions = new Float32Array(planes * LORENTZ_RING_SEGMENTS * 6);
-    let cursor = 0;
-    for (let plane = 0; plane < planes; plane++) {
-        for (let index = 0; index < LORENTZ_RING_SEGMENTS; index++) {
-            const a = (index / LORENTZ_RING_SEGMENTS) * TAU;
-            const b = ((index + 1) / LORENTZ_RING_SEGMENTS) * TAU;
-            cursor = writeRingPoint(positions, cursor, plane, radius, a);
-            cursor = writeRingPoint(positions, cursor, plane, radius, b);
-        }
-    }
-    return positions;
-}
-
-function writeQuadratic(buffer: Float32Array, offset: number, a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, c: { x: number; y: number; z: number }, t: number): void {
-    const left = (1 - t) * (1 - t);
-    const mid = 2 * (1 - t) * t;
-    const right = t * t;
-    buffer[offset] = left * a.x + mid * b.x + right * c.x;
-    buffer[offset + 1] = left * a.y + mid * b.y + right * c.y;
-    buffer[offset + 2] = left * a.z + mid * b.z + right * c.z;
-}
-
-function writeRingPoint(buffer: Float32Array, cursor: number, plane: number, radius: number, angle: number): number {
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    if (plane === 0) buffer.set([x, y, 0], cursor);
-    else if (plane === 1) buffer.set([x, 0, y], cursor);
-    else buffer.set([0, x, y], cursor);
-    return cursor + 3;
-}
-
-function levelRadius(level: number): number {
-    return clamp(0.58 + level * 0.24, 0.58, 2.18);
-}
-
-function lorentzNodeInfo(node: GalaxyNode): LorentzInfo | null {
-    const value = node.entity.metadata?.['lorentz'];
-    if (!value || typeof value !== 'object') return null;
-    const metadata = value as Record<string, unknown>;
-    const klein = metadata['klein'];
-    if (!Array.isArray(klein) || klein.length < 4) return null;
-    const memberships = Array.isArray(metadata['memberships']) ? metadata['memberships'] as Array<Record<string, unknown>> : [];
-    const primary = memberships[0];
-    return {
-        klein: [finite(klein[0]), finite(klein[1]), finite(klein[2]), finite(klein[3])],
-        level: finite(metadata['level'] ?? primary?.['level']),
-        memberships,
-        primaryTreeKind: String(metadata['primaryTreeKind'] || primary?.['treeKind'] || 'identity'),
-        treeId: String(primary?.['treeId'] || 'lorentz'),
-        w: finite(metadata['w']),
-    };
-}
-
-function lorentzNodeScale(info: LorentzInfo): number {
-    const membershipBoost = Math.min(0.18, info.memberships.length * 0.035);
-    const levelScale = info.level <= 0 ? 1.16 : Math.max(0.72, 1 - info.level * 0.035);
-    const wGlow = Math.min(0.08, Math.abs(info.w) * 0.1);
-    return levelScale + membershipBoost + wGlow;
-}
-
-function productRegionRole(node: GalaxyNode | undefined): string {
-    if (!node) return '';
-    const metadata = node.entity.metadata || {};
-    const direct = String(metadata['productRegionRole'] || '').toLowerCase();
-    if (direct) return direct;
-    const product = metadata['product'];
-    if (!product || typeof product !== 'object') return '';
-    const region = (product as Record<string, unknown>)['region'];
-    return region && typeof region === 'object' ? String((region as Record<string, unknown>)['role'] || '').toLowerCase() : '';
-}
-
-function productLaneKind(node: GalaxyNode): string {
-    const metadata = node.entity.metadata || {};
-    const direct = String(metadata['productLaneKind'] || '').toLowerCase();
-    if (direct) return direct;
-    const product = metadata['product'];
-    if (!product || typeof product !== 'object') return '';
-    const region = (product as Record<string, unknown>)['region'];
-    return region && typeof region === 'object' ? String((region as Record<string, unknown>)['laneKind'] || '').toLowerCase() : '';
-}
-
-function stringMeta(node: GalaxyNode, key: string): string {
-    return String(node.entity.metadata?.[key] || '');
-}
-
-function topologyTangent(id: string, lane: string): { x: number; y: number; z: number } {
-    const seed = stableVector(`${id}:topology:${lane || 'mixed'}`);
-    const axis = lane === 'causal' ? { x: 0.8, y: -0.2, z: 0.25 }
-        : lane === 'temporal' ? { x: 0.35, y: 0.75, z: -0.2 }
-            : lane === 'document' ? { x: -0.3, y: 0.2, z: 0.85 }
-                : lane === 'entity' ? { x: 0.2, y: 0.45, z: 0.65 }
-                    : { x: 0.45, y: 0.1, z: -0.55 };
-    const mixed = {
-        x: seed.x * 0.62 + axis.x * 0.38,
-        y: seed.y * 0.62 + axis.y * 0.38,
-        z: seed.z * 0.62 + axis.z * 0.38,
-    };
-    const length = Math.max(0.001, Math.hypot(mixed.x, mixed.y, mixed.z));
-    return { x: mixed.x / length, y: mixed.y / length, z: mixed.z / length };
-}
-
-function isProductNode(node: GalaxyNode): boolean {
-    const metadata = node.entity.metadata || {};
-    const sourceType = String(metadata['sourceType'] || '').toLowerCase();
-    const product = metadata['product'];
-    const manifold = String(metadata['manifold'] || '').toLowerCase();
-    const kind = String(node.entity.kind || '').toLowerCase();
-    return manifold === 'product'
-        || Boolean(product && typeof product === 'object')
-        || sourceType === 'product_node'
-        || sourceType === 'product_root'
-        || kind.startsWith('product:');
-}
-
-function productTreeKind(
-    link: GalaxyEdge,
-    source: GalaxyNode,
-    target: GalaxyNode,
-    sourceInfo: LorentzInfo | null,
-    targetInfo: LorentzInfo | null,
-): string {
-    const type = String(link.type || '').toLowerCase();
-    const relationFamily = relationFamilyFromText(
-        type,
-        source.entity.label,
-        source.entity.metadata?.['preview'],
-        target.entity.label,
-        target.entity.metadata?.['preview'],
-    );
-    if (relationFamily) return relationFamily;
-    const sourceKind = productKindFromNode(source);
-    const targetKind = productKindFromNode(target);
-    if (/caus|because|effect/.test(type)) return 'causal';
-    if (/temporal|before|after|timeline/.test(type)) return 'temporal';
-    if (/event|scene/.test(type)) return 'event';
-    if (sourceKind !== 'identity' && sourceKind !== 'documentStructure') return sourceKind;
-    if (targetKind !== 'identity' && targetKind !== 'documentStructure') return targetKind;
-    if (/location|place|city|route/.test(type)) return 'location';
-    if (/memory|evidence|source|provenance/.test(type)) return 'evidence';
-    if (/relation|relationship|fact|co.?occurs/.test(type)) return 'relationship';
-    if (/contrad|reject|oppos/.test(type)) return 'contradiction';
-    if (/anchor|chunk|note|document|doc/.test(type)) return 'documentStructure';
-    return targetInfo?.primaryTreeKind
-        || sourceInfo?.primaryTreeKind
-        || targetKind
-        || sourceKind
-        || 'identity';
-}
-
-function productKindFromNode(node: GalaxyNode): string {
-    const metadata = node.entity.metadata || {};
-    const text = `${node.entity.kind || ''} ${metadata['sourceType'] || ''} ${node.entity.label || ''}`.toLowerCase();
-    const relationFamily = relationFamilyFromText(text, metadata['preview']);
-    if (relationFamily) return relationFamily;
-    if (/causal|cause|effect/.test(text)) return 'causal';
-    if (/temporal|timeline|time/.test(text)) return 'temporal';
-    if (/event|scene/.test(text)) return 'event';
-    if (/location|place|city|route/.test(text)) return 'location';
-    if (/memory|evidence|source|provenance/.test(text)) return 'evidence';
-    if (/relationship|relation|graph-fact|graphfact|fact/.test(text)) return 'relationship';
-    if (/chunk|anchor|note|document|doc/.test(text)) return 'documentStructure';
-    return 'identity';
-}
-
-function productFallbackLevel(node: GalaxyNode): number {
-    const metadata = node.entity.metadata || {};
-    const text = `${node.entity.kind || ''} ${metadata['sourceType'] || ''}`.toLowerCase();
+function hierarchyLevel(
+    node: GalaxyNode,
+    role: string,
+    lane: string,
+    lorentz: Record<string, unknown>,
+    primary: Record<string, unknown>,
+    specificity: number,
+): number {
+    const direct = firstNumber(lorentz['level'], primary['level'], NaN);
+    if (Number.isFinite(direct)) return clamp(Math.round(direct), 0, 4);
+    if (role === 'outlier' || role === 'boundary') return 4;
+    if (role === 'bridge' || lane === 'relationship' || lane === 'causal') return 3;
+    if (lane === 'temporal' || lane === 'event' || specificity > 0.72) return 2;
+    const text = `${node.entity.kind || ''} ${node.entity.metadata?.sourceType || ''}`.toLowerCase();
     if (/note|document|doc/.test(text)) return 0;
-    if (/chunk|entity/.test(text)) return 1;
-    if (/anchor|event|fact|memory/.test(text)) return 2;
-    return Math.max(1, Math.round((node.depth || 0.35) * 4));
+    return 1;
 }
 
-function isLorentzTreeEdge(link: GalaxyEdge): boolean {
-    return String(link.type || '').startsWith('lorentz-tree');
+function hierarchyRadius(
+    node: GalaxyNode,
+    specificity: number,
+    role: string,
+    lane: string,
+    confidence: number,
+    ambiguity: number,
+): number {
+    const sourceType = String(node.entity.metadata?.sourceType || node.entity.kind || '').toLowerCase();
+    const kind = String(node.entity.kind || '').toLowerCase();
+    let radius = hierarchyShellRadius(sourceType, kind, lane);
+    radius += (clamp(specificity, 0, 1) - 0.62) * 0.22;
+    radius += (clamp(confidence, 0, 1) - 0.66) * 0.46;
+    radius -= clamp(ambiguity, 0, 1) * 0.24;
+    if (role === 'bridge') radius += 0.08;
+    if (role === 'outlier') radius += 0.16;
+    if (/note|document|doc/.test(sourceType)) radius = Math.min(radius, 0.72);
+    if (lane === 'temporal') radius = clamp(radius, 1.08, 1.72);
+    return clamp(radius, 0.38, CAP_SCENE_RADIUS * 0.985);
 }
 
-function treeKindFromEdge(type: string): string {
-    const [, kind = ''] = String(type || '').split(':');
-    return kind || 'identity';
+function hierarchyShellRadius(sourceType: string, kind: string, lane: string): number {
+    if (/note|document|doc/.test(sourceType)) return 0.54;
+    if (/memory|state|concept|context/.test(sourceType) || /memory|state|concept|context/.test(kind)) return 0.98;
+    if (/chunk/.test(sourceType)) return 1.22;
+    if (/graph.?fact|relationship|relation/.test(sourceType) || lane === 'relationship') return 1.34;
+    if (/event|temporal|causal/.test(sourceType) || lane === 'event' || lane === 'temporal' || lane === 'causal') return 1.48;
+    if (/anchor|mention|evidence/.test(sourceType)) return 1.68;
+    if (/entity|character|location|creature|npc|item|network|group/.test(sourceType) || /character|location|creature|npc|item|network|group/.test(kind)) return 1.92;
+    return 1.18;
 }
 
-function rgbForKind(kind: string): Rgb {
-    const graphNodeKind = normalizeGraphNodeColorKind(kind);
-    if (graphNodeKind) return hslToRgb(entityColorStore.getRawGraphNodeHsl(graphNodeKind));
-    return hslToRgb(KIND_HSL[kind] ?? '198 74% 64%');
+function hierarchyConfidence(
+    node: GalaxyNode,
+    region: Record<string, unknown>,
+    primary: Record<string, unknown>,
+    lorentz: Record<string, unknown>,
+): number {
+    return clamp(firstNumber(
+        node.entity.metadata?.['targetConfidence'],
+        lorentz['confidence'],
+        region['confidence'],
+        primary['confidence'],
+        node.entity.totalMentions ? 0.72 : 0.5,
+    ), 0, 1);
 }
 
-function hslToRgb(rawHsl: string): Rgb {
-    const values = rawHsl.match(/-?\d+(?:\.\d+)?/g)?.map((part) => Number(part)) ?? [];
-    const [h = 190, s = 70, l = 55] = values;
-    const hue = ((h % 360) + 360) % 360;
-    const saturation = clamp(s / 100, 0, 1);
-    const lightness = clamp(l / 100, 0, 1);
-    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
-    const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
-    const match = lightness - chroma / 2;
-    const [red, green, blue] = hue < 60 ? [chroma, x, 0] : hue < 120 ? [x, chroma, 0] : hue < 180 ? [0, chroma, x] : hue < 240 ? [0, x, chroma] : hue < 300 ? [x, 0, chroma] : [chroma, 0, x];
-    return { r: Math.round((red + match) * 255), g: Math.round((green + match) * 255), b: Math.round((blue + match) * 255) };
+function hierarchyNodeScale(info: HierarchyInfo): number {
+    return clamp(0.72 + info.specificity * 0.32 + (info.role === 'core' ? 0.08 : 0) - info.ambiguity * 0.08, 0.68, 1.16);
 }
 
-function stableVector(id: string): { x: number; y: number; z: number } {
-    const a = stableUnit(`${id}:a`) * TAU;
-    const y = stableUnit(`${id}:y`) * 2 - 1;
-    const radial = Math.sqrt(Math.max(0, 1 - y * y));
-    return { x: Math.cos(a) * radial, y, z: Math.sin(a) * radial };
+function capIdFor(
+    node: GalaxyNode,
+    lane: string,
+    product: Record<string, unknown>,
+    region: Record<string, unknown>,
+    lorentz: Record<string, unknown>,
+    primary: Record<string, unknown>,
+): string {
+    return firstText(
+        lorentz['capId'],
+        node.entity.metadata?.['embeddingClusterId'],
+        region['id'],
+        region['clusterId'],
+        product['clusterId'],
+        primary['treeId'],
+        `lane:${lane}`,
+    );
 }
 
-function stableUnit(value: string): number {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index++) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0) / 4294967295;
+function guideKindForLink(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNode, sourceInfo: HierarchyInfo, targetInfo: HierarchyInfo): string {
+    const relation = relationFamilyFromText(link.type, source.entity.label, source.entity.metadata?.['preview'], target.entity.label, target.entity.metadata?.['preview']);
+    if (relation) return relation;
+    if (sourceInfo.lane === targetInfo.lane) return sourceInfo.treeKind;
+    if (sourceInfo.lane === 'causal' || targetInfo.lane === 'causal') return 'causal';
+    if (sourceInfo.lane === 'temporal' || targetInfo.lane === 'temporal') return 'temporal';
+    if (/bridge|co.?occur|relationship|relation|fact/.test(String(link.type || '').toLowerCase())) return 'relationship';
+    return 'bridge';
 }
 
-function clamp(value: number, min: number, max: number): number {
-    return Math.min(max, Math.max(min, value));
+function isBridgeLink(link: GalaxyEdge, source: HierarchyInfo, target: HierarchyInfo): boolean {
+    const type = String(link.type || '').toLowerCase();
+    return source.capId !== target.capId || source.lane !== target.lane || /bridge|co.?occur|causal|temporal/.test(type);
 }
 
-function finite(value: unknown): number {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : 0;
+function normalizePhase(value: number): number {
+    const finiteValue = Number.isFinite(value) ? value : 0;
+    return ((finiteValue % 1) + 1) % 1;
 }

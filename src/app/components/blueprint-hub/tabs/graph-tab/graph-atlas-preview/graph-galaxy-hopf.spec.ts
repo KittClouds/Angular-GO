@@ -69,6 +69,41 @@ describe('Hopf galaxy visualization data', () => {
         expect(scene.hopfRibbons).toBeUndefined();
     });
 
+    it('turns cross-base Hopf links into faint braid guides', () => {
+        const nodes: GalaxyRenderableNode[] = [
+            hopfTarget('embed:entity:kai', 'Kai', 'anchor', 'embed:entity:kai', 0),
+            hopfTarget('embed:graph-fact:kai', 'Kai fact', 'fiber', 'embed:entity:kai', 0.32),
+            hopfTarget('embed:entity:hazel', 'Hazel', 'anchor', 'embed:entity:hazel', 0),
+            hopfTarget('embed:graph-fact:hazel', 'Hazel fact', 'fiber', 'embed:entity:hazel', 0.68),
+        ];
+        const scene = buildGalaxyScene(nodes, [
+            { id: 'same-base', sourceId: 'embed:entity:kai', targetId: 'embed:graph-fact:kai', type: 'embedding-backbone', confidence: 0.9 },
+            { id: 'cross-base', sourceId: 'embed:graph-fact:kai', targetId: 'embed:graph-fact:hazel', type: 'embedding-bridge', confidence: 0.9 },
+        ], mergeGalaxySettings({ layoutMode: 'hopfProjection' }));
+
+        const cross = scene.links.find((link) => link.id === 'cross-base')!;
+        expect(cross.alpha).toBeLessThanOrEqual(0.07);
+        expect(scene.hopfRibbons?.some((ribbon) => ribbon.guideKind === 'crossFiberBraid')).toBe(true);
+    });
+
+    it('keeps low-count semantic fibers visible when high-importance fibers fill the guide budget', () => {
+        const crowded = Array.from({ length: 64 }, (_, index) =>
+            hopfTarget(`embed:entity:busy-${index}`, `Busy ${index}`, 'anchor', `embed:entity:busy-${index}`, index / 64),
+        );
+        const status = hopfTarget('embed:memory:kai-status', 'Kai status', 'fiber', 'embed:entity:kai:hopf:memory-status', 0.4);
+        status.kind = 'memory-state';
+        status.totalMentions = 1;
+        status.metadata = {
+            sourceType: 'memoryState',
+            hopf: { role: 'fiber', baseId: 'embed:entity:kai:hopf:memory-status', fiberKind: 'memory-state', phase: 0.4 },
+        };
+        const scene = buildGalaxyScene([...crowded, status], [], mergeGalaxySettings({ layoutMode: 'hopfProjection' }));
+
+        const dataRibbons = scene.hopfRibbons?.filter((ribbon) => ribbon.guideKind === 'dataFiber') || [];
+        expect(dataRibbons.length).toBeLessThanOrEqual(48);
+        expect(dataRibbons.some((ribbon) => ribbon.nodeIds.includes('embed:memory:kai-status'))).toBe(true);
+    });
+
     it('clamps Hopf visual intensity independently of hybrid shell opacity', () => {
         const high = mergeGalaxySettings({ hopfSpaceIntensity: 99, hybridShellOpacity: 2 });
         const low = mergeGalaxySettings({ hopfSpaceIntensity: -4, hybridShellOpacity: -3 });
@@ -80,6 +115,25 @@ describe('Hopf galaxy visualization data', () => {
         expect(mergeGalaxySettings().hopfSpaceVisible).toBe(true);
     });
 });
+
+function hopfTarget(
+    id: string,
+    label: string,
+    role: 'anchor' | 'fiber',
+    baseId: string,
+    phase: number,
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind: role === 'anchor' ? 'entity' : 'graph-fact',
+        atlasX: phase + 0.12,
+        atlasY: 0.28,
+        atlasZ: 0.42,
+        totalMentions: 4,
+        metadata: { sourceType: role, hopf: { role, baseId, fiberKind: 'identity', phase } },
+    };
+}
 
 function positionOf(node: { x: number; y: number; z: number }): [number, number, number] {
     return [

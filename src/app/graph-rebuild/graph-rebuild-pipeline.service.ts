@@ -43,8 +43,6 @@ const POSTPROCESS_FACT_CAPABILITIES: AtlasCapabilityId[] = [
     'causalGraph',
 ];
 
-const POSTPROCESS_DISCOVERY_CAPABILITY: AtlasCapabilityId = 'assertedKernel';
-
 const PROJECTION_CAPABILITIES: Array<{ capability: AtlasCapabilityId; mode: GraphIndexProjectionMode }> = [
     { capability: 'hybridManifold', mode: 'hybrid' },
     { capability: 'hopfProjection', mode: 'hopf' },
@@ -248,13 +246,18 @@ export class GraphRebuildPipelineService {
             assertStageCompleted(nerStage);
 
             for (const capability of FULL_INDEX_CAPABILITIES) {
+                let rawStageResult: unknown;
                 const receipt = await this.runCapabilityStage(capability, options, capability === 'nliAdjudication'
                     ? (rawResult) => {
+                        rawStageResult = rawResult;
                         relationshipHints = relationshipHintsFromNliResult(rawResult);
                     }
                     : undefined);
                 stageReceipts.push(receipt);
                 assertStageCompleted(receipt);
+                if (capability === 'nliAdjudication') {
+                    appendNliStagingStages(stageReceipts, rawStageResult);
+                }
             }
 
             const graphStage = await this.runStage('graphSnapshot', 'Graph Rebuild Snapshot', async () => {
@@ -373,6 +376,7 @@ export class GraphRebuildPipelineService {
         const stageReceipts: GraphIndexStageReceipt[] = [];
         const projectionReceipts: GraphIndexProjectionReceipt[] = [];
         const snapshotRef: { value?: GraphRebuildSnapshot } = {};
+        let postProcessFingerprintValue: string | undefined;
         try {
             const docs = await this.loadScopedDocuments(request.scope.noteIds);
             const scope = expandScopeNoteIds(request.scope, docs);
@@ -382,6 +386,7 @@ export class GraphRebuildPipelineService {
                 ? smartGraphRegistry.getAllEntities()
                 : request.entities;
             const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection);
+            postProcessFingerprintValue = fingerprint;
             const postProcessCache = await this.safeLoadPostProcessCache(scope.scopeId, fingerprint);
             const cachedReceipt = await this.safeLoadReceipt(scope.scopeId);
             const cachedSnapshot = postProcessCache?.snapshot || await this.safeLoadSnapshot(scope.scopeId);
@@ -428,19 +433,29 @@ export class GraphRebuildPipelineService {
             }
 
             let relationshipHints: GraphRebuildRelationshipHint[] = [];
-            const discoveryStage = await this.runPostProcessDiscoveryStage(postProcessStageOptions);
+            const discoveryStage = skippedPostProcessDiscoveryStage(runStarted, docs.length);
             stageReceipts.push(discoveryStage);
-            assertStageCompleted(discoveryStage);
+            stageReceipts.push(signalCandidatePlanStage({
+                discoveryStage,
+                docs,
+                entities,
+                cachedSnapshot,
+            }));
 
             for (const capability of POSTPROCESS_FACT_CAPABILITIES) {
+                let rawStageResult: unknown;
                 const captureRelationshipHints = capability === 'nliAdjudication'
                     ? (rawResult: unknown) => {
+                        rawStageResult = rawResult;
                         relationshipHints = relationshipHintsFromNliResult(rawResult);
                     }
                     : undefined;
                 const receipt = await this.runCapabilityStage(capability, postProcessStageOptions, captureRelationshipHints);
                 stageReceipts.push(receipt);
                 assertStageCompleted(receipt);
+                if (capability === 'nliAdjudication') {
+                    appendNliStagingStages(stageReceipts, rawStageResult);
+                }
             }
 
             const graphStage = await this.runStage('postProcessSnapshot', 'Postprocess Snapshot', async () => {
@@ -477,6 +492,7 @@ export class GraphRebuildPipelineService {
             if (!completedSnapshot) {
                 throw new Error('Postprocess stage completed without a snapshot.');
             }
+            appendSignalCoverageStages(stageReceipts, completedSnapshot);
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             for (const projection of PROJECTION_CAPABILITIES) {
@@ -511,6 +527,7 @@ export class GraphRebuildPipelineService {
                 scope: request.scope,
                 policy: request.policy,
                 postProcessMode: 'full',
+                postProcessFingerprint: snapshot ? postProcessFingerprintValue : undefined,
                 modelSelection: request.modelSelection,
                 modelReadiness,
                 startedAt: runStarted,
@@ -535,6 +552,7 @@ export class GraphRebuildPipelineService {
         policy: GraphIndexRunRequest['policy'];
         postProcessMode?: GraphIndexPostProcessMode;
         postProcessFingerprint?: string;
+        postProcessDiscoveryFingerprint?: string;
         postProcessCacheHit?: boolean;
         modelSelection: GraphIndexRunRequest['modelSelection'];
         modelReadiness: GraphIndexModelReadiness[];
@@ -556,6 +574,7 @@ export class GraphRebuildPipelineService {
             modelSelection: input.modelSelection,
             postProcessMode: input.postProcessMode,
             postProcessFingerprint: input.postProcessFingerprint,
+            postProcessDiscoveryFingerprint: input.postProcessDiscoveryFingerprint,
             postProcessCacheHit: input.postProcessCacheHit,
             modelReadiness: input.modelReadiness,
             startedAt: input.startedAt,
@@ -652,25 +671,6 @@ export class GraphRebuildPipelineService {
         } catch {
             return null;
         }
-    }
-
-    private async runPostProcessDiscoveryStage(options: AtlasRunOptions): Promise<GraphIndexStageReceipt> {
-        return this.runStage('postProcessDiscovery', 'Entity Discovery', async () => {
-            const result = await this.atlasRuntime.runCapability(POSTPROCESS_DISCOVERY_CAPABILITY, {
-                ...options,
-                skipModelWarm: true,
-            });
-            const counters = numberCounts(result.rawResult);
-            const suggestions = counters['candidateSuggestions'] || counters['suggestions'] || 0;
-            const documents = counters['indexedDocuments'] || counters['processedDocuments'] || counters['documents'] || 0;
-            return {
-                outputCount: suggestions || sumOutputCounts(counters),
-                counters,
-                message: suggestions
-                    ? `${suggestions} review candidates from ${documents || 0} documents`
-                    : 'Entity discovery refreshed without new review candidates',
-            };
-        });
     }
 
     private async runNerDeltas(docs: ScopedDocument[]): Promise<Record<string, number>> {
@@ -882,6 +882,129 @@ function appendSnapshotTimingStages(
     ));
 }
 
+function appendSignalCoverageStages(
+    stageReceipts: GraphIndexStageReceipt[],
+    snapshot: GraphRebuildSnapshot,
+): void {
+    const targetCounts = countEmbeddingTargetFamilies(snapshot);
+    const targetTotal = snapshot.embeddingTargets?.length || 0;
+    stageReceipts.push(instrumentationStage(
+        'signalTargetCoverage',
+        'Signal Target Coverage',
+        0,
+        {
+            targets: targetTotal,
+            entityTargets: targetCounts['entity'],
+            graphFactTargets: targetCounts['graphFact'],
+            eventTargets: targetCounts['event'],
+            temporalFactTargets: targetCounts['temporalFact'],
+            causalFactTargets: targetCounts['causalFact'],
+            memoryStateTargets: targetCounts['memoryState'],
+            anchorTargets: targetCounts['anchor'],
+            chunkTargets: targetCounts['chunk'],
+            noteTargets: targetCounts['note'],
+            acceptedRelationships: snapshot.counters.acceptedRelationships || 0,
+            reviewRelationships: snapshot.counters.reviewRelationships || 0,
+            rejectedRelationships: snapshot.counters.rejectedRelationships || 0,
+            events: snapshot.counters.events || 0,
+            temporalEdges: snapshot.counters.temporalEdges || 0,
+            causalEdges: snapshot.counters.causalEdges || 0,
+            memoryState: snapshot.counters.memoryState || 0,
+        },
+        'Embedding target family coverage and graph signal starvation audit',
+    ));
+}
+
+function appendNliStagingStages(stageReceipts: GraphIndexStageReceipt[], rawResult: unknown): void {
+    const stages = arrayField(rawResult, 'stageSummaries');
+    for (const row of stages) {
+        if (!row || typeof row !== 'object') continue;
+        const record = row as Record<string, unknown>;
+        const stage = stringField(record, 'stage');
+        const label = nliStageLabel(stage);
+        if (!label) continue;
+        const durationMs = numberField(record, 'durationMs');
+        const counters = numberCounts(record['counts']);
+        stageReceipts.push(instrumentationStage(
+            `nli${stage.slice(0, 1).toUpperCase()}${stage.slice(1)}`,
+            label,
+            durationMs,
+            counters,
+            `${label} completed`,
+        ));
+    }
+}
+
+function nliStageLabel(stage: string): string {
+    switch (stage) {
+        case 'candidatePlan': return 'NLI Candidate Plan';
+        case 'modelWarm': return 'NLI Model Warm';
+        case 'classification': return 'NLI Classification';
+        case 'apply': return 'NLI Apply';
+        default: return '';
+    }
+}
+
+function signalCandidatePlanStage(input: {
+    discoveryStage: GraphIndexStageReceipt;
+    docs: ScopedDocument[];
+    entities: Array<{ id: string }>;
+    cachedSnapshot: GraphRebuildSnapshot | null | undefined;
+}): GraphIndexStageReceipt {
+    const discovery = input.discoveryStage.counters || {};
+    const discoveryCandidates = discovery['candidateSuggestions'] || discovery['suggestions'] || 0;
+    const exportableMentions = discovery['exportableMentions'] || discovery['mentions'] || 0;
+    const documentChars = input.docs.reduce((sum, doc) => sum + doc.plainText.length, 0);
+    const prior = input.cachedSnapshot;
+    return instrumentationStage(
+        'signalCandidatePlan',
+        'Signal Candidate Plan',
+        0,
+        {
+            documents: input.docs.length,
+            documentChars,
+            entities: input.entities.length,
+            discoveryCandidates,
+            exportableMentions,
+            discoveryCacheHit: discovery['discoveryCacheHit'] || 0,
+            discoverySkipped: discovery['postprocessDiscoverySkipped'] || 0,
+            priorTargets: prior?.counters.embeddingTargets || 0,
+            priorGraphLinks: prior?.counters.graphAwareLinkSuggestions || 0,
+            priorEntityLinks: prior?.counters.entityLinkSuggestions || 0,
+            plannedModelCalls: 0,
+        },
+        'Candidate ledger ready for label-conditioned signal adjudication',
+    );
+}
+
+function countEmbeddingTargetFamilies(snapshot: GraphRebuildSnapshot): Record<string, number> {
+    const counts: Record<string, number> = {
+        note: 0,
+        chunk: 0,
+        entity: 0,
+        anchor: 0,
+        graphFact: 0,
+        event: 0,
+        temporalFact: 0,
+        causalFact: 0,
+        memoryState: 0,
+    };
+    for (const target of snapshot.embeddingTargets || []) {
+        const key = normalizedTargetFamily(target.kind);
+        counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+}
+
+function normalizedTargetFamily(kind: string): string {
+    const normalized = String(kind || '').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase().replace(/[-_\s]+/g, '');
+    if (normalized === 'graphfact') return 'graphFact';
+    if (normalized === 'temporalfact') return 'temporalFact';
+    if (normalized === 'causalfact') return 'causalFact';
+    if (normalized === 'memorystate') return 'memoryState';
+    return normalized || 'unknown';
+}
+
 function instrumentationStage(
     id: string,
     label: string,
@@ -944,7 +1067,7 @@ function capabilityLabel(id: AtlasCapabilityId): string {
         case 'causalGraph': return 'Causal Rows';
         case 'hybridManifold': return 'Hybrid Projection';
         case 'hopfProjection': return 'Hopf Projection';
-        case 'lorentzForest': return 'Lorentz Forest';
+        case 'lorentzForest': return 'Hierarchy Caps Projection';
         case 'productManifold': return 'Product Manifold';
         default: return id;
     }
@@ -959,11 +1082,40 @@ function numberCounts(value: unknown, prefix = ''): Record<string, number> {
             counts[name] = raw;
         } else if (Array.isArray(raw)) {
             counts[name] = raw.length;
+            Object.assign(counts, atlasStageSummaryCounts(raw));
         } else if (raw && typeof raw === 'object') {
             Object.assign(counts, numberCounts(raw, name));
         }
     }
     return counts;
+}
+
+function atlasStageSummaryCounts(value: unknown[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const row = item as Record<string, unknown>;
+        const stage = typeof row['stage'] === 'string' ? row['stage'] : '';
+        if (!stage) continue;
+        const prefix = stage.replace(/[^a-z0-9]+/gi, '');
+        if (!prefix) continue;
+        const duration = row['durationMs'];
+        if (typeof duration === 'number' && Number.isFinite(duration)) {
+            counts[`${prefix}Ms`] = duration;
+        }
+        const stageCounts = row['counts'];
+        if (!stageCounts || typeof stageCounts !== 'object' || Array.isArray(stageCounts)) continue;
+        for (const [key, raw] of Object.entries(stageCounts as Record<string, unknown>)) {
+            if (typeof raw === 'number' && Number.isFinite(raw)) {
+                counts[`${prefix}${capitalizeCounterKey(key)}`] = raw;
+            }
+        }
+    }
+    return counts;
+}
+
+function capitalizeCounterKey(value: string): string {
+    return value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1)}` : value;
 }
 
 function projectionTimingCounters(counters: Record<string, number>, durationMs: number): Record<string, number> {
@@ -1075,6 +1227,25 @@ function skippedStage(
         outputCount: 0,
         counters: { cacheHit: 1 },
         message,
+    };
+}
+
+function skippedPostProcessDiscoveryStage(startedAt: number, documentCount: number): GraphIndexStageReceipt {
+    const now = Date.now();
+    return {
+        id: 'postProcessDiscovery',
+        label: 'Entity Discovery',
+        status: 'skipped',
+        startedAt: now,
+        completedAt: now,
+        durationMs: Math.max(0, now - startedAt),
+        outputCount: 0,
+        counters: {
+            postprocessDiscoverySkipped: 1,
+            documents: documentCount,
+            plannedModelCalls: 0,
+        },
+        message: 'Entity discovery is handled by Build Clean Graph; postprocess skips the deep NER pass.',
     };
 }
 

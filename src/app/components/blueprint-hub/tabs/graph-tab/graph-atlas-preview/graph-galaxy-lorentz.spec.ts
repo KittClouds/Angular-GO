@@ -45,6 +45,39 @@ describe('Lorentz tree galaxy visualization data', () => {
         ]));
     });
 
+    it('uses the Lorentz slot as hierarchy caps for graph rebuild targets', () => {
+        const scene = buildGalaxyScene([
+            capNode('doc', 'Document', 'note', 0.18, 0.66, 'documentStructure', [0.05, 0.1, 1]),
+            capNode('chunk', 'Sharp chunk', 'chunk', 0.93, 0.18, 'documentStructure', [0.12, 0.18, 1]),
+            capNode('cause', 'Cause bridge', 'causalFact', 0.76, 0.34, 'causal', [1, -0.2, 0.22]),
+        ], [
+            { id: 'doc-chunk', sourceId: 'doc', targetId: 'chunk', type: 'note-chunk', confidence: 0.9 },
+            { id: 'chunk-cause', sourceId: 'chunk', targetId: 'cause', type: 'causal', confidence: 0.84 },
+        ], mergeGalaxySettings({ layoutMode: 'lorentzTree' }));
+        const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
+
+        expect(scene.layoutMode).toBe('lorentzTree');
+        expect(byId.get('chunk')!.depth).toBeGreaterThan(byId.get('doc')!.depth);
+        expect(byId.get('cause')!.depth).toBeGreaterThan(byId.get('doc')!.depth);
+        expect(scene.lorentzGuides?.some((guide) => guide.id.startsWith('caps:boundary:'))).toBe(true);
+        expect(scene.lorentzGuides?.some((guide) => guide.treeKind === 'causal')).toBe(true);
+    });
+
+    it('keeps canon entities outside derived facts and context in hierarchy caps', () => {
+        const scene = buildGalaxyScene([
+            capNode('kai', 'Kai', 'entity', 0.86, 0.08, 'entity', [0.2, 0.1, 1], 0.94, 'CHARACTER'),
+            capNode('fact', 'Kai trusts Hazel', 'graphFact', 0.68, 0.24, 'relationship', [0.2, 0.1, 1], 0.72),
+            capNode('context', 'Unresolved memory', 'memoryState', 0.48, 0.58, 'evidence', [0.2, 0.1, 1], 0.44),
+        ], [
+            { id: 'entity-fact', sourceId: 'kai', targetId: 'fact', type: 'supports', confidence: 0.82 },
+            { id: 'fact-context', sourceId: 'fact', targetId: 'context', type: 'memory', confidence: 0.62 },
+        ], mergeGalaxySettings({ layoutMode: 'lorentzTree' }));
+        const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
+
+        expect(byId.get('kai')!.depth).toBeGreaterThan(byId.get('fact')!.depth);
+        expect(byId.get('fact')!.depth).toBeGreaterThan(byId.get('context')!.depth);
+    });
+
     it('does not emit Lorentz guide data for Hybrid or Hopf universes', () => {
         const atlas = buildLorentzAtlas(lorentzSnapshot());
         const hybrid = buildGalaxyScene(atlas.nodes, atlas.edges, mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
@@ -106,6 +139,40 @@ function membership(treeId: string, nodeId: string, parentNodeId: string | null,
         confidence: 1,
         sourceCount: 2,
         geometryVersion: 'lorentz_h4_forest_v1',
+    };
+}
+
+function capNode(
+    id: string,
+    label: string,
+    sourceType: string,
+    specificity: number,
+    ambiguity: number,
+    treeKind: string,
+    capDirection: [number, number, number],
+    targetConfidence = 0.72,
+    kind = sourceType,
+) {
+    return {
+        id,
+        label,
+        kind,
+        atlasX: capDirection[0],
+        atlasY: capDirection[1],
+        atlasZ: capDirection[2],
+        totalMentions: 2,
+        metadata: {
+            sourceType,
+            targetConfidence,
+            lorentz: {
+                capId: `cap:${treeKind}`,
+                capDirection,
+                capPhase: 0.25,
+                specificity,
+                ambiguity,
+                primaryTreeKind: treeKind,
+            },
+        },
     };
 }
 

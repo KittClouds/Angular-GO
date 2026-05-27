@@ -153,6 +153,73 @@ describe('Graph galaxy canonical colors', () => {
     });
 });
 
+describe('Graph galaxy hybrid hierarchy', () => {
+    it('keeps Hybrid as the same shell while promoting broad documents inward from concrete evidence', () => {
+        const scene = buildGalaxyScene([
+            hybridNode('doc-root', 'Red Mesa', 'doc', 'note', 1, 0.1, 0, { lane: 'document', specificity: 0.24, ambiguity: 0.3, level: 0 }),
+            hybridNode('chunk-leaf', 'Claimant mark', 'leaf', 'chunk', 1, 0.1, 0, { lane: 'document', specificity: 0.93, ambiguity: 0.02, level: 4 }),
+        ], [], mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
+        const doc = scene.nodes.find((node) => node.entity.id === 'doc-root')!;
+        const chunk = scene.nodes.find((node) => node.entity.id === 'chunk-leaf')!;
+
+        expect(scene.layoutMode).toBe('hybridSpace');
+        expect(hybridRadiusOf(doc)).toBeLessThan(hybridRadiusOf(chunk) - 0.08);
+        expect(hybridRadiusOf(chunk)).toBeGreaterThan(0.96);
+    });
+
+    it('gives temporal and causal facts typed directions without leaving the Hybrid lane', () => {
+        const scene = buildGalaxyScene([
+            hybridNode('time-1', 'Before the tower pull', 'graph-fact', 'temporal-fact', 1, 0, 0, { lane: 'temporal', specificity: 0.78, ambiguity: 0.04, phase: 0.25, level: 2 }),
+            hybridNode('cause-1', 'Signal causes recall', 'graph-fact', 'causal-fact', 0, 0, 1, { lane: 'causal', specificity: 0.74, ambiguity: 0.04, phase: 0.5, level: 3 }),
+        ], [{ id: 'causal-link', sourceId: 'time-1', targetId: 'cause-1', type: 'causal', confidence: 0.9 }], mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
+        const temporal = scene.nodes.find((node) => node.entity.id === 'time-1')!;
+        const causal = scene.nodes.find((node) => node.entity.id === 'cause-1')!;
+
+        expect(scene.layoutMode).toBe('hybridSpace');
+        expect(Math.abs(temporal.y / Math.hypot(temporal.x, temporal.y, temporal.z))).toBeLessThan(0.28);
+        expect(causal.x).toBeGreaterThan(0.35);
+        expect(scene.links[0].alpha).toBeGreaterThan(0.1);
+    });
+});
+
 function stable(index: number, salt: number): number {
     return (((index * 37 + salt * 17) % 101) / 50) - 1;
+}
+
+function hybridRadiusOf(node: { x: number; y: number; z: number }): number {
+    return Math.hypot(node.x, node.y, node.z) / 2.32;
+}
+
+function hybridNode(
+    id: string,
+    label: string,
+    sourceType: string,
+    kind: string,
+    atlasX: number,
+    atlasY: number,
+    atlasZ: number,
+    hierarchy: { lane: string; specificity: number; ambiguity: number; phase?: number; level: number },
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind,
+        totalMentions: 1,
+        atlasX,
+        atlasY,
+        atlasZ,
+        metadata: {
+            sourceType,
+            productLaneKind: hierarchy.lane,
+            graphKind: kind,
+            graphRelationFamily: hierarchy.lane === 'temporal' || hierarchy.lane === 'causal' ? hierarchy.lane : undefined,
+            lorentz: {
+                dominantLane: hierarchy.lane,
+                specificity: hierarchy.specificity,
+                ambiguity: hierarchy.ambiguity,
+                capPhase: hierarchy.phase ?? 0,
+                level: hierarchy.level,
+            },
+        },
+    };
 }

@@ -23,6 +23,8 @@ const LORENTZ_TUBE_RADIAL_SEGMENTS = 5;
 const PRODUCT_KLEIN_RADIUS = 2.18;
 const PRODUCT_KLEIN_RING_SEGMENTS = 96;
 const PRODUCT_HOPF_TUBE_SCALE = 0.75;
+const CAPS_SURFACE_EDGE_MIN_RADIUS = 1.72;
+const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
 type GuideSurface = 'default' | 'product';
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
@@ -41,6 +43,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private readonly ortho = new THREE.OrthographicCamera(-4, 4, 3, -3, 0.01, 100);
     private readonly color = new THREE.Color();
     private readonly densityVector = new THREE.Vector3();
+    private readonly edgeSurfacePoint = new THREE.Vector3();
     private readonly force = new GraphGalaxyForceController();
     private readonly dragVector = new THREE.Vector3();
     private readonly atomTexture = makeAtomTexture();
@@ -428,7 +431,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         positionAttr.array.fill(0);
         colorAttr.array.fill(0);
         let cursor = 0;
-        const steps = this.settings.edgeMode === 'curved' ? MAX_EDGE_SEGMENTS : 1;
+        const baseSteps = this.settings.edgeMode === 'curved' ? MAX_EDGE_SEGMENTS : 1;
         const strokes = this.edgeStrokeCount();
         const strokeOffset = this.edgeStrokeOffset();
         for (let edge = 0; edge < data.edgePairs.length / 2; edge++) {
@@ -437,6 +440,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             const target = data.edgePairs[edge * 2 + 1];
             const ax = positions[source * 3], ay = positions[source * 3 + 1], az = positions[source * 3 + 2];
             const bx = positions[target * 3], by = positions[target * 3 + 1], bz = positions[target * 3 + 2];
+            const surfaceEdge = this.capsSurfaceEdge(data, ax, ay, az, bx, by, bz);
+            const steps = surfaceEdge ? MAX_EDGE_SEGMENTS : baseSteps;
             const curveScale = THREE.MathUtils.clamp(this.settings.edgeCurveStrength, 0.25, 1.2) * (interGalaxy ? 0.92 : 0.58);
             const lift = this.settings.edgeMode === 'curved'
                 ? (0.08 + Math.abs(source - target) * 0.002) * curveScale + (interGalaxy ? 0.18 : 0)
@@ -453,8 +458,13 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
                 for (let step = 0; step < steps; step++) {
                     const t0 = step / steps;
                     const t1 = (step + 1) / steps;
-                    cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t0);
-                    cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t1);
+                    if (surfaceEdge) {
+                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t0);
+                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t1);
+                    } else {
+                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t0);
+                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t1);
+                    }
                 }
             }
         }
@@ -1270,7 +1280,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
 
     private sortedHopfRibbons(ribbons: GalaxyHopfRibbonView[], surface: GuideSurface): GalaxyHopfRibbonView[] {
         if (surface === 'default') return ribbons;
-        const rank = (kind: GalaxyHopfRibbonView['guideKind']) => kind === 'dataFiber' ? 0 : kind === 'torusBand' ? 1 : kind === 'spaceFiber' ? 2 : 3;
+        const rank = (kind: GalaxyHopfRibbonView['guideKind']) =>
+            kind === 'dataFiber' ? 0 : kind === 'crossFiberBraid' ? 1 : kind === 'torusBand' ? 2 : kind === 'spaceFiber' ? 3 : 4;
         return [...ribbons].sort((left, right) => rank(left.guideKind) - rank(right.guideKind) || right.importance - left.importance);
     }
 
@@ -1319,7 +1330,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private writeHopfRibbonColor(colors: Float32Array, offset: number, ribbon: GalaxyHopfRibbonView, index: number, phase: number, surface: GuideSurface): void {
         const palette = this.hopfRibbonPalette(ribbon, index, phase, surface);
         this.writeHslColor(colors, offset, palette.h, palette.s, palette.l);
-        if (ribbon.guideKind === 'dataFiber') {
+        if (ribbon.guideKind === 'dataFiber' || ribbon.guideKind === 'crossFiberBraid') {
             const mix = surface === 'product' ? 0.44 : 0.2;
             colors[offset] = THREE.MathUtils.lerp(colors[offset], ribbon.color.r, mix);
             colors[offset + 1] = THREE.MathUtils.lerp(colors[offset + 1], ribbon.color.g, mix);
@@ -1333,6 +1344,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             switch (ribbon.guideKind) {
                 case 'dataFiber':
                     return { h: 0.48 + seed * 0.26 + phase * 0.04, s: 0.8, l: 0.52 + Math.sin(phase * Math.PI) * 0.047 };
+                case 'crossFiberBraid':
+                    return { h: 0.5 + seed * 0.22 + phase * 0.035, s: 0.64, l: 0.38 };
                 case 'torusBand': {
                     const latitude = this.torusBandIndex(ribbon.id);
                     return { h: 0.62 + latitude * 0.036 + seed * 0.012, s: 0.48, l: 0.2 };
@@ -1346,6 +1359,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         switch (ribbon.guideKind) {
             case 'dataFiber':
                 return { h: 0.5 + seed * 0.3 + phase * 0.055, s: 0.68, l: 0.47 + Math.sin(phase * Math.PI) * 0.05 };
+            case 'crossFiberBraid':
+                return { h: 0.5 + seed * 0.24 + phase * 0.04, s: 0.58, l: 0.36 + Math.sin(phase * Math.PI) * 0.024 };
             case 'torusBand': {
                 const latitude = this.torusBandIndex(ribbon.id);
                 return { h: 0.62 + latitude * 0.045 + seed * 0.018 + phase * 0.025, s: 0.64, l: 0.34 };
@@ -1362,9 +1377,12 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const intensity = THREE.MathUtils.clamp(this.settings.hopfSpaceIntensity, 0, 1.4);
         if (surface === 'product') {
             const data = kind === 'dataFiber';
+            const braid = kind === 'crossFiberBraid';
+            if (braid) return THREE.MathUtils.clamp((0.018 + this.settings.glow * 0.007) * weight * intensity, 0, 0.052);
             const base = data ? 0.036 + this.settings.glow * 0.0215 : 0.0105 + this.settings.glow * 0.005;
             return THREE.MathUtils.clamp(base * weight * intensity, 0, data ? 0.13 : 0.032);
         }
+        if (kind === 'crossFiberBraid') return THREE.MathUtils.clamp((0.018 + this.settings.glow * 0.009) * weight * intensity, 0, 0.07);
         return THREE.MathUtils.clamp((0.035 + this.settings.glow * 0.024) * weight * intensity, 0, 0.16);
     }
 
@@ -1387,6 +1405,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         if (kind === 'dataFiber') {
             return THREE.MathUtils.clamp((glow ? 0.03 : 0.12) * intensity * (0.76 + globalGlow * 0.24), 0, glow ? 0.055 : 0.22);
         }
+        if (kind === 'crossFiberBraid') return 0;
         if (kind === 'torusBand') {
             return THREE.MathUtils.clamp((glow ? 0.012 : 0.045) * intensity * (0.8 + globalGlow * 0.18), 0, glow ? 0.026 : 0.085);
         }
@@ -1398,8 +1417,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             if (kind === 'dataFiber') return (layer === 'tubeGlow' ? 0.0216 : 0.00675) * PRODUCT_HOPF_TUBE_SCALE;
             return 0.002;
         }
-        if (kind === 'dataFiber') return layer === 'tubeGlow' ? 0.018 : 0.0055;
-        if (kind === 'torusBand') return layer === 'tubeGlow' ? 0.012 : 0.0038;
+        if (kind === 'dataFiber') return layer === 'tubeGlow' ? 0.012 : 0.0055;
+        if (kind === 'torusBand') return layer === 'tubeGlow' ? 0.008 : 0.0038;
         return 0.003;
     }
 
@@ -1408,6 +1427,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             switch (kind) {
                 case 'dataFiber':
                     return 1.58;
+                case 'crossFiberBraid':
+                    return 0.38;
                 case 'spaceFiber':
                     return 0.16;
                 case 'torusBand':
@@ -1419,6 +1440,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         switch (kind) {
             case 'dataFiber':
                 return 1.22;
+            case 'crossFiberBraid':
+                return 0.56;
             case 'spaceFiber':
                 return 0.34;
             case 'torusBand':
@@ -1651,6 +1674,49 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         return best;
     }
 
+    private capsSurfaceEdge(data: GalaxySceneV2, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+        if (this.mode !== '3d' || data.layoutMode !== 'lorentzTree') return false;
+        const ar = Math.hypot(ax, ay, az);
+        const br = Math.hypot(bx, by, bz);
+        if (ar < CAPS_SURFACE_EDGE_MIN_RADIUS || br < CAPS_SURFACE_EDGE_MIN_RADIUS) return false;
+        if (Math.abs(ar - br) > CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
+        return dot > -0.985;
+    }
+
+    private capsSurfacePoint(out: THREE.Vector3, ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): boolean {
+        const ar = Math.hypot(ax, ay, az);
+        const br = Math.hypot(bx, by, bz);
+        if (ar <= 0.000001 || br <= 0.000001) return false;
+        const anx = ax / ar, any = ay / ar, anz = az / ar;
+        const bnx = bx / br, bny = by / br, bnz = bz / br;
+        const radius = THREE.MathUtils.lerp(ar, br, t);
+        const dot = THREE.MathUtils.clamp(anx * bnx + any * bny + anz * bnz, -1, 1);
+
+        if (dot > 0.9995) {
+            const x = THREE.MathUtils.lerp(anx, bnx, t);
+            const y = THREE.MathUtils.lerp(any, bny, t);
+            const z = THREE.MathUtils.lerp(anz, bnz, t);
+            const len = Math.hypot(x, y, z);
+            if (len <= 0.000001) return false;
+            out.set(x / len * radius, y / len * radius, z / len * radius);
+            return true;
+        }
+
+        if (dot < -0.985) return false;
+        const theta = Math.acos(dot);
+        const sinTheta = Math.sin(theta);
+        if (Math.abs(sinTheta) <= 0.000001) return false;
+        const sourceScale = Math.sin((1 - t) * theta) / sinTheta;
+        const targetScale = Math.sin(t * theta) / sinTheta;
+        out.set(
+            (anx * sourceScale + bnx * targetScale) * radius,
+            (any * sourceScale + bny * targetScale) * radius,
+            (anz * sourceScale + bnz * targetScale) * radius,
+        );
+        return true;
+    }
+
     private writeEdgeVertex(
         positionAttr: THREE.BufferAttribute,
         colorAttr: THREE.BufferAttribute,
@@ -1669,12 +1735,41 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     ): number {
         const curve = lift * Math.sin(Math.PI * t);
         positionAttr.setXYZ(cursor, THREE.MathUtils.lerp(ax, bx, t), THREE.MathUtils.lerp(ay, by, t) + curve, THREE.MathUtils.lerp(az, bz, t));
+        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t);
+        return cursor + 1;
+    }
+
+    private writeCapsSurfaceEdgeVertex(
+        positionAttr: THREE.BufferAttribute,
+        colorAttr: THREE.BufferAttribute,
+        cursor: number,
+        data: GalaxySceneV2,
+        focus: GalaxyFocusMask,
+        edge: number,
+        ax: number,
+        ay: number,
+        az: number,
+        bx: number,
+        by: number,
+        bz: number,
+        ox: number,
+        oy: number,
+        t: number,
+    ): number {
+        if (!this.capsSurfacePoint(this.edgeSurfacePoint, ax, ay, az, bx, by, bz, t)) {
+            return this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, 0, t);
+        }
+        positionAttr.setXYZ(cursor, this.edgeSurfacePoint.x + ox, this.edgeSurfacePoint.y + oy, this.edgeSurfacePoint.z);
+        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t);
+        return cursor + 1;
+    }
+
+    private writeEdgeColor(colorAttr: THREE.BufferAttribute, cursor: number, data: GalaxySceneV2, focus: GalaxyFocusMask, edge: number, t: number): void {
         const color = this.edgeColor(data, edge, t);
         const bridgeBoost = data.edgeKinds[edge] === 1 ? 1.18 : 1;
         const glowBoost = 0.82 + THREE.MathUtils.clamp(this.settings.glow, 0, 1.8) * 0.2;
         const boost = (focus.hasFocus ? (focus.edgeLevels[edge] ? 1.04 : 0.1) : 0.76) * bridgeBoost * glowBoost;
         colorAttr.setXYZ(cursor, Math.min(0.78, color.r * boost), Math.min(0.86, color.g * boost), Math.min(0.88, color.b * boost));
-        return cursor + 1;
     }
 
     private edgeColor(data: GalaxySceneV2, edge: number, t: number): THREE.Color {

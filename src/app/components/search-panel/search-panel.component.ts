@@ -1547,11 +1547,9 @@ function receiptRowDetail(
   stageId = '',
 ): string {
   const entries = Object.entries(counters || {})
-    .filter(([key, value]) => isVisibleReceiptCounter(key, value));
-  const orderedEntries = stageId === 'snapshotDbOps'
-    ? prioritizeReceiptCounters(entries, ['dbLoadMs', 'snapshotPersistMs', 'snapshotStoreMs', 'snapshotSerializeMs', 'snapshotPayloadChars'])
-    : entries;
-  const counterLimit = stageId === 'snapshotDbOps' ? 5 : 3;
+    .filter(([key, value]) => isVisibleReceiptCounter(key, value, stageId));
+  const orderedEntries = prioritizeReceiptCounters(entries, receiptCounterPriority(stageId));
+  const counterLimit = receiptCounterLimit(stageId);
   const counterText = orderedEntries
     .slice(0, counterLimit)
     .map(([key, value]) => `${labelFromKey(key)} ${formatReceiptCounterValue(key, value)}`)
@@ -1568,12 +1566,56 @@ function prioritizeReceiptCounters(
   return [...entries].sort((left, right) => {
     const leftRank = rank.get(left[0]) ?? Number.MAX_SAFE_INTEGER;
     const rightRank = rank.get(right[0]) ?? Number.MAX_SAFE_INTEGER;
-    return leftRank - rightRank;
+    return leftRank - rightRank || left[0].localeCompare(right[0]);
   });
 }
 
-function isVisibleReceiptCounter(key: string, value: number): boolean {
-  if (!Number.isFinite(value) || value <= 0) return false;
+function receiptCounterPriority(stageId: string): string[] {
+  if (stageId === 'postProcessDiscovery') {
+    return ['postprocessDiscoverySkipped', 'plannedModelCalls', 'documents', 'dynamicSurfaceMs', 'dynamicSurfaceCandidateSuggestions', 'dynamicSurfaceMentions', 'dynamicSurfaceHints', 'processedDocuments', 'candidateSuggestions', 'indexedDocuments', 'graph.nodes'];
+  }
+  if (stageId === 'nliCandidatePlan') {
+    return ['rawInputs', 'validInputs', 'plannedInputs', 'duplicateInputs', 'uniquePairs', 'documentIds'];
+  }
+  if (stageId === 'nliClassification') {
+    return ['plannedInputs', 'results', 'batches', 'entailment', 'neutral', 'contradiction'];
+  }
+  if (stageId === 'nliApply') {
+    return ['results', 'appliedRows'];
+  }
+  if (stageId === 'snapshotDbOps') {
+    return ['dbLoadMs', 'snapshotPersistMs', 'snapshotStoreMs', 'snapshotSerializeMs', 'snapshotPayloadChars'];
+  }
+  if (stageId === 'signalCandidatePlan') {
+    return ['documents', 'documentChars', 'entities', 'discoverySkipped', 'discoveryCandidates', 'exportableMentions', 'discoveryCacheHit', 'priorTargets', 'plannedModelCalls'];
+  }
+  if (stageId === 'signalTargetCoverage') {
+    return ['targets', 'entityTargets', 'graphFactTargets', 'eventTargets', 'temporalFactTargets', 'causalFactTargets', 'memoryStateTargets', 'anchorTargets'];
+  }
+  return [];
+}
+
+function receiptCounterLimit(stageId: string): number {
+  if (stageId === 'postProcessDiscovery') return 8;
+  if (stageId === 'nliCandidatePlan' || stageId === 'nliClassification' || stageId === 'nliApply') return 6;
+  if (stageId === 'snapshotDbOps') return 5;
+  if (stageId === 'signalCandidatePlan') return 8;
+  if (stageId === 'signalTargetCoverage') return 8;
+  return 3;
+}
+
+const signalCoverageZeroCounterKeys = new Set([
+  'graphFactTargets',
+  'eventTargets',
+  'temporalFactTargets',
+  'causalFactTargets',
+  'memoryStateTargets',
+]);
+
+function isVisibleReceiptCounter(key: string, value: number, stageId = ''): boolean {
+  if (!Number.isFinite(value)) return false;
+  if (stageId === 'signalTargetCoverage' && signalCoverageZeroCounterKeys.has(key)) return true;
+  if (value <= 0) return false;
   return !/(started|completed|duration|elapsed|wall|timestamp|time)/i.test(key);
 }
 

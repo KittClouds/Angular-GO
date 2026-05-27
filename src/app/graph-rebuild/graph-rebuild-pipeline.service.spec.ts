@@ -286,6 +286,61 @@ describe('GraphRebuildPipelineService', () => {
         ]));
     });
 
+    it('skips entity discovery during force postprocess when docs are unchanged', async () => {
+        const first = await service.postProcessAtlas(request());
+        graphRebuild.loadPostProcessCache.mockResolvedValue(null);
+        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(first.receipt);
+        graphRebuild.loadPersistedSnapshot.mockResolvedValue(first.snapshot);
+        atlasRuntime.runCapability.mockClear();
+        graphRebuild.buildAndPersistSnapshot.mockClear();
+
+        const second = await service.postProcessAtlas({
+            ...request(),
+            policy: 'force',
+        });
+
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('assertedKernel', expect.anything());
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({
+            buildPolicy: 'dirty-only',
+            skipModelWarm: true,
+        }));
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledTimes(1);
+        expect(second.receipt.postProcessCacheHit).toBe(false);
+        expect(second.receipt.stageReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'postProcessDiscovery',
+                status: 'skipped',
+                counters: expect.objectContaining({ postprocessDiscoverySkipped: 1 }),
+            }),
+        ]));
+    });
+
+    it('keeps postprocess entity discovery disabled when only accepted entities change', async () => {
+        const first = await service.postProcessAtlas(request());
+        registryMock.entities = [
+            ...registryMock.entities,
+            { id: 'entity-red-mesa', label: 'Red Mesa', aliases: [], kind: 'LOCATION' },
+        ];
+        graphRebuild.loadPostProcessCache.mockResolvedValue(null);
+        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(first.receipt);
+        graphRebuild.loadPersistedSnapshot.mockResolvedValue(first.snapshot);
+        atlasRuntime.runCapability.mockClear();
+
+        const second = await service.postProcessAtlas({
+            ...request(),
+            policy: 'force',
+        });
+
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('assertedKernel', expect.anything());
+        expect(second.receipt.stageReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'postProcessDiscovery',
+                status: 'skipped',
+                counters: expect.objectContaining({ postprocessDiscoverySkipped: 1 }),
+            }),
+        ]));
+    });
+
     it('force postprocess does not invoke Semantic Atlas', async () => {
         const result = await service.postProcessAtlas({
             ...request(),
@@ -297,7 +352,7 @@ describe('GraphRebuildPipelineService', () => {
         expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('hopfProjection', expect.anything());
         expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('lorentzForest', expect.anything());
         expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('productManifold', expect.anything());
-        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('assertedKernel', expect.anything());
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({ skipModelWarm: true }));
         expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
             postProcessMode: 'full',
@@ -305,6 +360,50 @@ describe('GraphRebuildPipelineService', () => {
         expect(result.receipt.stageReceipts.some((stage) => stage.id === 'semanticAtlas')).toBe(false);
         expect(result.receipt.stageReceipts).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: 'postProcessDiscovery', label: 'Entity Discovery' }),
+            expect.objectContaining({
+                id: 'nliCandidatePlan',
+                label: 'NLI Candidate Plan',
+                counters: expect.objectContaining({
+                    rawInputs: 2,
+                    plannedInputs: 1,
+                    duplicateInputs: 1,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'nliClassification',
+                label: 'NLI Classification',
+                counters: expect.objectContaining({
+                    plannedInputs: 1,
+                    results: 1,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'nliApply',
+                label: 'NLI Apply',
+                counters: expect.objectContaining({
+                    appliedRows: 1,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'signalCandidatePlan',
+                label: 'Signal Candidate Plan',
+                counters: expect.objectContaining({
+                    documents: 1,
+                    discoverySkipped: 1,
+                    discoveryCandidates: 0,
+                    plannedModelCalls: 0,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'signalTargetCoverage',
+                label: 'Signal Target Coverage',
+                counters: expect.objectContaining({
+                    targets: 3,
+                    entityTargets: 1,
+                    graphFactTargets: 1,
+                    causalFactTargets: 0,
+                }),
+            }),
             expect.objectContaining({ id: 'snapshotDbOps', label: 'DB Ops' }),
             expect.objectContaining({ id: 'snapshotCpu', label: 'Snapshot CPU' }),
             expect.objectContaining({ id: 'uiCommit', label: 'UI Commit' }),
@@ -322,20 +421,29 @@ describe('GraphRebuildPipelineService', () => {
         ]));
     });
 
-    it('runs postprocess discovery without rescanning Dynamic NER', async () => {
+    it('postprocess skips entity discovery and Dynamic NER', async () => {
         const result = await service.postProcessAtlas(request());
 
         expect(ner.runDynamicScan).not.toHaveBeenCalled();
         expect(ner.acceptSuggestionForContext).not.toHaveBeenCalled();
-        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({
-            buildPolicy: 'dirty-only',
-            skipModelWarm: true,
-        }));
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('assertedKernel', expect.anything());
         expect(result.receipt.stageReceipts).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: 'postProcessDiscovery',
                 label: 'Entity Discovery',
-                counters: expect.objectContaining({ candidateSuggestions: 3 }),
+                status: 'skipped',
+                counters: expect.objectContaining({
+                    postprocessDiscoverySkipped: 1,
+                    plannedModelCalls: 0,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'signalCandidatePlan',
+                counters: expect.objectContaining({
+                    discoverySkipped: 1,
+                    discoveryCandidates: 0,
+                    entities: 2,
+                }),
             }),
         ]));
         expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
@@ -384,11 +492,7 @@ describe('GraphRebuildPipelineService', () => {
             postProcessMode: 'full',
         }));
         expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('semanticAtlas', expect.anything());
-        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('assertedKernel', expect.objectContaining({
-            buildPolicy: 'dirty-only',
-            noteIds: ['note-1', 'note-2'],
-            skipModelWarm: true,
-        }));
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('assertedKernel', expect.anything());
         expect(atlasRuntime.runCapability).toHaveBeenCalledWith('nliAdjudication', expect.objectContaining({
             buildPolicy: 'dirty-only',
             noteIds: ['note-1', 'note-2'],
@@ -442,6 +546,11 @@ function createGraphRebuildMock() {
         buildAndPersistSnapshot: vi.fn(async () => ({
             id: 'snapshot-1',
             embeddingGraphPostProcess: { schemaVersion: 'phoenix-embedding-graph-postprocess/v1' },
+            embeddingTargets: [
+                { id: 'embed:entity:entity-kai', kind: 'entity', sourceId: 'entity-kai', label: 'Kai', text: 'Kai', evidenceIds: [] },
+                { id: 'embed:graph-fact:1', kind: 'graphFact', sourceId: 'rel-1', label: 'Kai supports Hazel', text: 'fact', evidenceIds: [] },
+                { id: 'embed:event:1', kind: 'event', sourceId: 'event-1', label: 'Event', text: 'event', evidenceIds: [] },
+            ],
             counters: {
                 nodes: 2,
                 edges: 1,
@@ -514,13 +623,61 @@ function createAtlasRuntimeMock() {
                     indexedDocuments: 1,
                     nativeResult: {
                         processedDocuments: 1,
+                        stageSummaries: [{
+                            stage: 'dynamicSurface',
+                            status: 'completed',
+                            durationMs: 42,
+                            counts: {
+                                documents: 1,
+                                mentions: 12,
+                                candidateSuggestions: 3,
+                            },
+                        }],
                         graphDeltaCounts: { nodes: 4, edges: 5 },
                     },
                 }
                 : capability === 'nliAdjudication'
                 ? {
                     inputCount: 2,
+                    plannedInputCount: 1,
+                    duplicateInputCount: 1,
                     resultCount: 2,
+                    stageSummaries: [
+                        {
+                            stage: 'candidatePlan',
+                            status: 'completed',
+                            durationMs: 4,
+                            counts: {
+                                rawInputs: 2,
+                                validInputs: 2,
+                                plannedInputs: 1,
+                                duplicateInputs: 1,
+                                uniquePairs: 1,
+                            },
+                        },
+                        {
+                            stage: 'classification',
+                            status: 'completed',
+                            durationMs: 9,
+                            counts: {
+                                plannedInputs: 1,
+                                results: 1,
+                                batches: 1,
+                                entailment: 1,
+                                neutral: 0,
+                                contradiction: 0,
+                            },
+                        },
+                        {
+                            stage: 'apply',
+                            status: 'completed',
+                            durationMs: 3,
+                            counts: {
+                                results: 1,
+                                appliedRows: 1,
+                            },
+                        },
+                    ],
                     judgments: [{
                         judgmentId: 'j-1',
                         sourceId: 'entity-kai',

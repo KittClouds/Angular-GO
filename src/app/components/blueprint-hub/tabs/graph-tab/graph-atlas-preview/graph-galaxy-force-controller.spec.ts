@@ -52,6 +52,38 @@ describe('GraphGalaxyForceController Hybrid constraints', () => {
         expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(1.95);
     });
 
+    it('keeps hierarchy cap nodes on the Lorentz skin while force dragging', () => {
+        const scene = capsScene([
+            [2.14, 0, 0],
+            [0.62, 0.2, 0.04],
+        ]);
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('shell')).toBe(true);
+        controller.dragTo(new THREE.Vector3(8, 1, 0), 'force');
+
+        expect(radius3d(scene.positions3d, 0)).toBeCloseTo(2.14, 3);
+        expect(radius3d(scene.positions3d, 1)).toBeLessThanOrEqual(2.18);
+    });
+
+    it('pulls Hopf fiber nodes back toward their rail during stretched interactions', () => {
+        const scene = hopfScene([
+            [1.2, 0.1, 0.05],
+            [0, 0.8, 0.2],
+        ], new Uint8Array([1, 2]));
+        const controller = new GraphGalaxyForceController();
+        controller.bind(scene);
+        controller.setMode('3d');
+
+        expect(controller.begin('shell')).toBe(true);
+        controller.drag(new THREE.Vector3(1, 0, 0), 'stretch');
+
+        expect(scene.positions3d[3]).toBeGreaterThan(0);
+        expect(scene.positions3d[3]).toBeLessThan(0.14);
+    });
+
     it('expands Product positions volumetrically from the canonical shape', () => {
         const scene = productScene([
             [1, 0.25, 0.5],
@@ -94,15 +126,23 @@ function hybridScene(points: Array<[number, number, number]>): GalaxySceneV2 {
     return projectedScene('hybridSpace', points);
 }
 
-function hopfScene(points: Array<[number, number, number]>): GalaxySceneV2 {
-    return projectedScene('hopfProjection', points);
+function hopfScene(points: Array<[number, number, number]>, hopfRoles?: Uint8Array): GalaxySceneV2 {
+    return projectedScene('hopfProjection', points, hopfRoles);
 }
 
 function productScene(points: Array<[number, number, number]>): GalaxySceneV2 {
     return projectedScene('productManifold', points);
 }
 
-function projectedScene(layoutMode: GalaxySceneV2['layoutMode'], points: Array<[number, number, number]>): GalaxySceneV2 {
+function capsScene(points: Array<[number, number, number]>): GalaxySceneV2 {
+    return projectedScene('lorentzTree', points);
+}
+
+function projectedScene(
+    layoutMode: GalaxySceneV2['layoutMode'],
+    points: Array<[number, number, number]>,
+    hopfRoles?: Uint8Array,
+): GalaxySceneV2 {
     const positions3d = new Float32Array(points.length * 3);
     const positions2d = new Float32Array(points.length * 3);
     for (let index = 0; index < points.length; index++) {
@@ -121,6 +161,7 @@ function projectedScene(layoutMode: GalaxySceneV2['layoutMode'], points: Array<[
         labels: ['Shell', 'Inner'],
         kinds: ['leaf', 'entity'],
         groupIds: ['', ''],
+        hopfRoles,
         groups: [],
         hopfRibbons: [],
         lorentzGuides: [],

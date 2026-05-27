@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "start:lean": "set NODE_OPTIONS=--max-old-space-size=1536&& ng serve --host 127.0.0.1",
     "desktop:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
     "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "build": "ng build",

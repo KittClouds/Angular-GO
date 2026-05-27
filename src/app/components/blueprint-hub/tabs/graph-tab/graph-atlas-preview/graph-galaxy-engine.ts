@@ -137,7 +137,7 @@ export interface GalaxyHopfRibbon extends Rgb {
     nodeIds: string[];
     positions3d: Float32Array;
     importance: number;
-    guideKind: 'dataFiber' | 'spaceFiber' | 'torusBand' | 'axis';
+    guideKind: 'dataFiber' | 'crossFiberBraid' | 'spaceFiber' | 'torusBand' | 'axis';
     guideWeight: number;
 }
 
@@ -662,8 +662,10 @@ const HOPF_PROJECTION_RADIUS = 0.88;
 const HOPF_MAX_RADIUS = 2.05;
 const TAU = Math.PI * 2;
 const HOPF_RIBBON_SEGMENTS = 96;
+const HOPF_DATA_FIBER_GUIDE_LIMIT = 48;
 const HOPF_SPACE_FIBERS = 24;
 const HOPF_TORUS_BAND_FIBERS = 14;
+const HOPF_CROSS_FIBER_BRAID_LIMIT = 96;
 const PRODUCT_CONTEXT_SAMPLE_LIMIT = 384;
 
 interface HopfBaseInfo extends Rgb {
@@ -671,13 +673,24 @@ interface HopfBaseInfo extends Rgb {
     direction: { x: number; y: number; z: number };
     phases: number[];
     nodeIds: string[];
+    fiberKinds: Set<string>;
     importance: number;
+}
+
+interface HybridHierarchyInfo {
+    lane: string;
+    phase: number;
+    specificity: number;
+    ambiguity: number;
+    level: number;
+    strength: number;
 }
 
 function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void {
     for (const node of nodes) {
-        const direction = normalizedDirection(node);
-        const radius = hybridRadius(node);
+        const hierarchy = hybridHierarchyInfo(node);
+        const direction = hybridHierarchyDirection(node, hierarchy);
+        const radius = hybridHierarchyRadius(node, hybridRadius(node), hierarchy);
         node.x = direction.x * radius * HYBRID_SHELL_RADIUS;
         node.y = direction.y * radius * HYBRID_SHELL_RADIUS;
         node.z = direction.z * radius * HYBRID_SHELL_RADIUS;
@@ -692,8 +705,10 @@ function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void 
         const source = nodes[link.source];
         const target = nodes[link.target];
         const radialDelta = Math.abs((source?.depth || 0.68) - (target?.depth || 0.68));
-        link.alpha = Math.min(0.38, link.alpha * (1.08 + radialDelta * 0.35));
-        link.curve *= 0.78 + radialDelta * 0.9;
+        const lanePair = source && target ? hybridEdgeLanePair(source, target, link) : 'semantic';
+        const hierarchyBoost = lanePair === 'document' || lanePair === 'temporal' || lanePair === 'causal' ? 1.12 : 1;
+        link.alpha = Math.min(0.38, link.alpha * (1.08 + radialDelta * 0.35) * hierarchyBoost);
+        link.curve *= (0.78 + radialDelta * 0.9) * (lanePair === 'temporal' ? 1.18 : lanePair === 'document' ? 0.84 : 1);
     }
 }
 
@@ -754,6 +769,7 @@ function buildProductLocalHopfRibbons(productNodes: GalaxyNode[], hopfNodes: Gal
             direction: normalizedDirection(base),
             phases: [],
             nodeIds: [],
+            fiberKinds: new Set<string>(),
             importance: 0,
             r: base.r,
             g: base.g,
@@ -761,6 +777,7 @@ function buildProductLocalHopfRibbons(productNodes: GalaxyNode[], hopfNodes: Gal
         };
         info.phases.push(normalizePhaseRadians(hopfPhase(node, baseKey)));
         info.nodeIds.push(node.entity.id);
+        info.fiberKinds.add(hopfFiberKind(node));
         info.importance += Math.max(1, Number(node.entity.totalMentions || 1)) * (isHopfFiber(node) ? 1.2 : 0.65);
         baseInfos.set(baseKey, info);
     }
@@ -1018,6 +1035,172 @@ function hybridRadius(node: GalaxyNode): number {
     return 0.94;
 }
 
+function hybridHierarchyInfo(node: GalaxyNode): HybridHierarchyInfo {
+    const metadata = node.entity.metadata || {};
+    const product = recordValue(metadata['product']);
+    const region = recordValue(product['region']);
+    const lanes = recordValue(product['lanes']);
+    const lorentz = recordValue(metadata['lorentz']);
+    const lane = normalizeHierarchyLane(firstString(
+        metadata['productLaneKind'],
+        region['laneKind'],
+        product['dominantLane'],
+        lanes['dominantLane'],
+        lorentz['dominantLane'],
+        lorentz['primaryTreeKind'],
+        metadata['graphRelationFamily'],
+        metadata['graphKind'],
+        metadata['sourceType'],
+        node.entity.kind,
+    ));
+    const phase = unitPhase(firstNumber(lorentz['capPhase'], lanes['fiberPhase'], stableUnit(`${node.entity.id}:hybrid-phase`)));
+    const specificity = clamp(firstNumber(lorentz['specificity'], hybridFallbackSpecificity(node)), 0, 1);
+    const ambiguity = clamp(firstNumber(lorentz['ambiguity'], hybridFallbackAmbiguity(node)), 0, 1);
+    const level = clamp(Math.round(firstNumber(lorentz['level'], hybridFallbackLevel(node))), 0, 5);
+    const confidence = clamp(firstNumber(metadata['productRegionConfidence'], region['confidence'], 0.62), 0, 1);
+    return {
+        lane,
+        phase,
+        specificity,
+        ambiguity,
+        level,
+        strength: clamp(0.16 + specificity * 0.16 + confidence * 0.08 - ambiguity * 0.1, 0.1, 0.34),
+    };
+}
+
+function hybridHierarchyDirection(node: GalaxyNode, hierarchy: HybridHierarchyInfo): { x: number; y: number; z: number } {
+    const base = normalizedDirection(node);
+    const lane = hybridLaneDirection(hierarchy);
+    const laneStrength =
+        hierarchy.lane === 'temporal' ? hierarchy.strength * 1.08 :
+        hierarchy.lane === 'causal' ? hierarchy.strength * 1.02 :
+        hierarchy.lane === 'document' ? hierarchy.strength * 0.94 :
+        hierarchy.strength * 0.72;
+    const mixed = {
+        x: base.x * (1 - laneStrength) + lane.x * laneStrength,
+        y: base.y * (1 - laneStrength) + lane.y * laneStrength,
+        z: base.z * (1 - laneStrength) + lane.z * laneStrength,
+    };
+    return normalizeVector(mixed, base);
+}
+
+function hybridLaneDirection(hierarchy: HybridHierarchyInfo): { x: number; y: number; z: number } {
+    const angle = hierarchy.phase * TAU;
+    const level = hierarchy.level;
+    switch (hierarchy.lane) {
+        case 'document': {
+            const branch = clamp(0.12 + level * 0.08, 0.12, 0.46);
+            return normalizeVector({ x: Math.cos(angle) * branch, y: -0.12 + level * 0.08, z: 1 }, { x: 0, y: 0, z: 1 });
+        }
+        case 'temporal':
+            return normalizeVector({ x: Math.cos(angle), y: 0.16, z: Math.sin(angle) }, { x: 1, y: 0, z: 0 });
+        case 'causal': {
+            const cone = clamp(0.18 + level * 0.07, 0.18, 0.48);
+            return normalizeVector({ x: 0.9, y: Math.cos(angle) * cone, z: Math.sin(angle) * cone }, { x: 1, y: 0, z: 0 });
+        }
+        case 'event':
+            return normalizeVector({ x: -0.42, y: 0.34 + Math.sin(angle) * 0.18, z: Math.cos(angle) * 0.72 }, { x: -0.4, y: 0.3, z: 0.8 });
+        case 'relationship':
+            return normalizeVector({ x: 0.48, y: -0.52, z: Math.sin(angle) * 0.42 }, { x: 0.5, y: -0.5, z: 0 });
+        case 'entity':
+            return normalizeVector({ x: -0.58, y: 0.54, z: Math.sin(angle) * 0.26 }, { x: -0.6, y: 0.5, z: 0.2 });
+        case 'evidence':
+            return normalizeVector({ x: -0.7, y: -0.14, z: 0.68 + Math.sin(angle) * 0.18 }, { x: -0.7, y: -0.1, z: 0.7 });
+        default:
+            return normalizeVector({ x: 0.18, y: 0.48, z: 0.86 }, { x: 0, y: 0.4, z: 0.9 });
+    }
+}
+
+function hybridHierarchyRadius(node: GalaxyNode, baseRadius: number, hierarchy: HybridHierarchyInfo): number {
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    let target = 0.48 + hierarchy.specificity * 0.5 - hierarchy.ambiguity * 0.12;
+    if (sourceType === 'query') target = 1.015;
+    else if (hierarchy.lane === 'document') {
+        if (/doc|note|folder/.test(sourceType)) target = 0.64 + hierarchy.specificity * 0.14;
+        else if (/leaf|chunk|anchor|mention/.test(sourceType)) target = 0.9 + hierarchy.specificity * 0.09;
+        else target = 0.7 + hierarchy.level * 0.045;
+    } else if (hierarchy.lane === 'temporal') {
+        target = 0.66 + hierarchy.specificity * 0.22;
+    } else if (hierarchy.lane === 'causal') {
+        target = 0.62 + hierarchy.specificity * 0.28 + hierarchy.level * 0.018;
+    } else if (hierarchy.lane === 'entity') {
+        target = 0.6 + hierarchy.specificity * 0.24;
+    } else if (hierarchy.lane === 'relationship' || hierarchy.lane === 'event') {
+        target = 0.58 + hierarchy.specificity * 0.28;
+    }
+    return clamp(baseRadius * 0.72 + clamp(target, 0.24, 1.015) * 0.28, 0.24, 1.015);
+}
+
+function hybridEdgeLanePair(source: GalaxyNode, target: GalaxyNode, link: GalaxyEdge): string {
+    const type = `${link.type} ${source.entity.kind} ${target.entity.kind} ${source.entity.metadata?.graphRelationFamily || ''} ${target.entity.metadata?.graphRelationFamily || ''}`.toLowerCase();
+    if (/temporal|timeline|before|after/.test(type)) return 'temporal';
+    if (/caus|because|effect/.test(type)) return 'causal';
+    if (/doc|chunk|leaf|anchor|mention/.test(type)) return 'document';
+    return 'semantic';
+}
+
+function hybridFallbackSpecificity(node: GalaxyNode): number {
+    const kind = String(node.entity.kind || '').toLowerCase();
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (/leaf|chunk|anchor|mention/.test(sourceType)) return 0.9;
+    if (/doc|note|folder/.test(sourceType)) return 0.32;
+    if (/character|location|entity|concept|item|npc|creature/.test(kind)) return 0.78;
+    if (/event|temporal|causal/.test(kind)) return 0.72;
+    if (/fact|relationship|memory/.test(kind)) return 0.62;
+    return 0.58;
+}
+
+function hybridFallbackAmbiguity(node: GalaxyNode): number {
+    const metadata = node.entity.metadata || {};
+    const outlier = Number(metadata['embeddingOutlierScore'] || 0);
+    const sourceType = String(metadata.sourceType || '').toLowerCase();
+    if (/doc|folder/.test(sourceType)) return 0.34;
+    return clamp(outlier * 0.38, 0, 0.36);
+}
+
+function hybridFallbackLevel(node: GalaxyNode): number {
+    const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
+    if (/doc|folder/.test(sourceType)) return 0;
+    if (/leaf|chunk/.test(sourceType)) return 3;
+    if (/anchor|mention/.test(sourceType)) return 4;
+    return 2;
+}
+
+function normalizeHierarchyLane(value: string): string {
+    const lane = value.trim().toLowerCase().replace(/[_\s-]+/g, '');
+    if (/temporal|timeline|time/.test(lane)) return 'temporal';
+    if (/causal|cause|effect/.test(lane)) return 'causal';
+    if (/document|doc|chunk|leaf|anchor|mention/.test(lane)) return 'document';
+    if (/event|scene|beat|act|chapter/.test(lane)) return 'event';
+    if (/relation|relationship|cooccurrence|communication|authority|approval|family|intimacy|transfer/.test(lane)) return 'relationship';
+    if (/evidence|memory|state|source|provenance/.test(lane)) return 'evidence';
+    if (/entity|character|location|concept|item|creature|npc|network/.test(lane)) return 'entity';
+    return 'semantic';
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function firstString(...values: unknown[]): string {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+}
+
+function firstNumber(...values: unknown[]): number {
+    for (const value of values) {
+        const number = Number(value);
+        if (Number.isFinite(number)) return number;
+    }
+    return 0;
+}
+
+function unitPhase(value: number): number {
+    return value >= 0 && value <= 1 ? value : ((value / TAU) % 1 + 1) % 1;
+}
+
 function hybridNodeScale(node: GalaxyNode, radius: number): number {
     const sourceType = String(node.entity.metadata?.sourceType || '').toLowerCase();
     if (sourceType === 'query') return 1.18;
@@ -1050,10 +1233,12 @@ function applyHopfProjectionLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): Ga
         if (baseInfo && (isHopfAnchor(node) || isHopfFiber(node))) {
             baseInfo.phases.push(normalizePhaseRadians(phase));
             baseInfo.nodeIds.push(node.entity.id);
+            baseInfo.fiberKinds.add(hopfFiberKind(node));
             baseInfo.importance += Math.max(1, Number(node.entity.totalMentions || 1));
         }
     }
 
+    const crossFiberBraids: GalaxyHopfRibbon[] = [];
     for (const link of links) {
         const type = link.type.toLowerCase();
         if (type.includes('anchor-fiber')) {
@@ -1061,13 +1246,25 @@ function applyHopfProjectionLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): Ga
             link.curve *= 1.48;
             continue;
         }
+        const sourceNode = nodes[link.source];
+        const targetNode = nodes[link.target];
+        const sourceBase = sourceNode ? hopfBaseKey(sourceNode) : null;
+        const targetBase = targetNode ? hopfBaseKey(targetNode) : null;
+        if (sourceBase && targetBase && sourceBase !== targetBase) {
+            link.alpha = Math.min(0.07, link.alpha * 0.32 + 0.012);
+            link.curve *= 2.35;
+            if (crossFiberBraids.length < HOPF_CROSS_FIBER_BRAID_LIMIT) {
+                crossFiberBraids.push(buildHopfCrossFiberBraid(sourceNode, targetNode, link));
+            }
+            continue;
+        }
         if (type.includes('fiber-edge')) {
-            link.alpha = Math.min(0.42, link.alpha * 1.22 + 0.03);
-            link.curve *= 1.18;
+            link.alpha = Math.min(0.24, link.alpha * 0.72 + 0.026);
+            link.curve *= 1.32;
         }
     }
 
-    return buildHopfRibbons(baseInfos);
+    return [...buildHopfRibbons(baseInfos), ...crossFiberBraids];
 }
 
 function registerHopfBase(baseInfos: Map<string, HopfBaseInfo>, baseKey: string, node: GalaxyNode, anchor: boolean): void {
@@ -1078,6 +1275,7 @@ function registerHopfBase(baseInfos: Map<string, HopfBaseInfo>, baseKey: string,
         direction: normalizedDirection(node),
         phases: existing?.phases ?? [],
         nodeIds: existing?.nodeIds ?? [],
+        fiberKinds: existing?.fiberKinds ?? new Set<string>(),
         importance: existing?.importance ?? 0,
         r: node.r,
         g: node.g,
@@ -1086,10 +1284,7 @@ function registerHopfBase(baseInfos: Map<string, HopfBaseInfo>, baseKey: string,
 }
 
 function buildHopfRibbons(baseInfos: Map<string, HopfBaseInfo>): GalaxyHopfRibbon[] {
-    const dataFibers = [...baseInfos.values()]
-        .filter((info) => info.nodeIds.length > 0)
-        .sort((left, right) => right.importance - left.importance)
-        .slice(0, 36)
+    const dataFibers = selectHopfDataFibers(baseInfos)
         .map((info) => ({
             id: `hopf:ribbon:${info.key}`,
             nodeIds: [...new Set(info.nodeIds)],
@@ -1107,6 +1302,88 @@ function buildHopfRibbons(baseInfos: Map<string, HopfBaseInfo>): GalaxyHopfRibbo
         ...buildHopfTorusBands(),
         buildHopfAxisCue(),
     ];
+}
+
+function selectHopfDataFibers(baseInfos: Map<string, HopfBaseInfo>): HopfBaseInfo[] {
+    const candidates = [...baseInfos.values()]
+        .filter((info) => info.nodeIds.length > 0)
+        .sort((left, right) => right.importance - left.importance || left.key.localeCompare(right.key));
+    const selected = new Map<string, HopfBaseInfo>();
+    const add = (info: HopfBaseInfo | undefined) => {
+        if (!info || selected.size >= HOPF_DATA_FIBER_GUIDE_LIMIT) return;
+        selected.set(info.key, info);
+    };
+
+    const bySemanticKind = new Map<string, HopfBaseInfo>();
+    for (const info of candidates) {
+        const kind = primaryHopfFiberKind(info);
+        const current = bySemanticKind.get(kind);
+        if (!current || info.importance > current.importance) bySemanticKind.set(kind, info);
+    }
+    for (const info of [...bySemanticKind.values()].sort((left, right) => right.importance - left.importance)) add(info);
+    for (const info of candidates) add(info);
+    return [...selected.values()].sort((left, right) => right.importance - left.importance || left.key.localeCompare(right.key));
+}
+
+function primaryHopfFiberKind(info: HopfBaseInfo): string {
+    const kinds = [...info.fiberKinds].sort();
+    return kinds.find((kind) => kind !== 'identity' && kind !== 'entity') || kinds[0] || 'identity';
+}
+
+function buildHopfCrossFiberBraid(source: GalaxyNode, target: GalaxyNode, link: GalaxyEdge): GalaxyHopfRibbon {
+    const positions3d = hopfBraidSegments(source, target, link.flowOffset);
+    return {
+        id: `hopf:braid:${link.id}`,
+        nodeIds: [source.entity.id, target.entity.id],
+        positions3d,
+        importance: Math.max(0.18, link.confidence),
+        guideKind: 'crossFiberBraid',
+        guideWeight: 0.42 + Math.max(0, link.confidence) * 0.36,
+        r: Math.round((source.r + target.r) * 0.5),
+        g: Math.round((source.g + target.g) * 0.5),
+        b: Math.round((source.b + target.b) * 0.5),
+    };
+}
+
+function hopfBraidSegments(source: GalaxyNode, target: GalaxyNode, seed: number): Float32Array {
+    const segments = 18;
+    const positions = new Float32Array(segments * 2 * 3);
+    const midpoint = {
+        x: (source.x + target.x) * 0.34,
+        y: (source.y + target.y) * 0.34,
+        z: (source.z + target.z) * 0.34,
+    };
+    const twist = (seed - 0.5) * 0.32;
+    for (let index = 0; index < segments; index++) {
+        const a = index / segments;
+        const b = (index + 1) / segments;
+        const left = hopfBraidPoint(source, target, midpoint, a, twist);
+        const right = hopfBraidPoint(source, target, midpoint, b, twist);
+        const offset = index * 6;
+        positions[offset] = left.x;
+        positions[offset + 1] = left.y;
+        positions[offset + 2] = left.z;
+        positions[offset + 3] = right.x;
+        positions[offset + 4] = right.y;
+        positions[offset + 5] = right.z;
+    }
+    return positions;
+}
+
+function hopfBraidPoint(
+    source: GalaxyNode,
+    target: GalaxyNode,
+    midpoint: { x: number; y: number; z: number },
+    t: number,
+    twist: number,
+): { x: number; y: number; z: number } {
+    const u = 1 - t;
+    const wobble = Math.sin(t * Math.PI) * twist;
+    return {
+        x: u * u * source.x + 2 * u * t * (midpoint.x + wobble) + t * t * target.x,
+        y: u * u * source.y + 2 * u * t * (midpoint.y - wobble * 0.42) + t * t * target.y,
+        z: u * u * source.z + 2 * u * t * (midpoint.z + wobble * 0.58) + t * t * target.z,
+    };
 }
 
 function hopfRibbonSegments(direction: { x: number; y: number; z: number }, phases: number[]): Float32Array {
