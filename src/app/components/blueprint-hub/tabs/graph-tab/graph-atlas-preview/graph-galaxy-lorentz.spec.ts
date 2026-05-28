@@ -57,8 +57,8 @@ describe('Lorentz tree galaxy visualization data', () => {
         const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
 
         expect(scene.layoutMode).toBe('lorentzTree');
-        expect(byId.get('chunk')!.depth).toBeGreaterThan(byId.get('doc')!.depth);
-        expect(byId.get('cause')!.depth).toBeGreaterThan(byId.get('doc')!.depth);
+        expect(byId.get('doc')!.depth).toBeGreaterThan(byId.get('chunk')!.depth);
+        expect(byId.get('chunk')!.depth).toBeGreaterThan(byId.get('cause')!.depth);
         expect(scene.lorentzGuides?.some((guide) => guide.id.startsWith('caps:boundary:'))).toBe(true);
         expect(scene.lorentzGuides?.some((guide) => guide.treeKind === 'causal')).toBe(true);
     });
@@ -81,15 +81,18 @@ describe('Lorentz tree galaxy visualization data', () => {
     it('honors explicit graph-rebuild cap shell radii without changing fallback Lorentz fixtures', () => {
         const scene = buildGalaxyScene([
             capShellNode('doc', 'Red Mesa', 'note', 2.08, 'document_spine'),
-            capShellNode('entity', 'Kai', 'entity', 1.72, 'entity_anchor'),
+            capShellNode('chunk', 'Chunk 1', 'chunk', 1.72, 'chunk_spine'),
+            capShellNode('entity', 'Kai', 'entity', 1.42, 'entity_anchor'),
             capShellNode('evidence', 'Kai mention', 'anchor', 1.04, 'anchor_evidence'),
         ], [
-            { id: 'doc-entity', sourceId: 'doc', targetId: 'entity', type: 'contains', confidence: 0.9 },
+            { id: 'doc-chunk', sourceId: 'doc', targetId: 'chunk', type: 'contains', confidence: 0.9 },
+            { id: 'chunk-entity', sourceId: 'chunk', targetId: 'entity', type: 'contains', confidence: 0.86 },
             { id: 'entity-evidence', sourceId: 'entity', targetId: 'evidence', type: 'evidence', confidence: 0.82 },
         ], mergeGalaxySettings({ layoutMode: 'lorentzTree' }));
         const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
 
-        expect(byId.get('doc')!.depth).toBeGreaterThan(byId.get('entity')!.depth);
+        expect(byId.get('doc')!.depth).toBeGreaterThan(byId.get('chunk')!.depth);
+        expect(byId.get('chunk')!.depth).toBeGreaterThan(byId.get('entity')!.depth);
         expect(byId.get('entity')!.depth).toBeGreaterThan(byId.get('evidence')!.depth);
     });
 

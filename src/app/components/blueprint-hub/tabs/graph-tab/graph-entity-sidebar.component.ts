@@ -60,7 +60,7 @@ const ENTITY_ICONS: Record<string, any> = {
     standalone: true,
     imports: [CommonModule, ScrollingModule, LucideAngularModule],
     templateUrl: './graph-entity-sidebar.component.html',
-    styleUrls: ['./graph-entity-sidebar.component.css'],
+    styleUrls: ['./graph-entity-sidebar.component.css', './graph-entity-sidebar.review-clusters.css'],
 })
 export class GraphEntitySidebarComponent implements OnChanges, OnDestroy {
     private readonly graphRebuild = inject(GraphRebuildService);

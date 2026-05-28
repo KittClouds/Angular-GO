@@ -348,7 +348,7 @@ function targetScore(target: GraphRebuildEmbeddingTarget): number {
 }
 
 function targetParentIds(target: GraphRebuildEmbeddingTarget): string[] {
-    const parents: string[] = [];
+    const parents: string[] = [...(target.parentIds || [])];
     if (target.noteId && target.kind !== 'note') parents.push(`embed:note:${target.noteId}`);
     if (target.chunkId && target.kind !== 'chunk') parents.push(`embed:chunk:${target.chunkId}`);
     if (target.entityId && target.kind !== 'entity') parents.push(`embed:entity:${target.entityId}`);

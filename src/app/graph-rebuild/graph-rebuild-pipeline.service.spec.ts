@@ -116,6 +116,44 @@ describe('GraphRebuildPipelineService', () => {
             postProcessMode: 'core',
             projectionReceipts: [],
             message: expect.stringContaining('Clean graph built'),
+            stageReceipts: expect.arrayContaining([
+                expect.objectContaining({
+                    id: 'deltaPostprocessPlan',
+                    label: 'Delta Postprocess Plan',
+                    counters: expect.objectContaining({
+                        targetReplanDirty: 1,
+                    }),
+                }),
+                expect.objectContaining({
+                    id: 'signalCandidatePlan',
+                    label: 'Signal Candidate Plan',
+                    counters: expect.objectContaining({
+                        discoveryCandidates: 2,
+                        exportableMentions: 2,
+                    }),
+                }),
+                expect.objectContaining({
+                    id: 'signalTargetCoverage',
+                    label: 'Signal Target Coverage',
+                    counters: expect.objectContaining({
+                        targets: 3,
+                        entityTargets: 1,
+                        graphFactTargets: 1,
+                        eventTargets: 1,
+                    }),
+                }),
+                expect.objectContaining({
+                    id: 'graphTruthContract',
+                    label: 'Graph Truth Contract',
+                    counters: expect.objectContaining({
+                        graphTruthTotal: 3,
+                    }),
+                }),
+                expect.objectContaining({
+                    id: 'edgeTypeJudgmentPlan',
+                    label: 'Edge Type Judgment Plan',
+                }),
+            ]),
         }));
     });
 
@@ -267,7 +305,7 @@ describe('GraphRebuildPipelineService', () => {
         expect(service.lastSnapshot()?.id).toBe('snapshot-1');
     });
 
-    it('reuses postprocess cache when the scope and adapter fingerprint match', async () => {
+    it('uses projection-only orchestration when the scope and adapter fingerprint match', async () => {
         const first = await service.postProcessAtlas(request());
         expect(graphRebuild.persistPostProcessCache).not.toHaveBeenCalled();
         graphRebuild.loadPostProcessCache.mockResolvedValue(null);
@@ -277,12 +315,38 @@ describe('GraphRebuildPipelineService', () => {
 
         const second = await service.postProcessAtlas(request());
 
-        expect(atlasRuntime.runCapability).not.toHaveBeenCalled();
+        expect(atlasRuntime.runCapability).toHaveBeenCalledTimes(4);
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hybridManifold', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('hopfProjection', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('lorentzForest', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).toHaveBeenCalledWith('productManifold', expect.objectContaining({ skipModelWarm: true }));
+        expect(atlasRuntime.runCapability).not.toHaveBeenCalledWith('nliAdjudication', expect.anything());
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledTimes(1);
         expect(graphRebuild.restorePersistedSnapshot).toHaveBeenCalledWith(first.snapshot);
         expect(second.receipt.postProcessCacheHit).toBe(true);
         expect(second.receipt.stageReceipts).toEqual(expect.arrayContaining([
-            expect.objectContaining({ id: 'postProcessCache', status: 'skipped' }),
+            expect.objectContaining({
+                id: 'deltaPostprocessPlan',
+                counters: expect.objectContaining({
+                    projectionOnlyRoute: 1,
+                    targetReplanDirty: 0,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'postProcessCache',
+                status: 'completed',
+                counters: expect.objectContaining({
+                    projectionOnly: 1,
+                    targetReplanSkipped: 1,
+                }),
+            }),
             expect.objectContaining({ id: 'uiCommit', status: 'completed' }),
+        ]));
+        expect(second.receipt.projectionReceipts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ mode: 'hybrid', status: 'synced' }),
+            expect.objectContaining({ mode: 'hopf', status: 'synced' }),
+            expect.objectContaining({ mode: 'lorentz', status: 'synced' }),
+            expect.objectContaining({ mode: 'product', status: 'synced' }),
         ]));
     });
 
@@ -406,6 +470,10 @@ describe('GraphRebuildPipelineService', () => {
                     eventTargets: 1,
                     causalFactTargets: 0,
                 }),
+            }),
+            expect.objectContaining({
+                id: 'graphTruthContract',
+                label: 'Graph Truth Contract',
             }),
             expect.objectContaining({ id: 'snapshotDbOps', label: 'DB Ops' }),
             expect.objectContaining({ id: 'snapshotCpu', label: 'Snapshot CPU' }),

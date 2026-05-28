@@ -89,6 +89,36 @@
             </div>
             }
 
+            <div class="diagnostic-review-clusters">
+                <div class="diagnostic-section-head">
+                    <span class="diagnostics-kicker">Review clusters</span>
+                    <strong>{{ diagnostics.reviewClusters.length }} families</strong>
+                </div>
+                @for (cluster of diagnostics.reviewClusters; track cluster.id) {
+                <article class="diagnostic-review-cluster" [class.review-conflict]="cluster.conflicts > 0">
+                    <div class="review-cluster-top">
+                        <span>{{ cluster.kind === 'entity-link' ? 'Entity' : 'Graph' }}</span>
+                        <strong>{{ cluster.label }}</strong>
+                        <em>{{ cluster.count }} items</em>
+                    </div>
+                    <div class="review-cluster-metrics">
+                        <span>{{ scorePercent(cluster.confidence) }}% confidence</span>
+                        <span>{{ scorePercent(cluster.impact) }}% impact</span>
+                        <span>{{ cluster.conflicts }} conflicts</span>
+                        <b>{{ cluster.action }}</b>
+                    </div>
+                    <div class="review-cluster-examples">
+                        @for (example of cluster.examples; track example) {
+                        <small>{{ example }}</small>
+                        }
+                    </div>
+                    <p>{{ cluster.signals.slice(0, 4).join(' | ') || 'clustered by matching decision shape' }}</p>
+                </article>
+                } @empty {
+                <div class="empty-row">No review clusters for this scope yet.</div>
+                }
+            </div>
+
             <div class="diagnostic-suggestions">
                 <span class="diagnostics-kicker">Rerank signals</span>
                 @for (suggestion of diagnostics.suggestions; track suggestion.id) {

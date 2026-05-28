@@ -142,7 +142,7 @@ describe('embedding atlas projection', () => {
                 { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Note 1', text: 'chapter text', evidenceIds: [] },
                 { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'Kai entered the room.', evidenceIds: [], lane: 'chunk_spine', structuralRole: 'spine', admissionTier: 0, admissionStatus: 'admitted', parentIds: ['embed:note:note-1'] },
                 { id: 'embed:anchor:anchor-1', kind: 'anchor', sourceId: 'anchor-1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
-                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'], parentIds: ['embed:chunk:chunk-1', 'embed:note:note-1'] },
                 { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
                 { id: 'embed:entity:baton', kind: 'entity', sourceId: 'baton', entityId: 'baton', entityKind: 'LOCATION', label: 'Baton Rouge', text: 'Baton Rouge', evidenceIds: ['anchor-location'] },
                 { id: 'embed:anchor:anchor-location', kind: 'anchor', sourceId: 'anchor-location', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'baton', entityKind: 'LOCATION', label: 'Baton Rouge', text: 'Baton Rouge', evidenceIds: ['anchor-location'] },
@@ -166,6 +166,7 @@ describe('embedding atlas projection', () => {
         expect(atlas.edges.map((edge) => edge.type)).toEqual(expect.arrayContaining([
             'note-chunk',
             'chunk-anchor',
+            'chunk-entity',
             'anchor-entity',
             'co_occurs_with',
         ]));
@@ -179,7 +180,11 @@ describe('embedding atlas projection', () => {
             signalAdmissionTier: 0,
             signalAdmissionStatus: 'admitted',
             signalParentIds: ['embed:note:note-1'],
+            graphTruthStatus: 'accepted',
+            graphTruthKind: 'target',
         }));
+        expect(nodes.get('embed:anchor:anchor-1')?.metadata?.graphTruthStatus).toBe('evidence');
+        expect(nodes.get('embed:entity:kai')?.metadata?.signalParentIds).toEqual(['embed:chunk:chunk-1', 'embed:note:note-1']);
         expect(nodes.get('embed:anchor:anchor-location')?.kind).toBe('anchor');
         expect(colors.get('embed:entity:baton')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
         expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_GRAPH_NODE_COLORS.anchor);
@@ -347,7 +352,7 @@ describe('embedding atlas projection', () => {
             }),
         });
         expect(kai.metadata?.lorentz).toMatchObject({
-            level: 0,
+            level: 2,
             primaryTreeKind: 'identity',
             regionRole: 'core',
             dominantLane: 'entity',
@@ -376,7 +381,19 @@ describe('embedding atlas projection', () => {
             builtAt: 1,
             chunks: [],
             mentions: [],
-            entityAnchors: [],
+            entityAnchors: [{
+                id: 'a1',
+                noteId: 'note-1',
+                chunkId: 'chunk-1',
+                surface: 'Kai',
+                sourceStart: 0,
+                sourceEnd: 3,
+                source: 'dynamic-ner',
+                confidence: 0.92,
+                entityId: 'kai',
+                status: 'accepted',
+                generation: 1,
+            }],
             relationships: [],
             events: [],
             episodes: [],
@@ -416,8 +433,10 @@ describe('embedding atlas projection', () => {
         const byId = new Map(atlas.nodes.map((node) => [node.id, node.metadata?.lorentz as Record<string, unknown>]));
         expect(byId.get('embed:note:note-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
         expect(byId.get('embed:chunk:chunk-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
+        expect(byId.get('embed:entity:kai')).toMatchObject({ capId: 'document:note-1', signalLane: 'entity_anchor' });
         expect(byId.get('embed:anchor:a1')).toMatchObject({ capId: 'document:note-1', signalLane: 'anchor_evidence' });
-        expect(Number(byId.get('embed:note:note-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:entity:kai')?.['shellRadius']));
+        expect(Number(byId.get('embed:note:note-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:chunk:chunk-1')?.['shellRadius']));
+        expect(Number(byId.get('embed:chunk:chunk-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:entity:kai')?.['shellRadius']));
         expect(Number(byId.get('embed:entity:kai')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:anchor:a1')?.['shellRadius']));
     });
 

@@ -6,8 +6,11 @@ import type { AtlasCapabilityId } from '../components/search-panel/atlas-capabil
 import type { AtlasBuildScope, AtlasRunOptions } from '../services/atlas-capability-runtime.model';
 import { AtlasCapabilityRuntimeService } from '../services/atlas-capability-runtime.service';
 import { NerService } from '../services/ner.service';
+import { buildGraphRebuildDeltaPostProcessPlan, deltaPostProcessPlanCounters, type GraphRebuildDeltaPostProcessPlan } from './graph-rebuild-delta-postprocess-plan';
+import { buildGraphRebuildEdgeJudgmentPlan, edgeJudgmentPlanCounters } from './graph-rebuild-edge-type-judgment-plan';
 import { embeddingProfileFromModelSelection } from './graph-rebuild-embedding-signatures';
 import { GraphRebuildService } from './graph-rebuild.service';
+import { graphSignalTruthCounters } from './graph-rebuild-signal-truth';
 import type {
     GraphIndexModelReadiness,
     GraphIndexPostProcessMode,
@@ -135,6 +138,7 @@ export class GraphRebuildPipelineService {
             const entities = smartGraphRegistry.getAllEntities().length
                 ? smartGraphRegistry.getAllEntities()
                 : request.entities;
+            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection, request.embeddingStagePolicy);
             const graphStage = await this.runStage('coreGraphSnapshot', 'Clean Graph Snapshot', async () => {
                 const snapshot = await this.graphRebuild.buildAndPersistSnapshot({
                     scopeKind: scope.kind,
@@ -164,6 +168,22 @@ export class GraphRebuildPipelineService {
             if (!completedSnapshot) {
                 throw new Error('Clean graph stage completed without a snapshot.');
             }
+            appendDeltaPostProcessPlanStage(stageReceipts, {
+                policy: request.policy,
+                docs,
+                entities,
+                cachedSnapshot: completedSnapshot,
+                fingerprintMatched: false,
+            });
+            stageReceipts.push(signalCandidatePlanStage({
+                discoveryStage: nerStage,
+                docs,
+                entities,
+                cachedSnapshot: completedSnapshot,
+            }));
+            appendSignalCoverageStages(stageReceipts, completedSnapshot);
+            appendGraphTruthContractStage(stageReceipts, completedSnapshot);
+            appendEdgeJudgmentPlanStage(stageReceipts, completedSnapshot);
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             const completedAt = Date.now();
@@ -172,6 +192,7 @@ export class GraphRebuildPipelineService {
                 scope,
                 policy: request.policy,
                 postProcessMode: 'core',
+                postProcessFingerprint: fingerprint,
                 modelSelection: request.modelSelection,
                 modelReadiness: this.modelReadiness({ ...request, scope }),
                 startedAt: runStarted,
@@ -298,6 +319,8 @@ export class GraphRebuildPipelineService {
             stageReceipts.push(graphStage);
             assertStageCompleted(graphStage);
             if (snapshot) {
+                appendGraphTruthContractStage(stageReceipts, snapshot);
+                appendEdgeJudgmentPlanStage(stageReceipts, snapshot);
                 appendSnapshotTimingStages(stageReceipts, snapshot);
             }
 
@@ -395,25 +418,24 @@ export class GraphRebuildPipelineService {
             const cachedReceipt = await this.safeLoadReceipt(scope.scopeId);
             const cachedSnapshot = postProcessCache?.snapshot || await this.safeLoadSnapshot(scope.scopeId);
             const cacheReceipt = postProcessCache?.receipt || cachedReceipt;
-            if (
-                request.policy !== 'force'
-                && cachedSnapshot?.embeddingGraphPostProcess
-                && (
-                    Boolean(postProcessCache)
-                    || (
-                        cacheReceipt?.postProcessMode === 'full'
-                        && cacheReceipt.postProcessFingerprint === fingerprint
-                    )
-                )
-            ) {
-                const completedAt = Date.now();
-                const cacheStage = skippedStage(
-                    'postProcessCache',
-                    'Postprocess Cache',
-                    runStarted,
-                    completedAt,
-                    'Embedding topology and graph-aware links reused from fingerprint cache',
+            const fingerprintMatched = Boolean(postProcessCache)
+                || (
+                    cacheReceipt?.postProcessMode === 'full'
+                    && cacheReceipt.postProcessFingerprint === fingerprint
                 );
+            const deltaPlan = appendDeltaPostProcessPlanStage(stageReceipts, {
+                policy: request.policy,
+                docs,
+                entities,
+                cachedSnapshot,
+                fingerprintMatched,
+            });
+            if (request.policy !== 'force' && cachedSnapshot?.embeddingGraphPostProcess && deltaPlan.route === 'projection_only') {
+                for (const projection of PROJECTION_CAPABILITIES) {
+                    projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, cachedSnapshot));
+                }
+                const completedAt = Date.now();
+                const cacheStage = postProcessCacheStage(runStarted, completedAt, deltaPlan);
                 const receipt = this.buildRunReceipt({
                     idPrefix: 'postprocess-atlas',
                     scope,
@@ -425,14 +447,14 @@ export class GraphRebuildPipelineService {
                     modelReadiness: this.modelReadiness({ ...request, scope }),
                     startedAt: runStarted,
                     completedAt,
-                    stageReceipts: [cacheStage],
-                    projectionReceipts: cacheReceipt?.projectionReceipts || [],
+                    stageReceipts: [...stageReceipts, cacheStage],
+                    projectionReceipts,
                     snapshot: cachedSnapshot,
-                    message: 'Postprocess cache reused for this scope.',
+                    message: 'Postprocess reused the graph snapshot and refreshed projections for this scope.',
                 });
                 await this.publishRunReceipt(receipt, cachedSnapshot);
                 await this.graphRebuild.restorePersistedSnapshot(cachedSnapshot);
-                await this.graphRebuild.persistRunReceipt(receipt);
+                await this.persistRunReceiptWithTiming(receipt);
                 return { receipt, snapshot: cachedSnapshot };
             }
 
@@ -500,6 +522,8 @@ export class GraphRebuildPipelineService {
                 throw new Error('Postprocess stage completed without a snapshot.');
             }
             appendSignalCoverageStages(stageReceipts, completedSnapshot);
+            appendGraphTruthContractStage(stageReceipts, completedSnapshot);
+            appendEdgeJudgmentPlanStage(stageReceipts, completedSnapshot);
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             for (const projection of PROJECTION_CAPABILITIES) {
@@ -955,6 +979,48 @@ function appendSignalCoverageStages(
     ));
 }
 
+function appendGraphTruthContractStage(stageReceipts: GraphIndexStageReceipt[], snapshot: GraphRebuildSnapshot): void {
+    stageReceipts.push(instrumentationStage(
+        'graphTruthContract',
+        'Graph Truth Contract',
+        0,
+        graphSignalTruthCounters(snapshot),
+        'Canonical graph signal status contract shared by every projection',
+    ));
+}
+
+function appendDeltaPostProcessPlanStage(
+    stageReceipts: GraphIndexStageReceipt[],
+    input: {
+        policy: GraphIndexRunRequest['policy'];
+        docs: ScopedDocument[];
+        entities: Array<{ id: string; label: string; kind: string; aliases?: string[] }>;
+        cachedSnapshot: GraphRebuildSnapshot | null | undefined;
+        fingerprintMatched: boolean;
+    },
+): GraphRebuildDeltaPostProcessPlan {
+    const plan = buildGraphRebuildDeltaPostProcessPlan(input);
+    stageReceipts.push(instrumentationStage(
+        'deltaPostprocessPlan',
+        'Delta Postprocess Plan',
+        0,
+        deltaPostProcessPlanCounters(plan),
+        'Delta orchestration lanes selected before graph postprocess work',
+    ));
+    return plan;
+}
+
+function appendEdgeJudgmentPlanStage(stageReceipts: GraphIndexStageReceipt[], snapshot: GraphRebuildSnapshot): void {
+    const plan = buildGraphRebuildEdgeJudgmentPlan(snapshot);
+    stageReceipts.push(instrumentationStage(
+        'edgeTypeJudgmentPlan',
+        'Edge Type Judgment Plan',
+        0,
+        edgeJudgmentPlanCounters(plan),
+        'GLiClass edge/type candidate plan ready; no graph mutation yet',
+    ));
+}
+
 function planLaneCount(
     plan: GraphRebuildSnapshot['embeddingTargetPlan'] | undefined,
     lane: string,
@@ -1013,8 +1079,8 @@ function signalCandidatePlanStage(input: {
     cachedSnapshot: GraphRebuildSnapshot | null | undefined;
 }): GraphIndexStageReceipt {
     const discovery = input.discoveryStage.counters || {};
-    const discoveryCandidates = discovery['candidateSuggestions'] || discovery['suggestions'] || 0;
-    const exportableMentions = discovery['exportableMentions'] || discovery['mentions'] || 0;
+    const discoveryCandidates = discovery['candidateSuggestions'] || discovery['suggestions'] || discovery['candidates'] || 0;
+    const exportableMentions = discovery['exportableMentions'] || discovery['mentions'] || discovery['acceptedAnchors'] || 0;
     const documentChars = input.docs.reduce((sum, doc) => sum + doc.plainText.length, 0);
     const prior = input.cachedSnapshot;
     return instrumentationStage(
@@ -1288,6 +1354,29 @@ function skippedStage(
         outputCount: 0,
         counters: { cacheHit: 1 },
         message,
+    };
+}
+
+function postProcessCacheStage(
+    startedAt: number,
+    completedAt: number,
+    plan: GraphRebuildDeltaPostProcessPlan,
+): GraphIndexStageReceipt {
+    return {
+        id: 'postProcessCache',
+        label: 'Postprocess Cache',
+        status: 'completed',
+        startedAt,
+        completedAt,
+        durationMs: Math.max(0, completedAt - startedAt),
+        outputCount: 0,
+        counters: {
+            cacheHit: 1,
+            projectionOnly: plan.lanes.some((lane) => lane.lane === 'projection_only' && lane.dirty) ? 1 : 0,
+            targetReplanSkipped: 1,
+            dirtyLanes: plan.dirtyLaneCount,
+        },
+        message: 'Graph snapshot cache reused; projection-only route executed.',
     };
 }
 

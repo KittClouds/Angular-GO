@@ -34,7 +34,20 @@ export function buildGraphRebuildEmbeddingTargetPlan(
     const noteIds = input.noteIds?.length ? input.noteIds : unique([...chunks.map((chunk) => chunk.noteId), ...anchors.map((anchor) => anchor.noteId)]);
     for (const noteId of noteIds) targets.push({ id: `embed:note:${noteId}`, kind: 'note', sourceId: noteId, noteId, label: `Note ${noteId}`, text: noteText(input, noteId), evidenceIds: [] });
     for (const chunk of chunks) targets.push({ id: `embed:chunk:${chunk.id}`, kind: 'chunk', sourceId: chunk.id, noteId: chunk.noteId, chunkId: chunk.id, label: `Chunk ${chunk.ordinal + 1}`, text: chunkText(input, chunk, anchorsByChunkId.get(chunk.id) || [], nodeByEntityId), evidenceIds: [] });
-    for (const node of nodes) targets.push({ id: `embed:entity:${node.entityId}`, kind: 'entity', sourceId: node.entityId, entityId: node.entityId, entityKind: node.kind, label: node.label, text: entityText(input, node, anchorsByEntityId.get(node.entityId) || []), evidenceIds: node.anchorIds });
+    for (const node of nodes) {
+        const entityAnchors = anchorsByEntityId.get(node.entityId) || [];
+        targets.push({
+            id: `embed:entity:${node.entityId}`,
+            kind: 'entity',
+            sourceId: node.entityId,
+            entityId: node.entityId,
+            entityKind: node.kind,
+            label: node.label,
+            text: entityText(input, node, entityAnchors),
+            evidenceIds: node.anchorIds,
+            parentIds: entityParentIds(entityAnchors),
+        });
+    }
     for (const anchor of anchors) targets.push({ id: `embed:anchor:${anchor.id}`, kind: 'anchor', sourceId: anchor.id, noteId: anchor.noteId, chunkId: anchor.chunkId, entityId: anchor.entityId, entityKind: nodeByEntityId.get(anchor.entityId)?.kind, label: anchor.surface, text: anchorText(input, anchor, nodeByEntityId.get(anchor.entityId)), evidenceIds: [anchor.id] });
     for (const relationship of relationships) {
         if (relationship.status === 'rejected') continue;
@@ -216,6 +229,16 @@ function groupAnchorsByChunk(anchors: GraphRebuildEntityAnchor[]): Map<string, G
         groups.set(anchor.chunkId, [...(groups.get(anchor.chunkId) || []), anchor]);
     }
     return groups;
+}
+
+function entityParentIds(anchors: GraphRebuildEntityAnchor[]): string[] {
+    const chunkParents = anchors
+        .map((anchor) => anchor.chunkId ? `embed:chunk:${anchor.chunkId}` : '')
+        .filter(Boolean);
+    const noteParents = anchors
+        .map((anchor) => anchor.noteId ? `embed:note:${anchor.noteId}` : '')
+        .filter(Boolean);
+    return unique([...chunkParents, ...noteParents]);
 }
 
 function representativeAnchorContexts(

@@ -16,6 +16,7 @@ import {
     sparseEmbeddingSignature,
     sparseToDenseVector,
 } from '../../../../../graph-rebuild/graph-rebuild-embedding-signatures';
+import { buildGraphSignalTruthIndex, type GraphSignalTruthRecord } from '../../../../../graph-rebuild/graph-rebuild-signal-truth';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
 import { relationFamilyFromText, relationHslFromText } from './graph-relation-visual-style';
@@ -37,6 +38,11 @@ type HopfBaseAssignment = {
     splitKey?: string;
 };
 
+type TargetHierarchyContext = {
+    noteId?: string;
+    chunkId?: string;
+};
+
 export function buildGraphRebuildEmbeddingAtlas(
     snapshot: GraphRebuildSnapshot,
     manifold: AtlasManifoldMode,
@@ -46,10 +52,12 @@ export function buildGraphRebuildEmbeddingAtlas(
     const postByTarget = new Map((snapshot.embeddingGraphPostProcess?.targets || []).map((row) => [row.targetId, row]));
     const selected = selectEmbeddingTargets(snapshot)
         .map((target) => hydrateTargetEntityKind(target, entityKindById));
+    const hierarchyByTarget = buildTargetHierarchyContext(snapshot);
+    const truthByTarget = buildGraphSignalTruthIndex(snapshot);
     const hopfBasePlan = manifold === 'hopf' ? buildHopfBasePlan(selected, postByTarget) : undefined;
     const vectors = selected.map((target) => textVector(target, profile.selectedDimensions));
     const nodes = selected.map((target, index) =>
-        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id), hopfBasePlan?.get(target.id)),
+        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id), hopfBasePlan?.get(target.id), hierarchyByTarget.get(target.id), truthByTarget.get(target.id)),
     );
     const nodeIds = new Set(nodes.map((node) => node.id));
     return {
@@ -185,6 +193,30 @@ function hydrateTargetEntityKind(
     return entityKind ? { ...target, entityKind } : target;
 }
 
+function buildTargetHierarchyContext(snapshot: GraphRebuildSnapshot): Map<string, TargetHierarchyContext> {
+    const contexts = new Map<string, TargetHierarchyContext>();
+    for (const noteId of snapshot.noteIds || []) {
+        contexts.set(`embed:note:${noteId}`, { noteId });
+    }
+    for (const chunk of snapshot.chunks || []) {
+        contexts.set(`embed:chunk:${chunk.id}`, { noteId: chunk.noteId, chunkId: chunk.id });
+    }
+    const entityContexts = new Map<string, { confidence: number; context: TargetHierarchyContext }>();
+    for (const anchor of snapshot.entityAnchors || []) {
+        const context = { noteId: anchor.noteId, chunkId: anchor.chunkId };
+        contexts.set(`embed:anchor:${anchor.id}`, context);
+        if (!anchor.entityId) continue;
+        const existing = entityContexts.get(anchor.entityId);
+        if (!existing || anchor.confidence > existing.confidence) {
+            entityContexts.set(anchor.entityId, { confidence: anchor.confidence, context });
+        }
+    }
+    for (const [entityId, value] of entityContexts) {
+        contexts.set(`embed:entity:${entityId}`, value.context);
+    }
+    return contexts;
+}
+
 function targetNode(
     target: GraphRebuildEmbeddingTarget,
     vector: Float32Array,
@@ -193,6 +225,8 @@ function targetNode(
     manifold: AtlasManifoldMode,
     post?: GraphRebuildEmbeddingTargetPostProcess,
     hopfBase?: HopfBaseAssignment,
+    hierarchyContext?: TargetHierarchyContext,
+    graphTruth?: GraphSignalTruthRecord,
 ): GalaxyRenderableNode {
     const point = projectVector(vector, target.id, index, total, manifold);
     const relationFamily = displayKind(target.kind) === 'graph-fact'
@@ -219,9 +253,13 @@ function targetNode(
             signalAdmissionStatus: target.admissionStatus,
             signalAdmissionReason: target.admissionReason,
             signalParentIds: target.parentIds,
+            graphTruth,
+            graphTruthStatus: graphTruth?.status,
+            graphTruthReason: graphTruth?.reason,
+            graphTruthKind: graphTruth?.kind,
             targetConfidence: targetConfidence(target),
-            noteId: target.noteId,
-            chunkId: target.chunkId,
+            noteId: target.noteId || hierarchyContext?.noteId,
+            chunkId: target.chunkId || hierarchyContext?.chunkId,
             sourceEntityId: target.entityId,
             embeddingClusterId: post?.clusterId,
             embeddingClusterRole: post?.clusterRole,
@@ -241,7 +279,7 @@ function targetNode(
                 dominantLane: post.productLaneFeatures.dominantLane,
                 lanes: post.productLaneFeatures,
             } : undefined,
-            lorentz: post ? productLorentzMetadata(target, point, post) : undefined,
+            lorentz: post ? productLorentzMetadata(target, point, post, hierarchyContext) : undefined,
             hopf: post ? graphRebuildHopfMetadata(target, post, manifold, hopfBase) : undefined,
             graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
@@ -399,6 +437,7 @@ function productLorentzMetadata(
     target: GraphRebuildEmbeddingTarget,
     point: { x: number; y: number; z: number },
     post: GraphRebuildEmbeddingTargetPostProcess,
+    hierarchyContext?: TargetHierarchyContext,
 ): Record<string, unknown> {
     const lane = post.productLaneFeatures;
     const region = post.productTopologyRegion;
@@ -407,7 +446,9 @@ function productLorentzMetadata(
     const scale = 0.22 + depth * 0.66;
     const treeKind = productFiberKind(post.clusterRole, region.laneKind);
     const parentNodeId = post.medoidTargetId && post.medoidTargetId !== target.id ? post.medoidTargetId : null;
-    const level = productRegionLevel(post);
+    const capId = productCapId(target, region.id, hierarchyContext);
+    const parentId = productCapParentId(target, parentNodeId, hierarchyContext);
+    const level = productRegionLevel(target, post);
     const specificity = productHierarchySpecificity(target, post);
     const ambiguity = productHierarchyAmbiguity(post);
     return {
@@ -418,7 +459,7 @@ function productLorentzMetadata(
             (point.z / radius) * scale,
             lane.fiberPhase,
         ],
-        capId: productCapId(target, region.id),
+        capId,
         capDirection: [point.x / radius, point.y / radius, point.z / radius],
         capPhase: lane.fiberPhase,
         shellRadius: productCapShellRadius(target, specificity, ambiguity),
@@ -433,32 +474,40 @@ function productLorentzMetadata(
         regionRole: region.role,
         dominantLane: region.laneKind,
         memberships: [{
-            treeId: productCapId(target, region.id),
+            treeId: capId,
             treeKind,
-            parentNodeId: productCapParentId(target, parentNodeId),
+            parentNodeId: parentId,
             level,
-            pathKey: `${productCapId(target, region.id)}/${productCapParentId(target, parentNodeId) || 'root'}/${target.id}`,
+            pathKey: `${capId}/${parentId || 'root'}/${target.id}`,
         }, {
             treeId: `product-lane:${region.laneKind}`,
             treeKind: region.laneKind,
-            parentNodeId: productCapParentId(target, parentNodeId),
+            parentNodeId: parentId,
             level,
             pathKey: `product-lane:${region.laneKind}/${post.clusterId}/${target.id}`,
         }],
     };
 }
 
-function productCapId(target: GraphRebuildEmbeddingTarget, fallback: string): string {
-    if ((target.lane === 'document_spine' || target.lane === 'anchor_evidence') && target.noteId) return `document:${target.noteId}`;
-    if (target.kind === 'chunk' && target.noteId) return `document:${target.noteId}`;
-    if ((target.lane === 'event_identity' || target.lane === 'temporal_fact' || target.lane === 'causal_fact') && target.noteId) return `story:${target.noteId}`;
+function productCapId(target: GraphRebuildEmbeddingTarget, fallback: string, hierarchyContext?: TargetHierarchyContext): string {
+    const noteId = target.noteId || hierarchyContext?.noteId;
+    if (noteId) return `document:${noteId}`;
     return fallback;
 }
 
-function productCapParentId(target: GraphRebuildEmbeddingTarget, fallback: string | null): string | null {
+function productCapParentId(
+    target: GraphRebuildEmbeddingTarget,
+    fallback: string | null,
+    hierarchyContext?: TargetHierarchyContext,
+): string | null {
     const parents = target.parentIds || [];
-    if (target.kind === 'chunk' && target.noteId) return `embed:note:${target.noteId}`;
-    if (target.kind === 'anchor' && target.chunkId) return `embed:chunk:${target.chunkId}`;
+    const noteId = target.noteId || hierarchyContext?.noteId;
+    const chunkId = target.chunkId || hierarchyContext?.chunkId;
+    if (target.kind === 'chunk' && noteId) return `embed:note:${noteId}`;
+    if (target.kind === 'entity' && chunkId) return `embed:chunk:${chunkId}`;
+    if (target.kind === 'entity' && noteId) return `embed:note:${noteId}`;
+    if (target.kind === 'anchor' && target.entityId) return `embed:entity:${target.entityId}`;
+    if (target.kind === 'anchor' && chunkId) return `embed:chunk:${chunkId}`;
     if (parents.length) return parents[0];
     return fallback;
 }
@@ -470,19 +519,34 @@ function productCapShellRadius(
 ): number {
     const lane = target.lane || 'unknown';
     let radius = 1.28;
-    if (lane === 'document_spine') radius = target.kind === 'note' ? 2.08 : 1.92;
-    else if (lane === 'entity_anchor') radius = 1.72;
-    else if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') radius = 1.56;
-    else if (lane === 'relationship_fact') radius = 1.44;
-    else if (lane === 'memory_state') radius = 1.22;
-    else if (lane === 'cooccurrence_weak') radius = 1.16;
-    else if (lane === 'anchor_evidence') radius = 1.04;
+    if (lane === 'document_spine') radius = target.kind === 'note' ? 2.08 : 1.76;
+    else if (lane === 'chunk_spine') radius = 1.76;
+    else if (lane === 'entity_anchor') radius = 1.42;
+    else if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') radius = 1.34;
+    else if (lane === 'relationship_fact') radius = 1.3;
+    else if (lane === 'memory_state') radius = 1.16;
+    else if (lane === 'cooccurrence_weak') radius = 1.08;
+    else if (lane === 'anchor_evidence') radius = 0.96;
     const confidence = targetConfidence(target);
     const confidenceDrop = lane === 'document_spine' ? 0.08 : 0.24;
     radius -= (1 - confidence) * confidenceDrop;
     radius += (specificity - 0.72) * 0.08;
     radius -= ambiguity * 0.08;
-    return clampRange(radius, 0.54, 2.12);
+    const [min, max] = productCapShellBand(target);
+    return clampRange(radius, min, max);
+}
+
+function productCapShellBand(target: GraphRebuildEmbeddingTarget): [number, number] {
+    const lane = target.lane || 'unknown';
+    if (lane === 'document_spine' && target.kind === 'note') return [2.02, 2.12];
+    if (lane === 'document_spine' || lane === 'chunk_spine') return [1.66, 1.84];
+    if (lane === 'entity_anchor') return [1.34, 1.52];
+    if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') return [1.22, 1.48];
+    if (lane === 'relationship_fact') return [1.18, 1.42];
+    if (lane === 'memory_state') return [1.04, 1.28];
+    if (lane === 'cooccurrence_weak') return [0.96, 1.2];
+    if (lane === 'anchor_evidence') return [0.84, 1.08];
+    return [0.54, 2.12];
 }
 
 function productHierarchySpecificity(
@@ -507,7 +571,14 @@ function productHierarchyAmbiguity(post: GraphRebuildEmbeddingTargetPostProcess)
     return clamp01(post.productLaneFeatures.clusterRadius * 0.52 + post.outlierScore * 0.28 + roleBoost);
 }
 
-function productRegionLevel(post: GraphRebuildEmbeddingTargetPostProcess): number {
+function productRegionLevel(target: GraphRebuildEmbeddingTarget, post: GraphRebuildEmbeddingTargetPostProcess): number {
+    const kind = displayKind(target.kind);
+    if (target.lane === 'document_spine' && kind === 'note') return 0;
+    if (target.lane === 'document_spine' || target.lane === 'chunk_spine' || kind === 'chunk') return 1;
+    if (target.lane === 'entity_anchor' || kind === 'entity') return 2;
+    if (target.lane === 'anchor_evidence' || kind === 'anchor') return 3;
+    if (target.lane === 'relationship_fact' || target.lane === 'event_identity' || target.lane === 'temporal_fact' || target.lane === 'causal_fact') return 2;
+    if (target.lane === 'memory_state' || target.lane === 'cooccurrence_weak') return 3;
     const role = post.productTopologyRegion.role;
     if (post.medoidTargetId === post.targetId && role === 'core') return 0;
     if (role === 'core') return 1;
@@ -545,6 +616,7 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
     for (const anchor of snapshot.entityAnchors) {
         if (anchor.chunkId) {
             add(`embed:chunk-anchor:${anchor.id}`, `embed:chunk:${anchor.chunkId}`, `embed:anchor:${anchor.id}`, 'chunk-anchor', anchor.confidence);
+            add(`embed:chunk-entity:${anchor.chunkId}:${anchor.entityId}`, `embed:chunk:${anchor.chunkId}`, `embed:entity:${anchor.entityId}`, 'chunk-entity', anchor.confidence);
         }
         add(`embed:anchor-entity:${anchor.id}`, `embed:anchor:${anchor.id}`, `embed:entity:${anchor.entityId}`, 'anchor-entity', anchor.confidence);
     }

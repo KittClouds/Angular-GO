@@ -120,6 +120,8 @@ describe('Phoenix graph rebuild builder', () => {
             .toContain('mentions:1');
         expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
             .toContain('evidence_context:Kai approved the packet');
+        expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.parentIds)
+            .toEqual(expect.arrayContaining(['embed:chunk:note-1:block:0', 'embed:note:note-1']));
         const approvedFact = snapshot.embeddingTargets.find((target) => target.id.includes('approves_or_accepts'));
         expect(approvedFact?.label).toContain('Kai approves_or_accepts Rift');
         expect(approvedFact?.text).toContain('confidence:');

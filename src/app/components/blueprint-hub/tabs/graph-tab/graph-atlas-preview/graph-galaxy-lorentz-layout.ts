@@ -286,10 +286,10 @@ function buildMembershipGuides(nodes: GalaxyNode[], links: GalaxyEdge[], infos: 
 
 function buildLevelShellGuides(): GalaxyLorentzGuide[] {
     const shells = [
-        { level: 0, radius: 0.52, kind: 'documentStructure', weight: 0.32 },
-        { level: 1, radius: 1.04, kind: 'semantic', weight: 0.38 },
-        { level: 2, radius: 1.55, kind: 'relationship', weight: 0.44 },
-        { level: 3, radius: 2.08, kind: 'identity', weight: 0.52 },
+        { level: 0, radius: 2.08, kind: 'documentStructure', weight: 0.52 },
+        { level: 1, radius: 1.72, kind: 'semantic', weight: 0.44 },
+        { level: 2, radius: 1.42, kind: 'identity', weight: 0.38 },
+        { level: 3, radius: 1.04, kind: 'evidence', weight: 0.32 },
     ];
     return shells.map((shell) => ({
         id: `caps:shell:${shell.level}`,
@@ -360,6 +360,8 @@ function hierarchyLevel(
     if (lane === 'temporal' || lane === 'event' || specificity > 0.72) return 2;
     const text = `${node.entity.kind || ''} ${node.entity.metadata?.sourceType || ''}`.toLowerCase();
     if (/note|document|doc/.test(text)) return 0;
+    if (/chunk/.test(text)) return 1;
+    if (/entity|character|location|creature|npc|item|network|group/.test(text)) return 2;
     return 1;
 }
 
@@ -382,19 +384,23 @@ function hierarchyRadius(
     radius -= clamp(ambiguity, 0, 1) * 0.24;
     if (role === 'bridge') radius += 0.08;
     if (role === 'outlier') radius += 0.16;
-    if (/note|document|doc/.test(sourceType)) radius = Math.min(radius, 0.72);
+    if (/note|document|doc/.test(sourceType)) radius = Math.max(radius, 1.96);
+    if (/chunk/.test(sourceType)) radius = clamp(radius, 1.58, 1.86);
+    if (/entity|character|location|creature|npc|item|network|group/.test(sourceType) || /character|location|creature|npc|item|network|group/.test(kind)) {
+        radius = clamp(radius, 1.28, 1.58);
+    }
     if (lane === 'temporal') radius = clamp(radius, 1.08, 1.72);
     return clamp(radius, 0.38, CAP_SCENE_RADIUS * 0.985);
 }
 
 function hierarchyShellRadius(sourceType: string, kind: string, lane: string): number {
-    if (/note|document|doc/.test(sourceType)) return 0.54;
-    if (/memory|state|concept|context/.test(sourceType) || /memory|state|concept|context/.test(kind)) return 0.98;
-    if (/chunk/.test(sourceType)) return 1.22;
-    if (/graph.?fact|relationship|relation/.test(sourceType) || lane === 'relationship') return 1.34;
-    if (/event|temporal|causal/.test(sourceType) || lane === 'event' || lane === 'temporal' || lane === 'causal') return 1.48;
-    if (/anchor|mention|evidence/.test(sourceType)) return 1.68;
-    if (/entity|character|location|creature|npc|item|network|group/.test(sourceType) || /character|location|creature|npc|item|network|group/.test(kind)) return 1.92;
+    if (/note|document|doc/.test(sourceType)) return 2.08;
+    if (/chunk/.test(sourceType)) return 1.72;
+    if (/entity|character|location|creature|npc|item|network|group/.test(sourceType) || /character|location|creature|npc|item|network|group/.test(kind)) return 1.42;
+    if (/graph.?fact|relationship|relation/.test(sourceType) || lane === 'relationship') return 1.3;
+    if (/event|temporal|causal/.test(sourceType) || lane === 'event' || lane === 'temporal' || lane === 'causal') return 1.34;
+    if (/anchor|mention|evidence/.test(sourceType)) return 0.96;
+    if (/memory|state|concept|context/.test(sourceType) || /memory|state|concept|context/.test(kind)) return 1.08;
     return 1.18;
 }
 
@@ -425,8 +431,10 @@ function capIdFor(
     lorentz: Record<string, unknown>,
     primary: Record<string, unknown>,
 ): string {
+    const structuralCapId = structuralCapIdFor(node, lane);
     return firstText(
         lorentz['capId'],
+        structuralCapId,
         node.entity.metadata?.['embeddingClusterId'],
         region['id'],
         region['clusterId'],
@@ -434,6 +442,14 @@ function capIdFor(
         primary['treeId'],
         `lane:${lane}`,
     );
+}
+
+function structuralCapIdFor(node: GalaxyNode, lane: string): string {
+    const metadata = node.entity.metadata || {};
+    const noteId = firstText(metadata['noteId'], /note|document|doc/.test(String(metadata['sourceType'] || node.entity.kind || '').toLowerCase()) ? metadata['sourceId'] : '');
+    if (noteId) return `document:${noteId}`;
+    if (lane === 'document' || lane === 'documentStructure') return 'document:root';
+    return '';
 }
 
 function guideKindForLink(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNode, sourceInfo: HierarchyInfo, targetInfo: HierarchyInfo): string {
