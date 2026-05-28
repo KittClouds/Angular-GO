@@ -1666,9 +1666,18 @@ function projectionReceiptDetail(projection: GraphIndexProjectionReceipt): strin
   if (backendMs > 0) parts.push(`${backendLabel} ${formatDuration(backendMs)}`);
   if (uiMs > 0) parts.push(`ui ${formatDuration(uiMs)}`);
   if (projection.mode === 'siegel') {
+    parts.push(counters['siegelNative'] ? 'native' : 'fallback');
     parts.push(`g${counters['siegelGenus'] || 0}`);
     parts.push(`${formatCount(counters['siegelDirectedEdges'] || 0)} directed`);
+    parts.push(`${formatCount(counters['siegelPairs'] || counters['siegelDirectedEdges'] || 0)} pairs`);
+    parts.push(`${formatCount(counters['siegelDistanceEvaluations'] || 0)} evals`);
     parts.push(`${formatCount(counters['siegelAsymmetricPairs'] || 0)} asymmetric`);
+    const capped = (counters['siegelCappedEdges'] || 0)
+      + (counters['siegelCappedPairs'] || 0)
+      + (counters['siegelCappedDistances'] || 0);
+    if (capped > 0) parts.push(`${formatCount(capped)} capped`);
+    if (counters['siegelSkippedEdges']) parts.push(`${formatCount(counters['siegelSkippedEdges'])} skipped`);
+    if (counters['siegelEstimatedBytes']) parts.push(formatBytes(counters['siegelEstimatedBytes']));
   }
   if (nodes > 0 || edges > 0) parts.push(`payload ${formatCount(nodes)}n/${formatCount(edges)}e`);
   return parts.join(' / ');
@@ -1798,6 +1807,13 @@ function formatDuration(value: number): string {
 
 function formatCount(value: number): string {
   return Math.max(0, Math.round(Number(value) || 0)).toLocaleString('en-US');
+}
+
+function formatBytes(value: number): string {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${formatCount(bytes)} B`;
 }
 
 function labelFromKey(key: string): string {

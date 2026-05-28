@@ -120,6 +120,10 @@ class PhoenixTaurpcBridge implements PhoenixNativeBridge {
         return this.callJson('lorentz_forest_query_json', request);
     }
 
+    async siegelFinslerReceipt(request: Record<string, unknown>): Promise<any> {
+        return this.callJson('siegel_finsler_receipt_json', request);
+    }
+
     async buildStructure(request: Record<string, unknown>): Promise<any> {
         return this.callJson('build_structure_json', request);
     }

@@ -4,20 +4,21 @@ import { buildSiegelBackboneProjectionReceipt } from './graph-rebuild-siegel-bac
 import type { GraphRebuildSnapshot } from './graph-rebuild-snapshot';
 
 describe('buildSiegelBackboneProjectionReceipt', () => {
-    it('measures asymmetric parent-child Finsler structure without native sidecars', () => {
+    it('measures asymmetric parent-child Finsler structure without native sidecars', async () => {
         const snapshot = snapshotWithTargets([
             target('doc', 'document_spine', 'Document root', [], 0),
             target('chunk', 'chunk_spine', 'Chunk one', ['doc'], 1),
             target('entity', 'entity_anchor', 'Kai', ['chunk'], 2),
         ]);
 
-        const receipt = buildSiegelBackboneProjectionReceipt(snapshot);
+        const receipt = await buildSiegelBackboneProjectionReceipt(snapshot, { nativeRunner: null });
 
         expect(receipt.mode).toBe('siegel');
         expect(receipt.status).toBe('synced');
         expect(receipt.targetCount).toBe(3);
         expect(receipt.counters).toEqual(expect.objectContaining({
             siegelEnabled: 1,
+            siegelFallback: 1,
             siegelGenus: 3,
             siegelMatrixCells: 6,
             siegelParentEdges: 2,
@@ -27,8 +28,43 @@ describe('buildSiegelBackboneProjectionReceipt', () => {
         }));
     });
 
-    it('skips cleanly when no targets are available', () => {
-        const receipt = buildSiegelBackboneProjectionReceipt(snapshotWithTargets([]));
+    it('uses native kernel receipts when a runner is available', async () => {
+        const snapshot = snapshotWithTargets([
+            target('doc', 'document_spine', 'Document root', [], 0),
+            target('chunk', 'chunk_spine', 'Chunk one', ['doc'], 1),
+        ]);
+
+        const receipt = await buildSiegelBackboneProjectionReceipt(snapshot, {
+            nativeRunner: async () => ({
+                contract: {
+                    targetCount: 2,
+                    directedEdgeCount: 1,
+                    genus: 3,
+                    matrixCells: 6,
+                    distanceEvaluations: 2,
+                    asymmetricPairCount: 1,
+                    hierarchyViolationCount: 0,
+                    estimatedBytes: 104,
+                    timings: { buildMs: 1, matrixPlanMs: 2, distanceMs: 3 },
+                },
+                counters: { pairCount: 1, skippedEdgeCount: 0 },
+                parentPairs: 1,
+                backbonePairs: 0,
+                bridgePairs: 0,
+            }),
+        });
+
+        expect(receipt.status).toBe('synced');
+        expect(receipt.message).toContain('Native Siegel-Finsler');
+        expect(receipt.counters).toEqual(expect.objectContaining({
+            siegelNative: 1,
+            siegelPairs: 1,
+            siegelDistanceMs: 3,
+        }));
+    });
+
+    it('skips cleanly when no targets are available', async () => {
+        const receipt = await buildSiegelBackboneProjectionReceipt(snapshotWithTargets([]));
 
         expect(receipt.status).toBe('skipped');
         expect(receipt.targetCount).toBe(0);

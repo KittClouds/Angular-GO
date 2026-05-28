@@ -14,6 +14,7 @@ pub mod lorentz_tree;
 pub mod manifold_v2;
 pub mod poincare;
 pub mod shard;
+pub mod siegel_finsler;
 pub mod sphere;
 pub mod sphere_shard;
 pub mod sphere_tangent;

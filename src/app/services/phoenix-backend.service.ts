@@ -81,6 +81,7 @@ export type PhoenixNativeBridge = Pick<PhoenixWasmService, 'isReady' | PhoenixNa
     loadRuntime(): Promise<void>;
     bootSnapshot(): Promise<PhoenixBootSnapshotPayload>;
     compileGalaxyScene(request: PhoenixGalaxySceneRequest): Promise<PhoenixGalaxyScene>;
+    siegelFinslerReceipt?(request: Record<string, unknown>): Promise<any>;
 };
 
 export type PhoenixRuntimeTarget = 'web' | 'native';

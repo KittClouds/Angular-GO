@@ -20,14 +20,75 @@ interface DirectedPair {
     kind: 'parent' | 'backbone' | 'bridge';
 }
 
-export function buildSiegelBackboneProjectionReceipt(
+interface SiegelBackboneReceiptOptions {
+    nativeRunner?: SiegelNativeRunner | null;
+}
+
+type SiegelNativeRunner = (request: SiegelNativeRunRequest) => Promise<SiegelNativeRunReceipt>;
+
+interface SiegelNativeRunRequest {
+    genus: number;
+    targets: SiegelNativeTargetInput[];
+    edges: SiegelNativeEdgeInput[];
+    caps: {
+        maxTargets: number;
+        maxDirectedEdges: number;
+        maxPairs: number;
+        maxDistanceEvaluations: number;
+    };
+}
+
+interface SiegelNativeTargetInput {
+    stableHash: number;
+    lane: string;
+    hierarchyDepth: number;
+    confidenceMilli: number;
+}
+
+interface SiegelNativeEdgeInput {
+    fromOrd: number;
+    toOrd: number;
+    kind: DirectedPair['kind'];
+    weightMilli: number;
+}
+
+interface SiegelNativeRunReceipt {
+    contract?: Record<string, unknown>;
+    counters?: Record<string, unknown>;
+    parentPairs?: unknown;
+    backbonePairs?: unknown;
+    bridgePairs?: unknown;
+}
+
+export async function buildSiegelBackboneProjectionReceipt(
     snapshot: GraphRebuildSnapshot | null,
-): GraphIndexProjectionReceipt {
+    options: SiegelBackboneReceiptOptions = {},
+): Promise<GraphIndexProjectionReceipt> {
     const startedAt = Date.now();
     const targetCount = snapshot?.embeddingTargets.length || 0;
     if (!snapshot || targetCount === 0) {
         return receipt(startedAt, snapshot, {}, 'Siegel-Finsler backbone skipped; no embedding targets');
     }
+
+    const nativeRunner = options.nativeRunner ?? runtimeNativeRunner();
+    if (nativeRunner) {
+        try {
+            const nativeReceipt = await nativeRunner(nativeRequest(snapshot));
+            return receiptFromNative(startedAt, snapshot, nativeReceipt);
+        } catch {
+            return fallbackReceipt(startedAt, snapshot, { siegelNativeError: 1 });
+        }
+    }
+
+    return fallbackReceipt(startedAt, snapshot, { siegelFallback: 1 });
+}
+
+function fallbackReceipt(
+    startedAt: number,
+    snapshot: GraphRebuildSnapshot,
+    extraCounters: Record<string, number>,
+): GraphIndexProjectionReceipt {
+    const targetCount = snapshot.embeddingTargets.length;
 
     const profile = normalizeEmbeddingProfile(snapshot.embeddingProfile);
     const dimensions = Math.max(32, profile.selectedDimensions);
@@ -63,8 +124,82 @@ export function buildSiegelBackboneProjectionReceipt(
             siegelHierarchyViolations: metrics.hierarchyViolations,
             siegelEstimatedBytes: targetCount * MATRIX_CELLS * 2 * Float32Array.BYTES_PER_ELEMENT,
             siegelPrunedDirectedEdges: Math.max(0, allPairs.length - pairs.length),
+            ...extraCounters,
         },
-        message: `Siegel-Finsler backbone synced: g=${SIEGEL_GENUS}, ${pairs.length} directed edges`,
+        message: `Siegel-Finsler fallback synced: g=${SIEGEL_GENUS}, ${pairs.length} directed edges`,
+    };
+}
+
+function nativeRequest(snapshot: GraphRebuildSnapshot): SiegelNativeRunRequest {
+    const pairs = directedPairs(snapshot);
+    return {
+        genus: SIEGEL_GENUS,
+        targets: snapshot.embeddingTargets.map((target, index) => ({
+            stableHash: stableTargetHash(target, index),
+            lane: target.lane || 'unknown',
+            hierarchyDepth: targetDepth(target),
+            confidenceMilli: confidenceMilli(target),
+        })),
+        edges: pairs.map((pair) => ({
+            fromOrd: pair.source,
+            toOrd: pair.target,
+            kind: pair.kind,
+            weightMilli: pair.kind === 'bridge' ? 850 : 1_000,
+        })),
+        caps: {
+            maxTargets: Math.max(1, snapshot.embeddingTargets.length),
+            maxDirectedEdges: MAX_EVALUATED_DIRECTED_EDGES,
+            maxPairs: MAX_EVALUATED_DIRECTED_EDGES,
+            maxDistanceEvaluations: MAX_EVALUATED_DIRECTED_EDGES,
+        },
+    };
+}
+
+function receiptFromNative(
+    startedAt: number,
+    snapshot: GraphRebuildSnapshot,
+    nativeReceipt: SiegelNativeRunReceipt,
+): GraphIndexProjectionReceipt {
+    const completedAt = Date.now();
+    const contract = nativeReceipt.contract || {};
+    const nativeCounters = nativeReceipt.counters || {};
+    const targetCount = counter(contract['targetCount'], snapshot.embeddingTargets.length);
+    const directedEdges = counter(contract['directedEdgeCount'], counter(nativeCounters['directedEdgeCount']));
+    const timings = objectRecord(contract['timings']);
+    return {
+        mode: 'siegel',
+        status: 'synced',
+        startedAt,
+        completedAt,
+        durationMs: completedAt - startedAt,
+        targetCount,
+        vectorCount: targetCount,
+        counters: {
+            siegelEnabled: 1,
+            siegelNative: 1,
+            siegelGenus: counter(contract['genus'], SIEGEL_GENUS),
+            siegelMatrixCells: counter(contract['matrixCells'], MATRIX_CELLS),
+            siegelTargets: targetCount,
+            siegelDirectedEdges: directedEdges,
+            siegelPairs: counter(nativeCounters['pairCount'], directedEdges),
+            siegelParentEdges: counter(nativeReceipt.parentPairs),
+            siegelBackboneEdges: counter(nativeReceipt.backbonePairs),
+            siegelBridgeEdges: counter(nativeReceipt.bridgePairs),
+            siegelSkippedEdges: counter(nativeCounters['skippedEdgeCount']),
+            siegelCappedEdges: counter(nativeCounters['cappedEdgeCount']),
+            siegelCappedPairs: counter(nativeCounters['cappedPairCount']),
+            siegelCappedDistances: counter(nativeCounters['cappedDistanceCount']),
+            siegelDistanceEvaluations: counter(contract['distanceEvaluations'], counter(nativeCounters['distanceEvaluations'])),
+            siegelAsymmetricPairs: counter(contract['asymmetricPairCount'], counter(nativeCounters['asymmetricPairCount'])),
+            siegelHierarchyViolations: counter(contract['hierarchyViolationCount'], counter(nativeCounters['hierarchyViolationCount'])),
+            siegelEstimatedBytes: counter(contract['estimatedBytes']),
+            siegelBuildMs: counter(timings['buildMs']),
+            siegelMatrixPlanMs: counter(timings['matrixPlanMs']),
+            siegelDistanceMs: counter(timings['distanceMs']),
+            siegelHierarchyMs: counter(timings['hierarchyMs']),
+            siegelSerializeMs: counter(timings['serializeMs']),
+        },
+        message: `Native Siegel-Finsler synced: g=${counter(contract['genus'], SIEGEL_GENUS)}, ${directedEdges} directed edges`,
     };
 }
 
@@ -156,6 +291,39 @@ function kindRank(kind: DirectedPair['kind']): number {
     if (kind === 'parent') return 0;
     if (kind === 'backbone') return 1;
     return 2;
+}
+
+function stableTargetHash(target: GraphRebuildEmbeddingTarget, index: number): number {
+    const text = `${target.id}\u0000${target.sourceId}\u0000${target.lane || ''}\u0000${target.label}\u0000${index}`;
+    let hash = 2166136261;
+    for (let cursor = 0; cursor < text.length; cursor += 1) {
+        hash ^= text.charCodeAt(cursor);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function confidenceMilli(target: GraphRebuildEmbeddingTarget): number {
+    if (target.admissionStatus === 'deferred') return 550;
+    if (target.admissionStatus === 'admitted') return 950;
+    const evidenceBoost = Math.min(150, (target.evidenceIds?.length || 0) * 25);
+    return Math.max(500, Math.min(1_000, 800 + evidenceBoost));
+}
+
+function runtimeNativeRunner(): SiegelNativeRunner | null {
+    if (typeof window === 'undefined') return null;
+    const bridge = window.__PHOENIX_NATIVE_BACKEND__;
+    if (!bridge?.siegelFinslerReceipt) return null;
+    return (request) => bridge.siegelFinslerReceipt!(request as unknown as Record<string, unknown>);
+}
+
+function counter(value: unknown, fallback = 0): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
 function receipt(

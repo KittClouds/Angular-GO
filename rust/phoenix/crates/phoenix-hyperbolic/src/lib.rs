@@ -8,6 +8,7 @@ pub mod poincare;
 pub mod lorentz_tree;
 pub mod product_manifold;
 mod product_manifold_math;
+pub mod siegel_finsler;
 pub mod shard;
 pub mod tangent;
 

@@ -14,6 +14,7 @@ use phoenix_hyperbolic::lorentz_tree::{
     LorentzScoreConfig, LorentzTree, LorentzTreeKind, LorentzTreeMembership, LorentzTreeQuery,
     MmapLorentzForestIndex,
 };
+use phoenix_hyperbolic::siegel_finsler::{run_siegel_finsler_kernel, SiegelKernelRunRequest};
 use phoenix_types::{
     AnalyzeTextRequest, AtlasRichScanRequest, CommitRequest, CreateSessionRequest,
     GraphDeltaRequest, IngestRequest, QueryRequest, RebuildRequest, RuntimeConfig,
@@ -478,6 +479,7 @@ pub trait PhoenixApi {
     async fn lorentz_forest_cache_json(request_json: String) -> Result<String, String>;
     async fn lorentz_forest_build_json(request_json: String) -> Result<String, String>;
     async fn lorentz_forest_query_json(request_json: String) -> Result<String, String>;
+    async fn siegel_finsler_receipt_json(request_json: String) -> Result<String, String>;
     async fn build_structure_json(request_json: String) -> Result<String, String>;
     async fn analyze_text_json(request_json: String) -> Result<String, String>;
     async fn graph_delta_json(request_json: String) -> Result<String, String>;
@@ -618,6 +620,12 @@ impl PhoenixApi for PhoenixApiImpl {
         let guard = self.lock_state()?;
         let response = query_lorentz_forest_response(&guard.host, request)?;
         serialize_json(&response)
+    }
+
+    async fn siegel_finsler_receipt_json(self, request_json: String) -> Result<String, String> {
+        let request = parse_json::<SiegelKernelRunRequest>(&request_json)?;
+        let receipt = run_siegel_finsler_kernel(&request);
+        serialize_json(&receipt)
     }
 
     async fn build_structure_json(self, request_json: String) -> Result<String, String> {

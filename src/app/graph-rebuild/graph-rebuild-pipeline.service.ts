@@ -341,7 +341,7 @@ export class GraphRebuildPipelineService {
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, snapshot));
             }
-            projectionReceipts.push(buildSiegelBackboneProjectionReceipt(snapshot));
+            projectionReceipts.push(await buildSiegelBackboneProjectionReceipt(snapshot));
 
             const completedAt = Date.now();
             const completedSnapshot = snapshot as GraphRebuildSnapshot | null;
@@ -449,7 +449,7 @@ export class GraphRebuildPipelineService {
                 for (const projection of PROJECTION_CAPABILITIES) {
                     projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, cachedSnapshot));
                 }
-                projectionReceipts.push(buildSiegelBackboneProjectionReceipt(cachedSnapshot));
+                projectionReceipts.push(await buildSiegelBackboneProjectionReceipt(cachedSnapshot));
                 const completedAt = Date.now();
                 const cacheStage = postProcessCacheStage(runStarted, completedAt, deltaPlan);
                 const receipt = this.buildRunReceipt({
@@ -546,7 +546,7 @@ export class GraphRebuildPipelineService {
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(skippedProjectionReceipt(projection.mode, completedSnapshot));
             }
-            projectionReceipts.push(buildSiegelBackboneProjectionReceipt(completedSnapshot));
+            projectionReceipts.push(await buildSiegelBackboneProjectionReceipt(completedSnapshot));
 
             const completedAt = Date.now();
             const receipt = this.buildRunReceipt({

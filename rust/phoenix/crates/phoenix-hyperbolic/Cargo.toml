@@ -13,3 +13,6 @@ bincode = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = "1.14"
 roaring = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

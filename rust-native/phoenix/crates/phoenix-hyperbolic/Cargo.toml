@@ -15,3 +15,6 @@ bytemuck = "1.14"
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 roaring = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
