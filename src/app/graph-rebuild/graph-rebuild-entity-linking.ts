@@ -15,6 +15,7 @@ import type {
 const MAX_ENTITY_LINK_SUGGESTIONS = 48;
 const MAX_LINKER_CANDIDATES_PER_MENTION = 4;
 const MIN_LINKER_CANDIDATE_SCORE = 0.42;
+export const GLINER_LINKER_MODEL_ID = 'knowledgator/gliner-linker-base-v1.0';
 
 interface EntityLinkIndex {
     nodesById: Map<string, GraphRebuildNode>;

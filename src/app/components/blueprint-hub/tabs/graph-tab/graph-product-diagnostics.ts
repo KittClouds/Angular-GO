@@ -146,6 +146,14 @@ function suggestionViews(suggestions: GraphRebuildLinkSuggestion[], entityId: st
         }));
 }
 
+export function buildReviewClusterViews(
+    snapshot: GraphRebuildSnapshot | null,
+    entityId?: string,
+): ProductDiagnosticsReviewCluster[] {
+    if (!snapshot) return [];
+    return reviewClusterViews(snapshot, entityId);
+}
+
 function reviewClusterViews(snapshot: GraphRebuildSnapshot, entityId?: string): ProductDiagnosticsReviewCluster[] {
     return [
         ...entityLinkClusters(snapshot.entityLinkSuggestions || [], entityId),

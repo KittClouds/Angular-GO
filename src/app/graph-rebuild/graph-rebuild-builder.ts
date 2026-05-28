@@ -84,7 +84,8 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             embeddingGraphPostProcess,
         )
         : [];
-    const entityLinking = postProcessMode === 'full'
+    const entityLinkerEnabled = input.embeddingStagePolicy?.entityLinkerEnabled !== false;
+    const entityLinking = postProcessMode === 'full' && entityLinkerEnabled
         ? buildGraphRebuildEntityLinkSuggestions({
             mentions,
             entityAnchors,

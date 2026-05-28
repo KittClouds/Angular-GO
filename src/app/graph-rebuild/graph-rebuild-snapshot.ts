@@ -694,7 +694,7 @@ export type GraphIndexPolicy = 'delta' | 'force';
 export type GraphIndexPostProcessMode = 'core' | 'full';
 export type GraphIndexRunStatus = 'blocked' | 'running' | 'completed' | 'failed';
 export type GraphIndexStageStatus = 'blocked' | 'skipped' | 'running' | 'completed' | 'failed';
-export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz' | 'product';
+export type GraphIndexProjectionMode = 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'siegel';
 
 export interface GraphIndexRunScope {
     kind: GraphRebuildScopeKind;
@@ -713,6 +713,7 @@ export interface GraphIndexModelSelection {
 
 export interface GraphIndexEmbeddingStagePolicy {
     enabledLanes?: GraphRebuildSignalTargetLane[];
+    entityLinkerEnabled?: boolean;
 }
 
 export interface GraphIndexRunRequest {
@@ -725,10 +726,11 @@ export interface GraphIndexRunRequest {
 }
 
 export interface GraphIndexModelReadiness {
-    id: 'dynamicNer' | 'semanticEmbedding' | 'nli';
+    id: 'dynamicNer' | 'semanticEmbedding' | 'nli' | 'entityLinker';
     label: string;
     status: 'idle' | 'warming' | 'running' | 'ready' | 'error';
     detail: string;
+    optional?: boolean;
 }
 
 export interface GraphIndexStageReceipt {

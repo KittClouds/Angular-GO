@@ -858,6 +858,15 @@ h3 {
   background: rgba(var(--phthalo-rgb), 0.14);
 }
 
+.model-lane-card.optional-clickable,
+.linker-stage-toggle {
+  cursor: pointer;
+}
+
+.model-lane-card.optional-clickable:hover {
+  border-color: rgba(125, 225, 209, 0.34);
+}
+
 .postprocess-stage-toggle span {
   overflow: hidden;
   font-size: 8px;
@@ -987,6 +996,37 @@ h3 {
 
 .entity-link-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.review-cluster-card {
+  border-color: rgba(216, 180, 254, 0.2);
+  background:
+    linear-gradient(135deg, rgba(88, 28, 135, 0.18), rgba(var(--phthalo-rgb), 0.12)),
+    var(--surface-bg);
+}
+
+.review-cluster-rows {
+  max-height: 180px;
+}
+
+.review-cluster-row {
+  grid-template-columns: auto minmax(0, 1fr) auto 24px;
+  border-color: rgba(216, 180, 254, 0.14);
+}
+
+.review-cluster-row.review-conflict {
+  border-color: rgba(244, 114, 182, 0.22);
+}
+
+.review-cluster-impact {
+  display: inline-grid;
+  min-width: 22px;
+  place-items: center;
+  border-radius: 999px;
+  color: #f5d0fe;
+  font-size: 8px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .link-kind {

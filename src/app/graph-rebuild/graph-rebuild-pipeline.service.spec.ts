@@ -150,6 +150,14 @@ describe('GraphRebuildPipelineService', () => {
                     }),
                 }),
                 expect.objectContaining({
+                    id: 'entityLinkerPlan',
+                    label: 'Entity Linker Plan',
+                    counters: expect.objectContaining({
+                        narrowRetrieverReady: 1,
+                        modelRunnerReady: 0,
+                    }),
+                }),
+                expect.objectContaining({
                     id: 'edgeTypeJudgmentPlan',
                     label: 'Edge Type Judgment Plan',
                 }),

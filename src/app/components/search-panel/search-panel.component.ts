@@ -39,6 +39,7 @@ import { AtlasCapabilityRuntimeService } from '../../services/atlas-capability-r
 import { GraphRebuildPipelineService } from '../../graph-rebuild/graph-rebuild-pipeline.service';
 import type {
   GraphIndexProjectionReceipt,
+  GraphIndexModelReadiness,
   GraphIndexRunRequest,
   GraphIndexRunScope,
   GraphIndexRunReceipt,
@@ -90,6 +91,10 @@ import {
   type AtlasCapability,
   type AtlasCapabilityId,
 } from './atlas-capability.model';
+import {
+  buildReviewClusterViews,
+  type ProductDiagnosticsReviewCluster,
+} from '../blueprint-hub/tabs/graph-tab/graph-product-diagnostics';
 
 type BuilderCapabilityCard = {
   capability: AtlasCapability;
@@ -417,6 +422,10 @@ export class SearchPanelComponent implements OnInit {
   readonly selectedEmbeddingStageLanes = signal<GraphRebuildSignalTargetLane[]>(
     EMBEDDING_STAGE_LANES.map((lane) => lane.id)
   );
+  readonly entityLinkerStageEnabled = signal(true);
+  readonly enabledPostprocessStageCount = computed(() =>
+    this.selectedEmbeddingStageLanes().length + (this.entityLinkerStageEnabled() ? 1 : 0)
+  );
   readonly embeddingStageControls = computed(() => {
     const selected = new Set(this.selectedEmbeddingStageLanes());
     return EMBEDDING_STAGE_LANES.map((lane) => ({
@@ -446,6 +455,9 @@ export class SearchPanelComponent implements OnInit {
   );
   readonly entityLinkSuggestions = computed(() =>
     (this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions || []).slice(0, 12)
+  );
+  readonly reviewClusters = computed<ProductDiagnosticsReviewCluster[]>(() =>
+    buildReviewClusterViews(this.fullAtlasPipeline.lastSnapshot())
   );
   readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
   readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
@@ -492,7 +504,10 @@ export class SearchPanelComponent implements OnInit {
       embeddingDimensionLabel: this.activeEmbeddingDimensionLabel(),
       nliModelId: this.nli.modelId() || 'onnx-community/ModernBERT-base-nli',
     },
-    embeddingStagePolicy: { enabledLanes: this.selectedEmbeddingStageLanes() },
+    embeddingStagePolicy: {
+      enabledLanes: this.selectedEmbeddingStageLanes(),
+      entityLinkerEnabled: this.entityLinkerStageEnabled(),
+    },
     entities: smartGraphRegistry.getAllEntities(),
   }));
   readonly fullAtlasModelReadiness = computed(() => this.fullAtlasPipeline.modelReadiness(this.fullAtlasRequest()));
@@ -583,6 +598,10 @@ export class SearchPanelComponent implements OnInit {
         ? lanes.filter((current) => current !== lane)
         : [...lanes, lane]
     );
+  }
+
+  toggleEntityLinkerStage(): void {
+    this.entityLinkerStageEnabled.update((enabled) => !enabled);
   }
 
   onScopeChange(scope: 'global' | string): void {
@@ -677,6 +696,17 @@ export class SearchPanelComponent implements OnInit {
     try {
       await this.fullAtlasPipeline.loadModels(this.fullAtlasRequest());
       this.notice.set('Full Atlas Index models are warm. No graph data was built.');
+    } catch (err) {
+      this.error.set(this.toErrorMessage(err));
+    }
+  }
+
+  async warmFullAtlasModel(modelId: GraphIndexModelReadiness['id'], optional = false): Promise<void> {
+    if (!optional || this.fullAtlasBusy()) return;
+    this.error.set(null);
+    try {
+      await this.fullAtlasPipeline.warmOptionalModel(modelId);
+      this.notice.set('Optional Entity Linker lane is staged. No graph data was built.');
     } catch (err) {
       this.error.set(this.toErrorMessage(err));
     }
@@ -1612,7 +1642,7 @@ function stageReceiptRow(stage: GraphIndexStageReceipt): LastRunReceiptRow {
 function projectionReceiptRow(projection: GraphIndexProjectionReceipt): LastRunReceiptRow {
   return {
     id: `projection:${projection.mode}`,
-    label: `${titleCase(projection.mode)} Projection`,
+    label: projection.mode === 'siegel' ? 'Siegel-Finsler Backbone' : `${titleCase(projection.mode)} Projection`,
     detail: projectionReceiptDetail(projection),
     durationMs: projection.durationMs,
     outputCount: projection.targetCount,
@@ -1635,6 +1665,11 @@ function projectionReceiptDetail(projection: GraphIndexProjectionReceipt): strin
   ];
   if (backendMs > 0) parts.push(`${backendLabel} ${formatDuration(backendMs)}`);
   if (uiMs > 0) parts.push(`ui ${formatDuration(uiMs)}`);
+  if (projection.mode === 'siegel') {
+    parts.push(`g${counters['siegelGenus'] || 0}`);
+    parts.push(`${formatCount(counters['siegelDirectedEdges'] || 0)} directed`);
+    parts.push(`${formatCount(counters['siegelAsymmetricPairs'] || 0)} asymmetric`);
+  }
   if (nodes > 0 || edges > 0) parts.push(`payload ${formatCount(nodes)}n/${formatCount(edges)}e`);
   return parts.join(' / ');
 }

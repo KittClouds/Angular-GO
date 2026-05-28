@@ -9,7 +9,9 @@ import { NerService } from '../services/ner.service';
 import { buildGraphRebuildDeltaPostProcessPlan, deltaPostProcessPlanCounters, type GraphRebuildDeltaPostProcessPlan } from './graph-rebuild-delta-postprocess-plan';
 import { buildGraphRebuildEdgeJudgmentPlan, edgeJudgmentPlanCounters } from './graph-rebuild-edge-type-judgment-plan';
 import { embeddingProfileFromModelSelection } from './graph-rebuild-embedding-signatures';
+import { GLINER_LINKER_MODEL_ID } from './graph-rebuild-entity-linking';
 import { GraphRebuildService } from './graph-rebuild.service';
+import { buildSiegelBackboneProjectionReceipt } from './graph-rebuild-siegel-backbone';
 import { graphSignalTruthCounters } from './graph-rebuild-signal-truth';
 import type {
     GraphIndexModelReadiness,
@@ -23,6 +25,7 @@ import type {
     GraphIndexStageReceipt,
     GraphRebuildCounters,
     GraphRebuildDropReasons,
+    GraphRebuildEntityLinkCounters,
     GraphRebuildRelationshipHint,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
@@ -73,6 +76,7 @@ export class GraphRebuildPipelineService {
     private readonly atlasRuntime = inject(AtlasCapabilityRuntimeService);
     private readonly ner = inject(NerService);
     private readonly runningState = signal(false);
+    private readonly entityLinkerWarmState = signal(false);
     private readonly lastReceiptState = signal<GraphIndexRunReceipt | null>(null);
     private readonly lastSnapshotState = signal<GraphRebuildSnapshot | null>(null);
 
@@ -85,11 +89,12 @@ export class GraphRebuildPipelineService {
         const dynamicNer = this.requiredModelState('dynamicNer', 'Dynamic NER', 'dynamicNer', options);
         const semanticEmbedding = this.requiredModelState('semanticEmbedding', 'Semantic Embedding', 'semanticAtlas', options);
         const nli = this.requiredModelState('nli', 'NLI', 'nliAdjudication', options);
-        return [dynamicNer, semanticEmbedding, nli];
+        const entityLinker = this.entityLinkerModelState();
+        return [dynamicNer, semanticEmbedding, nli, entityLinker];
     }
 
     modelsReady(request: GraphIndexRunRequest): boolean {
-        return this.modelReadiness(request).every((model) => model.status === 'ready');
+        return this.modelReadiness(request).every((model) => model.optional || model.status === 'ready');
     }
 
     coreModelsReady(request: GraphIndexRunRequest): boolean {
@@ -104,8 +109,15 @@ export class GraphRebuildPipelineService {
             await this.atlasRuntime.warmModelLane('dynamicNer', options);
             await this.atlasRuntime.warmModelLane('semanticEmbedding', options);
             await this.atlasRuntime.warmModelLane('nli', options);
+            await this.warmEntityLinker();
         } finally {
             this.runningState.set(false);
+        }
+    }
+
+    async warmOptionalModel(modelId: GraphIndexModelReadiness['id']): Promise<void> {
+        if (modelId === 'entityLinker') {
+            await this.warmEntityLinker();
         }
     }
 
@@ -183,6 +195,7 @@ export class GraphRebuildPipelineService {
             }));
             appendSignalCoverageStages(stageReceipts, completedSnapshot);
             appendGraphTruthContractStage(stageReceipts, completedSnapshot);
+            appendEntityLinkerPlanStage(stageReceipts, completedSnapshot, request.embeddingStagePolicy?.entityLinkerEnabled !== false);
             appendEdgeJudgmentPlanStage(stageReceipts, completedSnapshot);
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
@@ -236,7 +249,7 @@ export class GraphRebuildPipelineService {
             throw new Error('Full Atlas Index is already running.');
         }
         const modelReadiness = this.modelReadiness(request);
-        const cold = modelReadiness.filter((model) => model.status !== 'ready');
+        const cold = modelReadiness.filter((model) => !model.optional && model.status !== 'ready');
         if (cold.length) {
             throw new Error(`Load models first: ${cold.map((model) => model.label).join(', ')}.`);
         }
@@ -320,6 +333,7 @@ export class GraphRebuildPipelineService {
             assertStageCompleted(graphStage);
             if (snapshot) {
                 appendGraphTruthContractStage(stageReceipts, snapshot);
+                appendEntityLinkerPlanStage(stageReceipts, snapshot, request.embeddingStagePolicy?.entityLinkerEnabled !== false);
                 appendEdgeJudgmentPlanStage(stageReceipts, snapshot);
                 appendSnapshotTimingStages(stageReceipts, snapshot);
             }
@@ -327,6 +341,7 @@ export class GraphRebuildPipelineService {
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, snapshot));
             }
+            projectionReceipts.push(buildSiegelBackboneProjectionReceipt(snapshot));
 
             const completedAt = Date.now();
             const completedSnapshot = snapshot as GraphRebuildSnapshot | null;
@@ -393,7 +408,7 @@ export class GraphRebuildPipelineService {
             throw new Error('Full Atlas Index is already running.');
         }
         const modelReadiness = this.modelReadiness(request);
-        const cold = modelReadiness.filter((model) => model.status !== 'ready');
+        const cold = modelReadiness.filter((model) => !model.optional && model.status !== 'ready');
         if (cold.length) {
             throw new Error(`Load models first: ${cold.map((model) => model.label).join(', ')}.`);
         }
@@ -434,6 +449,7 @@ export class GraphRebuildPipelineService {
                 for (const projection of PROJECTION_CAPABILITIES) {
                     projectionReceipts.push(await this.runProjectionStage(projection.capability, projection.mode, options, cachedSnapshot));
                 }
+                projectionReceipts.push(buildSiegelBackboneProjectionReceipt(cachedSnapshot));
                 const completedAt = Date.now();
                 const cacheStage = postProcessCacheStage(runStarted, completedAt, deltaPlan);
                 const receipt = this.buildRunReceipt({
@@ -523,12 +539,14 @@ export class GraphRebuildPipelineService {
             }
             appendSignalCoverageStages(stageReceipts, completedSnapshot);
             appendGraphTruthContractStage(stageReceipts, completedSnapshot);
+            appendEntityLinkerPlanStage(stageReceipts, completedSnapshot, request.embeddingStagePolicy?.entityLinkerEnabled !== false);
             appendEdgeJudgmentPlanStage(stageReceipts, completedSnapshot);
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             for (const projection of PROJECTION_CAPABILITIES) {
                 projectionReceipts.push(skippedProjectionReceipt(projection.mode, completedSnapshot));
             }
+            projectionReceipts.push(buildSiegelBackboneProjectionReceipt(completedSnapshot));
 
             const completedAt = Date.now();
             const receipt = this.buildRunReceipt({
@@ -867,6 +885,22 @@ export class GraphRebuildPipelineService {
             detail: requirement?.statusLabel || 'idle',
         };
     }
+
+    private entityLinkerModelState(): GraphIndexModelReadiness {
+        return {
+            id: 'entityLinker',
+            label: 'Entity Linker',
+            status: this.entityLinkerWarmState() ? 'ready' : 'idle',
+            detail: this.entityLinkerWarmState()
+                ? `${GLINER_LINKER_MODEL_ID} staged; native runner pending`
+                : `narrow retriever ready; ${GLINER_LINKER_MODEL_ID} runner pending`,
+            optional: true,
+        };
+    }
+
+    private async warmEntityLinker(): Promise<void> {
+        this.entityLinkerWarmState.set(true);
+    }
 }
 
 function expandScopeNoteIds(scope: GraphIndexRunScope, docs: ScopedDocument[]): GraphIndexRunScope {
@@ -986,6 +1020,31 @@ function appendGraphTruthContractStage(stageReceipts: GraphIndexStageReceipt[], 
         0,
         graphSignalTruthCounters(snapshot),
         'Canonical graph signal status contract shared by every projection',
+    ));
+}
+
+function appendEntityLinkerPlanStage(
+    stageReceipts: GraphIndexStageReceipt[],
+    snapshot: GraphRebuildSnapshot,
+    enabled: boolean,
+): void {
+    const counters: Partial<GraphRebuildEntityLinkCounters> = snapshot.counters.entityLinking || {};
+    stageReceipts.push(instrumentationStage(
+        'entityLinkerPlan',
+        'Entity Linker Plan',
+        0,
+        {
+            entityLinkerEnabled: enabled ? 1 : 0,
+            narrowRetrieverReady: 1,
+            modelRunnerReady: 0,
+            modelCalls: 0,
+            candidateLinks: counters.candidateLinks || snapshot.counters.entityLinkSuggestions || 0,
+            linkerCandidates: counters.linkerCandidates || 0,
+            autoConfirmableLinks: counters.autoConfirmable || 0,
+            ambiguousLinks: counters.ambiguous || 0,
+            rejectedLinks: counters.rejected || 0,
+        },
+        `${GLINER_LINKER_MODEL_ID} inference pending; narrow candidates are staged for model rerank`,
     ));
 }
 
@@ -1436,9 +1495,10 @@ function postProcessFingerprint(
 
 function normalizedEmbeddingStagePolicy(
     policy?: GraphIndexRunRequest['embeddingStagePolicy'],
-): { enabledLanes: string[] } {
+): { enabledLanes: string[]; entityLinkerEnabled: boolean } {
     return {
         enabledLanes: [...(policy?.enabledLanes || [])].sort(),
+        entityLinkerEnabled: policy?.entityLinkerEnabled !== false,
     };
 }
 

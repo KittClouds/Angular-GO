@@ -85,11 +85,13 @@
 
     <div class="model-lane-grid full-atlas-model-grid">
       <div *ngFor="let model of fullAtlasModelReadiness()" class="model-lane-card"
-        [ngClass]="'lane-' + modelReadinessTone(model.status)">
+        [ngClass]="'lane-' + modelReadinessTone(model.status)"
+        [class.optional-clickable]="model.optional"
+        (click)="warmFullAtlasModel(model.id, model.optional)">
         <span>{{ model.label }}</span>
         <strong>{{ model.status }}</strong>
         <small>{{ model.detail }}</small>
-        <em>{{ model.status === 'ready' ? 'warm' : 'required' }}</em>
+        <em>{{ model.optional ? (model.status === 'ready' ? 'staged' : 'click to stage') : (model.status === 'ready' ? 'warm' : 'required') }}</em>
       </div>
     </div>
 
@@ -161,7 +163,7 @@
           <small>lanes</small>
         </span>
         <span>
-          <strong>{{ selectedEmbeddingStageLanes().length | number:'1.0-0' }}</strong>
+          <strong>{{ enabledPostprocessStageCount() | number:'1.0-0' }}</strong>
           <small>enabled</small>
         </span>
       </div>
@@ -170,6 +172,11 @@
           [class.active]="lane.enabled" (click)="toggleEmbeddingStageLane(lane.id)">
           <span>{{ lane.label }}</span>
           <strong>{{ lane.enabled ? 'on' : 'off' }}</strong>
+        </button>
+        <button type="button" class="postprocess-stage-toggle linker-stage-toggle"
+          [class.active]="entityLinkerStageEnabled()" (click)="toggleEntityLinkerStage()">
+          <span>Entity linker</span>
+          <strong>{{ entityLinkerStageEnabled() ? 'on' : 'off' }}</strong>
         </button>
       </div>
       <div class="postprocess-lanes" *ngIf="staging.lanes.length">
@@ -180,6 +187,26 @@
           </span>
           <em>{{ lane.percent | number:'1.0-0' }}%</em>
           <i><b [style.width.%]="lane.percent"></b></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="link-suggestion-card review-cluster-card" *ngIf="reviewClusters().length > 0">
+      <div class="link-suggestion-head">
+        <span>Review clusters</span>
+        <strong>{{ reviewClusters().length }} families</strong>
+      </div>
+      <div class="link-suggestion-rows review-cluster-rows">
+        <div *ngFor="let cluster of reviewClusters()" class="link-suggestion-row review-cluster-row"
+          [class.review-conflict]="cluster.conflicts > 0">
+          <span class="link-kind">{{ cluster.kind === 'entity-link' ? 'entity' : 'graph' }}</span>
+          <span class="link-main">
+            <strong>{{ cluster.label }}</strong>
+            <small>{{ cluster.action }} / {{ cluster.count }} items / {{ cluster.representativeCount }} examples<ng-container
+                *ngIf="cluster.conflicts > 0"> / {{ cluster.conflicts }} conflicts</ng-container></small>
+          </span>
+          <em>{{ confidencePercent(cluster.confidence) }}%</em>
+          <span class="review-cluster-impact">{{ confidencePercent(cluster.impact) }}</span>
         </div>
       </div>
     </div>

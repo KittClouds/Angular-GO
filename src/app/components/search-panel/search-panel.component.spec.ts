@@ -598,6 +598,7 @@ function createFullAtlasPipelineMock() {
         modelsReady: vi.fn(() => false),
         coreModelsReady: vi.fn(() => true),
         loadModels: vi.fn(async () => undefined),
+        warmOptionalModel: vi.fn(async () => undefined),
         buildCoreGraph: vi.fn(async () => {
             const receipt = {
                 status: 'completed',
