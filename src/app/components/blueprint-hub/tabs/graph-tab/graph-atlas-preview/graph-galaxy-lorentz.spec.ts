@@ -78,6 +78,21 @@ describe('Lorentz tree galaxy visualization data', () => {
         expect(byId.get('fact')!.depth).toBeGreaterThan(byId.get('context')!.depth);
     });
 
+    it('honors explicit graph-rebuild cap shell radii without changing fallback Lorentz fixtures', () => {
+        const scene = buildGalaxyScene([
+            capShellNode('doc', 'Red Mesa', 'note', 2.08, 'document_spine'),
+            capShellNode('entity', 'Kai', 'entity', 1.72, 'entity_anchor'),
+            capShellNode('evidence', 'Kai mention', 'anchor', 1.04, 'anchor_evidence'),
+        ], [
+            { id: 'doc-entity', sourceId: 'doc', targetId: 'entity', type: 'contains', confidence: 0.9 },
+            { id: 'entity-evidence', sourceId: 'entity', targetId: 'evidence', type: 'evidence', confidence: 0.82 },
+        ], mergeGalaxySettings({ layoutMode: 'lorentzTree' }));
+        const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
+
+        expect(byId.get('doc')!.depth).toBeGreaterThan(byId.get('entity')!.depth);
+        expect(byId.get('entity')!.depth).toBeGreaterThan(byId.get('evidence')!.depth);
+    });
+
     it('does not emit Lorentz guide data for Hybrid or Hopf universes', () => {
         const atlas = buildLorentzAtlas(lorentzSnapshot());
         const hybrid = buildGalaxyScene(atlas.nodes, atlas.edges, mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
@@ -171,6 +186,33 @@ function capNode(
                 specificity,
                 ambiguity,
                 primaryTreeKind: treeKind,
+            },
+        },
+    };
+}
+
+function capShellNode(id: string, label: string, sourceType: string, shellRadius: number, signalLane: string) {
+    return {
+        id,
+        label,
+        kind: sourceType,
+        atlasX: 0.2,
+        atlasY: 0.1,
+        atlasZ: 1,
+        totalMentions: 2,
+        metadata: {
+            sourceType,
+            signalLane,
+            targetConfidence: 0.9,
+            lorentz: {
+                capId: 'document:note-1',
+                capDirection: [0.2, 0.1, 1],
+                capPhase: 0.25,
+                shellRadius,
+                signalLane,
+                specificity: 0.82,
+                ambiguity: 0.04,
+                primaryTreeKind: 'documentStructure',
             },
         },
     };

@@ -43,6 +43,7 @@ import type {
   GraphIndexRunScope,
   GraphIndexRunReceipt,
   GraphIndexStageReceipt,
+  GraphRebuildSignalTargetLane,
   GraphRebuildEntityLinkSuggestion,
   GraphRebuildLinkSuggestion,
 } from '../../graph-rebuild/graph-rebuild-snapshot';
@@ -114,6 +115,35 @@ interface LastRunReceiptRow {
   status: string;
   kind: 'stage' | 'projection';
 }
+
+interface PostprocessLaneView {
+  id: string;
+  label: string;
+  admitted: number;
+  candidates: number;
+  deferred: number;
+  percent: number;
+}
+
+interface PostprocessStagingView {
+  targets: number;
+  candidates: number;
+  deferred: number;
+  lanes: PostprocessLaneView[];
+}
+
+const EMBEDDING_STAGE_LANES: Array<{ id: GraphRebuildSignalTargetLane; label: string }> = [
+  { id: 'document_spine', label: 'Document spine' },
+  { id: 'chunk_spine', label: 'Chunk spine' },
+  { id: 'entity_anchor', label: 'Entity anchors' },
+  { id: 'relationship_fact', label: 'Relationship facts' },
+  { id: 'temporal_fact', label: 'Temporal facts' },
+  { id: 'causal_fact', label: 'Causal facts' },
+  { id: 'memory_state', label: 'Memory states' },
+  { id: 'event_identity', label: 'Event identity' },
+  { id: 'anchor_evidence', label: 'Anchor evidence' },
+  { id: 'cooccurrence_weak', label: 'Co-occurrence' },
+];
 
 @Component({
   selector: 'app-search-panel',
@@ -384,6 +414,19 @@ export class SearchPanelComponent implements OnInit {
   readonly lastRunReceiptRows = computed(() =>
     buildLastRunReceiptRows(this.fullAtlasPipeline.lastReceipt())
   );
+  readonly selectedEmbeddingStageLanes = signal<GraphRebuildSignalTargetLane[]>(
+    EMBEDDING_STAGE_LANES.map((lane) => lane.id)
+  );
+  readonly embeddingStageControls = computed(() => {
+    const selected = new Set(this.selectedEmbeddingStageLanes());
+    return EMBEDDING_STAGE_LANES.map((lane) => ({
+      ...lane,
+      enabled: selected.has(lane.id),
+    }));
+  });
+  readonly postprocessStaging = computed(() =>
+    buildPostprocessStagingView(this.fullAtlasPipeline.lastReceipt())
+  );
   readonly graphAwareLinkSuggestionTotal = computed(() =>
     this.fullAtlasPipeline.lastSnapshot()?.counters.graphAwareLinkSuggestions
       ?? this.fullAtlasPipeline.lastReceipt()?.counters.graphAwareLinkSuggestions
@@ -449,6 +492,7 @@ export class SearchPanelComponent implements OnInit {
       embeddingDimensionLabel: this.activeEmbeddingDimensionLabel(),
       nliModelId: this.nli.modelId() || 'onnx-community/ModernBERT-base-nli',
     },
+    embeddingStagePolicy: { enabledLanes: this.selectedEmbeddingStageLanes() },
     entities: smartGraphRegistry.getAllEntities(),
   }));
   readonly fullAtlasModelReadiness = computed(() => this.fullAtlasPipeline.modelReadiness(this.fullAtlasRequest()));
@@ -531,6 +575,14 @@ export class SearchPanelComponent implements OnInit {
     if (lane === 'graph') {
       void this.machine.refreshAuditSafe();
     }
+  }
+
+  toggleEmbeddingStageLane(lane: GraphRebuildSignalTargetLane): void {
+    this.selectedEmbeddingStageLanes.update((lanes) =>
+      lanes.includes(lane)
+        ? lanes.filter((current) => current !== lane)
+        : [...lanes, lane]
+    );
   }
 
   onScopeChange(scope: 'global' | string): void {
@@ -1485,6 +1537,53 @@ function buildLastRunReceiptRows(receipt: GraphIndexRunReceipt | null): LastRunR
   ];
 }
 
+function buildPostprocessStagingView(receipt: GraphIndexRunReceipt | null): PostprocessStagingView | null {
+  if (!receipt?.stageReceipts?.length) return null;
+  const coverage = receipt.stageReceipts.find((stage) => stage.id === 'signalTargetCoverage');
+  if (!coverage) return null;
+  const counters = coverage.counters || {};
+  const targets = counterValue(counters, 'targets') || receipt.counters.embeddingTargets || 0;
+  const candidates = counterValue(counters, 'candidateTargets') || receipt.counters.embeddingTargetCandidates || targets;
+  const deferred = counterValue(counters, 'deferredTargets') || receipt.counters.embeddingTargetDeferred || 0;
+  const laneRows = [
+    ['documentSpine', 'Document spine'],
+    ['chunkSpine', 'Chunk spine'],
+    ['entityAnchors', 'Entity anchors'],
+    ['relationshipFacts', 'Relationship facts'],
+    ['temporalFacts', 'Temporal facts'],
+    ['causalFacts', 'Causal facts'],
+    ['memoryStates', 'Memory states'],
+    ['eventIdentities', 'Event identity'],
+    ['anchorEvidence', 'Anchor evidence'],
+    ['weakCooccurrence', 'Co-occurrence'],
+  ] as const;
+  const rawLanes = laneRows
+    .map(([key, label]) => ({
+      id: key,
+      label,
+      admitted: counterValue(counters, key),
+      candidates: counterValue(counters, `${key}Candidates`) || counterValue(counters, key),
+      deferred: counterValue(counters, `${key}Deferred`),
+      percent: 0,
+    }))
+    .filter((lane) => lane.admitted > 0 || lane.candidates > 0 || zeroVisiblePostprocessLane(lane.id));
+  const maxLane = Math.max(1, ...rawLanes.map((lane) => lane.admitted));
+  const lanes = rawLanes.map((lane) => ({
+    ...lane,
+    percent: Math.max(4, Math.min(100, (lane.admitted / maxLane) * 100)),
+  }));
+  return { targets, candidates, deferred, lanes };
+}
+
+function counterValue(counters: Record<string, number> | undefined, key: string): number {
+  const value = counters?.[key];
+  return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function zeroVisiblePostprocessLane(id: string): boolean {
+  return id === 'relationshipFacts' || id === 'temporalFacts' || id === 'causalFacts' || id === 'memoryStates' || id === 'eventIdentities';
+}
+
 function graphIndexReceiptLabel(receipt: GraphIndexRunReceipt): string {
   const noun = graphIndexReceiptNoun(receipt);
   return receipt.status === 'completed' ? `${noun} complete` : `${noun} failed`;
@@ -1583,6 +1682,9 @@ function receiptCounterPriority(stageId: string): string[] {
   if (stageId === 'nliApply') {
     return ['results', 'appliedRows'];
   }
+  if (stageId === 'graphSnapshot' || stageId === 'postProcessSnapshot') {
+    return ['embeddingTargets', 'embeddingPlannedPairs', 'embeddingPrunedPairs', 'embeddingBackboneEdges', 'embeddingClusters', 'linkSuggestions', 'entityLinks'];
+  }
   if (stageId === 'snapshotDbOps') {
     return ['dbLoadMs', 'snapshotPersistMs', 'snapshotStoreMs', 'snapshotSerializeMs', 'snapshotPayloadChars'];
   }
@@ -1590,7 +1692,22 @@ function receiptCounterPriority(stageId: string): string[] {
     return ['documents', 'documentChars', 'entities', 'discoverySkipped', 'discoveryCandidates', 'exportableMentions', 'discoveryCacheHit', 'priorTargets', 'plannedModelCalls'];
   }
   if (stageId === 'signalTargetCoverage') {
-    return ['targets', 'entityTargets', 'graphFactTargets', 'eventTargets', 'temporalFactTargets', 'causalFactTargets', 'memoryStateTargets', 'anchorTargets'];
+    return [
+      'targets',
+      'candidateTargets',
+      'deferredTargets',
+      'documentSpine',
+      'chunkSpine',
+      'entityAnchors',
+      'relationshipFacts',
+      'temporalFacts',
+      'causalFacts',
+      'memoryStates',
+      'eventIdentities',
+      'anchorEvidence',
+      'weakCooccurrence',
+      'graphFactTargets',
+    ];
   }
   return [];
 }
@@ -1598,13 +1715,25 @@ function receiptCounterPriority(stageId: string): string[] {
 function receiptCounterLimit(stageId: string): number {
   if (stageId === 'postProcessDiscovery') return 8;
   if (stageId === 'nliCandidatePlan' || stageId === 'nliClassification' || stageId === 'nliApply') return 6;
+  if (stageId === 'graphSnapshot' || stageId === 'postProcessSnapshot') return 7;
   if (stageId === 'snapshotDbOps') return 5;
   if (stageId === 'signalCandidatePlan') return 8;
-  if (stageId === 'signalTargetCoverage') return 8;
+  if (stageId === 'signalTargetCoverage') return 12;
   return 3;
 }
 
 const signalCoverageZeroCounterKeys = new Set([
+  'deferredTargets',
+  'documentSpine',
+  'chunkSpine',
+  'entityAnchors',
+  'relationshipFacts',
+  'temporalFacts',
+  'causalFacts',
+  'memoryStates',
+  'eventIdentities',
+  'anchorEvidence',
+  'weakCooccurrence',
   'graphFactTargets',
   'eventTargets',
   'temporalFactTargets',

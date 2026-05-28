@@ -73,6 +73,40 @@ describe('GraphGalaxyParticles', () => {
 
         particles.dispose();
     });
+
+    it('matches shell-aware Caps and Hybrid surface routing for particles', () => {
+        const settings = { ...DEFAULT_GALAXY_SETTINGS, particleFlow: true, particleSpeed: 0, particleOpacity: 1, edgeMode: 'straight' as const };
+        const caps = capsParticleScene(0.98);
+        const hybrid = { ...capsParticleScene(2.32), layoutMode: 'hybridSpace' as const };
+        const particles = new GraphGalaxyParticles();
+        const probe = particles as unknown as { seeds: number[] };
+
+        particles.bind(caps, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(caps, caps.positions3d, settings, 0);
+        let position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(Math.hypot(position.getX(0), position.getY(0), position.getZ(0))).toBeCloseTo(0.98);
+
+        caps.positions3d = new Float32Array([1.34, 0, 0, 0, 1.48, 0]);
+        particles.update(caps, caps.positions3d, settings, 0);
+        position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(position.getX(0)).toBeCloseTo(0.67);
+        expect(position.getY(0)).toBeCloseTo(0.74);
+
+        particles.bind(hybrid, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(hybrid, hybrid.positions3d, settings, 0);
+        position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(Math.hypot(position.getX(0), position.getY(0), position.getZ(0))).toBeCloseTo(2.32);
+
+        hybrid.positions3d = new Float32Array([2.32, 0, 0, 0, 1.74, 0]);
+        particles.update(hybrid, hybrid.positions3d, settings, 0);
+        position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(position.getX(0)).toBeCloseTo(1.16);
+        expect(position.getY(0)).toBeCloseTo(0.87);
+
+        particles.dispose();
+    });
 });
 
 function particleScene(): GalaxySceneV2 {
@@ -100,7 +134,7 @@ function particleScene(): GalaxySceneV2 {
     };
 }
 
-function capsParticleScene(): GalaxySceneV2 {
+function capsParticleScene(radius = 2.08): GalaxySceneV2 {
     return {
         ...particleScene(),
         layoutMode: 'lorentzTree',
@@ -108,8 +142,8 @@ function capsParticleScene(): GalaxySceneV2 {
         labels: ['A', 'B'],
         kinds: ['character', 'location'],
         groupIds: ['', ''],
-        positions3d: new Float32Array([2.08, 0, 0, 0, 2.08, 0]),
-        positions2d: new Float32Array([2.08, 0, 0, 0, 2.08, 0]),
+        positions3d: new Float32Array([radius, 0, 0, 0, radius, 0]),
+        positions2d: new Float32Array([radius, 0, 0, 0, radius, 0]),
         radii: new Float32Array([0.08, 0.08]),
         colors: new Float32Array([1, 0, 0, 0.1, 0.8, 1]),
         edgePairs: new Uint32Array([0, 1]),

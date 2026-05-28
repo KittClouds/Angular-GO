@@ -23,8 +23,11 @@ const LORENTZ_TUBE_RADIAL_SEGMENTS = 5;
 const PRODUCT_KLEIN_RADIUS = 2.18;
 const PRODUCT_KLEIN_RING_SEGMENTS = 96;
 const PRODUCT_HOPF_TUBE_SCALE = 0.75;
-const CAPS_SURFACE_EDGE_MIN_RADIUS = 1.72;
+const CAPS_SURFACE_EDGE_MIN_RADIUS = 0.34;
 const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
+const CAPS_SHELL_RADII = [0.54, 0.98, 1.22, 1.34, 1.48, 1.68, 1.92];
+const HYBRID_SURFACE_EDGE_MIN_RADIUS = 2.32 * 0.92;
+const HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.42;
 type GuideSurface = 'default' | 'product';
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
@@ -312,6 +315,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const focus = buildGalaxyFocusMask(data, this.selectedId, this.hoverId);
         this.focusMask = focus;
         this.updateGroupShells(data);
+        this.updateLorentzGuideGeometry(data, positions);
         this.updateGuideFocus(data, focus);
         this.updateInstances(data, positions, focus);
         this.updateEdgeGeometry(data, positions, focus);
@@ -326,6 +330,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const focus = buildGalaxyFocusMask(data, this.selectedId, this.hoverId);
         this.focusMask = focus;
         this.updateGroupShells(data);
+        this.updateLorentzGuideGeometry(data, positions);
         this.updateGuideFocus(data, focus);
         this.updateInstances(data, positions, focus);
         this.updateEdgeGeometry(data, positions, focus);
@@ -633,6 +638,118 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             }
             material.needsUpdate = true;
         });
+    }
+
+    private updateLorentzGuideGeometry(data: GalaxySceneV2, positions: Float32Array): void {
+        if (data.layoutMode !== 'lorentzTree' || !this.shells) return;
+        const indexById = this.nodeIndexById(data);
+        this.shells.traverse((child) => {
+            if (child.userData['guideKind'] !== 'lorentz') return;
+            const guides = child.userData['lorentzGuides'] as GalaxyLorentzGuideView[] | undefined;
+            if (child instanceof THREE.LineSegments && Array.isArray(guides)) {
+                this.updateLorentzGuideLinePositions(child, guides, data, positions, indexById);
+                return;
+            }
+            const guide = child.userData['lorentzGuide'] as GalaxyLorentzGuideView | undefined;
+            const layer = child.userData['lorentzLayer'];
+            if (!(child instanceof THREE.Mesh) || !guide || (layer !== 'tubeCore' && layer !== 'tubeGlow')) return;
+            const points = this.lorentzGuidePath(guide, data, positions, indexById);
+            if (points.length < 4) return;
+            const previous = child.geometry;
+            const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.35);
+            child.geometry = new THREE.TubeGeometry(curve, LORENTZ_TUBE_SEGMENTS, this.lorentzTubeRadius(guide, layer, this.guideSurface(child)), LORENTZ_TUBE_RADIAL_SEGMENTS, false);
+            previous.dispose();
+        });
+    }
+
+    private updateLorentzGuideLinePositions(
+        line: THREE.LineSegments,
+        guides: GalaxyLorentzGuideView[],
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        indexById: Map<string, number>,
+    ): void {
+        const positionAttr = line.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+        if (!positionAttr) return;
+        const output = positionAttr.array as Float32Array;
+        let cursor = 0;
+        for (const guide of guides) {
+            cursor = this.writeLorentzGuidePositions(output, cursor, guide, data, positions, indexById);
+        }
+        positionAttr.needsUpdate = true;
+        line.geometry.computeBoundingSphere();
+    }
+
+    private writeLorentzGuidePositions(
+        output: Float32Array,
+        cursor: number,
+        guide: GalaxyLorentzGuideView,
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        indexById: Map<string, number>,
+    ): number {
+        const sourceIndex = this.liveGuideNodeIndex(guide, data, indexById, 0);
+        const targetIndex = this.liveGuideNodeIndex(guide, data, indexById, 1);
+        if (guide.guideKind !== 'membership' || sourceIndex < 0 || targetIndex < 0) {
+            output.set(guide.positions3d, cursor);
+            return cursor + guide.positions3d.length;
+        }
+        const oldLast = guide.positions3d.length - 3;
+        const oldAx = guide.positions3d[0], oldAy = guide.positions3d[1], oldAz = guide.positions3d[2];
+        const oldBx = guide.positions3d[oldLast], oldBy = guide.positions3d[oldLast + 1], oldBz = guide.positions3d[oldLast + 2];
+        const newA = sourceIndex * 3;
+        const newB = targetIndex * 3;
+        return this.writeReanchoredGuidePositions(
+            output,
+            cursor,
+            guide.positions3d,
+            oldAx, oldAy, oldAz,
+            oldBx, oldBy, oldBz,
+            positions[newA], positions[newA + 1], positions[newA + 2],
+            positions[newB], positions[newB + 1], positions[newB + 2],
+        );
+    }
+
+    private writeReanchoredGuidePositions(
+        output: Float32Array,
+        cursor: number,
+        source: Float32Array,
+        oldAx: number, oldAy: number, oldAz: number,
+        oldBx: number, oldBy: number, oldBz: number,
+        newAx: number, newAy: number, newAz: number,
+        newBx: number, newBy: number, newBz: number,
+    ): number {
+        const odx = oldBx - oldAx, ody = oldBy - oldAy, odz = oldBz - oldAz;
+        const ndx = newBx - newAx, ndy = newBy - newAy, ndz = newBz - newAz;
+        const oldLenSq = Math.max(0.000001, odx * odx + ody * ody + odz * odz);
+        const offsetScale = THREE.MathUtils.clamp(Math.sqrt((ndx * ndx + ndy * ndy + ndz * ndz) / oldLenSq), 0.25, 2.4);
+        for (let index = 0; index < source.length; index += 3) {
+            const px = source[index], py = source[index + 1], pz = source[index + 2];
+            const t = THREE.MathUtils.clamp(((px - oldAx) * odx + (py - oldAy) * ody + (pz - oldAz) * odz) / oldLenSq, 0, 1);
+            const oldBaseX = oldAx + odx * t, oldBaseY = oldAy + ody * t, oldBaseZ = oldAz + odz * t;
+            output[cursor++] = newAx + ndx * t + (px - oldBaseX) * offsetScale;
+            output[cursor++] = newAy + ndy * t + (py - oldBaseY) * offsetScale;
+            output[cursor++] = newAz + ndz * t + (pz - oldBaseZ) * offsetScale;
+        }
+        output[cursor - source.length] = newAx;
+        output[cursor - source.length + 1] = newAy;
+        output[cursor - source.length + 2] = newAz;
+        output[cursor - 3] = newBx;
+        output[cursor - 2] = newBy;
+        output[cursor - 1] = newBz;
+        return cursor;
+    }
+
+    private nodeIndexById(data: GalaxySceneV2): Map<string, number> {
+        const indexes = new Map<string, number>();
+        for (let index = 0; index < data.ids.length; index++) indexes.set(data.ids[index], index);
+        return indexes;
+    }
+
+    private liveGuideNodeIndex(guide: GalaxyLorentzGuideView, data: GalaxySceneV2, indexById: Map<string, number>, nodeOffset: number): number {
+        const id = guide.nodeIds[nodeOffset];
+        const index = id ? indexById.get(id) : undefined;
+        return index !== undefined && index >= 0 && index < data.ids.length ? index : -1;
     }
 
     private updateLorentzGuideLineColors(
@@ -1122,6 +1239,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         mesh.userData['guideWeight'] = guide.guideWeight;
         mesh.userData['treeKind'] = guide.treeKind;
         mesh.userData['nodeIds'] = guide.nodeIds;
+        mesh.userData['lorentzGuide'] = guide;
         mesh.userData['pickable'] = false;
         return mesh;
     }
@@ -1451,23 +1569,42 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         }
     }
 
-    private lorentzGuidePath(guide: GalaxyLorentzGuideView): THREE.Vector3[] {
+    private lorentzGuidePath(
+        guide: GalaxyLorentzGuideView,
+        data?: GalaxySceneV2,
+        positions?: Float32Array,
+        indexById?: Map<string, number>,
+    ): THREE.Vector3[] {
         const segmentCount = Math.floor(guide.positions3d.length / 6);
         if (segmentCount < 2) return [];
+        const pathSource = data && positions && indexById && guide.guideKind === 'membership'
+            ? this.reanchoredLorentzGuidePositions(guide, data, positions, indexById)
+            : guide.positions3d;
         const stride = Math.max(1, Math.floor(segmentCount / 40));
         const points: THREE.Vector3[] = [];
-        points.push(new THREE.Vector3(guide.positions3d[0], guide.positions3d[1], guide.positions3d[2]));
+        points.push(new THREE.Vector3(pathSource[0], pathSource[1], pathSource[2]));
         for (let segment = 0; segment < segmentCount; segment += stride) {
             const offset = segment * 6 + 3;
             points.push(new THREE.Vector3(
-                guide.positions3d[offset],
-                guide.positions3d[offset + 1],
-                guide.positions3d[offset + 2],
+                pathSource[offset],
+                pathSource[offset + 1],
+                pathSource[offset + 2],
             ));
         }
-        const lastOffset = guide.positions3d.length - 3;
-        points.push(new THREE.Vector3(guide.positions3d[lastOffset], guide.positions3d[lastOffset + 1], guide.positions3d[lastOffset + 2]));
+        const lastOffset = pathSource.length - 3;
+        points.push(new THREE.Vector3(pathSource[lastOffset], pathSource[lastOffset + 1], pathSource[lastOffset + 2]));
         return points;
+    }
+
+    private reanchoredLorentzGuidePositions(
+        guide: GalaxyLorentzGuideView,
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        indexById: Map<string, number>,
+    ): Float32Array {
+        const output = new Float32Array(guide.positions3d.length);
+        this.writeLorentzGuidePositions(output, 0, guide, data, positions, indexById);
+        return output;
     }
 
     private writeLorentzGuideColor(
@@ -1675,13 +1812,35 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     }
 
     private capsSurfaceEdge(data: GalaxySceneV2, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
-        if (this.mode !== '3d' || data.layoutMode !== 'lorentzTree') return false;
+        if (this.mode !== '3d') return false;
         const ar = Math.hypot(ax, ay, az);
         const br = Math.hypot(bx, by, bz);
+        if (data.layoutMode === 'hybridSpace') return this.hybridSurfaceEdge(ar, br, ax, ay, az, bx, by, bz);
+        if (data.layoutMode !== 'lorentzTree') return false;
         if (ar < CAPS_SURFACE_EDGE_MIN_RADIUS || br < CAPS_SURFACE_EDGE_MIN_RADIUS) return false;
         if (Math.abs(ar - br) > CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        if (this.capsShellIndex(ar) !== this.capsShellIndex(br)) return false;
         const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
         return dot > -0.985;
+    }
+
+    private hybridSurfaceEdge(ar: number, br: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+        if (ar < HYBRID_SURFACE_EDGE_MIN_RADIUS || br < HYBRID_SURFACE_EDGE_MIN_RADIUS) return false;
+        if (Math.abs(ar - br) > HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
+        return dot > -0.985;
+    }
+
+    private capsShellIndex(radius: number): number {
+        let best = 0;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let index = 0; index < CAPS_SHELL_RADII.length; index++) {
+            const distance = Math.abs(radius - CAPS_SHELL_RADII[index]);
+            if (distance >= bestDistance) continue;
+            best = index;
+            bestDistance = distance;
+        }
+        return best;
     }
 
     private capsSurfacePoint(out: THREE.Vector3, ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): boolean {

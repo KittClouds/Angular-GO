@@ -192,6 +192,56 @@ export interface GraphRebuildEmbeddingTarget {
     label: string;
     text: string;
     evidenceIds: string[];
+    lane?: GraphRebuildSignalTargetLane;
+    structuralRole?: GraphRebuildSignalStructuralRole;
+    admissionTier?: number;
+    admissionStatus?: GraphRebuildSignalAdmissionStatus;
+    admissionReason?: string;
+    deferReason?: string;
+    parentIds?: string[];
+}
+
+export type GraphRebuildSignalTargetLane =
+    | 'document_spine'
+    | 'chunk_spine'
+    | 'entity_anchor'
+    | 'relationship_fact'
+    | 'temporal_fact'
+    | 'causal_fact'
+    | 'memory_state'
+    | 'event_identity'
+    | 'story_signal'
+    | 'cooccurrence_weak'
+    | 'anchor_evidence'
+    | 'unknown';
+
+export type GraphRebuildSignalStructuralRole =
+    | 'root'
+    | 'spine'
+    | 'child'
+    | 'fact'
+    | 'bridge'
+    | 'evidence'
+    | 'context'
+    | 'deferred';
+
+export type GraphRebuildSignalAdmissionStatus = 'admitted' | 'deferred';
+
+export interface GraphRebuildSignalTargetLaneReceipt {
+    lane: GraphRebuildSignalTargetLane;
+    candidates: number;
+    admitted: number;
+    deferred: number;
+    tier: number;
+}
+
+export interface GraphRebuildEmbeddingTargetPlan {
+    schemaVersion: 'phoenix-signal-target-plan/v1';
+    candidateCount: number;
+    admittedCount: number;
+    deferredCount: number;
+    maxAdmitted: number;
+    lanes: GraphRebuildSignalTargetLaneReceipt[];
 }
 
 export interface GraphRebuildEmbeddingVector {
@@ -403,6 +453,9 @@ export interface GraphRebuildEmbeddingGraphMetrics {
     outlierCount: number;
     maxHubScore: number;
     meanNeighborCount: number;
+    plannedPairCount?: number;
+    theoreticalPairCount?: number;
+    prunedPairCount?: number;
 }
 
 export interface GraphRebuildEmbeddingGraphPostProcess {
@@ -551,6 +604,17 @@ export interface GraphRebuildCounters {
     causalEdges: number;
     memoryState: number;
     embeddingTargets: number;
+    embeddingTargetCandidates?: number;
+    embeddingTargetDeferred?: number;
+    embeddingDocumentSpine?: number;
+    embeddingChunkSpine?: number;
+    embeddingEntityAnchors?: number;
+    embeddingRelationshipFacts?: number;
+    embeddingTemporalFacts?: number;
+    embeddingCausalFacts?: number;
+    embeddingMemoryStates?: number;
+    embeddingEventIdentities?: number;
+    embeddingAnchorEvidence?: number;
     embeddingVectors: number;
     projectionRefs: number;
     nodes: number;
@@ -563,6 +627,9 @@ export interface GraphRebuildCounters {
     embeddingBackboneEdges?: number;
     embeddingBridgeEdges?: number;
     embeddingOutliers?: number;
+    embeddingPlannedPairs?: number;
+    embeddingTheoreticalPairs?: number;
+    embeddingPrunedPairs?: number;
     graphAwareLinkSuggestions?: number;
     entityLinkSuggestions?: number;
     entityLinking?: GraphRebuildEntityLinkCounters;
@@ -607,6 +674,7 @@ export interface GraphRebuildSnapshot {
     causalEdges: GraphRebuildCausalEdge[];
     memoryState: GraphRebuildMemoryState[];
     embeddingTargets: GraphRebuildEmbeddingTarget[];
+    embeddingTargetPlan?: GraphRebuildEmbeddingTargetPlan;
     embeddingVectors: GraphRebuildEmbeddingVector[];
     embeddingProfile?: GraphRebuildEmbeddingProfile;
     embeddingModelAdapter?: GraphRebuildEmbeddingModelAdapter;
@@ -643,11 +711,16 @@ export interface GraphIndexModelSelection {
     nliModelId: string;
 }
 
+export interface GraphIndexEmbeddingStagePolicy {
+    enabledLanes?: GraphRebuildSignalTargetLane[];
+}
+
 export interface GraphIndexRunRequest {
     scope: GraphIndexRunScope;
     policy: GraphIndexPolicy;
     postProcessMode?: GraphIndexPostProcessMode;
     modelSelection: GraphIndexModelSelection;
+    embeddingStagePolicy?: GraphIndexEmbeddingStagePolicy;
     entities: RegisteredEntity[];
 }
 
@@ -724,6 +797,7 @@ export interface BuildGraphRebuildSnapshotInput {
     noteTexts?: Record<string, string>;
     embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
     postProcessMode?: GraphIndexPostProcessMode;
+    embeddingStagePolicy?: GraphIndexEmbeddingStagePolicy;
     candidateCount?: number;
     builtAt?: number;
 }

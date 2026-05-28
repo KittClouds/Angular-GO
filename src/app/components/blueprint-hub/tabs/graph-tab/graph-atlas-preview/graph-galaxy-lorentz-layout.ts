@@ -371,6 +371,9 @@ function hierarchyRadius(
     confidence: number,
     ambiguity: number,
 ): number {
+    const lorentz = record(node.entity.metadata?.['lorentz']);
+    const explicitRadius = Number(lorentz['shellRadius']);
+    if (Number.isFinite(explicitRadius)) return clamp(explicitRadius, 0.38, CAP_SCENE_RADIUS * 0.985);
     const sourceType = String(node.entity.metadata?.sourceType || node.entity.kind || '').toLowerCase();
     const kind = String(node.entity.kind || '').toLowerCase();
     let radius = hierarchyShellRadius(sourceType, kind, lane);

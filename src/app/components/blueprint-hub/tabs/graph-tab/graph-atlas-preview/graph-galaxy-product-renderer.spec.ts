@@ -36,6 +36,7 @@ type RendererProbe = {
     productKleinLayerOpacity(layer: string): number;
     capsSurfaceEdge(data: { layoutMode: string }, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
     capsSurfacePoint(out: THREE.Vector3, ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): boolean;
+    writeLorentzGuidePositions(output: Float32Array, cursor: number, guide: Record<string, unknown>, data: { ids: string[] }, positions: Float32Array, indexById: Map<string, number>): number;
 };
 
 describe('Product manifold guide styling', () => {
@@ -188,10 +189,42 @@ describe('Product manifold guide styling', () => {
 
         expect(renderer.capsSurfaceEdge(caps, 2.08, 0, 0, 0, 2.04, 0)).toBe(true);
         expect(renderer.capsSurfaceEdge(hybrid, 2.08, 0, 0, 0, 2.04, 0)).toBe(false);
+        expect(renderer.capsSurfaceEdge(hybrid, 2.32, 0, 0, 0, 2.28, 0)).toBe(true);
+        expect(renderer.capsSurfaceEdge(hybrid, 2.32, 0, 0, 0, 1.74, 0)).toBe(false);
+        expect(renderer.capsSurfaceEdge(hybrid, 1.34, 0, 0, 0, 1.32, 0)).toBe(false);
         expect(renderer.capsSurfaceEdge(caps, 2.08, 0, 0, 0.6, 0.24, 0)).toBe(false);
+        expect(renderer.capsSurfaceEdge(caps, 0.98, 0, 0, 0, 0.96, 0)).toBe(true);
+        expect(renderer.capsSurfaceEdge(caps, 1.34, 0, 0, 0, 1.48, 0)).toBe(false);
         expect(renderer.capsSurfacePoint(mid, 2.08, 0, 0, 0, 2.08, 0, 0.5)).toBe(true);
         expect(mid.length()).toBeCloseTo(2.08);
         expect(mid.x).toBeGreaterThan(1.4);
         expect(mid.y).toBeGreaterThan(1.4);
+    });
+
+    it('reanchors Caps membership guides to live node positions', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const guide = {
+            id: 'caps:bridge:a-b',
+            guideKind: 'membership',
+            nodeIds: ['a', 'b'],
+            positions3d: new Float32Array([
+                0, 0, 0, 0.5, 0.2, 0,
+                0.5, 0.2, 0, 1, 0, 0,
+            ]),
+        };
+        const output = new Float32Array(guide.positions3d.length);
+
+        renderer.writeLorentzGuidePositions(
+            output,
+            0,
+            guide,
+            { ids: ['a', 'b'] },
+            new Float32Array([2, 0, 0, 4, 0, 0]),
+            new Map([['a', 0], ['b', 1]]),
+        );
+
+        expect(Array.from(output.slice(0, 3))).toEqual([2, 0, 0]);
+        expect(Array.from(output.slice(output.length - 3))).toEqual([4, 0, 0]);
+        expect(output[4]).toBeGreaterThan(0);
     });
 });

@@ -22,10 +22,19 @@ import {
 const NEIGHBOR_LIMIT = 6;
 const BACKBONE_MIN_SCORE = 0.18;
 const BRIDGE_MIN_SCORE = 0.13;
+const FULL_PAIR_TARGET_LIMIT = 320;
+const PAIRS_PER_TARGET_LIMIT = 72;
+const LANE_BUCKET_SAMPLE_LIMIT = 96;
+const BRIDGE_REPRESENTATIVE_LIMIT = 28;
 
 interface Neighbor {
     target: number;
     score: number;
+}
+
+interface PairPlan {
+    pairs: Array<[number, number]>;
+    theoreticalPairCount: number;
 }
 
 export function buildGraphRebuildEmbeddingGraphPostProcess(
@@ -35,7 +44,8 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
     const profile = normalizeEmbeddingProfile(profileInput);
     const adapter = embeddingModelAdapterFromProfile(profile);
     const signatures = targets.map((target) => sparseEmbeddingSignature(target, profile.selectedDimensions));
-    const neighbors = buildMutualNeighbors(signatures);
+    const plan = buildNeighborPairPlan(targets);
+    const neighbors = buildMutualNeighbors(signatures, plan);
     const clusters = clusterTargets(targets, neighbors);
     const baseTargetRows = buildTargetRows(targets, clusters, neighbors);
     const backboneEdges = buildBackboneEdges(targets, baseTargetRows, neighbors);
@@ -73,23 +83,133 @@ export function buildGraphRebuildEmbeddingGraphPostProcess(
             outlierCount: outlierTargetIds.length,
             maxHubScore: targetRows.reduce((max, row) => Math.max(max, row.hubScore), 0),
             meanNeighborCount: round(meanNeighborCount),
+            plannedPairCount: plan.pairs.length,
+            theoreticalPairCount: plan.theoreticalPairCount,
+            prunedPairCount: Math.max(0, plan.theoreticalPairCount - plan.pairs.length),
         },
     };
 }
 
-function buildMutualNeighbors(signatures: SparseEmbeddingSignature[]): Neighbor[][] {
+function buildMutualNeighbors(signatures: SparseEmbeddingSignature[], plan: PairPlan): Neighbor[][] {
     const directed = signatures.map((): Neighbor[] => []);
-    for (let i = 0; i < signatures.length; i += 1) {
-        for (let j = i + 1; j < signatures.length; j += 1) {
-            const score = sparseCosine(signatures[i], signatures[j]);
-            if (score < BRIDGE_MIN_SCORE) continue;
-            pushTopNeighbor(directed[i], { target: j, score });
-            pushTopNeighbor(directed[j], { target: i, score });
-        }
+    for (const [i, j] of plan.pairs) {
+        const score = sparseCosine(signatures[i], signatures[j]);
+        if (score < BRIDGE_MIN_SCORE) continue;
+        pushTopNeighbor(directed[i], { target: j, score });
+        pushTopNeighbor(directed[j], { target: i, score });
     }
     return directed.map((list, index) =>
         list.filter((neighbor) => directed[neighbor.target].some((other) => other.target === index)),
     );
+}
+
+function buildNeighborPairPlan(targets: GraphRebuildEmbeddingTarget[]): PairPlan {
+    const theoreticalPairCount = Math.max(0, Math.floor((targets.length * (targets.length - 1)) / 2));
+    const pairs: Array<[number, number]> = [];
+    const seen = new Set<string>();
+    const degree = new Uint16Array(targets.length);
+    const add = (left: number, right: number, force = false) => {
+        if (left < 0 || right < 0) return;
+        if (left === right) return;
+        const a = Math.min(left, right);
+        const b = Math.max(left, right);
+        const key = `${a}:${b}`;
+        if (seen.has(key)) return;
+        if (!force && degree[a] >= PAIRS_PER_TARGET_LIMIT && degree[b] >= PAIRS_PER_TARGET_LIMIT) return;
+        seen.add(key);
+        degree[a] += 1;
+        degree[b] += 1;
+        pairs.push([a, b]);
+    };
+
+    if (targets.length <= FULL_PAIR_TARGET_LIMIT) {
+        for (let i = 0; i < targets.length; i += 1) {
+            for (let j = i + 1; j < targets.length; j += 1) add(i, j, true);
+        }
+        return { pairs, theoreticalPairCount };
+    }
+
+    const byId = new Map(targets.map((target, index) => [target.id, index]));
+    const buckets = new Map<string, number[]>();
+    for (let index = 0; index < targets.length; index += 1) {
+        const target = targets[index];
+        if (target.noteId) mapArray(buckets, `note:${target.noteId}`).push(index);
+        if (target.chunkId) mapArray(buckets, `chunk:${target.chunkId}`).push(index);
+        if (target.entityId) mapArray(buckets, `entity:${target.entityId}`).push(index);
+        const kind = normalizeKind(target.kind);
+        mapArray(buckets, `kind:${kind}`).push(index);
+        if (/event|temporal|causal/.test(kind)) mapArray(buckets, 'lane:story').push(index);
+        if (/fact|memory/.test(kind)) mapArray(buckets, 'lane:evidence').push(index);
+    }
+
+    for (let index = 0; index < targets.length; index += 1) {
+        const target = targets[index];
+        if (target.noteId) add(index, byId.get(`embed:note:${target.noteId}`) ?? -1, true);
+        if (target.chunkId) add(index, byId.get(`embed:chunk:${target.chunkId}`) ?? -1, true);
+        if (target.entityId) add(index, byId.get(`embed:entity:${target.entityId}`) ?? -1, true);
+    }
+
+    for (const [key, values] of buckets) {
+        const limit = key.startsWith('lane:') || key.startsWith('kind:') ? LANE_BUCKET_SAMPLE_LIMIT : Math.floor(LANE_BUCKET_SAMPLE_LIMIT * 0.7);
+        addBucketPairs(spreadRanked(values, targets, limit), add);
+    }
+
+    const representatives = representativeIndicesByKind(targets);
+    for (let index = 0; index < targets.length; index += 1) {
+        for (const rep of representatives) {
+            if (normalizeKind(targets[index].kind) === normalizeKind(targets[rep].kind)) continue;
+            add(index, rep);
+        }
+    }
+    return { pairs, theoreticalPairCount };
+}
+
+function addBucketPairs(indices: number[], add: (left: number, right: number) => void): void {
+    for (let i = 0; i < indices.length; i += 1) {
+        for (let j = i + 1; j < indices.length; j += 1) add(indices[i], indices[j]);
+    }
+}
+
+function spreadRanked(indices: number[], targets: GraphRebuildEmbeddingTarget[], limit: number): number[] {
+    const ranked = [...indices].sort((left, right) =>
+        targetSignalScore(targets[right]) - targetSignalScore(targets[left])
+        || targets[left].id.localeCompare(targets[right].id),
+    );
+    if (ranked.length <= limit) return ranked;
+    const out: number[] = [];
+    const step = (ranked.length - 1) / Math.max(1, limit - 1);
+    for (let index = 0; index < limit; index += 1) out.push(ranked[Math.round(index * step)]);
+    return out;
+}
+
+function representativeIndicesByKind(targets: GraphRebuildEmbeddingTarget[]): number[] {
+    const byKind = new Map<string, number[]>();
+    for (let index = 0; index < targets.length; index += 1) {
+        mapArray(byKind, normalizeKind(targets[index].kind)).push(index);
+    }
+    return [...byKind.values()].flatMap((indices) =>
+        spreadRanked(indices, targets, BRIDGE_REPRESENTATIVE_LIMIT),
+    );
+}
+
+function targetSignalScore(target: GraphRebuildEmbeddingTarget): number {
+    const kind = normalizeKind(target.kind);
+    let score =
+        /causal/.test(kind) ? 940 :
+        /temporal/.test(kind) ? 930 :
+        /event/.test(kind) ? 910 :
+        /memory/.test(kind) ? 890 :
+        /graph-fact|fact/.test(kind) ? 860 :
+        /chunk|note/.test(kind) ? 830 :
+        /entity/.test(kind) ? 800 :
+        /anchor/.test(kind) ? 760 : 700;
+    const text = `${target.label} ${target.text}`.toLowerCase();
+    if (text.includes('[accepted]')) score += 42;
+    if (/confidence:([0-9.]+)/.test(text)) score += Math.round(Number(text.match(/confidence:([0-9.]+)/)?.[1] || 0) * 60);
+    if (/evidence_context:/.test(text)) score += 24;
+    if (/before|after|because|causes|memory_key|chunk_role|meaning_cues/.test(text)) score += 18;
+    score += Math.min(54, target.evidenceIds.length * 6);
+    return score;
 }
 
 function pushTopNeighbor(list: Neighbor[], neighbor: Neighbor): void {
@@ -394,6 +514,15 @@ function mapSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
         map.set(key, set);
     }
     return set;
+}
+
+function mapArray<K, V>(map: Map<K, V[]>, key: K): V[] {
+    let values = map.get(key);
+    if (!values) {
+        values = [];
+        map.set(key, values);
+    }
+    return values;
 }
 
 function sortedIds(ids: Set<string> | undefined): string[] {

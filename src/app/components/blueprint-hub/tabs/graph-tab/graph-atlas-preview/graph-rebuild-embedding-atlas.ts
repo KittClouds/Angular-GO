@@ -21,7 +21,7 @@ import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embed
 import { relationFamilyFromText, relationHslFromText } from './graph-relation-visual-style';
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
-const LIMIT = 420;
+const VISIBLE_TARGET_LIMIT = 960;
 const STORY_TARGET_BUDGET = 120;
 const RELATION_TARGET_BUDGET = 96;
 const CO_OCCURRENCE_TARGET_BUDGET = 48;
@@ -78,7 +78,7 @@ export function buildGraphRebuildEmbeddingAtlas(
 
 function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmbeddingTarget[] {
     const candidates = snapshot.embeddingTargets.filter((target) => target.text.trim() || target.label.trim());
-    if (candidates.length <= LIMIT) return candidates;
+    if (candidates.length <= VISIBLE_TARGET_LIMIT) return candidates;
 
     const selected = new Map<string, GraphRebuildEmbeddingTarget>();
     const byId = new Map(candidates.map((target) => [target.id, target]));
@@ -86,11 +86,11 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
     const relationshipById = new Map(snapshot.relationships.map((relationship) => [relationship.id, relationship]));
     const selectedRelationIds = new Set<string>();
     const add = (target?: GraphRebuildEmbeddingTarget) => {
-        if (target && selected.size < LIMIT) selected.set(target.id, target);
+        if (target && selected.size < VISIBLE_TARGET_LIMIT) selected.set(target.id, target);
     };
     const addGroup = (targets: Array<GraphRebuildEmbeddingTarget | undefined>) => {
         const missing = targets.filter((target): target is GraphRebuildEmbeddingTarget => !!target && !selected.has(target.id));
-        if (selected.size + missing.length > LIMIT) return false;
+        if (selected.size + missing.length > VISIBLE_TARGET_LIMIT) return false;
         for (const target of missing) selected.set(target.id, target);
         return true;
     };
@@ -131,8 +131,40 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
     for (const target of evenSample(relationTargets.filter((target) => !selectedRelationIds.has(target.id)), relationBudgetLeft)) {
         addLinkedRelationship(target);
     }
-    for (const target of candidates) add(target);
+    for (const target of coverageOrderedTargets(candidates)) add(target);
     return [...selected.values()];
+}
+
+function coverageOrderedTargets(targets: GraphRebuildEmbeddingTarget[]): GraphRebuildEmbeddingTarget[] {
+    const weight = (target: GraphRebuildEmbeddingTarget) => {
+        switch (displayKind(target.kind)) {
+            case 'note': return 900;
+            case 'chunk': return 880;
+            case 'causal-fact': return 860;
+            case 'temporal-fact': return 850;
+            case 'event': return 830;
+            case 'memory-state': return 810;
+            case 'graph-fact': return 790;
+            case 'entity': return 760;
+            case 'anchor': return 700;
+            default: return 650;
+        }
+    };
+    return [...targets].sort((left, right) =>
+        weight(right) - weight(left)
+        || targetEvidenceScore(right) - targetEvidenceScore(left)
+        || left.id.localeCompare(right.id),
+    );
+}
+
+function targetEvidenceScore(target: GraphRebuildEmbeddingTarget): number {
+    const confidence = targetConfidence(target);
+    const text = `${target.label} ${target.text}`.toLowerCase();
+    let score = confidence * 100 + Math.min(48, target.evidenceIds.length * 6);
+    if (text.includes('[accepted]')) score += 34;
+    if (/causal|cause|because|before|after|temporal|memory_key|chunk_role|meaning_cues/.test(text)) score += 24;
+    if (/evidence_context:/.test(text)) score += 16;
+    return score;
 }
 
 function evenSample<T>(values: T[], limit: number): T[] {
@@ -181,6 +213,12 @@ function targetNode(
             entityKind: target.entityKind,
             graphColorKind: relationFamily || targetRenderKind(target),
             graphRelationFamily: relationFamily || undefined,
+            signalLane: target.lane,
+            signalStructuralRole: target.structuralRole,
+            signalAdmissionTier: target.admissionTier,
+            signalAdmissionStatus: target.admissionStatus,
+            signalAdmissionReason: target.admissionReason,
+            signalParentIds: target.parentIds,
             targetConfidence: targetConfidence(target),
             noteId: target.noteId,
             chunkId: target.chunkId,
@@ -380,9 +418,12 @@ function productLorentzMetadata(
             (point.z / radius) * scale,
             lane.fiberPhase,
         ],
-        capId: region.id,
+        capId: productCapId(target, region.id),
         capDirection: [point.x / radius, point.y / radius, point.z / radius],
         capPhase: lane.fiberPhase,
+        shellRadius: productCapShellRadius(target, specificity, ambiguity),
+        signalLane: target.lane,
+        structuralRole: target.structuralRole,
         specificity,
         ambiguity,
         level,
@@ -392,19 +433,56 @@ function productLorentzMetadata(
         regionRole: region.role,
         dominantLane: region.laneKind,
         memberships: [{
-            treeId: region.id,
+            treeId: productCapId(target, region.id),
             treeKind,
-            parentNodeId,
+            parentNodeId: productCapParentId(target, parentNodeId),
             level,
-            pathKey: `${region.id}/${parentNodeId || 'medoid'}/${target.id}`,
+            pathKey: `${productCapId(target, region.id)}/${productCapParentId(target, parentNodeId) || 'root'}/${target.id}`,
         }, {
             treeId: `product-lane:${region.laneKind}`,
             treeKind: region.laneKind,
-            parentNodeId,
+            parentNodeId: productCapParentId(target, parentNodeId),
             level,
             pathKey: `product-lane:${region.laneKind}/${post.clusterId}/${target.id}`,
         }],
     };
+}
+
+function productCapId(target: GraphRebuildEmbeddingTarget, fallback: string): string {
+    if ((target.lane === 'document_spine' || target.lane === 'anchor_evidence') && target.noteId) return `document:${target.noteId}`;
+    if (target.kind === 'chunk' && target.noteId) return `document:${target.noteId}`;
+    if ((target.lane === 'event_identity' || target.lane === 'temporal_fact' || target.lane === 'causal_fact') && target.noteId) return `story:${target.noteId}`;
+    return fallback;
+}
+
+function productCapParentId(target: GraphRebuildEmbeddingTarget, fallback: string | null): string | null {
+    const parents = target.parentIds || [];
+    if (target.kind === 'chunk' && target.noteId) return `embed:note:${target.noteId}`;
+    if (target.kind === 'anchor' && target.chunkId) return `embed:chunk:${target.chunkId}`;
+    if (parents.length) return parents[0];
+    return fallback;
+}
+
+function productCapShellRadius(
+    target: GraphRebuildEmbeddingTarget,
+    specificity: number,
+    ambiguity: number,
+): number {
+    const lane = target.lane || 'unknown';
+    let radius = 1.28;
+    if (lane === 'document_spine') radius = target.kind === 'note' ? 2.08 : 1.92;
+    else if (lane === 'entity_anchor') radius = 1.72;
+    else if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') radius = 1.56;
+    else if (lane === 'relationship_fact') radius = 1.44;
+    else if (lane === 'memory_state') radius = 1.22;
+    else if (lane === 'cooccurrence_weak') radius = 1.16;
+    else if (lane === 'anchor_evidence') radius = 1.04;
+    const confidence = targetConfidence(target);
+    const confidenceDrop = lane === 'document_spine' ? 0.08 : 0.24;
+    radius -= (1 - confidence) * confidenceDrop;
+    radius += (specificity - 0.72) * 0.08;
+    radius -= ambiguity * 0.08;
+    return clampRange(radius, 0.54, 2.12);
 }
 
 function productHierarchySpecificity(
@@ -604,6 +682,11 @@ function unitPhase(value: number): number {
 
 function clamp01(value: number): number {
     return Math.min(1, Math.max(0, value));
+}
+
+function clampRange(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) return min;
+    return Math.min(max, Math.max(min, value));
 }
 
 function hash(value: string): number {

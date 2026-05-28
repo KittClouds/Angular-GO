@@ -143,6 +143,7 @@ export class GraphRebuildPipelineService {
                     entities,
                     embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
                     postProcessMode: 'core',
+                    embeddingStagePolicy: request.embeddingStagePolicy,
                     candidateCount: nerStage.counters['candidates'] || 0,
                 });
                 snapshotRef.value = snapshot;
@@ -233,7 +234,7 @@ export class GraphRebuildPipelineService {
             const entities = smartGraphRegistry.getAllEntities().length
                 ? smartGraphRegistry.getAllEntities()
                 : request.entities;
-            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection);
+            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection, request.embeddingStagePolicy);
             const nerStage = await this.runStage('dynamicNer', 'Dynamic NER + Alex Deltas', async () => {
                 const counts = await this.runNerDeltas(docs);
                 return {
@@ -269,6 +270,7 @@ export class GraphRebuildPipelineService {
                     relationshipHints,
                     embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
                     postProcessMode: 'full',
+                    embeddingStagePolicy: request.embeddingStagePolicy,
                     candidateCount: nerStage.counters['candidates'] || 0,
                 });
                 return {
@@ -284,6 +286,8 @@ export class GraphRebuildPipelineService {
                         embeddingClusters: snapshot.counters.embeddingClusters || 0,
                         embeddingBackboneEdges: snapshot.counters.embeddingBackboneEdges || 0,
                         embeddingOutliers: snapshot.counters.embeddingOutliers || 0,
+                        embeddingPlannedPairs: snapshot.counters.embeddingPlannedPairs || 0,
+                        embeddingPrunedPairs: snapshot.counters.embeddingPrunedPairs || 0,
                         linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
                         entityLinks: snapshot.counters.entityLinkSuggestions || 0,
                         nliHints: relationshipHints.length,
@@ -385,7 +389,7 @@ export class GraphRebuildPipelineService {
             const entities = smartGraphRegistry.getAllEntities().length
                 ? smartGraphRegistry.getAllEntities()
                 : request.entities;
-            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection);
+            const fingerprint = postProcessFingerprint(scope, docs, entities, request.modelSelection, request.embeddingStagePolicy);
             postProcessFingerprintValue = fingerprint;
             const postProcessCache = await this.safeLoadPostProcessCache(scope.scopeId, fingerprint);
             const cachedReceipt = await this.safeLoadReceipt(scope.scopeId);
@@ -467,6 +471,7 @@ export class GraphRebuildPipelineService {
                     relationshipHints,
                     embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
                     postProcessMode: 'full',
+                    embeddingStagePolicy: request.embeddingStagePolicy,
                     candidateCount: cachedSnapshot?.counters.candidates || 0,
                 });
                 snapshotRef.value = snapshot;
@@ -479,6 +484,8 @@ export class GraphRebuildPipelineService {
                         embeddingClusters: snapshot.counters.embeddingClusters || 0,
                         embeddingBackboneEdges: snapshot.counters.embeddingBackboneEdges || 0,
                         embeddingOutliers: snapshot.counters.embeddingOutliers || 0,
+                        embeddingPlannedPairs: snapshot.counters.embeddingPlannedPairs || 0,
+                        embeddingPrunedPairs: snapshot.counters.embeddingPrunedPairs || 0,
                         linkSuggestions: snapshot.counters.graphAwareLinkSuggestions || 0,
                         entityLinks: snapshot.counters.entityLinkSuggestions || 0,
                         nliHints: relationshipHints.length,
@@ -888,12 +895,45 @@ function appendSignalCoverageStages(
 ): void {
     const targetCounts = countEmbeddingTargetFamilies(snapshot);
     const targetTotal = snapshot.embeddingTargets?.length || 0;
+    const plan = snapshot.embeddingTargetPlan;
     stageReceipts.push(instrumentationStage(
         'signalTargetCoverage',
         'Signal Target Coverage',
         0,
         {
             targets: targetTotal,
+            candidateTargets: plan?.candidateCount || targetTotal,
+            deferredTargets: plan?.deferredCount || 0,
+            documentSpine: planLaneCount(plan, 'document_spine'),
+            documentSpineCandidates: planLaneCandidates(plan, 'document_spine'),
+            documentSpineDeferred: planLaneDeferred(plan, 'document_spine'),
+            chunkSpine: planLaneCount(plan, 'chunk_spine'),
+            chunkSpineCandidates: planLaneCandidates(plan, 'chunk_spine'),
+            chunkSpineDeferred: planLaneDeferred(plan, 'chunk_spine'),
+            entityAnchors: planLaneCount(plan, 'entity_anchor'),
+            entityAnchorsCandidates: planLaneCandidates(plan, 'entity_anchor'),
+            entityAnchorsDeferred: planLaneDeferred(plan, 'entity_anchor'),
+            relationshipFacts: planLaneCount(plan, 'relationship_fact'),
+            relationshipFactsCandidates: planLaneCandidates(plan, 'relationship_fact'),
+            relationshipFactsDeferred: planLaneDeferred(plan, 'relationship_fact'),
+            temporalFacts: planLaneCount(plan, 'temporal_fact'),
+            temporalFactsCandidates: planLaneCandidates(plan, 'temporal_fact'),
+            temporalFactsDeferred: planLaneDeferred(plan, 'temporal_fact'),
+            causalFacts: planLaneCount(plan, 'causal_fact'),
+            causalFactsCandidates: planLaneCandidates(plan, 'causal_fact'),
+            causalFactsDeferred: planLaneDeferred(plan, 'causal_fact'),
+            memoryStates: planLaneCount(plan, 'memory_state'),
+            memoryStatesCandidates: planLaneCandidates(plan, 'memory_state'),
+            memoryStatesDeferred: planLaneDeferred(plan, 'memory_state'),
+            eventIdentities: planLaneCount(plan, 'event_identity'),
+            eventIdentitiesCandidates: planLaneCandidates(plan, 'event_identity'),
+            eventIdentitiesDeferred: planLaneDeferred(plan, 'event_identity'),
+            anchorEvidence: planLaneCount(plan, 'anchor_evidence'),
+            anchorEvidenceCandidates: planLaneCandidates(plan, 'anchor_evidence'),
+            anchorEvidenceDeferred: planLaneDeferred(plan, 'anchor_evidence'),
+            weakCooccurrence: planLaneCount(plan, 'cooccurrence_weak'),
+            weakCooccurrenceCandidates: planLaneCandidates(plan, 'cooccurrence_weak'),
+            weakCooccurrenceDeferred: planLaneDeferred(plan, 'cooccurrence_weak'),
             entityTargets: targetCounts['entity'],
             graphFactTargets: targetCounts['graphFact'],
             eventTargets: targetCounts['event'],
@@ -913,6 +953,27 @@ function appendSignalCoverageStages(
         },
         'Embedding target family coverage and graph signal starvation audit',
     ));
+}
+
+function planLaneCount(
+    plan: GraphRebuildSnapshot['embeddingTargetPlan'] | undefined,
+    lane: string,
+): number {
+    return plan?.lanes.find((row) => row.lane === lane)?.admitted || 0;
+}
+
+function planLaneCandidates(
+    plan: GraphRebuildSnapshot['embeddingTargetPlan'] | undefined,
+    lane: string,
+): number {
+    return plan?.lanes.find((row) => row.lane === lane)?.candidates || 0;
+}
+
+function planLaneDeferred(
+    plan: GraphRebuildSnapshot['embeddingTargetPlan'] | undefined,
+    lane: string,
+): number {
+    return plan?.lanes.find((row) => row.lane === lane)?.deferred || 0;
 }
 
 function appendNliStagingStages(stageReceipts: GraphIndexStageReceipt[], rawResult: unknown): void {
@@ -1254,6 +1315,7 @@ function postProcessFingerprint(
     docs: ScopedDocument[],
     entities: Array<{ id: string; label: string; kind: string; aliases?: string[] }>,
     modelSelection: GraphIndexRunRequest['modelSelection'],
+    embeddingStagePolicy?: GraphIndexRunRequest['embeddingStagePolicy'],
 ): string {
     const payload = JSON.stringify({
         scope: {
@@ -1278,8 +1340,17 @@ function postProcessFingerprint(
             }))
             .sort((left, right) => left.id.localeCompare(right.id)),
         modelSelection,
+        embeddingStagePolicy: normalizedEmbeddingStagePolicy(embeddingStagePolicy),
     });
     return simpleHash(payload);
+}
+
+function normalizedEmbeddingStagePolicy(
+    policy?: GraphIndexRunRequest['embeddingStagePolicy'],
+): { enabledLanes: string[] } {
+    return {
+        enabledLanes: [...(policy?.enabledLanes || [])].sort(),
+    };
 }
 
 function simpleHash(value: string): string {

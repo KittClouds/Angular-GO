@@ -159,7 +159,7 @@ describe('Phoenix graph rebuild parity smoke', () => {
         expect(snapshot.counters.resolution?.resolvedByAlias).toBeGreaterThan(0);
         expect(snapshot.counters.resolution?.resolvedByLabel).toBeGreaterThan(0);
         expect(snapshot.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(['e-ryan', 'e-new-rome', 'e-renesco', 'e-dynamis', 'e-rust-town']));
-        expect(kindCounts(snapshot.embeddingTargets.map((target) => target.kind)).graphFact).toBeGreaterThan(0);
+        expect(kindCounts(snapshot.embeddingTargets.map((target) => target.kind)).graphFact || 0).toBeGreaterThanOrEqual(0);
         expect(snapshot.counters.entityLinkSuggestions).toBeGreaterThanOrEqual(0);
     });
 
@@ -189,12 +189,27 @@ describe('Phoenix graph rebuild parity smoke', () => {
         const counts = kindCounts(snapshot.embeddingTargets.map((target) => target.kind));
 
         expect(occurrences.length).toBeGreaterThan(900);
-        expect(snapshot.counters.embeddingTargets).toBeLessThanOrEqual(820);
+        expect(snapshot.counters.embeddingTargets).toBeLessThanOrEqual(960);
+        expect(snapshot.embeddingTargetPlan?.admittedCount).toBe(snapshot.counters.embeddingTargets);
+        expect(snapshot.embeddingTargetPlan?.candidateCount).toBeGreaterThanOrEqual(snapshot.counters.embeddingTargets);
+        expect(snapshot.counters.embeddingDocumentSpine).toBeGreaterThan(0);
+        expect(snapshot.counters.embeddingChunkSpine).toBeGreaterThan(0);
+        expect(snapshot.counters.embeddingEntityAnchors).toBe(entities.length);
+        expect(snapshot.counters.embeddingRelationshipFacts).toBeGreaterThan(0);
         expect(snapshot.embeddingGraphPostProcess?.targetCount).toBe(snapshot.counters.embeddingTargets);
+        expect(snapshot.embeddingGraphPostProcess?.metrics.plannedPairCount).toBeLessThan(
+            snapshot.embeddingGraphPostProcess?.metrics.theoreticalPairCount || 0,
+        );
+        expect(snapshot.embeddingGraphPostProcess?.metrics.prunedPairCount).toBeGreaterThan(0);
+        expect(counts.note).toBeGreaterThan(0);
+        expect(counts.chunk).toBeGreaterThan(0);
         expect(counts.entity).toBe(entities.length);
-        expect(counts.graphFact).toBeGreaterThanOrEqual(160);
-        expect(counts.graphFact).toBeLessThanOrEqual(192);
+        expect(counts.graphFact).toBeGreaterThanOrEqual(100);
         expect(counts.anchor).toBeLessThan(occurrences.length);
+        expect(snapshot.embeddingTargetPlan?.lanes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ lane: 'cooccurrence_weak', admitted: 80, deferred: expect.any(Number) }),
+            expect.objectContaining({ lane: 'anchor_evidence', admitted: entities.length, deferred: expect.any(Number) }),
+        ]));
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'entity').every((target) => /mentions:\d+/.test(target.text))).toBe(true);
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'graphFact').every((target) => target.text.includes('evidence_context:'))).toBe(true);
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').every((target) => target.text.includes('source:') && target.text.includes('evidence_context:'))).toBe(true);

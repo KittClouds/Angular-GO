@@ -52,11 +52,11 @@
     "eventCount": 1,
     "memoryStateCount": 3,
     "embeddingTargetKindCounts": {
-      "anchor": 6,
+      "anchor": 3,
       "chunk": 1,
       "entity": 3,
       "event": 1,
-      "graphFact": 4,
+      "graphFact": 1,
       "memoryState": 3,
       "note": 1
     }

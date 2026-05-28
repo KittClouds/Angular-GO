@@ -140,7 +140,7 @@ describe('embedding atlas projection', () => {
             memoryState: [],
             embeddingTargets: [
                 { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Note 1', text: 'chapter text', evidenceIds: [] },
-                { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'Kai entered the room.', evidenceIds: [] },
+                { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'Kai entered the room.', evidenceIds: [], lane: 'chunk_spine', structuralRole: 'spine', admissionTier: 0, admissionStatus: 'admitted', parentIds: ['embed:note:note-1'] },
                 { id: 'embed:anchor:anchor-1', kind: 'anchor', sourceId: 'anchor-1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
                 { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', label: 'Kai', text: 'Kai', evidenceIds: ['anchor-1'] },
                 { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
@@ -173,6 +173,13 @@ describe('embedding atlas projection', () => {
         const colors = new Map(atlas.nodes.map((node) => [node.id, node.colorHsl]));
         const styleLabDefaults = new Set(Object.values(DEFAULT_ENTITY_COLORS));
         expect(nodes.get('embed:entity:baton')?.kind).toBe('location');
+        expect(nodes.get('embed:chunk:chunk-1')?.metadata).toEqual(expect.objectContaining({
+            signalLane: 'chunk_spine',
+            signalStructuralRole: 'spine',
+            signalAdmissionTier: 0,
+            signalAdmissionStatus: 'admitted',
+            signalParentIds: ['embed:note:note-1'],
+        }));
         expect(nodes.get('embed:anchor:anchor-location')?.kind).toBe('anchor');
         expect(colors.get('embed:entity:baton')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
         expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_GRAPH_NODE_COLORS.anchor);
@@ -349,6 +356,69 @@ describe('embedding atlas projection', () => {
             fiberKind: 'identity',
             phase: 0.33,
         });
+    });
+
+    it('maps graph-rebuild signal lanes into hierarchy cap shells', () => {
+        const targets = [
+            { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Red Mesa', text: 'chapter text', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionTier: 0 },
+            { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'sharp chunk', evidenceIds: [], lane: 'document_spine', structuralRole: 'spine', admissionTier: 0 },
+            { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'mentions:4 evidence_context:Kai', evidenceIds: ['a1', 'a2'], lane: 'entity_anchor', structuralRole: 'child', admissionTier: 1 },
+            { id: 'embed:anchor:a1', kind: 'anchor', sourceId: 'a1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'source:dynamic evidence_context:Kai', evidenceIds: ['a1'], lane: 'anchor_evidence', structuralRole: 'evidence', admissionTier: 3 },
+        ] as const;
+        const posts = targets.map((target, index) => overloadedHopfPost(target.id, 'embed:note:note-1', index / targets.length, target.kind));
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-caps',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [...targets],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+            embeddingGraphPostProcess: {
+                schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
+                targetCount: targets.length,
+                vectorDimensions: 384,
+                clusters: [],
+                productTopologyRegions: posts.map((post) => post.productTopologyRegion),
+                targets: posts,
+                backboneEdges: [],
+                bridgeEdges: [],
+                outlierTargetIds: [],
+                metrics: {
+                    clusterCount: 1,
+                    singletonCount: 0,
+                    largestClusterSize: targets.length,
+                    largestClusterRatio: 1,
+                    backboneEdgeCount: 0,
+                    bridgeEdgeCount: 0,
+                    outlierCount: 0,
+                    maxHubScore: 0.8,
+                    meanNeighborCount: 1,
+                },
+            },
+        }, 'lorentz');
+
+        const byId = new Map(atlas.nodes.map((node) => [node.id, node.metadata?.lorentz as Record<string, unknown>]));
+        expect(byId.get('embed:note:note-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
+        expect(byId.get('embed:chunk:chunk-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
+        expect(byId.get('embed:anchor:a1')).toMatchObject({ capId: 'document:note-1', signalLane: 'anchor_evidence' });
+        expect(Number(byId.get('embed:note:note-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:entity:kai')?.['shellRadius']));
+        expect(Number(byId.get('embed:entity:kai')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:anchor:a1')?.['shellRadius']));
     });
 
     it('uses postprocess clusters as Hopf bases instead of making every target its own anchor', () => {
@@ -571,7 +641,7 @@ describe('embedding atlas projection', () => {
         }, 'product');
 
         const nodeIds = new Set(atlas.nodes.map((node) => node.id));
-        expect(atlas.nodes).toHaveLength(420);
+        expect(atlas.nodes).toHaveLength(fillerTargets.length + 7);
         expect(nodeIds.has('embed:graph-fact:co-1')).toBe(true);
         expect([...nodeIds].filter((id) => id.includes('kai') || id.includes('hazel') || id.includes('co-1')).sort()).toEqual([
             'embed:entity:hazel',

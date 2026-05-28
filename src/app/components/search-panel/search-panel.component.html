@@ -146,6 +146,44 @@
       </div>
     </div>
 
+    <div class="postprocess-staging" *ngIf="postprocessStaging() as staging">
+      <div class="postprocess-staging-head">
+        <span>Postprocess staging</span>
+        <strong>{{ staging.targets | number:'1.0-0' }} admitted / {{ staging.candidates | number:'1.0-0' }} candidates</strong>
+      </div>
+      <div class="postprocess-stage-summary">
+        <span>
+          <strong>{{ staging.deferred | number:'1.0-0' }}</strong>
+          <small>deferred</small>
+        </span>
+        <span>
+          <strong>{{ staging.lanes.length | number:'1.0-0' }}</strong>
+          <small>lanes</small>
+        </span>
+        <span>
+          <strong>{{ selectedEmbeddingStageLanes().length | number:'1.0-0' }}</strong>
+          <small>enabled</small>
+        </span>
+      </div>
+      <div class="postprocess-stage-controls">
+        <button type="button" *ngFor="let lane of embeddingStageControls()" class="postprocess-stage-toggle"
+          [class.active]="lane.enabled" (click)="toggleEmbeddingStageLane(lane.id)">
+          <span>{{ lane.label }}</span>
+          <strong>{{ lane.enabled ? 'on' : 'off' }}</strong>
+        </button>
+      </div>
+      <div class="postprocess-lanes" *ngIf="staging.lanes.length">
+        <div *ngFor="let lane of staging.lanes" class="postprocess-lane">
+          <span>
+            <strong>{{ lane.label }}</strong>
+            <small>{{ lane.admitted | number:'1.0-0' }} in<ng-container *ngIf="lane.deferred > 0"> / {{ lane.deferred | number:'1.0-0' }} held</ng-container></small>
+          </span>
+          <em>{{ lane.percent | number:'1.0-0' }}%</em>
+          <i><b [style.width.%]="lane.percent"></b></i>
+        </div>
+      </div>
+    </div>
+
     <div class="link-suggestion-card" *ngIf="entityLinkSuggestionTotal() > 0">
       <div class="link-suggestion-head">
         <span>Entity-link candidates</span>

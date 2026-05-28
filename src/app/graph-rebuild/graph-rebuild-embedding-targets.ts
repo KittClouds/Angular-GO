@@ -3,6 +3,7 @@ import type {
     GraphRebuildCausalEdge,
     GraphRebuildChunk,
     GraphRebuildEmbeddingTarget,
+    GraphRebuildEmbeddingTargetPlan,
     GraphRebuildEntityAnchor,
     GraphRebuildEvent,
     GraphRebuildMemoryState,
@@ -10,19 +11,10 @@ import type {
     GraphRebuildRelationship,
     GraphRebuildTemporalEdge,
 } from './graph-rebuild-snapshot';
+import { selectGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-target-policy';
 import { summarizeMeaningFrame } from './graph-rebuild-meaning-frames';
 
-const MAX_EMBEDDING_TARGETS = 960;
-const NOTE_TARGET_BUDGET = 32;
-const ENTITY_TARGET_BUDGET = 320;
-const RELATION_TARGET_BUDGET = 192;
-const STORY_EDGE_TARGET_BUDGET = 128;
-const EVENT_TARGET_BUDGET = 96;
-const MEMORY_TARGET_BUDGET = 96;
-const CHUNK_TARGET_BUDGET = 160;
-const ANCHOR_TARGET_BUDGET = 192;
-
-export function buildGraphRebuildEmbeddingTargets(
+export function buildGraphRebuildEmbeddingTargetPlan(
     input: BuildGraphRebuildSnapshotInput,
     chunks: GraphRebuildChunk[],
     anchors: GraphRebuildEntityAnchor[],
@@ -32,7 +24,7 @@ export function buildGraphRebuildEmbeddingTargets(
     temporalEdges: GraphRebuildTemporalEdge[],
     causalEdges: GraphRebuildCausalEdge[],
     memoryState: GraphRebuildMemoryState[],
-): GraphRebuildEmbeddingTarget[] {
+): GraphRebuildEmbeddingTargetPlan & { targets: GraphRebuildEmbeddingTarget[] } {
     const targets: GraphRebuildEmbeddingTarget[] = [];
     const nodeByEntityId = new Map(nodes.map((node) => [node.entityId, node]));
     const anchorById = new Map(anchors.map((anchor) => [anchor.id, anchor]));
@@ -61,122 +53,21 @@ export function buildGraphRebuildEmbeddingTargets(
     for (const edge of temporalEdges) targets.push(temporalTarget(input, edge, 'temporalFact', eventById, anchorById));
     for (const edge of causalEdges) targets.push(temporalTarget(input, edge, 'causalFact', eventById, anchorById));
     for (const state of memoryState) targets.push({ id: `embed:memory:${state.id}`, kind: 'memoryState', sourceId: state.id, noteId: state.noteId, entityId: state.entityId, label: state.key, text: memoryText(input, state, nodeByEntityId, anchorById), evidenceIds: state.evidenceIds });
-    return selectEmbeddingTargets(targets, relationships, temporalEdges, causalEdges);
+    return selectGraphRebuildEmbeddingTargetPlan(targets, relationships, temporalEdges, causalEdges, input.embeddingStagePolicy);
 }
 
-function selectEmbeddingTargets(
-    targets: GraphRebuildEmbeddingTarget[],
+export function buildGraphRebuildEmbeddingTargets(
+    input: BuildGraphRebuildSnapshotInput,
+    chunks: GraphRebuildChunk[],
+    anchors: GraphRebuildEntityAnchor[],
+    nodes: GraphRebuildNode[],
     relationships: GraphRebuildRelationship[],
+    events: GraphRebuildEvent[],
     temporalEdges: GraphRebuildTemporalEdge[],
     causalEdges: GraphRebuildCausalEdge[],
+    memoryState: GraphRebuildMemoryState[],
 ): GraphRebuildEmbeddingTarget[] {
-    if (targets.length <= MAX_EMBEDDING_TARGETS) return targets;
-    const selected = new Map<string, GraphRebuildEmbeddingTarget>();
-    const byKind = groupTargetsByKind(targets);
-    const entityById = new Map((byKind.get('entity') || []).map((target) => [target.entityId || target.sourceId, target]));
-    const eventById = new Map((byKind.get('event') || []).map((target) => [target.sourceId, target]));
-    const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
-    const storyEdgeById = new Map([...temporalEdges, ...causalEdges].map((edge) => [edge.id, edge]));
-
-    const addGroup = (group: Array<GraphRebuildEmbeddingTarget | undefined>): boolean => {
-        const missing = group.filter((target): target is GraphRebuildEmbeddingTarget => !!target && !selected.has(target.id));
-        if (selected.size + missing.length > MAX_EMBEDDING_TARGETS) return false;
-        for (const target of missing) selected.set(target.id, target);
-        return true;
-    };
-    const addMany = (values: GraphRebuildEmbeddingTarget[], budget: number): void => {
-        for (const target of values.slice(0, budget)) addGroup([target]);
-    };
-
-    addMany(ranked(byKind.get('note') || []), NOTE_TARGET_BUDGET);
-    addMany(ranked(byKind.get('entity') || []), ENTITY_TARGET_BUDGET);
-    for (const target of ranked(byKind.get('graphfact') || []).slice(0, RELATION_TARGET_BUDGET)) {
-        const relationship = relationshipById.get(target.sourceId);
-        addGroup([
-            target,
-            relationship ? entityById.get(relationship.sourceEntityId) : undefined,
-            relationship ? entityById.get(relationship.targetEntityId) : undefined,
-        ]);
-    }
-    for (const target of ranked([...(byKind.get('temporalfact') || []), ...(byKind.get('causalfact') || [])]).slice(0, STORY_EDGE_TARGET_BUDGET)) {
-        const edge = storyEdgeById.get(target.sourceId);
-        addGroup([
-            target,
-            edge ? eventById.get(edge.sourceId) : undefined,
-            edge ? eventById.get(edge.targetId) : undefined,
-        ]);
-    }
-    addMany(ranked(byKind.get('event') || []), EVENT_TARGET_BUDGET);
-    for (const target of ranked(byKind.get('memorystate') || []).slice(0, MEMORY_TARGET_BUDGET)) {
-        addGroup([target, target.entityId ? entityById.get(target.entityId) : undefined]);
-    }
-    addMany(ranked(byKind.get('chunk') || []), CHUNK_TARGET_BUDGET);
-    for (const target of representativeAnchors(byKind.get('anchor') || []).slice(0, ANCHOR_TARGET_BUDGET)) {
-        addGroup([target, target.entityId ? entityById.get(target.entityId) : undefined]);
-    }
-    return [...selected.values()];
-}
-
-function groupTargetsByKind(targets: GraphRebuildEmbeddingTarget[]): Map<string, GraphRebuildEmbeddingTarget[]> {
-    const groups = new Map<string, GraphRebuildEmbeddingTarget[]>();
-    for (const target of targets) {
-        const kind = normalizeKind(target.kind);
-        groups.set(kind, [...(groups.get(kind) || []), target]);
-    }
-    return groups;
-}
-
-function representativeAnchors(targets: GraphRebuildEmbeddingTarget[]): GraphRebuildEmbeddingTarget[] {
-    const perEntity = new Map<string, GraphRebuildEmbeddingTarget[]>();
-    for (const target of ranked(targets)) {
-        const key = target.entityId || target.sourceId;
-        const bucket = perEntity.get(key) || [];
-        if (bucket.length >= 3) continue;
-        bucket.push(target);
-        perEntity.set(key, bucket);
-    }
-    return [...perEntity.values()].flat().sort(targetOrder);
-}
-
-function ranked(targets: GraphRebuildEmbeddingTarget[]): GraphRebuildEmbeddingTarget[] {
-    return [...targets].sort(targetOrder);
-}
-
-function targetOrder(left: GraphRebuildEmbeddingTarget, right: GraphRebuildEmbeddingTarget): number {
-    return targetScore(right) - targetScore(left) || left.id.localeCompare(right.id);
-}
-
-function targetScore(target: GraphRebuildEmbeddingTarget): number {
-    const kind = normalizeKind(target.kind);
-    let score =
-        kind === 'entity' ? 900 :
-        kind === 'graphfact' ? 840 :
-        kind === 'causalfact' ? 830 :
-        kind === 'temporalfact' ? 810 :
-        kind === 'event' ? 780 :
-        kind === 'memorystate' ? 720 :
-        kind === 'note' ? 680 :
-        kind === 'chunk' ? 620 :
-        kind === 'anchor' ? 540 : 500;
-    const text = `${target.label} ${target.text}`.toLowerCase();
-    if (text.includes('[accepted]')) score += 90;
-    if (text.includes('[review]')) score += 34;
-    if (/command|authority|causal|cause|because|before|after|temporal|approved|accepted|warn|co_occurs_with/.test(text)) score += 44;
-    if (/chunk_role:(authority_chain|evidence_block|transition)/.test(text)) score += 36;
-    if (/meaning_cues:|entity_priors:/.test(text)) score += 18;
-    if (/evidence_context:/.test(text)) score += 42;
-    if (/source:(manual_tag|accepted_suggestion|dictionary_match|machine_evidence|machine_suggestion)/.test(text)) score += 24;
-    const mentionMatch = text.match(/mentions:(\d+)/);
-    if (mentionMatch) score += Math.min(64, Number(mentionMatch[1]) * 2);
-    const confidenceMatch = text.match(/confidence:([0-9.]+)/);
-    if (confidenceMatch) score += Math.round(clamp(Number(confidenceMatch[1]), 0, 1) * 48);
-    score += Math.min(48, target.evidenceIds.length * 6);
-    if (target.entityKind) score += 8;
-    return score;
-}
-
-function normalizeKind(kind: string): string {
-    return String(kind || '').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase().replace(/[-_\s]+/g, '');
+    return buildGraphRebuildEmbeddingTargetPlan(input, chunks, anchors, nodes, relationships, events, temporalEdges, causalEdges, memoryState).targets;
 }
 
 function temporalTarget(

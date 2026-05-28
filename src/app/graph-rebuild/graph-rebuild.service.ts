@@ -14,6 +14,7 @@ import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames'
 import type {
     GraphIndexRunReceipt,
     GraphIndexPostProcessMode,
+    GraphIndexEmbeddingStagePolicy,
     GraphRebuildBuildTimings,
     GraphRebuildChunk,
     GraphRebuildEmbeddingProfile,
@@ -47,6 +48,7 @@ export interface GraphRebuildBuildRequest {
     relationshipHints?: GraphRebuildRelationshipHint[];
     embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
     postProcessMode?: GraphIndexPostProcessMode;
+    embeddingStagePolicy?: GraphIndexEmbeddingStagePolicy;
     candidateCount?: number;
 }
 
@@ -94,6 +96,7 @@ export class GraphRebuildService {
                 relationshipHints: request.relationshipHints,
                 embeddingProfile: request.embeddingProfile,
                 postProcessMode: request.postProcessMode,
+                embeddingStagePolicy: request.embeddingStagePolicy,
                 candidateCount: request.candidateCount,
             }));
             finalizeBuildTimings(timings, totalStarted);

@@ -9,10 +9,11 @@ import type {
     GraphRebuildNode,
     GraphRebuildRelationship,
     GraphRebuildRelationshipHint,
+    GraphRebuildSignalTargetLane,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
 import { deriveGraphRebuildFacts } from './graph-rebuild-derived-facts';
-import { buildGraphRebuildEmbeddingTargets } from './graph-rebuild-embedding-targets';
+import { buildGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-targets';
 import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
 import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
@@ -55,7 +56,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
     const acceptedRelationships = relationships.filter((relationship) => relationship.status === 'accepted').length;
     const reviewRelationships = relationships.filter((relationship) => relationship.status === 'review').length;
     const rejectedRelationships = relationships.filter((relationship) => relationship.status === 'rejected').length;
-    const embeddingTargets = buildGraphRebuildEmbeddingTargets(
+    const embeddingTargetPlan = buildGraphRebuildEmbeddingTargetPlan(
         input,
         chunks,
         entityAnchors,
@@ -66,6 +67,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         derived.causalEdges,
         derived.memoryState,
     );
+    const embeddingTargets = embeddingTargetPlan.targets;
     const postProcessMode = input.postProcessMode || 'full';
     const embeddingGraphPostProcess = postProcessMode === 'full'
         ? buildGraphRebuildEmbeddingGraphPostProcess(
@@ -115,6 +117,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         causalEdges: derived.causalEdges,
         memoryState: derived.memoryState,
         embeddingTargets,
+        embeddingTargetPlan,
         embeddingVectors: [],
         embeddingProfile: embeddingGraphPostProcess?.profile,
         embeddingModelAdapter: embeddingGraphPostProcess?.adapter,
@@ -150,6 +153,17 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             causalEdges: derived.causalEdges.length,
             memoryState: derived.memoryState.length,
             embeddingTargets: embeddingTargets.length,
+            embeddingTargetCandidates: embeddingTargetPlan.candidateCount,
+            embeddingTargetDeferred: embeddingTargetPlan.deferredCount,
+            embeddingDocumentSpine: planLaneAdmitted(embeddingTargetPlan, 'document_spine'),
+            embeddingChunkSpine: planLaneAdmitted(embeddingTargetPlan, 'chunk_spine'),
+            embeddingEntityAnchors: planLaneAdmitted(embeddingTargetPlan, 'entity_anchor'),
+            embeddingRelationshipFacts: planLaneAdmitted(embeddingTargetPlan, 'relationship_fact'),
+            embeddingTemporalFacts: planLaneAdmitted(embeddingTargetPlan, 'temporal_fact'),
+            embeddingCausalFacts: planLaneAdmitted(embeddingTargetPlan, 'causal_fact'),
+            embeddingMemoryStates: planLaneAdmitted(embeddingTargetPlan, 'memory_state'),
+            embeddingEventIdentities: planLaneAdmitted(embeddingTargetPlan, 'event_identity'),
+            embeddingAnchorEvidence: planLaneAdmitted(embeddingTargetPlan, 'anchor_evidence'),
             embeddingVectors: 0,
             projectionRefs: 0,
             nodes: nodes.length,
@@ -162,6 +176,9 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             embeddingBackboneEdges: embeddingGraphPostProcess?.metrics.backboneEdgeCount || 0,
             embeddingBridgeEdges: embeddingGraphPostProcess?.metrics.bridgeEdgeCount || 0,
             embeddingOutliers: embeddingGraphPostProcess?.metrics.outlierCount || 0,
+            embeddingPlannedPairs: embeddingGraphPostProcess?.metrics.plannedPairCount || 0,
+            embeddingTheoreticalPairs: embeddingGraphPostProcess?.metrics.theoreticalPairCount || 0,
+            embeddingPrunedPairs: embeddingGraphPostProcess?.metrics.prunedPairCount || 0,
             graphAwareLinkSuggestions: graphAwareLinkSuggestions.length,
             entityLinkSuggestions: entityLinking.suggestions.length,
             entityLinking: entityLinking.counters,
@@ -172,6 +189,13 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         },
         resolutionSuggestions: hygiene.suggestions,
     };
+}
+
+function planLaneAdmitted(
+    plan: { lanes: Array<{ lane: GraphRebuildSignalTargetLane; admitted: number }> },
+    lane: GraphRebuildSignalTargetLane,
+): number {
+    return plan.lanes.find((row) => row.lane === lane)?.admitted || 0;
 }
 
 function buildNodes(anchors: GraphRebuildEntityAnchor[], entitiesById: Map<string, RegisteredEntity>): GraphRebuildNode[] {

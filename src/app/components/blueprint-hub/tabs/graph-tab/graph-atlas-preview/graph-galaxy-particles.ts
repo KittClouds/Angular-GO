@@ -7,8 +7,11 @@ import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
 const MAX_FLOW_PARTICLES = 1800;
 const EMPTY_VEC3 = new Float32Array(0);
 const EMPTY_SCALAR = new Float32Array(0);
-const CAPS_SURFACE_EDGE_MIN_RADIUS = 1.72;
+const CAPS_SURFACE_EDGE_MIN_RADIUS = 0.34;
 const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
+const CAPS_SHELL_RADII = [0.54, 0.98, 1.22, 1.34, 1.48, 1.68, 1.92];
+const HYBRID_SURFACE_EDGE_MIN_RADIUS = 2.32 * 0.92;
+const HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.42;
 
 export class GraphGalaxyParticles {
     readonly points: THREE.Points;
@@ -167,15 +170,37 @@ export class GraphGalaxyParticles {
     }
 
     private capsSurfaceParticle(data: GalaxySceneV2, positions: Float32Array, source: number, target: number): boolean {
-        if (data.layoutMode !== 'lorentzTree' || positions !== data.positions3d) return false;
+        if (positions !== data.positions3d) return false;
         const ax = positions[source * 3], ay = positions[source * 3 + 1], az = positions[source * 3 + 2];
         const bx = positions[target * 3], by = positions[target * 3 + 1], bz = positions[target * 3 + 2];
         const ar = Math.hypot(ax, ay, az);
         const br = Math.hypot(bx, by, bz);
+        if (data.layoutMode === 'hybridSpace') return this.hybridSurfaceParticle(ar, br, ax, ay, az, bx, by, bz);
+        if (data.layoutMode !== 'lorentzTree') return false;
         if (ar < CAPS_SURFACE_EDGE_MIN_RADIUS || br < CAPS_SURFACE_EDGE_MIN_RADIUS) return false;
         if (Math.abs(ar - br) > CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        if (this.capsShellIndex(ar) !== this.capsShellIndex(br)) return false;
         const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
         return dot > -0.985;
+    }
+
+    private hybridSurfaceParticle(ar: number, br: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+        if (ar < HYBRID_SURFACE_EDGE_MIN_RADIUS || br < HYBRID_SURFACE_EDGE_MIN_RADIUS) return false;
+        if (Math.abs(ar - br) > HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA) return false;
+        const dot = (ax * bx + ay * by + az * bz) / Math.max(0.000001, ar * br);
+        return dot > -0.985;
+    }
+
+    private capsShellIndex(radius: number): number {
+        let best = 0;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let index = 0; index < CAPS_SHELL_RADII.length; index++) {
+            const distance = Math.abs(radius - CAPS_SHELL_RADII[index]);
+            if (distance >= bestDistance) continue;
+            best = index;
+            bestDistance = distance;
+        }
+        return best;
     }
 
     private capsSurfacePoint(positions: Float32Array, source: number, target: number, t: number): { x: number; y: number; z: number } | null {

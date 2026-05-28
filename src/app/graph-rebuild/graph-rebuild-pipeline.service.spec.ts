@@ -399,8 +399,11 @@ describe('GraphRebuildPipelineService', () => {
                 label: 'Signal Target Coverage',
                 counters: expect.objectContaining({
                     targets: 3,
+                    candidateTargets: 3,
+                    deferredTargets: 0,
                     entityTargets: 1,
                     graphFactTargets: 1,
+                    eventTargets: 1,
                     causalFactTargets: 0,
                 }),
             }),

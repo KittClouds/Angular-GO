@@ -98,10 +98,24 @@ describe('Phoenix graph rebuild builder', () => {
             chunk: 1,
             entity: 3,
             event: 1,
-            graphFact: 5,
+            graphFact: 2,
             memoryState: 3,
             note: 1,
         });
+        expect(snapshot.embeddingTargetPlan).toMatchObject({
+            schemaVersion: 'phoenix-signal-target-plan/v1',
+            candidateCount: 17,
+            admittedCount: 14,
+            deferredCount: 3,
+        });
+        expect(snapshot.embeddingTargetPlan?.lanes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ lane: 'document_spine', admitted: 1 }),
+            expect.objectContaining({ lane: 'chunk_spine', admitted: 1 }),
+            expect.objectContaining({ lane: 'entity_anchor', admitted: 3 }),
+            expect.objectContaining({ lane: 'relationship_fact', admitted: 2 }),
+            expect.objectContaining({ lane: 'cooccurrence_weak', candidates: 3, admitted: 0, deferred: 3 }),
+            expect.objectContaining({ lane: 'memory_state', admitted: 3 }),
+        ]));
         expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
             .toContain('mentions:1');
         expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
@@ -123,7 +137,14 @@ describe('Phoenix graph rebuild builder', () => {
             events: 1,
             episodes: 1,
             memoryState: 3,
-            embeddingTargets: 17,
+            embeddingTargets: 14,
+            embeddingTargetCandidates: 17,
+            embeddingTargetDeferred: 3,
+            embeddingDocumentSpine: 1,
+            embeddingChunkSpine: 1,
+            embeddingEntityAnchors: 3,
+            embeddingRelationshipFacts: 2,
+            embeddingMemoryStates: 3,
             nodes: 3,
             edges: 5,
             structuralComponents: 1,
@@ -134,6 +155,34 @@ describe('Phoenix graph rebuild builder', () => {
             hubEntityIds: ['e-hazel', 'e-kai', 'e-rift'],
         });
         expect(snapshot.structuralPostProcess?.components).toHaveLength(1);
+    });
+
+    it('defers disabled embedding lanes without hiding their candidates', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:lane-policy',
+            noteIds: ['note-1'],
+            entities: [entity('e-kai', 'Kai', [])],
+            chunks: [
+                { id: 'note-1:block:0', noteId: 'note-1', start: 0, end: 60, ordinal: 0, source: 'note-block' },
+            ],
+            occurrences: [occurrence('note-1', 'e-kai', 'Kai', 0, 3)],
+            noteTexts: { 'note-1': 'Kai watched the red mesa gate.' },
+            embeddingStagePolicy: {
+                enabledLanes: ['document_spine', 'chunk_spine', 'entity_anchor'],
+            },
+            builtAt: 20,
+        });
+
+        expect(snapshot.embeddingTargetPlan).toMatchObject({
+            candidateCount: 4,
+            admittedCount: 3,
+            deferredCount: 1,
+        });
+        expect(snapshot.embeddingTargets.map((target) => target.kind).sort()).toEqual(['chunk', 'entity', 'note']);
+        expect(snapshot.embeddingTargetPlan?.lanes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ lane: 'anchor_evidence', candidates: 1, admitted: 0, deferred: 1 }),
+        ]));
     });
 
     it('adds deterministic topology roles for structural post-processing', () => {
