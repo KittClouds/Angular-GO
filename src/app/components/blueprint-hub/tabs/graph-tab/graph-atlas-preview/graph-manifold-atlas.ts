@@ -1,4 +1,11 @@
-import { HOPF_MANIFOLD_CAPABILITIES, LORENTZ_MANIFOLD_CAPABILITIES, PRODUCT_MANIFOLD_CAPABILITIES, type AtlasManifoldMode, type ManifoldAtlasSnapshot } from '../../../../../services/manifold-atlas.types';
+import {
+    HOPF_MANIFOLD_CAPABILITIES,
+    LORENTZ_MANIFOLD_CAPABILITIES,
+    PRODUCT_MANIFOLD_CAPABILITIES,
+    SIEGEL_FINSLER_CAPABILITIES,
+    type AtlasManifoldMode,
+    type ManifoldAtlasSnapshot,
+} from '../../../../../services/manifold-atlas.types';
 import type { PhoenixUiApiService, SearchScope, SemanticAtlasEmbeddingAtlas, SemanticAtlasEmbeddingNode } from '../../../../../services/phoenix-ui-api.service';
 import {
     buildBackendEmbeddingAtlas,
@@ -9,7 +16,7 @@ import {
 } from './graph-embedding-atlas';
 import { buildLorentzAtlas } from './graph-lorentz-atlas';
 
-type VisualManifoldMode = Extract<AtlasManifoldMode, 'hybrid' | 'hopf' | 'lorentz' | 'product'>;
+type VisualManifoldMode = Extract<AtlasManifoldMode, 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'siegel'>;
 
 export interface ManifoldAtlasAdapter {
     readonly mode: VisualManifoldMode;
@@ -134,11 +141,49 @@ export const PRODUCT_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
     },
 };
 
+export const SIEGEL_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
+    mode: 'siegel',
+    label: 'Siegel',
+    traceLabel: 'Siegel trace',
+    async load(phoenixUiApi, scope) {
+        const snapshot = await phoenixUiApi.loadManifoldAtlasSnapshot('siegel', scope);
+        if (snapshot?.payload.nodes.length) {
+            return withManifoldMetadata(snapshot, buildBackendEmbeddingAtlas({
+                ...snapshot.payload,
+                sourceLabel: snapshot.sourceLabel || snapshot.payload.sourceLabel,
+            }));
+        }
+        return {
+            ...emptyBackendAtlas('siegel-finsler semantic atlas unavailable'),
+            manifold: {
+                mode: 'siegel',
+                geometryVersion: 'siegel_finsler_v1',
+                sourceLabel: 'siegel-finsler semantic atlas unavailable',
+                capabilities: SIEGEL_FINSLER_CAPABILITIES,
+                projectionSource: 'semantic_atlas_rows',
+                cells: [],
+                charts: [],
+                seams: [],
+                neighborRings: [],
+                coneTraces: [],
+                anchorProjections: [],
+                lorentzTrees: [],
+                lorentzMemberships: [],
+                lorentzCache: null,
+            },
+        };
+    },
+    trace(query, atlas) {
+        return buildEmbeddingQueryTrace(query, atlas);
+    },
+};
+
 export const MANIFOLD_ATLAS_ADAPTERS: Record<VisualManifoldMode, ManifoldAtlasAdapter> = {
     hybrid: HYBRID_MANIFOLD_ADAPTER,
     hopf: HOPF_MANIFOLD_ADAPTER,
     lorentz: LORENTZ_MANIFOLD_ADAPTER,
     product: PRODUCT_MANIFOLD_ADAPTER,
+    siegel: SIEGEL_MANIFOLD_ADAPTER,
 };
 
 export function manifoldAdapter(mode: AtlasManifoldMode): ManifoldAtlasAdapter {

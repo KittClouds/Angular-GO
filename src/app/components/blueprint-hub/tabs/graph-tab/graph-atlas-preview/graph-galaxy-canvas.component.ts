@@ -196,7 +196,7 @@ export class GraphGalaxyCanvasComponent implements AfterViewInit, OnChanges, OnD
 
     onWheel(event: WheelEvent): void {
         event.preventDefault();
-        this.renderer.zoom(event.deltaY);
+        this.renderer.zoomAt(event.deltaY, this.pointerFromEvent(event));
         this.draw();
     }
 

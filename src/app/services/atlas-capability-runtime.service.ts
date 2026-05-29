@@ -97,7 +97,7 @@ const MANIFOLD_PROJECTION_OPERATIONS: AtlasRuntimeOperation[] = [
     { kind: 'manifoldSnapshot', service: 'PhoenixUiApiService.loadManifoldAtlasSnapshot', policy: 'read-only', manifold: 'product' },
 ];
 
-const MANIFOLD_MODE_CAPABILITIES: Record<AtlasManifoldMode, AtlasCapabilityId> = {
+const MANIFOLD_MODE_CAPABILITIES: Partial<Record<AtlasManifoldMode, AtlasCapabilityId>> = {
     hybrid: 'hybridManifold',
     hopf: 'hopfProjection',
     lorentz: 'lorentzForest',
@@ -1521,7 +1521,7 @@ function operationCapabilityId(operation: AtlasRuntimeOperation): AtlasCapabilit
 }
 
 function capabilityForManifoldMode(mode: AtlasManifoldMode): AtlasCapabilityId {
-    return MANIFOLD_MODE_CAPABILITIES[mode];
+    return MANIFOLD_MODE_CAPABILITIES[mode] || 'galaxyVisualization';
 }
 
 function manifoldModeForCapability(id: AtlasCapabilityId | undefined): AtlasManifoldMode {
@@ -1532,6 +1532,7 @@ function manifoldModeLabel(mode: AtlasManifoldMode): string {
     if (mode === 'hopf') return 'Hopf';
     if (mode === 'lorentz') return 'Caps';
     if (mode === 'product') return 'Product';
+    if (mode === 'siegel') return 'Siegel';
     return 'Hybrid';
 }
 

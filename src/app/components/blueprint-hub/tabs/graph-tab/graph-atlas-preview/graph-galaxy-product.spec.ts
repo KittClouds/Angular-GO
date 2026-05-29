@@ -76,6 +76,29 @@ describe('Product manifold galaxy visualization data', () => {
         expect(relationGuides.every((guide) => guide.positions3d.length > 0)).toBe(true);
     });
 
+    it('anchors Product fibers on medoids instead of promoting weak co-occurrence clutter', () => {
+        const nodes: GalaxyRenderableNode[] = [
+            clusteredTargetNode('embed:entity:kai', 'Kai', 'entity', 'embed:entity:kai', 'core'),
+            clusteredTargetNode('embed:entity:rowan', 'Rowan', 'entity', 'embed:entity:kai', 'boundary'),
+            clusteredTargetNode('embed:graph-fact:trust', 'Kai trusts Rowan', 'graph-fact', 'embed:entity:kai', 'boundary'),
+            clusteredTargetNode('embed:graph-fact:co', 'Kai co_occurs_with Rowan', 'graph-fact', 'embed:entity:kai', 'boundary', 'weak co_occurs_with evidence'),
+        ];
+        const edges: GalaxyInputEdge[] = [
+            { id: 'fact-source:trust', sourceId: 'embed:graph-fact:trust', targetId: 'embed:entity:kai', type: 'trusts', confidence: 0.78 },
+            { id: 'fact-source:co', sourceId: 'embed:graph-fact:co', targetId: 'embed:entity:kai', type: 'co_occurs_with', confidence: 0.56 },
+        ];
+
+        const scene = buildGalaxyScene(nodes, edges, mergeGalaxySettings({ layoutMode: 'productManifold' }));
+        const medoidRibbon = scene.hopfRibbons?.find((ribbon) => ribbon.id === 'product:local-fiber:embed:entity:kai');
+        const allFiberNodeIds = new Set((scene.hopfRibbons ?? []).flatMap((ribbon) => ribbon.nodeIds));
+
+        expect(medoidRibbon).toBeTruthy();
+        expect(scene.hopfRibbons?.some((ribbon) => ribbon.id === 'product:local-fiber:embed:entity:rowan')).toBe(false);
+        expect(medoidRibbon?.nodeIds).toContain('embed:entity:rowan');
+        expect(medoidRibbon?.nodeIds).toContain('embed:graph-fact:trust');
+        expect([...allFiberNodeIds].some((id) => id.includes('embed:graph-fact:co') || id.includes('fact-source:co'))).toBe(false);
+    });
+
     it('uses embedding topology as a selectable lens without merging nodes', () => {
         const nodes: GalaxyRenderableNode[] = [
             topologyNode('embed:entity:kai', 'Kai', 'embedding-cluster:0', 'embed:entity:kai', 0.1, 0.9),
@@ -326,6 +349,30 @@ function topologyNode(
                     },
                 },
             },
+        },
+    };
+}
+
+function clusteredTargetNode(
+    id: string,
+    label: string,
+    sourceType: string,
+    medoidTargetId: string,
+    role: string,
+    preview = '',
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind: sourceType,
+        totalMentions: sourceType === 'entity' && id === medoidTargetId ? 3 : 1,
+        metadata: {
+            sourceType,
+            embeddingClusterId: 'embedding-cluster:kai-context',
+            embeddingMedoidTargetId: medoidTargetId,
+            productRegionRole: role,
+            productLaneKind: sourceType === 'entity' ? 'entity' : 'relation',
+            preview,
         },
     };
 }

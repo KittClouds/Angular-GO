@@ -101,7 +101,7 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         writeColor(edgeColors, index * 2, source);
         writeColor(edgeColors, index * 2 + 1, target);
         edgeAlpha[index] = edge.alpha;
-        edgeKinds[index] = edge.interGalaxy ? 1 : 0;
+        edgeKinds[index] = edge.interGalaxy ? 1 : hierarchyEdgeKind(edge.type);
     }
 
     return {
@@ -125,6 +125,10 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         edgeAlpha,
         edgeKinds,
     };
+}
+
+function hierarchyEdgeKind(type: string): number {
+    return /target-parent|note-chunk|chunk-anchor|chunk-entity|anchor-entity|event-chunk|event-entity|memory-entity/i.test(type) ? 2 : 0;
 }
 
 function hopfMetadata(node: GalaxyNode): Record<string, unknown> | null {

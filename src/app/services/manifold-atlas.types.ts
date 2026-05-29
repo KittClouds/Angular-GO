@@ -1,4 +1,4 @@
-export type AtlasManifoldMode = 'hybrid' | 'hopf' | 'lorentz' | 'product';
+export type AtlasManifoldMode = 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'siegel';
 export type ManifoldProjectionSource =
     | 'real_snapshot_vectors'
     | 'semantic_atlas_rows';
@@ -278,5 +278,13 @@ export const PRODUCT_MANIFOLD_CAPABILITIES: ManifoldCapabilities = {
     anchors: true,
     fibers: true,
     phase: true,
+    cones: true,
+};
+
+export const SIEGEL_FINSLER_CAPABILITIES: ManifoldCapabilities = {
+    ann: true,
+    anchors: false,
+    fibers: false,
+    phase: false,
     cones: true,
 };

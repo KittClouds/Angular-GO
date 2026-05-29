@@ -4,7 +4,9 @@ import {
     normalizeEntityKind,
 } from '../../../../../lib/store/entityColorStore';
 import { applyLorentzTreeLayout } from './graph-galaxy-lorentz-layout';
+import { buildProductLocalHopfRibbons, productHopfProjectionNodes } from './graph-galaxy-product-fibers';
 import { applyProductConsensusLayout } from './graph-galaxy-product-layout';
+import { applySiegelFinslerLayout } from './graph-galaxy-siegel-layout';
 
 export type GalaxyLabelMode = 'hover' | 'selected' | 'important' | 'always' | 'off';
 export type GalaxyEdgeMode = 'curved' | 'straight' | 'hidden';
@@ -12,7 +14,7 @@ export type GalaxyEdgeColorMode = 'aqua' | 'orchid' | 'gold' | 'entityBlend' | '
 export type GalaxyBackgroundMode = 'nebula' | 'grid' | 'quiet' | 'void';
 export type GalaxyNodeDragMode = 'stretch' | 'force' | 'pin' | 'camera';
 export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
-export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold';
+export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold' | 'siegelFinsler';
 export type GalaxyEmbeddingTopologyMode = 'off' | 'clusters' | 'regions' | 'lanes' | 'medoids' | 'outliers' | 'backbone' | 'bridges';
 
 export interface GalaxyRenderSettings {
@@ -267,6 +269,12 @@ export function buildGalaxyScene(
         const hopfNodes = productHopfProjectionNodes(nodes, links);
         const hopfRibbons = buildProductLocalHopfRibbons(nodes, hopfNodes);
         return { nodes, links, layoutMode: 'productManifold', groups: [], hopfRibbons, lorentzGuides };
+    }
+
+    if (settings.layoutMode === 'siegelFinsler') {
+        applyGalaxyMetadata(nodes);
+        const lorentzGuides = applySiegelFinslerLayout(nodes, links);
+        return { nodes, links, layoutMode: 'siegelFinsler', groups: [], lorentzGuides };
     }
 
     const groupPlan = settings.layoutMode === 'multiGalaxy' ? buildGroupPlan(nodes) : [];
@@ -666,8 +674,6 @@ const HOPF_DATA_FIBER_GUIDE_LIMIT = 48;
 const HOPF_SPACE_FIBERS = 24;
 const HOPF_TORUS_BAND_FIBERS = 14;
 const HOPF_CROSS_FIBER_BRAID_LIMIT = 96;
-const PRODUCT_CONTEXT_SAMPLE_LIMIT = 384;
-
 interface HopfBaseInfo extends Rgb {
     key: string;
     direction: { x: number; y: number; z: number };
@@ -712,291 +718,6 @@ function applyHybridSpaceLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): void 
     }
 }
 
-function productHopfProjectionNodes(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyNode[] {
-    const clones = nodes.map((node) => productHopfClone(node));
-    const basesByRef = productEntityBaseMap(nodes);
-    const samples: GalaxyNode[] = [];
-    const seen = new Set<string>();
-    const addSample = (base: GalaxyNode | undefined, context: GalaxyNode | undefined, link: GalaxyEdge, side: string) => {
-        if (!base || !context || base === context || samples.length >= PRODUCT_CONTEXT_SAMPLE_LIMIT) return;
-        const fiberKind = productContextFiberKind(context, link);
-        const key = `${base.entity.id}|${context.entity.id}|${link.id}|${fiberKind}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        samples.push(productContextSampleNode(base, context, link, fiberKind, side, samples.length));
-    };
-
-    for (const link of links) {
-        const source = nodes[link.source];
-        const target = nodes[link.target];
-        if (!source || !target) continue;
-        if (isProductEntityBase(source)) addSample(source, target, link, 'target');
-        if (isProductEntityBase(target)) addSample(target, source, link, 'source');
-    }
-
-    for (const node of nodes) {
-        if (samples.length >= PRODUCT_CONTEXT_SAMPLE_LIMIT || isProductEntityBase(node)) continue;
-        const sourceEntityId = stringMetadata(node, 'sourceEntityId');
-        const base = sourceEntityId ? basesByRef.get(sourceEntityId) : undefined;
-        if (base) {
-            addSample(base, node, {
-                id: `product:implicit-context:${base.entity.id}:${node.entity.id}`,
-                source: 0,
-                target: 0,
-                type: 'product-context',
-                confidence: 0.62,
-                alpha: 0,
-                curve: 0,
-                flowOffset: 0,
-            }, 'implicit');
-        }
-    }
-
-    return [...clones, ...samples];
-}
-
-function buildProductLocalHopfRibbons(productNodes: GalaxyNode[], hopfNodes: GalaxyNode[]): GalaxyHopfRibbon[] {
-    const productById = new Map(productNodes.map((node) => [node.entity.id, node]));
-    const baseInfos = new Map<string, HopfBaseInfo>();
-    for (const node of hopfNodes) {
-        const baseKey = hopfBaseKey(node);
-        if (!baseKey) continue;
-        const base = productById.get(baseKey);
-        if (!base) continue;
-        const existing = baseInfos.get(baseKey);
-        const info = existing ?? {
-            key: baseKey,
-            direction: normalizedDirection(base),
-            phases: [],
-            nodeIds: [],
-            fiberKinds: new Set<string>(),
-            importance: 0,
-            r: base.r,
-            g: base.g,
-            b: base.b,
-        };
-        info.phases.push(normalizePhaseRadians(hopfPhase(node, baseKey)));
-        info.nodeIds.push(node.entity.id);
-        info.fiberKinds.add(hopfFiberKind(node));
-        info.importance += Math.max(1, Number(node.entity.totalMentions || 1)) * (isHopfFiber(node) ? 1.2 : 0.65);
-        baseInfos.set(baseKey, info);
-    }
-
-    return [...baseInfos.values()]
-        .filter((info) => info.nodeIds.length > 0)
-        .sort((left, right) => right.importance - left.importance)
-        .slice(0, 48)
-        .map((info) => {
-            const base = productById.get(info.key)!;
-            return {
-                id: `product:local-fiber:${info.key}`,
-                nodeIds: [...new Set(info.nodeIds)],
-                positions3d: productLocalFiberSegments(base, info.phases, info.importance),
-                importance: info.importance,
-                guideKind: 'dataFiber' as const,
-                guideWeight: 0.82,
-                r: info.r,
-                g: info.g,
-                b: info.b,
-            };
-        });
-}
-
-function productHopfClone(node: GalaxyNode): GalaxyNode {
-    const metadata = node.entity.metadata || {};
-    const existingHopf = hopfMetadata(node) || {};
-    const fiberKind = String(existingHopf['fiberKind'] || productContextFiberKind(node, null));
-    const phase = Number.isFinite(Number(existingHopf['phase']))
-        ? Number(existingHopf['phase'])
-        : productPhase(`${node.entity.id}:anchor:${fiberKind}`);
-    return {
-        ...node,
-        entity: {
-            ...node.entity,
-            metadata: {
-                ...metadata,
-                hopf: {
-                    ...existingHopf,
-                    role: existingHopf['role'] || 'anchor',
-                    baseId: existingHopf['baseId'] || node.entity.id,
-                    fiberKind,
-                    phase,
-                },
-            },
-        },
-    };
-}
-
-function productContextSampleNode(
-    base: GalaxyNode,
-    context: GalaxyNode,
-    link: GalaxyEdge,
-    fiberKind: string,
-    side: string,
-    ordinal: number,
-): GalaxyNode {
-    const phase = productPhase(`${base.entity.id}:${context.entity.id}:${link.id}:${fiberKind}:${ordinal}`);
-    const metadata = context.entity.metadata || {};
-    const id = `product:context:${base.entity.id}:${context.entity.id}:${link.id}:${side}`;
-    return {
-        ...context,
-        entity: {
-            ...context.entity,
-            id,
-            label: `${base.entity.label} / ${fiberKind.replace(/_/g, ' ')}`,
-            kind: `PRODUCT_CONTEXT:${fiberKind}`,
-            totalMentions: Math.max(1, Math.round((context.entity.totalMentions || 1) * Math.max(0.65, link.confidence || 0.65))),
-            colorHsl: base.entity.colorHsl || context.entity.colorHsl,
-            metadata: {
-                ...metadata,
-                sourceType: 'product_context_sample',
-                product: {
-                    role: 'contextSample',
-                    baseId: base.entity.id,
-                    sourceNodeId: context.entity.id,
-                    linkId: link.id,
-                    linkType: link.type,
-                    fiberKind,
-                },
-                hopf: {
-                    role: 'fiber',
-                    baseId: base.entity.id,
-                    fiberKind,
-                    phase,
-                },
-            },
-        },
-        r: base.r,
-        g: base.g,
-        b: base.b,
-        radius: Math.max(1.2, context.radius * 0.68),
-        galaxyOpacity: 0,
-    };
-}
-
-function productEntityBaseMap(nodes: GalaxyNode[]): Map<string, GalaxyNode> {
-    const out = new Map<string, GalaxyNode>();
-    for (const node of nodes) {
-        if (!isProductEntityBase(node)) continue;
-        for (const ref of productEntityRefs(node)) out.set(ref, node);
-    }
-    return out;
-}
-
-function productEntityRefs(node: GalaxyNode): string[] {
-    const refs = new Set<string>([node.entity.id]);
-    const sourceId = stringMetadata(node, 'sourceId');
-    const sourceEntityId = stringMetadata(node, 'sourceEntityId');
-    if (sourceId) refs.add(sourceId);
-    if (sourceEntityId) refs.add(sourceEntityId);
-    for (const prefix of ['embed:entity:', 'entity::']) {
-        if (node.entity.id.startsWith(prefix)) refs.add(node.entity.id.slice(prefix.length));
-        if (sourceId.startsWith(prefix)) refs.add(sourceId.slice(prefix.length));
-    }
-    return [...refs].filter(Boolean);
-}
-
-function isProductEntityBase(node: GalaxyNode): boolean {
-    const metadata = node.entity.metadata || {};
-    const sourceType = String(metadata.sourceType || '').toLowerCase();
-    const product = metadata['product'] as Record<string, unknown> | undefined;
-    const productSourceType = String(product?.['sourceType'] || '').toLowerCase();
-    const kind = String(node.entity.kind || '').toLowerCase();
-    const id = node.entity.id.toLowerCase();
-    return sourceType === 'entity'
-        || productSourceType === 'entity'
-        || id.startsWith('embed:entity:')
-        || id.startsWith('entity::')
-        || kind.includes('character')
-        || kind.includes('entity');
-}
-
-function productContextFiberKind(context: GalaxyNode, link: GalaxyEdge | null): string {
-    const text = [
-        link?.type || '',
-        context.entity.kind || '',
-        context.entity.label || '',
-        context.entity.metadata?.sourceType || '',
-        context.entity.metadata?.['preview'] || '',
-    ].join(' ').toLowerCase();
-    if (/caus|because|therefore|effect/.test(text)) return 'causal';
-    if (/time|temporal|before|after|timeline/.test(text)) return 'temporal';
-    if (/event|scene|episode/.test(text)) return 'event';
-    if (/anchor|evidence|source|span|provenance/.test(text)) return 'evidence';
-    if (/relationship|co.?occurs|relation|graph-fact|fact/.test(text)) return 'relationship';
-    if (/memory|state/.test(text)) return 'evidence';
-    if (/chunk|note|document|doc|leaf/.test(text)) return 'document_structure';
-    if (/location|place|city|tower|realm/.test(text)) return 'location';
-    return 'identity';
-}
-
-function productPhase(value: string): number {
-    return Math.round(stableUnit(value) * 1000000) / 1000000;
-}
-
-function productLocalFiberSegments(base: GalaxyNode, phases: number[], importance: number): Float32Array {
-    const frame = productLocalFrame(base);
-    const phaseSet = new Set<number>();
-    for (let index = 0; index < 40; index++) {
-        phaseSet.add(roundPhase((index / 40) * TAU));
-    }
-    for (const phase of phases) phaseSet.add(roundPhase(phase));
-    const samples = [...phaseSet].sort((left, right) => left - right);
-    const radius = clamp(0.095 + Math.log1p(Math.max(1, importance)) * 0.018, 0.11, 0.26);
-    const positions = new Float32Array(samples.length * 2 * 3);
-    for (let index = 0; index < samples.length; index++) {
-        const current = productLocalFiberPoint(base, frame, samples[index], radius);
-        const next = productLocalFiberPoint(base, frame, samples[(index + 1) % samples.length], radius);
-        const offset = index * 6;
-        positions[offset] = current.x;
-        positions[offset + 1] = current.y;
-        positions[offset + 2] = current.z;
-        positions[offset + 3] = next.x;
-        positions[offset + 4] = next.y;
-        positions[offset + 5] = next.z;
-    }
-    return positions;
-}
-
-function productLocalFiberPoint(
-    base: GalaxyNode,
-    frame: { a: { x: number; y: number; z: number }; b: { x: number; y: number; z: number }; radial: { x: number; y: number; z: number } },
-    phase: number,
-    radius: number,
-): { x: number; y: number; z: number } {
-    const c = Math.cos(phase);
-    const s = Math.sin(phase);
-    const wobble = Math.sin(phase * 2 + stableUnit(`${base.entity.id}:fiber-wobble`) * TAU) * radius * 0.18;
-    return {
-        x: base.x + (frame.a.x * c + frame.b.x * s) * radius + frame.radial.x * wobble,
-        y: base.y + (frame.a.y * c + frame.b.y * s) * radius + frame.radial.y * wobble,
-        z: base.z + (frame.a.z * c + frame.b.z * s) * radius + frame.radial.z * wobble,
-    };
-}
-
-function productLocalFrame(base: GalaxyNode): {
-    radial: { x: number; y: number; z: number };
-    a: { x: number; y: number; z: number };
-    b: { x: number; y: number; z: number };
-} {
-    const radial = normalizeVector({ x: base.x, y: base.y, z: base.z }, stableVector(`${base.entity.id}:product-fiber`));
-    const pole = Math.abs(radial.y) > 0.82 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 };
-    const a = normalizeVector(cross(radial, pole), stableVector(`${base.entity.id}:product-fiber-a`));
-    const b = normalizeVector(cross(radial, a), stableVector(`${base.entity.id}:product-fiber-b`));
-    return { radial, a, b };
-}
-
-function cross(
-    left: { x: number; y: number; z: number },
-    right: { x: number; y: number; z: number },
-): { x: number; y: number; z: number } {
-    return {
-        x: left.y * right.z - left.z * right.y,
-        y: left.z * right.x - left.x * right.z,
-        z: left.x * right.y - left.y * right.x,
-    };
-}
-
 function normalizeVector(
     value: { x: number; y: number; z: number },
     fallback: { x: number; y: number; z: number },
@@ -1004,11 +725,6 @@ function normalizeVector(
     const norm = Math.hypot(value.x, value.y, value.z);
     if (norm > 0.0001) return { x: value.x / norm, y: value.y / norm, z: value.z / norm };
     return fallback;
-}
-
-function stringMetadata(node: GalaxyNode, key: string): string {
-    const value = node.entity.metadata?.[key];
-    return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
 function normalizedDirection(node: GalaxyNode): { x: number; y: number; z: number } {

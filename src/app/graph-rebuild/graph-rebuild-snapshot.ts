@@ -320,7 +320,7 @@ export interface GraphRebuildEmbeddingModelAdapter {
 
 export interface GraphRebuildProjectionRef {
     targetId: string;
-    manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'hyperbolic';
+    manifold: 'hybrid' | 'hopf' | 'lorentz' | 'product' | 'siegel' | 'hyperbolic';
     projectionId: string;
 }
 

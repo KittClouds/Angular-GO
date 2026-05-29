@@ -28,12 +28,14 @@ const INITIAL_MANIFOLD_STATUSES: PhoenixMachineManifoldStatusMap = {
     hopf: 'idle',
     lorentz: 'idle',
     product: 'idle',
+    siegel: 'idle',
 };
 const INITIAL_MANIFOLD_LOAD_IDS: Record<AtlasManifoldMode, number> = {
     hybrid: 0,
     hopf: 0,
     lorentz: 0,
     product: 0,
+    siegel: 0,
 };
 
 export interface PhoenixMachineSemanticDocument {

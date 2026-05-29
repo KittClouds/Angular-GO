@@ -352,7 +352,7 @@ describe('embedding atlas projection', () => {
             }),
         });
         expect(kai.metadata?.lorentz).toMatchObject({
-            level: 2,
+            level: 3,
             primaryTreeKind: 'identity',
             regionRole: 'core',
             dominantLane: 'entity',
@@ -366,8 +366,9 @@ describe('embedding atlas projection', () => {
     it('maps graph-rebuild signal lanes into hierarchy cap shells', () => {
         const targets = [
             { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Red Mesa', text: 'chapter text', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionTier: 0 },
-            { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'sharp chunk', evidenceIds: [], lane: 'document_spine', structuralRole: 'spine', admissionTier: 0 },
-            { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'mentions:4 evidence_context:Kai', evidenceIds: ['a1', 'a2'], lane: 'entity_anchor', structuralRole: 'child', admissionTier: 1 },
+            { id: 'embed:structure-root:note-1:document-structure', kind: 'structureRoot', sourceId: 'note-1:document-structure', noteId: 'note-1', label: 'Document structure', text: 'structure_root:document-structure', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionTier: 0, parentIds: ['embed:note:note-1'] },
+            { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'sharp chunk', evidenceIds: [], lane: 'chunk_spine', structuralRole: 'spine', admissionTier: 0, parentIds: ['embed:structure-root:note-1:document-structure'] },
+            { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'mentions:4 evidence_context:Kai', evidenceIds: ['a1', 'a2'], lane: 'entity_anchor', structuralRole: 'child', admissionTier: 1, parentIds: ['embed:chunk:chunk-1', 'embed:structure-root:note-1:identity'] },
             { id: 'embed:anchor:a1', kind: 'anchor', sourceId: 'a1', noteId: 'note-1', chunkId: 'chunk-1', entityId: 'kai', label: 'Kai', text: 'source:dynamic evidence_context:Kai', evidenceIds: ['a1'], lane: 'anchor_evidence', structuralRole: 'evidence', admissionTier: 3 },
         ] as const;
         const posts = targets.map((target, index) => overloadedHopfPost(target.id, 'embed:note:note-1', index / targets.length, target.kind));
@@ -432,12 +433,68 @@ describe('embedding atlas projection', () => {
 
         const byId = new Map(atlas.nodes.map((node) => [node.id, node.metadata?.lorentz as Record<string, unknown>]));
         expect(byId.get('embed:note:note-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
-        expect(byId.get('embed:chunk:chunk-1')).toMatchObject({ capId: 'document:note-1', signalLane: 'document_spine' });
+        expect(byId.get('embed:structure-root:note-1:document-structure')).toMatchObject({
+            capId: 'document:note-1',
+            signalLane: 'document_spine',
+            parentNodeId: 'embed:note:note-1',
+        });
+        expect(byId.get('embed:chunk:chunk-1')).toMatchObject({
+            capId: 'document:note-1',
+            signalLane: 'chunk_spine',
+            parentNodeId: 'embed:structure-root:note-1:document-structure',
+        });
         expect(byId.get('embed:entity:kai')).toMatchObject({ capId: 'document:note-1', signalLane: 'entity_anchor' });
         expect(byId.get('embed:anchor:a1')).toMatchObject({ capId: 'document:note-1', signalLane: 'anchor_evidence' });
         expect(Number(byId.get('embed:note:note-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:chunk:chunk-1')?.['shellRadius']));
+        expect(Number(byId.get('embed:structure-root:note-1:document-structure')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:chunk:chunk-1')?.['shellRadius']));
         expect(Number(byId.get('embed:chunk:chunk-1')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:entity:kai')?.['shellRadius']));
         expect(Number(byId.get('embed:entity:kai')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:anchor:a1')?.['shellRadius']));
+    });
+
+    it('carries graph-rebuild targets into Siegel-Finsler metadata', () => {
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-siegel',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', label: 'Red Mesa', text: 'chapter text', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionStatus: 'admitted' },
+                { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', label: 'Chunk 1', text: 'sharp chunk', evidenceIds: [], lane: 'chunk_spine', structuralRole: 'spine', admissionStatus: 'admitted', parentIds: ['embed:note:note-1'] },
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'mentions:3 evidence_context:Kai', evidenceIds: ['a1'], lane: 'entity_anchor', structuralRole: 'child', admissionStatus: 'admitted', parentIds: ['embed:chunk:chunk-1'] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+        }, 'siegel');
+
+        const kai = atlas.nodes.find((node) => node.id === 'embed:entity:kai')!;
+        expect(atlas.manifold).toMatchObject({
+            mode: 'siegel',
+            geometryVersion: 'graph_rebuild_siegel_finsler_v1',
+        });
+        expect(atlas.sourceLabel).toContain('siegel-finsler');
+        expect(kai.metadata?.siegel).toMatchObject({
+            lane: 'entity',
+            depth: 3,
+            parentIds: ['embed:chunk:chunk-1'],
+            directed: true,
+        });
+        expect(kai.metadata?.siegel?.['matrixCells']).toHaveLength(6);
+        expect(atlas.edges.map((edge) => edge.type)).toContain('target-parent');
     });
 
     it('uses postprocess clusters as Hopf bases instead of making every target its own anchor', () => {

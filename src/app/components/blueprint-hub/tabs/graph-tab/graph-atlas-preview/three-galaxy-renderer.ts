@@ -40,6 +40,10 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private readonly dragHit = new THREE.Vector3();
     private readonly dragOffset = new THREE.Vector3();
     private readonly dragTarget = new THREE.Vector3();
+    private readonly zoomPlane = new THREE.Plane();
+    private readonly zoomBefore = new THREE.Vector3();
+    private readonly zoomAfter = new THREE.Vector3();
+    private readonly zoomNormal = new THREE.Vector3();
     private readonly pickVector = new THREE.Vector3();
     private readonly cameraTarget = new THREE.Vector3();
     private readonly perspective = new THREE.PerspectiveCamera(48, 1, 0.01, 100);
@@ -169,7 +173,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             return;
         }
         this.yaw += deltaX * 0.006;
-        this.pitch = THREE.MathUtils.clamp(this.pitch + deltaY * 0.004, -0.95, 0.95);
+        this.pitch = THREE.MathUtils.clamp(this.pitch + deltaY * 0.004, -1.35, 1.35);
         this.updateCamera();
     }
 
@@ -184,6 +188,25 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         const nextDistance = THREE.MathUtils.clamp(this.distance * Math.exp(delta * 0.0012), 2.2, 22);
         if (nextDistance === this.distance) return;
         this.distance = nextDistance;
+        this.updateCamera();
+    }
+
+    zoomAt(delta: number, pointer: GraphRendererPointer): void {
+        const nextDistance = THREE.MathUtils.clamp(this.distance * Math.exp(delta * 0.0012), 2.2, 22);
+        if (nextDistance === this.distance) return;
+        const hasAnchor = this.pointerToCameraTargetPlane(pointer, this.zoomBefore);
+        this.distance = nextDistance;
+        if (!hasAnchor) {
+            this.updateCamera();
+            return;
+        }
+        this.updateCamera(false);
+        if (this.pointerToCameraTargetPlane(pointer, this.zoomAfter)) {
+            this.zoomBefore.sub(this.zoomAfter);
+            this.panX += this.zoomBefore.x;
+            this.panY += this.zoomBefore.y;
+            this.panZ += this.zoomBefore.z;
+        }
         this.updateCamera();
     }
 
@@ -502,7 +525,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         }
     }
 
-    private updateCamera(): void {
+    private updateCamera(render = true): void {
         const target = this.cameraTarget.set(this.panX, this.panY, this.panZ);
         if (this.mode === '3d') {
             const x = target.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
@@ -517,7 +540,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             this.ortho.zoom = THREE.MathUtils.clamp(8 / this.distance, 0.45, 3.5);
             this.ortho.updateProjectionMatrix();
         }
-        this.render();
+        if (render) this.render();
     }
 
     private camera(): THREE.Camera {
@@ -541,6 +564,15 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         this.pointer.y = -(pointer.y / Math.max(1, pointer.height)) * 2 + 1;
         this.raycaster.setFromCamera(this.pointer, this.camera());
         return Boolean(this.raycaster.ray.intersectPlane(this.dragPlane, out));
+    }
+
+    private pointerToCameraTargetPlane(pointer: GraphRendererPointer, out: THREE.Vector3): boolean {
+        this.pointer.x = (pointer.x / Math.max(1, pointer.width)) * 2 - 1;
+        this.pointer.y = -(pointer.y / Math.max(1, pointer.height)) * 2 + 1;
+        this.camera().getWorldDirection(this.zoomNormal).normalize();
+        this.zoomPlane.setFromNormalAndCoplanarPoint(this.zoomNormal, this.cameraTarget.set(this.panX, this.panY, this.panZ));
+        this.raycaster.setFromCamera(this.pointer, this.camera());
+        return Boolean(this.raycaster.ray.intersectPlane(this.zoomPlane, out));
     }
 
     private colorPart(data: GalaxySceneV2, index: number, channel: number): number {
@@ -859,6 +891,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         if (scene.layoutMode === 'hybridSpace') return this.buildHybridGuides();
         if (scene.layoutMode === 'hopfProjection') return this.buildHopfGuides(scene);
         if (scene.layoutMode === 'lorentzTree') return this.buildLorentzGuides(scene);
+        if (scene.layoutMode === 'siegelFinsler') return this.buildLorentzGuides(scene);
         if (scene.layoutMode === 'productManifold') return this.buildProductGuides(scene);
         if (scene.layoutMode !== 'multiGalaxy' || scene.groups.length < 2) return null;
         const group = new THREE.Group();
@@ -1757,7 +1790,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             this.shells.scale.set(scale, scale, this.mode === '2d' ? 0.08 : scale);
             return;
         }
-        if (data.layoutMode === 'hybridSpace' || data.layoutMode === 'hopfProjection' || data.layoutMode === 'lorentzTree') {
+        if (data.layoutMode === 'hybridSpace' || data.layoutMode === 'hopfProjection' || data.layoutMode === 'lorentzTree' || data.layoutMode === 'siegelFinsler') {
             this.shells.scale.set(1, 1, this.mode === '2d' ? 0.08 : 1);
             return;
         }

@@ -3,6 +3,7 @@ import {
     HYBRID_MANIFOLD_CAPABILITIES,
     LORENTZ_MANIFOLD_CAPABILITIES,
     PRODUCT_MANIFOLD_CAPABILITIES,
+    SIEGEL_FINSLER_CAPABILITIES,
     type AtlasManifoldMode,
     type ManifoldCapabilities,
 } from '../../../../../services/manifold-atlas.types';
@@ -197,6 +198,11 @@ function buildTargetHierarchyContext(snapshot: GraphRebuildSnapshot): Map<string
     const contexts = new Map<string, TargetHierarchyContext>();
     for (const noteId of snapshot.noteIds || []) {
         contexts.set(`embed:note:${noteId}`, { noteId });
+        contexts.set(`embed:structure-root:${noteId}:document-structure`, { noteId });
+        contexts.set(`embed:structure-root:${noteId}:identity`, { noteId });
+        contexts.set(`embed:structure-root:${noteId}:temporal`, { noteId });
+        contexts.set(`embed:structure-root:${noteId}:causal`, { noteId });
+        contexts.set(`embed:structure-root:${noteId}:evidence`, { noteId });
     }
     for (const chunk of snapshot.chunks || []) {
         contexts.set(`embed:chunk:${chunk.id}`, { noteId: chunk.noteId, chunkId: chunk.id });
@@ -279,6 +285,7 @@ function targetNode(
                 dominantLane: post.productLaneFeatures.dominantLane,
                 lanes: post.productLaneFeatures,
             } : undefined,
+            siegel: manifold === 'siegel' ? graphRebuildSiegelMetadata(target, post, hierarchyContext) : undefined,
             lorentz: post ? productLorentzMetadata(target, point, post, hierarchyContext) : undefined,
             hopf: post ? graphRebuildHopfMetadata(target, post, manifold, hopfBase) : undefined,
             graphKind: targetRenderKind(target),
@@ -300,6 +307,27 @@ function targetConfidence(target: GraphRebuildEmbeddingTarget): number {
     if (target.kind === 'anchor') return 0.86;
     if (target.kind === 'chunk') return 0.78;
     return 0.62;
+}
+
+function graphRebuildSiegelMetadata(
+    target: GraphRebuildEmbeddingTarget,
+    post?: GraphRebuildEmbeddingTargetPostProcess,
+    hierarchyContext?: TargetHierarchyContext,
+): Record<string, unknown> {
+    const lane = normalizeSiegelLane(target.lane, target.kind);
+    const confidence = targetConfidence(target);
+    const depth = siegelDepth(target, hierarchyContext);
+    return {
+        role: target.structuralRole || target.admissionStatus || 'signal',
+        lane,
+        depth,
+        confidence,
+        ambiguity: post?.outlierScore ?? (target.admissionStatus === 'deferred' ? 0.72 : 0),
+        phase: unitHash(`${target.id}:siegel-phase`),
+        matrixCells: siegelMatrixCells(target, lane, depth),
+        parentIds: target.parentIds || [],
+        directed: true,
+    };
 }
 
 function graphRebuildHopfMetadata(
@@ -332,6 +360,34 @@ function graphRebuildHopfMetadata(
         rootBaseId: assignment?.rootBaseId,
         splitKey: assignment?.splitKey,
     };
+}
+
+function normalizeSiegelLane(lane: string | undefined, kind: string): string {
+    const raw = String(lane || kind || '').toLowerCase();
+    if (/document|chunk|spine|structure/.test(raw)) return 'document';
+    if (/entity|anchor/.test(raw)) return 'entity';
+    if (/relationship|cooccurrence/.test(raw)) return 'relationship';
+    if (/temporal/.test(raw)) return 'temporal';
+    if (/causal/.test(raw)) return 'causal';
+    if (/memory|evidence/.test(raw)) return 'evidence';
+    if (/event|story/.test(raw)) return 'event';
+    return 'semantic';
+}
+
+function siegelDepth(target: GraphRebuildEmbeddingTarget, hierarchyContext?: TargetHierarchyContext): number {
+    const kind = displayKind(target.kind);
+    if (kind === 'note') return 0;
+    if (kind === 'structure-root') return 1;
+    if (kind === 'chunk') return 2;
+    if (kind === 'entity') return 3;
+    if (kind === 'anchor') return 4;
+    if (hierarchyContext?.chunkId) return 4;
+    return target.structuralRole === 'root' ? 1 : target.structuralRole === 'spine' ? 2 : 4;
+}
+
+function siegelMatrixCells(target: GraphRebuildEmbeddingTarget, lane: string, depth: number): number[] {
+    const source = `${target.id}:${lane}:${depth}:${target.parentIds?.join('|') || ''}`;
+    return Array.from({ length: 6 }, (_, index) => unitHash(`${source}:${index}`));
 }
 
 function buildHopfBasePlan(
@@ -463,6 +519,7 @@ function productLorentzMetadata(
         capDirection: [point.x / radius, point.y / radius, point.z / radius],
         capPhase: lane.fiberPhase,
         shellRadius: productCapShellRadius(target, specificity, ambiguity),
+        parentNodeId: parentId,
         signalLane: target.lane,
         structuralRole: target.structuralRole,
         specificity,
@@ -503,9 +560,11 @@ function productCapParentId(
     const parents = target.parentIds || [];
     const noteId = target.noteId || hierarchyContext?.noteId;
     const chunkId = target.chunkId || hierarchyContext?.chunkId;
-    if (target.kind === 'chunk' && noteId) return `embed:note:${noteId}`;
+    const kind = displayKind(target.kind);
+    if (kind === 'structure-root' && noteId) return `embed:note:${noteId}`;
+    if (target.kind === 'chunk' && noteId) return firstParentWithPrefix(parents, `embed:structure-root:${noteId}:document-structure`) || `embed:note:${noteId}`;
     if (target.kind === 'entity' && chunkId) return `embed:chunk:${chunkId}`;
-    if (target.kind === 'entity' && noteId) return `embed:note:${noteId}`;
+    if (target.kind === 'entity' && noteId) return firstParentWithPrefix(parents, `embed:structure-root:${noteId}:identity`) || `embed:note:${noteId}`;
     if (target.kind === 'anchor' && target.entityId) return `embed:entity:${target.entityId}`;
     if (target.kind === 'anchor' && chunkId) return `embed:chunk:${chunkId}`;
     if (parents.length) return parents[0];
@@ -518,9 +577,10 @@ function productCapShellRadius(
     ambiguity: number,
 ): number {
     const lane = target.lane || 'unknown';
+    const kind = displayKind(target.kind);
     let radius = 1.28;
-    if (lane === 'document_spine') radius = target.kind === 'note' ? 2.08 : 1.76;
-    else if (lane === 'chunk_spine') radius = 1.76;
+    if (lane === 'document_spine') radius = kind === 'note' ? 2.08 : kind === 'structure-root' ? 1.92 : 1.72;
+    else if (lane === 'chunk_spine') radius = 1.66;
     else if (lane === 'entity_anchor') radius = 1.42;
     else if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') radius = 1.34;
     else if (lane === 'relationship_fact') radius = 1.3;
@@ -538,8 +598,10 @@ function productCapShellRadius(
 
 function productCapShellBand(target: GraphRebuildEmbeddingTarget): [number, number] {
     const lane = target.lane || 'unknown';
-    if (lane === 'document_spine' && target.kind === 'note') return [2.02, 2.12];
-    if (lane === 'document_spine' || lane === 'chunk_spine') return [1.66, 1.84];
+    const kind = displayKind(target.kind);
+    if (lane === 'document_spine' && kind === 'note') return [2.02, 2.12];
+    if (lane === 'document_spine' && kind === 'structure-root') return [1.86, 1.98];
+    if (lane === 'document_spine' || lane === 'chunk_spine') return [1.56, 1.74];
     if (lane === 'entity_anchor') return [1.34, 1.52];
     if (lane === 'event_identity' || lane === 'temporal_fact' || lane === 'causal_fact') return [1.22, 1.48];
     if (lane === 'relationship_fact') return [1.18, 1.42];
@@ -556,6 +618,7 @@ function productHierarchySpecificity(
     const kind = displayKind(target.kind);
     let base = 0.58;
     if (kind === 'note') base = 0.22;
+    else if (kind === 'structure-root') base = 0.42;
     else if (kind === 'chunk' || kind === 'anchor') base = 0.9;
     else if (kind === 'entity') base = 0.82;
     else if (kind === 'event' || kind === 'temporal-fact' || kind === 'causal-fact') base = 0.74;
@@ -574,11 +637,12 @@ function productHierarchyAmbiguity(post: GraphRebuildEmbeddingTargetPostProcess)
 function productRegionLevel(target: GraphRebuildEmbeddingTarget, post: GraphRebuildEmbeddingTargetPostProcess): number {
     const kind = displayKind(target.kind);
     if (target.lane === 'document_spine' && kind === 'note') return 0;
-    if (target.lane === 'document_spine' || target.lane === 'chunk_spine' || kind === 'chunk') return 1;
-    if (target.lane === 'entity_anchor' || kind === 'entity') return 2;
-    if (target.lane === 'anchor_evidence' || kind === 'anchor') return 3;
-    if (target.lane === 'relationship_fact' || target.lane === 'event_identity' || target.lane === 'temporal_fact' || target.lane === 'causal_fact') return 2;
-    if (target.lane === 'memory_state' || target.lane === 'cooccurrence_weak') return 3;
+    if (kind === 'structure-root') return 1;
+    if (target.lane === 'document_spine' || target.lane === 'chunk_spine' || kind === 'chunk') return 2;
+    if (target.lane === 'entity_anchor' || kind === 'entity') return 3;
+    if (target.lane === 'anchor_evidence' || kind === 'anchor') return 4;
+    if (target.lane === 'relationship_fact' || target.lane === 'event_identity' || target.lane === 'temporal_fact' || target.lane === 'causal_fact') return 3;
+    if (target.lane === 'memory_state' || target.lane === 'cooccurrence_weak') return 4;
     const role = post.productTopologyRegion.role;
     if (post.medoidTargetId === post.targetId && role === 'core') return 0;
     if (role === 'core') return 1;
@@ -612,6 +676,12 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
 
     for (const chunk of snapshot.chunks) {
         add(`embed:note-chunk:${chunk.id}`, `embed:note:${chunk.noteId}`, `embed:chunk:${chunk.id}`, 'note-chunk', 0.9);
+    }
+    const targetIds = new Set(snapshot.embeddingTargets.map((target) => target.id));
+    for (const target of snapshot.embeddingTargets) {
+        for (const parentId of target.parentIds || []) {
+            if (targetIds.has(parentId)) add(`embed:target-parent:${parentId}:${target.id}`, parentId, target.id, 'target-parent', 0.88);
+        }
     }
     for (const anchor of snapshot.entityAnchors) {
         if (anchor.chunkId) {
@@ -675,7 +745,7 @@ function projectVector(
     const spiral = index * 2.399963229728653 + unitHash(id);
     const y = total > 1 ? 1 - (index / (total - 1)) * 2 : 0;
     const radial = Math.sqrt(Math.max(0, 1 - y * y));
-    const scale = manifold === 'hopf' ? 0.86 : manifold === 'lorentz' ? 1.22 : manifold === 'product' ? 1.08 : 1.48;
+    const scale = manifold === 'hopf' ? 0.86 : manifold === 'lorentz' ? 1.22 : manifold === 'product' ? 1.08 : manifold === 'siegel' ? 1.12 : 1.48;
     return {
         x: (vector[0] * 0.9 + Math.cos(spiral) * radial) * scale,
         y: (vector[1] * 0.7 + y * 0.64) * scale,
@@ -712,6 +782,7 @@ function targetColorHsl(target: GraphRebuildEmbeddingTarget): string {
 function kindHsl(kind: string): string {
     switch (displayKind(kind)) {
         case 'note': return entityColorStore.getRawGraphNodeHsl('document');
+        case 'structure-root': return entityColorStore.getRawGraphNodeHsl('document');
         case 'chunk': return entityColorStore.getRawGraphNodeHsl('chunk');
         case 'entity': return '282 70% 62%';
         case 'anchor': return entityColorStore.getRawGraphNodeHsl('anchor');
@@ -728,11 +799,13 @@ function graphRebuildGeometryVersion(manifold: AtlasManifoldMode): string {
     if (manifold === 'hopf') return 'graph_rebuild_hopf_v1';
     if (manifold === 'lorentz') return 'graph_rebuild_hierarchy_caps_v1';
     if (manifold === 'product') return 'graph_rebuild_product_lorentz_hopf_v1';
+    if (manifold === 'siegel') return 'graph_rebuild_siegel_finsler_v1';
     return 'graph_rebuild_hybrid_v1';
 }
 
 function graphRebuildProjectionLabel(manifold: AtlasManifoldMode): string {
     if (manifold === 'lorentz') return 'hierarchy caps';
+    if (manifold === 'siegel') return 'siegel-finsler';
     return manifold;
 }
 
@@ -740,7 +813,12 @@ function graphRebuildCapabilities(manifold: AtlasManifoldMode): ManifoldCapabili
     if (manifold === 'hopf') return HOPF_MANIFOLD_CAPABILITIES;
     if (manifold === 'lorentz') return LORENTZ_MANIFOLD_CAPABILITIES;
     if (manifold === 'product') return PRODUCT_MANIFOLD_CAPABILITIES;
+    if (manifold === 'siegel') return SIEGEL_FINSLER_CAPABILITIES;
     return HYBRID_MANIFOLD_CAPABILITIES;
+}
+
+function firstParentWithPrefix(parentIds: string[], prefix: string): string | null {
+    return parentIds.find((parentId) => parentId.startsWith(prefix)) || null;
 }
 
 function unitHash(value: string): number {

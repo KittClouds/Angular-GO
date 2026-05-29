@@ -20,6 +20,7 @@ export interface GraphRendererPort {
     rotate(deltaX: number, deltaY: number): void;
     pan(deltaX: number, deltaY: number): void;
     zoom(delta: number): void;
+    zoomAt(delta: number, pointer: GraphRendererPointer): void;
     resetCamera(): void;
     fitToGraph(): void;
     focusNode(id: string): void;

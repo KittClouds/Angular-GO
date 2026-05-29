@@ -100,7 +100,7 @@ function selectEmbeddingTargets(
         for (const target of values.slice(0, budget)) addGroup([target]);
     };
 
-    addMany(ranked(byKind.get('note') || []), NOTE_TARGET_BUDGET);
+    addMany(ranked(byLane.get('document_spine') || []), NOTE_TARGET_BUDGET * 6);
     addMany(spreadSample(documentOrdered(byKind.get('chunk') || []), CHUNK_TARGET_BUDGET), CHUNK_TARGET_BUDGET);
     for (const target of ranked([...(byLane.get('temporal_fact') || []), ...(byLane.get('causal_fact') || [])]).slice(0, STORY_EDGE_TARGET_BUDGET)) {
         const edge = storyEdgeById.get(target.sourceId);
@@ -152,6 +152,7 @@ function annotateTarget(target: GraphRebuildEmbeddingTarget): GraphRebuildEmbedd
 function targetLane(target: GraphRebuildEmbeddingTarget): GraphRebuildSignalTargetLane {
     const kind = normalizeKind(target.kind);
     if (kind === 'note') return 'document_spine';
+    if (kind === 'structureroot') return 'document_spine';
     if (kind === 'chunk') return 'chunk_spine';
     if (kind === 'entity') return 'entity_anchor';
     if (kind === 'anchor') return 'anchor_evidence';
@@ -300,6 +301,7 @@ function coverageFillOrder(targets: GraphRebuildEmbeddingTarget[]): GraphRebuild
 function coverageWeight(target: GraphRebuildEmbeddingTarget): number {
     const kind = normalizeKind(target.kind);
     if (kind === 'note') return 980;
+    if (kind === 'structureroot') return 970;
     if (kind === 'chunk') return 960;
     if (kind === 'causalfact') return 940;
     if (kind === 'temporalfact') return 930;
@@ -322,6 +324,7 @@ function targetOrder(left: GraphRebuildEmbeddingTarget, right: GraphRebuildEmbed
 function targetScore(target: GraphRebuildEmbeddingTarget): number {
     const kind = normalizeKind(target.kind);
     let score =
+        kind === 'structureroot' ? 980 :
         kind === 'entity' ? 900 :
         kind === 'graphfact' ? 840 :
         kind === 'causalfact' ? 830 :
@@ -349,9 +352,11 @@ function targetScore(target: GraphRebuildEmbeddingTarget): number {
 
 function targetParentIds(target: GraphRebuildEmbeddingTarget): string[] {
     const parents: string[] = [...(target.parentIds || [])];
-    if (target.noteId && target.kind !== 'note') parents.push(`embed:note:${target.noteId}`);
-    if (target.chunkId && target.kind !== 'chunk') parents.push(`embed:chunk:${target.chunkId}`);
-    if (target.entityId && target.kind !== 'entity') parents.push(`embed:entity:${target.entityId}`);
+    const kind = normalizeKind(target.kind);
+    const rooted = Boolean(target.noteId && parents.some((parentId) => parentId.startsWith(`embed:structure-root:${target.noteId}:`)));
+    if (target.noteId && kind !== 'note' && (kind === 'structureroot' || !rooted)) parents.push(`embed:note:${target.noteId}`);
+    if (target.chunkId && kind !== 'chunk') parents.push(`embed:chunk:${target.chunkId}`);
+    if (target.entityId && kind !== 'entity') parents.push(`embed:entity:${target.entityId}`);
     return [...new Set(parents)];
 }
 

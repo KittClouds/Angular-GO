@@ -77,7 +77,8 @@ describe('GraphRebuildService persistence helpers', () => {
             'entity-red-mesa',
         ]);
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'entity')).toHaveLength(3);
-        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').length).toBeGreaterThan(3);
+        expect(snapshot.embeddingTargetPlan?.lanes.find((lane) => lane.lane === 'anchor_evidence')?.candidates).toBeGreaterThan(3);
+        expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').length).toBeGreaterThan(0);
     });
 
     it('roundtrips explicit graph snapshots through Overgraph scoped documents', () => {

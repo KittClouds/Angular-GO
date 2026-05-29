@@ -52,6 +52,18 @@ describe('GraphGalaxyParticles', () => {
         particles.dispose();
     });
 
+    it('focuses Caps selection through structural ancestors instead of semantic hubs', () => {
+        const scene = structuralCapsScene();
+        const focus = buildGalaxyFocusMask(scene, 'kai', null);
+
+        expect([...focus.edgeLevels]).toEqual([2, 2, 2, 0]);
+        expect(focus.nodeLevels[0]).toBeGreaterThan(0);
+        expect(focus.nodeLevels[1]).toBeGreaterThan(0);
+        expect(focus.nodeLevels[2]).toBeGreaterThan(0);
+        expect(focus.nodeLevels[3]).toBe(3);
+        expect(focus.nodeLevels[4]).toBe(0);
+    });
+
     it('keeps Caps particles on spherical shell edges without affecting map paths', () => {
         const scene = capsParticleScene();
         const particles = new GraphGalaxyParticles();
@@ -150,5 +162,42 @@ function capsParticleScene(radius = 2.08): GalaxySceneV2 {
         edgeColors: new Float32Array([1, 0, 0, 0.1, 0.8, 1]),
         edgeAlpha: new Float32Array([1]),
         edgeKinds: new Uint8Array([0]),
+    };
+}
+
+function structuralCapsScene(): GalaxySceneV2 {
+    return {
+        ...particleScene(),
+        layoutMode: 'lorentzTree',
+        ids: ['doc', 'root', 'chunk', 'kai', 'rowan'],
+        labels: ['Document', 'Identity root', 'Chunk 1', 'Kai', 'Rowan'],
+        kinds: ['note', 'structureRoot', 'chunk', 'character', 'character'],
+        groupIds: ['', '', '', '', ''],
+        positions3d: new Float32Array([
+            0, 0, 2.08,
+            0, 0, 1.92,
+            0, 0, 1.72,
+            0, 0, 1.42,
+            1.42, 0, 0,
+        ]),
+        positions2d: new Float32Array([
+            0, 0, 2.08,
+            0, 0, 1.92,
+            0, 0, 1.72,
+            0, 0, 1.42,
+            1.42, 0, 0,
+        ]),
+        radii: new Float32Array([0.08, 0.08, 0.08, 0.08, 0.08]),
+        colors: new Float32Array([
+            0.1, 0.8, 1,
+            0.1, 0.8, 1,
+            0.1, 0.8, 1,
+            0.9, 0.2, 0.7,
+            0.9, 0.2, 0.7,
+        ]),
+        edgePairs: new Uint32Array([0, 1, 1, 2, 2, 3, 3, 4]),
+        edgeColors: new Float32Array(4 * 6),
+        edgeAlpha: new Float32Array([1, 1, 1, 1]),
+        edgeKinds: new Uint8Array([2, 2, 2, 0]),
     };
 }

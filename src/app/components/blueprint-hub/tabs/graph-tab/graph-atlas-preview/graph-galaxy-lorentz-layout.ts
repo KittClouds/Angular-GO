@@ -203,14 +203,53 @@ function relaxCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: Hierarch
             const sourceInfo = infos[link.source];
             const targetInfo = infos[link.target];
             const sameCap = sourceInfo.capId === targetInfo.capId;
+            const structural = isStructuralHierarchyLink(link);
             const bridge = isBridgeLink(link, sourceInfo, targetInfo);
-            const ideal = sameCap ? 0.26 : bridge ? 0.74 : 0.52;
-            const strength = sameCap ? 0.018 : bridge ? 0.01 : 0.012;
+            if (structural) {
+                pullStructuralChild(source, target, link, sourceInfo, targetInfo);
+                continue;
+            }
+            const levelDelta = Math.abs(sourceInfo.level - targetInfo.level);
+            const ideal = sameCap ? 0.28 : bridge ? 0.78 : 0.56 + levelDelta * 0.02;
+            const strength = sameCap ? 0.01 : bridge ? 0.004 : 0.006;
             pullPair(source, target, ideal, strength);
             projectNodeToRadius(source, sourceInfo.targetRadius);
             projectNodeToRadius(target, targetInfo.targetRadius);
         }
     }
+}
+
+function pullStructuralChild(
+    source: GalaxyNode,
+    target: GalaxyNode,
+    link: GalaxyEdge,
+    sourceInfo: HierarchyInfo,
+    targetInfo: HierarchyInfo,
+): void {
+    const sourceIsParent = sourceInfo.targetRadius >= targetInfo.targetRadius;
+    const parent = sourceIsParent ? source : target;
+    const child = sourceIsParent ? target : source;
+    const parentInfo = sourceIsParent ? sourceInfo : targetInfo;
+    const childInfo = sourceIsParent ? targetInfo : sourceInfo;
+    const parentDirection = normalize(vectorOf(parent), parentInfo.direction);
+    const childDirection = normalize(vectorOf(child), childInfo.direction);
+    const frame = tangentFrame(parentDirection);
+    const phase = stableUnit(`${link.id}:caps-child`);
+    const spread = clamp(0.1 + Math.abs(parentInfo.level - childInfo.level) * 0.04 + childInfo.ambiguity * 0.16, 0.1, 0.34);
+    const orbit = add(
+        scale(frame.a, Math.cos(phase * TAU) * spread),
+        scale(frame.b, Math.sin(phase * TAU) * spread),
+    );
+    const desired = normalize(add(
+        add(scale(parentDirection, 0.76), scale(childInfo.direction, 0.14)),
+        add(scale(laneDirection(childInfo.lane), 0.08), orbit),
+    ), parentDirection);
+    const blend = clamp(0.18 + link.confidence * 0.1, 0.18, 0.3);
+    const next = normalize(add(scale(childDirection, 1 - blend), scale(desired, blend)), desired);
+    child.x = next.x * childInfo.targetRadius;
+    child.y = next.y * childInfo.targetRadius;
+    child.z = next.z * childInfo.targetRadius;
+    projectNodeToRadius(parent, parentInfo.targetRadius);
 }
 
 function tuneCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: HierarchyInfo[]): void {
@@ -219,7 +258,10 @@ function tuneCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: Hierarchy
         const targetInfo = infos[link.target];
         const sameCap = sourceInfo?.capId === targetInfo?.capId;
         const bridge = sourceInfo && targetInfo && isBridgeLink(link, sourceInfo, targetInfo);
-        if (sameCap) {
+        if (isStructuralHierarchyLink(link)) {
+            link.alpha = Math.min(0.56, link.alpha * 1.56 + 0.06);
+            link.curve *= 0.42;
+        } else if (sameCap) {
             link.alpha = Math.min(0.52, link.alpha * 1.22 + 0.035);
             link.curve *= 0.62;
         } else if (bridge) {
@@ -268,16 +310,17 @@ function buildMembershipGuides(nodes: GalaxyNode[], links: GalaxyEdge[], infos: 
         const targetInfo = infos[link.target];
         const treeKind = guideKindForLink(link, source, target, sourceInfo, targetInfo);
         const confidence = clamp(link.confidence, 0.12, 1);
+        const structural = isStructuralHierarchyLink(link);
         guides.push({
             id: `caps:bridge:${link.id}`,
             nodeIds: [source.entity.id, target.entity.id],
             positions3d: capBridgeSegments(source, target, treeKind, sourceInfo, targetInfo),
-            importance: Math.max(source.radius, target.radius) * 0.48 + confidence,
+            importance: Math.max(source.radius, target.radius) * 0.48 + confidence + (structural ? 2 : 0),
             treeId: sourceInfo.capId === targetInfo.capId ? sourceInfo.capId : 'caps:overlap',
             treeKind,
             level: Math.max(sourceInfo.level, targetInfo.level),
             guideKind: 'membership',
-            guideWeight: 0.42 + Math.min(0.36, confidence * 0.24),
+            guideWeight: structural ? 0.72 : 0.42 + Math.min(0.36, confidence * 0.24),
             ...rgbForKind(treeKind),
         });
     }
@@ -453,6 +496,7 @@ function structuralCapIdFor(node: GalaxyNode, lane: string): string {
 }
 
 function guideKindForLink(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNode, sourceInfo: HierarchyInfo, targetInfo: HierarchyInfo): string {
+    if (isStructuralHierarchyLink(link)) return targetInfo.level > sourceInfo.level ? targetInfo.treeKind : sourceInfo.treeKind;
     const relation = relationFamilyFromText(link.type, source.entity.label, source.entity.metadata?.['preview'], target.entity.label, target.entity.metadata?.['preview']);
     if (relation) return relation;
     if (sourceInfo.lane === targetInfo.lane) return sourceInfo.treeKind;
@@ -460,6 +504,10 @@ function guideKindForLink(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNo
     if (sourceInfo.lane === 'temporal' || targetInfo.lane === 'temporal') return 'temporal';
     if (/bridge|co.?occur|relationship|relation|fact/.test(String(link.type || '').toLowerCase())) return 'relationship';
     return 'bridge';
+}
+
+function isStructuralHierarchyLink(link: GalaxyEdge): boolean {
+    return /target-parent|note-chunk|chunk-anchor|chunk-entity|anchor-entity|event-chunk|event-entity|memory-entity/i.test(String(link.type || ''));
 }
 
 function isBridgeLink(link: GalaxyEdge, source: HierarchyInfo, target: HierarchyInfo): boolean {

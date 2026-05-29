@@ -14,6 +14,16 @@ import type {
 import { selectGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-target-policy';
 import { summarizeMeaningFrame } from './graph-rebuild-meaning-frames';
 
+type StructuralRootKey = 'document-structure' | 'identity' | 'temporal' | 'causal' | 'evidence';
+
+const STRUCTURAL_ROOTS: Array<{ key: StructuralRootKey; label: string; text: string }> = [
+    { key: 'document-structure', label: 'Document structure', text: 'document spine and chunk hierarchy root' },
+    { key: 'identity', label: 'Identity root', text: 'accepted entity and alias provenance root' },
+    { key: 'temporal', label: 'Temporal root', text: 'event order and before/after signal root' },
+    { key: 'causal', label: 'Causal root', text: 'cause, explanation, authority, and consequence signal root' },
+    { key: 'evidence', label: 'Evidence root', text: 'raw anchor evidence and supporting context root' },
+];
+
 export function buildGraphRebuildEmbeddingTargetPlan(
     input: BuildGraphRebuildSnapshotInput,
     chunks: GraphRebuildChunk[],
@@ -33,7 +43,31 @@ export function buildGraphRebuildEmbeddingTargetPlan(
     const eventById = new Map(events.map((event) => [event.id, event]));
     const noteIds = input.noteIds?.length ? input.noteIds : unique([...chunks.map((chunk) => chunk.noteId), ...anchors.map((anchor) => anchor.noteId)]);
     for (const noteId of noteIds) targets.push({ id: `embed:note:${noteId}`, kind: 'note', sourceId: noteId, noteId, label: `Note ${noteId}`, text: noteText(input, noteId), evidenceIds: [] });
-    for (const chunk of chunks) targets.push({ id: `embed:chunk:${chunk.id}`, kind: 'chunk', sourceId: chunk.id, noteId: chunk.noteId, chunkId: chunk.id, label: `Chunk ${chunk.ordinal + 1}`, text: chunkText(input, chunk, anchorsByChunkId.get(chunk.id) || [], nodeByEntityId), evidenceIds: [] });
+    for (const noteId of noteIds) {
+        for (const root of STRUCTURAL_ROOTS) {
+            targets.push({
+                id: structureRootId(noteId, root.key),
+                kind: 'structureRoot',
+                sourceId: `${noteId}:${root.key}`,
+                noteId,
+                label: root.label,
+                text: `structure_root:${root.key} note:${noteId} ${root.text}`,
+                evidenceIds: [],
+                parentIds: [`embed:note:${noteId}`],
+            });
+        }
+    }
+    for (const chunk of chunks) targets.push({
+        id: `embed:chunk:${chunk.id}`,
+        kind: 'chunk',
+        sourceId: chunk.id,
+        noteId: chunk.noteId,
+        chunkId: chunk.id,
+        label: `Chunk ${chunk.ordinal + 1}`,
+        text: chunkText(input, chunk, anchorsByChunkId.get(chunk.id) || [], nodeByEntityId),
+        evidenceIds: [],
+        parentIds: [structureRootId(chunk.noteId, 'document-structure')],
+    });
     for (const node of nodes) {
         const entityAnchors = anchorsByEntityId.get(node.entityId) || [];
         targets.push({
@@ -48,7 +82,19 @@ export function buildGraphRebuildEmbeddingTargetPlan(
             parentIds: entityParentIds(entityAnchors),
         });
     }
-    for (const anchor of anchors) targets.push({ id: `embed:anchor:${anchor.id}`, kind: 'anchor', sourceId: anchor.id, noteId: anchor.noteId, chunkId: anchor.chunkId, entityId: anchor.entityId, entityKind: nodeByEntityId.get(anchor.entityId)?.kind, label: anchor.surface, text: anchorText(input, anchor, nodeByEntityId.get(anchor.entityId)), evidenceIds: [anchor.id] });
+    for (const anchor of anchors) targets.push({
+        id: `embed:anchor:${anchor.id}`,
+        kind: 'anchor',
+        sourceId: anchor.id,
+        noteId: anchor.noteId,
+        chunkId: anchor.chunkId,
+        entityId: anchor.entityId,
+        entityKind: nodeByEntityId.get(anchor.entityId)?.kind,
+        label: anchor.surface,
+        text: anchorText(input, anchor, nodeByEntityId.get(anchor.entityId)),
+        evidenceIds: [anchor.id],
+        parentIds: [structureRootId(anchor.noteId, 'evidence')],
+    });
     for (const relationship of relationships) {
         if (relationship.status === 'rejected') continue;
         const sourceLabel = entityLabel(relationship.sourceEntityId, nodeByEntityId);
@@ -60,12 +106,34 @@ export function buildGraphRebuildEmbeddingTargetPlan(
             label: `${sourceLabel} ${relationship.relationType} ${targetLabel}`,
             text: relationshipText(input, relationship, nodeByEntityId, anchorById),
             evidenceIds: relationship.evidenceAnchorIds,
+            parentIds: relationshipParentIds(relationship, anchorById),
         });
     }
-    for (const event of events) targets.push({ id: `embed:event:${event.id}`, kind: 'event', sourceId: event.id, noteId: event.noteId, chunkId: event.chunkId, entityId: event.entityIds[0], label: event.label, text: eventText(input, event, nodeByEntityId, anchorById), evidenceIds: event.evidenceAnchorIds });
+    for (const event of events) targets.push({
+        id: `embed:event:${event.id}`,
+        kind: 'event',
+        sourceId: event.id,
+        noteId: event.noteId,
+        chunkId: event.chunkId,
+        entityId: event.entityIds[0],
+        label: event.label,
+        text: eventText(input, event, nodeByEntityId, anchorById),
+        evidenceIds: event.evidenceAnchorIds,
+        parentIds: eventParentIds(event),
+    });
     for (const edge of temporalEdges) targets.push(temporalTarget(input, edge, 'temporalFact', eventById, anchorById));
     for (const edge of causalEdges) targets.push(temporalTarget(input, edge, 'causalFact', eventById, anchorById));
-    for (const state of memoryState) targets.push({ id: `embed:memory:${state.id}`, kind: 'memoryState', sourceId: state.id, noteId: state.noteId, entityId: state.entityId, label: state.key, text: memoryText(input, state, nodeByEntityId, anchorById), evidenceIds: state.evidenceIds });
+    for (const state of memoryState) targets.push({
+        id: `embed:memory:${state.id}`,
+        kind: 'memoryState',
+        sourceId: state.id,
+        noteId: state.noteId,
+        entityId: state.entityId,
+        label: state.key,
+        text: memoryText(input, state, nodeByEntityId, anchorById),
+        evidenceIds: state.evidenceIds,
+        parentIds: state.noteId ? [structureRootId(state.noteId, 'identity')] : [],
+    });
     return selectGraphRebuildEmbeddingTargetPlan(targets, relationships, temporalEdges, causalEdges, input.embeddingStagePolicy);
 }
 
@@ -92,10 +160,12 @@ function temporalTarget(
 ): GraphRebuildEmbeddingTarget {
     const source = eventById.get(edge.sourceId);
     const target = eventById.get(edge.targetId);
+    const rootKey: StructuralRootKey = kind === 'causalFact' ? 'causal' : 'temporal';
     return {
         id: `embed:${kind}:${edge.id}`,
         kind,
         sourceId: edge.id,
+        noteId: source?.noteId || target?.noteId,
         label: edge.relationType,
         text: limitText([
             `${source?.label || edge.sourceId} ${edge.relationType} ${target?.label || edge.targetId}`,
@@ -103,6 +173,11 @@ function temporalTarget(
             ...evidenceContexts(input, edge.evidenceIds, anchorById, 4).map((context) => `evidence_context:${context}`),
         ].filter(Boolean).join('\n'), 1800),
         evidenceIds: edge.evidenceIds,
+        parentIds: unique([
+            ...noteIdsFromEventsAndEvidence(source, target, edge.evidenceIds, anchorById).map((noteId) => structureRootId(noteId, rootKey)),
+            `embed:event:${edge.sourceId}`,
+            `embed:event:${edge.targetId}`,
+        ]),
     };
 }
 
@@ -231,14 +306,59 @@ function groupAnchorsByChunk(anchors: GraphRebuildEntityAnchor[]): Map<string, G
     return groups;
 }
 
+function structureRootId(noteId: string, key: StructuralRootKey): string {
+    return `embed:structure-root:${noteId}:${key}`;
+}
+
 function entityParentIds(anchors: GraphRebuildEntityAnchor[]): string[] {
     const chunkParents = anchors
         .map((anchor) => anchor.chunkId ? `embed:chunk:${anchor.chunkId}` : '')
         .filter(Boolean);
-    const noteParents = anchors
-        .map((anchor) => anchor.noteId ? `embed:note:${anchor.noteId}` : '')
+    const identityParents = anchors
+        .map((anchor) => anchor.noteId ? structureRootId(anchor.noteId, 'identity') : '')
         .filter(Boolean);
-    return unique([...chunkParents, ...noteParents]);
+    return unique([...chunkParents, ...identityParents]);
+}
+
+function relationshipParentIds(
+    relationship: GraphRebuildRelationship,
+    anchorById: Map<string, GraphRebuildEntityAnchor>,
+): string[] {
+    return unique([
+        ...noteIdsFromEvidence(relationship.evidenceAnchorIds, anchorById).map((noteId) => structureRootId(noteId, 'identity')),
+        `embed:entity:${relationship.sourceEntityId}`,
+        `embed:entity:${relationship.targetEntityId}`,
+    ]);
+}
+
+function eventParentIds(event: GraphRebuildEvent): string[] {
+    return unique([
+        structureRootId(event.noteId, 'temporal'),
+        ...(event.chunkId ? [`embed:chunk:${event.chunkId}`] : []),
+        ...event.entityIds.map((entityId) => `embed:entity:${entityId}`),
+    ]);
+}
+
+function noteIdsFromEventsAndEvidence(
+    source: GraphRebuildEvent | undefined,
+    target: GraphRebuildEvent | undefined,
+    evidenceIds: string[],
+    anchorById: Map<string, GraphRebuildEntityAnchor>,
+): string[] {
+    return unique([
+        source?.noteId || '',
+        target?.noteId || '',
+        ...noteIdsFromEvidence(evidenceIds, anchorById),
+    ].filter(Boolean));
+}
+
+function noteIdsFromEvidence(
+    evidenceIds: string[],
+    anchorById: Map<string, GraphRebuildEntityAnchor>,
+): string[] {
+    return unique(evidenceIds
+        .map((evidenceId) => anchorById.get(evidenceId)?.noteId || '')
+        .filter(Boolean));
 }
 
 function representativeAnchorContexts(

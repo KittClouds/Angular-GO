@@ -58,7 +58,8 @@
       "event": 1,
       "graphFact": 1,
       "memoryState": 3,
-      "note": 1
+      "note": 1,
+      "structureRoot": 5
     }
   }
 }

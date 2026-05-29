@@ -66,7 +66,7 @@ interface PersistedAtlasViewState {
 const GRAPH_ATLAS_VIEW_STATE_KEY = 'graph.atlas.viewState.v1';
 const ATLAS_MODES = new Set<AtlasMode>(['entities', 'graph', 'embeddings']);
 const ATLAS_VIEW_MODES = new Set<AtlasViewMode>(['3d', 'map']);
-const ATLAS_MANIFOLD_MODES = new Set<AtlasManifoldMode>(['hybrid', 'hopf', 'lorentz', 'product']);
+const ATLAS_MANIFOLD_MODES = new Set<AtlasManifoldMode>(['hybrid', 'hopf', 'lorentz', 'product', 'siegel']);
 
 export interface GraphInventory {
     nodes: GalaxyRenderableNode[];
@@ -158,6 +158,9 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
                                 [class.bg-violet-500/20]="manifoldMode() === 'product'" [class.text-violet-100]="manifoldMode() === 'product'"
                                 [class.text-zinc-500]="manifoldMode() !== 'product'" (click)="setManifoldMode('product')">Product</button>
+                            <button type="button" class="rounded-lg px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition"
+                                [class.bg-violet-500/20]="manifoldMode() === 'siegel'" [class.text-violet-100]="manifoldMode() === 'siegel'"
+                                [class.text-zinc-500]="manifoldMode() !== 'siegel'" (click)="setManifoldMode('siegel')">Siegel</button>
                         </div>
                         @if (manifoldMode() === 'hybrid') {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
@@ -177,6 +180,11 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
                                 (click)="setLayoutMode('lorentzTree')">Caps</button>
+                        </div>
+                        } @else if (manifoldMode() === 'siegel') {
+                        <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
+                            <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
+                                (click)="setLayoutMode('siegelFinsler')">Finsler</button>
                         </div>
                         } @else {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
@@ -333,7 +341,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             @if (settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHopfSpace()">Hopf Space<span>{{ settings.hopfSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
-                            @if (settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') {
+                            @if (settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold' || settings.layoutMode === 'siegelFinsler') {
                             <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Cap Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
                             @if (settings.layoutMode === 'productManifold') {
@@ -352,7 +360,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.hopfSpaceIntensity" class="galaxy-slider" (input)="setHopfSpaceIntensity($any($event.target).value)" />
                         </label>
                         }
-                        @if ((settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold') && settings.lorentzSpaceVisible) {
+                        @if ((settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold' || settings.layoutMode === 'siegelFinsler') && settings.lorentzSpaceVisible) {
                         <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.lorentzSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.lorentzSpaceIntensity" class="galaxy-slider" (input)="setLorentzSpaceIntensity($any($event.target).value)" />
@@ -788,6 +796,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         hopf: emptyEmbeddingAtlas('hopf atlas not loaded'),
         lorentz: emptyEmbeddingAtlas('lorentz forest not loaded'),
         product: emptyEmbeddingAtlas('product atlas not loaded'),
+        siegel: emptyEmbeddingAtlas('siegel-finsler atlas not loaded'),
     });
     readonly embeddingAtlas = computed(() => this.embeddingAtlasByMode()[this.manifoldMode()]);
     readonly graphRebuildEmbeddingAtlas = computed(() => {
@@ -889,6 +898,8 @@ export class GraphAtlasPreviewComponent implements OnInit {
             this.machine.setManifoldMode('lorentz');
         } else if (mode === 'productManifold' && this.manifoldMode() !== 'product') {
             this.machine.setManifoldMode('product');
+        } else if (mode === 'siegelFinsler' && this.manifoldMode() !== 'siegel') {
+            this.machine.setManifoldMode('siegel');
         }
         this.updateSettings({ layoutMode: mode });
         this.persistViewState();
@@ -982,6 +993,10 @@ export class GraphAtlasPreviewComponent implements OnInit {
                 ? 'hopf_ico_r5_v1'
                 : this.manifoldMode() === 'lorentz'
                     ? 'hierarchy_caps_v1'
+                    : this.manifoldMode() === 'product'
+                        ? 'product_lorentz_hopf_v1'
+                        : this.manifoldMode() === 'siegel'
+                            ? 'siegel_finsler_v1'
                     : 'hybrid_semantic_v1'
         );
     }
@@ -1182,6 +1197,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'entities') return 'registry entities';
         if (this.atlasMode === 'graph') return 'graph nodes';
         if (this.usesGraphRebuildEmbeddingAtlas()) return 'embedding targets';
+        if (this.manifoldMode() === 'siegel') return 'finsler nodes';
         return this.manifoldMode() === 'lorentz' ? 'cap nodes' : 'semantic vectors';
     }
 
@@ -1189,6 +1205,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'entities') return 'registry links';
         if (this.atlasMode === 'graph') return 'graph edges';
         if (this.usesGraphRebuildEmbeddingAtlas()) return 'snapshot links';
+        if (this.manifoldMode() === 'siegel') return 'directed links';
         return this.manifoldMode() === 'lorentz' ? 'cap links' : 'candidate links';
     }
 
@@ -1198,6 +1215,8 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.usesGraphRebuildEmbeddingAtlas()) return `Graph Rebuild Snapshot -> ${this.currentProjectionLabel()} Space`;
         if (this.manifoldMode() === 'lorentz') return 'Hierarchy Caps Sidecar';
         if (this.manifoldMode() === 'hopf') return 'Semantic Atlas -> Hopf Projection';
+        if (this.manifoldMode() === 'product') return 'Semantic Atlas -> Product Space';
+        if (this.manifoldMode() === 'siegel') return 'Semantic Atlas -> Siegel-Finsler Space';
         return 'Semantic Atlas -> Hybrid Space';
     }
 
@@ -1233,6 +1252,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'entities') return 'No entities yet';
         if (this.manifoldMode() === 'hopf') return 'No Hopf manifold yet';
         if (this.manifoldMode() === 'lorentz') return 'No hierarchy caps yet';
+        if (this.manifoldMode() === 'siegel') return 'No Siegel-Finsler space yet';
         return 'No Semantic Atlas embeddings yet';
     }
 
@@ -1241,6 +1261,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (this.atlasMode === 'entities') return 'Add or extract entities and the atlas will start drawing the scope.';
         if (this.manifoldMode() === 'hopf') return 'Index the Semantic Atlas from the rendered graph, then project the existing vectors into Hopf space.';
         if (this.manifoldMode() === 'lorentz') return 'Index the Semantic Atlas from the rendered graph, then project it into hierarchy caps.';
+        if (this.manifoldMode() === 'siegel') return 'Index the Semantic Atlas from the rendered graph, then project directed structure into Siegel-Finsler space.';
         return 'Index the Semantic Atlas from rendered leaves, documents, entities, and context lanes. A local preview is shown only when native vectors are unavailable.';
     }
 
@@ -1353,6 +1374,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
         if (mode === 'product') return 'productManifold';
         if (mode === 'hopf') return 'hopfProjection';
         if (mode === 'lorentz') return 'lorentzTree';
+        if (mode === 'siegel') return 'siegelFinsler';
         return 'hybridSpace';
     }
 

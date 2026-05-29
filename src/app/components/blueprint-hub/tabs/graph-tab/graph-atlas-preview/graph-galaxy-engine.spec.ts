@@ -182,6 +182,29 @@ describe('Graph galaxy hybrid hierarchy', () => {
     });
 });
 
+describe('Graph galaxy Siegel-Finsler layout', () => {
+    it('orders directed structural targets along the Finsler flow', () => {
+        const scene = buildGalaxyScene([
+            siegelNode('doc', 'Document', 'note', 'document', 0, []),
+            siegelNode('root', 'Document structure', 'structureRoot', 'document', 1, ['doc']),
+            siegelNode('chunk', 'Chunk 1', 'chunk', 'document', 2, ['root']),
+            siegelNode('entity', 'Kai', 'entity', 'entity', 3, ['chunk']),
+        ], [
+            { id: 'doc-root', sourceId: 'doc', targetId: 'root', type: 'target-parent', confidence: 0.9 },
+            { id: 'root-chunk', sourceId: 'root', targetId: 'chunk', type: 'target-parent', confidence: 0.9 },
+            { id: 'chunk-entity', sourceId: 'chunk', targetId: 'entity', type: 'target-parent', confidence: 0.9 },
+        ], mergeGalaxySettings({ layoutMode: 'siegelFinsler' }));
+        const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
+
+        expect(scene.layoutMode).toBe('siegelFinsler');
+        expect(byId.get('root')!.x).toBeGreaterThan(byId.get('doc')!.x);
+        expect(byId.get('chunk')!.x).toBeGreaterThan(byId.get('root')!.x);
+        expect(byId.get('entity')!.x).toBeGreaterThan(byId.get('chunk')!.x);
+        expect(scene.lorentzGuides?.some((guide) => guide.id.startsWith('siegel:lane:document'))).toBe(true);
+        expect(scene.lorentzGuides?.some((guide) => guide.id === 'siegel:direction-axis')).toBe(true);
+    });
+});
+
 function stable(index: number, salt: number): number {
     return (((index * 37 + salt * 17) % 101) / 50) - 1;
 }
@@ -219,6 +242,35 @@ function hybridNode(
                 ambiguity: hierarchy.ambiguity,
                 capPhase: hierarchy.phase ?? 0,
                 level: hierarchy.level,
+            },
+        },
+    };
+}
+
+function siegelNode(
+    id: string,
+    label: string,
+    kind: string,
+    lane: string,
+    depth: number,
+    parentIds: string[],
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind,
+        totalMentions: 1,
+        metadata: {
+            sourceType: kind,
+            graphKind: kind,
+            signalParentIds: parentIds,
+            siegel: {
+                lane,
+                role: depth <= 1 ? 'root' : 'child',
+                depth,
+                confidence: 0.9,
+                matrixCells: [0.5, 0.5, 0.5, 0.4, 0.6, 0.5],
+                parentIds,
             },
         },
     };

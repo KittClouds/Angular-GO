@@ -101,15 +101,16 @@ describe('Phoenix graph rebuild builder', () => {
             graphFact: 2,
             memoryState: 3,
             note: 1,
+            structureRoot: 5,
         });
         expect(snapshot.embeddingTargetPlan).toMatchObject({
             schemaVersion: 'phoenix-signal-target-plan/v1',
-            candidateCount: 17,
-            admittedCount: 14,
+            candidateCount: 22,
+            admittedCount: 19,
             deferredCount: 3,
         });
         expect(snapshot.embeddingTargetPlan?.lanes).toEqual(expect.arrayContaining([
-            expect.objectContaining({ lane: 'document_spine', admitted: 1 }),
+            expect.objectContaining({ lane: 'document_spine', admitted: 6 }),
             expect.objectContaining({ lane: 'chunk_spine', admitted: 1 }),
             expect.objectContaining({ lane: 'entity_anchor', admitted: 3 }),
             expect.objectContaining({ lane: 'relationship_fact', admitted: 2 }),
@@ -121,7 +122,7 @@ describe('Phoenix graph rebuild builder', () => {
         expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.text)
             .toContain('evidence_context:Kai approved the packet');
         expect(snapshot.embeddingTargets.find((target) => target.id === 'embed:entity:e-kai')?.parentIds)
-            .toEqual(expect.arrayContaining(['embed:chunk:note-1:block:0', 'embed:note:note-1']));
+            .toEqual(expect.arrayContaining(['embed:chunk:note-1:block:0', 'embed:structure-root:note-1:identity']));
         const approvedFact = snapshot.embeddingTargets.find((target) => target.id.includes('approves_or_accepts'));
         expect(approvedFact?.label).toContain('Kai approves_or_accepts Rift');
         expect(approvedFact?.text).toContain('confidence:');
@@ -139,10 +140,10 @@ describe('Phoenix graph rebuild builder', () => {
             events: 1,
             episodes: 1,
             memoryState: 3,
-            embeddingTargets: 14,
-            embeddingTargetCandidates: 17,
+            embeddingTargets: 19,
+            embeddingTargetCandidates: 22,
             embeddingTargetDeferred: 3,
-            embeddingDocumentSpine: 1,
+            embeddingDocumentSpine: 6,
             embeddingChunkSpine: 1,
             embeddingEntityAnchors: 3,
             embeddingRelationshipFacts: 2,
@@ -177,11 +178,20 @@ describe('Phoenix graph rebuild builder', () => {
         });
 
         expect(snapshot.embeddingTargetPlan).toMatchObject({
-            candidateCount: 4,
-            admittedCount: 3,
+            candidateCount: 9,
+            admittedCount: 8,
             deferredCount: 1,
         });
-        expect(snapshot.embeddingTargets.map((target) => target.kind).sort()).toEqual(['chunk', 'entity', 'note']);
+        expect(snapshot.embeddingTargets.map((target) => target.kind).sort()).toEqual([
+            'chunk',
+            'entity',
+            'note',
+            'structureRoot',
+            'structureRoot',
+            'structureRoot',
+            'structureRoot',
+            'structureRoot',
+        ]);
         expect(snapshot.embeddingTargetPlan?.lanes).toEqual(expect.arrayContaining([
             expect.objectContaining({ lane: 'anchor_evidence', candidates: 1, admitted: 0, deferred: 1 }),
         ]));
