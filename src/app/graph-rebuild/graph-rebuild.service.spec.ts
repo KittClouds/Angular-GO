@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY,
     GRAPH_REBUILD_NAMESPACE,
+    graphModelV2OverGraphExportToScopedDocument,
     graphIndexReceiptToScopedDocument,
     graphRebuildSnapshotToScopedDocument,
     mergeGraphRebuildOccurrences,
     postProcessCacheToScopedDocument,
     recoverGraphRebuildOccurrences,
+    scopedDocumentToGraphModelV2OverGraphExport,
     scopedDocumentToGraphIndexReceipt,
     scopedDocumentToGraphRebuildSnapshot,
     dynamicChunksForNote,
@@ -210,6 +213,32 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(document.namespace).toBe(GRAPH_REBUILD_NAMESPACE);
         expect(document.scopeFolderId).toBe('global');
         expect(scopedDocumentToGraphIndexReceipt(document)).toEqual(receipt);
+    });
+
+    it('persists graph model v2 as a separate OverGraph export sidecar', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            entities: [entity('entity-kai', 'Kai', []), entity('entity-hazel', 'Hazel', [])],
+            chunks: [{ id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 30, ordinal: 0, source: 'dynamic-chunking' }],
+            occurrences: [
+                occurrence('note-1', 'entity-kai', 0, 3),
+                occurrence('note-1', 'entity-hazel', 12, 17),
+            ],
+            noteTexts: { 'note-1': 'Kai approved Hazel.' },
+            builtAt: 42,
+        });
+
+        const document = graphModelV2OverGraphExportToScopedDocument(snapshot);
+        const roundtripped = document ? scopedDocumentToGraphModelV2OverGraphExport(document) : null;
+
+        expect(document?.namespace).toBe(GRAPH_REBUILD_NAMESPACE);
+        expect(document?.documentKey).toBe(GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY);
+        expect(roundtripped?.schemaVersion).toBe('phoenix-graph-model-v2-overgraph/v1');
+        const expectedVertices = (snapshot.graphModelV2?.counters.atoms || 0) + (snapshot.graphModelV2?.counters.facts || 0);
+        expect(roundtripped?.graphBatch.vertices.length).toBe(expectedVertices);
+        expect(roundtripped?.graphBatch.edges.some((edge) => edge.edgeType === 'role:source')).toBe(true);
     });
 
     it('keeps postprocess cache documents as lightweight snapshot references', () => {

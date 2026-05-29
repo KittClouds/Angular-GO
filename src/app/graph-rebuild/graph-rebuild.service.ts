@@ -12,6 +12,10 @@ import type { RegisteredEntity } from '../lib/registry';
 import { PhoenixStoreService, type StoreScopedDocument } from '../services/phoenix-store.service';
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames';
+import {
+    buildGraphModelV2OverGraphExport,
+    type GraphModelV2OverGraphExport,
+} from './graph-model-v2-overgraph';
 import type {
     GraphIndexRunReceipt,
     GraphIndexPostProcessMode,
@@ -28,6 +32,7 @@ import type {
 export const GRAPH_REBUILD_NAMESPACE = 'phoenix_graph_rebuild_v1';
 const SNAPSHOT_DOCUMENT_KEY = 'snapshot';
 const RECEIPT_DOCUMENT_KEY = 'receipt';
+export const GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY = 'graph-model-v2-overgraph';
 const POST_PROCESS_CACHE_PREFIX = 'postprocess-cache';
 
 export interface GraphRebuildPostProcessCache {
@@ -134,6 +139,11 @@ export class GraphRebuildService {
         return document ? scopedDocumentToGraphRebuildSnapshot(document) : null;
     }
 
+    async loadPersistedGraphModelV2OverGraph(scopeId: string): Promise<GraphModelV2OverGraphExport | null> {
+        const document = await this.store.getScopedDocument(scopeId, GRAPH_REBUILD_NAMESPACE, GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY);
+        return document ? scopedDocumentToGraphModelV2OverGraphExport(document) : null;
+    }
+
     async persistRunReceipt(receipt: GraphIndexRunReceipt): Promise<void> {
         await this.store.upsertScopedDocument(graphIndexReceiptToScopedDocument(receipt));
         dispatchGraphRebuildEvent('graph-index-run-completed', {
@@ -188,6 +198,8 @@ export class GraphRebuildService {
         }
         const storeStarted = performance.now();
         await this.store.upsertScopedDocument(document);
+        const overGraphDocument = graphModelV2OverGraphExportToScopedDocument(snapshot);
+        if (overGraphDocument) await this.store.upsertScopedDocument(overGraphDocument);
         if (timings) timings.snapshotStoreMs = elapsedMs(storeStarted);
         if (emitEvent) {
             const eventStarted = performance.now();
@@ -379,10 +391,34 @@ export function graphRebuildSnapshotToScopedDocument(snapshot: GraphRebuildSnaps
     };
 }
 
+export function graphModelV2OverGraphExportToScopedDocument(snapshot: GraphRebuildSnapshot): StoreScopedDocument | null {
+    if (!snapshot.graphModelV2) return null;
+    const now = Date.now();
+    return {
+        id: `${GRAPH_REBUILD_NAMESPACE}:${snapshot.scopeId}:${GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY}`,
+        scopeFolderId: snapshot.scopeId,
+        narrativeId: snapshot.scopeKind === 'narrative' ? snapshot.scopeId : '',
+        namespace: GRAPH_REBUILD_NAMESPACE,
+        documentKey: GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY,
+        payload: JSON.stringify(buildGraphModelV2OverGraphExport(snapshot)),
+        createdAt: snapshot.builtAt || now,
+        updatedAt: now,
+    };
+}
+
 export function scopedDocumentToGraphRebuildSnapshot(document: StoreScopedDocument): GraphRebuildSnapshot | null {
     try {
         const parsed = JSON.parse(document.payload) as GraphRebuildSnapshot;
         return parsed?.schemaVersion === 'phoenix-graph-rebuild/v1' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+export function scopedDocumentToGraphModelV2OverGraphExport(document: StoreScopedDocument): GraphModelV2OverGraphExport | null {
+    try {
+        const parsed = JSON.parse(document.payload) as GraphModelV2OverGraphExport;
+        return parsed?.schemaVersion === 'phoenix-graph-model-v2-overgraph/v1' ? parsed : null;
     } catch {
         return null;
     }
