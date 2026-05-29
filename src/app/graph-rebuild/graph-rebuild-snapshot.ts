@@ -1,5 +1,6 @@
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
+import type { GraphModelV2Snapshot } from './graph-model-v2';
 
 export type GraphRebuildScopeKind = 'global' | 'folder' | 'narrative' | 'note' | 'multiNote';
 export type GraphRebuildAnchorSource = EntityOccurrence['source'] | 'accepted_suggestion';
@@ -688,6 +689,7 @@ export interface GraphRebuildSnapshot {
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
     structuralPostProcess?: GraphRebuildStructuralPostProcess;
+    graphModelV2?: GraphModelV2Snapshot;
     graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
     entityLinkSuggestions?: GraphRebuildEntityLinkSuggestion[];
     counters: GraphRebuildCounters;

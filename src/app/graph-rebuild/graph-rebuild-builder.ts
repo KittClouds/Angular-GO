@@ -17,6 +17,7 @@ import { buildGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-
 import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
 import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
+import { buildGraphModelV2Snapshot } from './graph-model-v2';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import {
     buildGraphRebuildAliasResolver,
@@ -100,7 +101,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         ...entityAnchors.map((anchor) => anchor.noteId),
     ]);
 
-    return {
+    const snapshot: GraphRebuildSnapshot = {
         schemaVersion: 'phoenix-graph-rebuild/v1',
         id: `graph-rebuild:${input.scopeKind}:${input.scopeId}:${builtAt}`,
         source: 'phoenix-graph-rebuild',
@@ -190,6 +191,8 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         },
         resolutionSuggestions: hygiene.suggestions,
     };
+    snapshot.graphModelV2 = buildGraphModelV2Snapshot(snapshot);
+    return snapshot;
 }
 
 function planLaneAdmitted(

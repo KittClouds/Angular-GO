@@ -28,6 +28,7 @@ const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
 const CAPS_SHELL_RADII = [0.54, 0.98, 1.22, 1.34, 1.48, 1.68, 1.92];
 const HYBRID_SURFACE_EDGE_MIN_RADIUS = 2.32 * 0.92;
 const HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.42;
+const MAX_CAMERA_VIEW_SHIFT = 2.6;
 type GuideSurface = 'default' | 'product';
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
@@ -42,8 +43,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private readonly dragTarget = new THREE.Vector3();
     private readonly zoomPlane = new THREE.Plane();
     private readonly zoomBefore = new THREE.Vector3();
-    private readonly zoomAfter = new THREE.Vector3();
     private readonly zoomNormal = new THREE.Vector3();
+    private readonly zoomProjected = new THREE.Vector3();
     private readonly pickVector = new THREE.Vector3();
     private readonly cameraTarget = new THREE.Vector3();
     private readonly perspective = new THREE.PerspectiveCamera(48, 1, 0.01, 100);
@@ -75,6 +76,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private panX = 0;
     private panY = 0;
     private panZ = 0;
+    private viewShiftX = 0;
+    private viewShiftY = 0;
     private dragReady = false;
     private densityBins = new Uint16Array(0);
     private densityNodeBins = new Int32Array(0);
@@ -201,11 +204,20 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             return;
         }
         this.updateCamera(false);
-        if (this.pointerToCameraTargetPlane(pointer, this.zoomAfter)) {
-            this.zoomBefore.sub(this.zoomAfter);
-            this.panX += this.zoomBefore.x;
-            this.panY += this.zoomBefore.y;
-            this.panZ += this.zoomBefore.z;
+        this.zoomProjected.copy(this.zoomBefore).project(this.camera());
+        if (Number.isFinite(this.zoomProjected.x) && Number.isFinite(this.zoomProjected.y)) {
+            const pointerX = (pointer.x / Math.max(1, pointer.width)) * 2 - 1;
+            const pointerY = -(pointer.y / Math.max(1, pointer.height)) * 2 + 1;
+            this.viewShiftX = THREE.MathUtils.clamp(
+                this.viewShiftX + pointerX - this.zoomProjected.x,
+                -MAX_CAMERA_VIEW_SHIFT,
+                MAX_CAMERA_VIEW_SHIFT,
+            );
+            this.viewShiftY = THREE.MathUtils.clamp(
+                this.viewShiftY + pointerY - this.zoomProjected.y,
+                -MAX_CAMERA_VIEW_SHIFT,
+                MAX_CAMERA_VIEW_SHIFT,
+            );
         }
         this.updateCamera();
     }
@@ -217,6 +229,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         this.panX = 0;
         this.panY = 0;
         this.panZ = 0;
+        this.clearViewShift();
         this.updateCamera();
     }
 
@@ -225,6 +238,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         this.panX = 0;
         this.panY = 0;
         this.panZ = 0;
+        this.clearViewShift();
         this.updateCamera();
     }
 
@@ -238,11 +252,13 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         this.panY = positions[index * 3 + 1];
         this.panZ = positions[index * 3 + 2];
         this.distance = Math.min(this.distance, 5.4);
+        this.clearViewShift();
         this.updateCamera();
     }
 
     clearFocus(): void {
         this.panX = this.panY = this.panZ = 0;
+        this.clearViewShift();
         this.updateCamera();
     }
 
@@ -534,13 +550,35 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             this.perspective.position.set(x, y, z);
             this.perspective.lookAt(target);
             this.perspective.updateProjectionMatrix();
+            this.applyViewShift(this.perspective);
+            this.perspective.updateMatrixWorld();
         } else {
             this.ortho.position.set(target.x, target.y, this.distance);
             this.ortho.lookAt(target);
             this.ortho.zoom = THREE.MathUtils.clamp(8 / this.distance, 0.45, 3.5);
             this.ortho.updateProjectionMatrix();
+            this.applyViewShift(this.ortho);
+            this.ortho.updateMatrixWorld();
         }
         if (render) this.render();
+    }
+
+    private clearViewShift(): void {
+        this.viewShiftX = 0;
+        this.viewShiftY = 0;
+    }
+
+    private applyViewShift(camera: THREE.PerspectiveCamera | THREE.OrthographicCamera): void {
+        if (this.viewShiftX === 0 && this.viewShiftY === 0) return;
+        const matrix = camera.projectionMatrix.elements;
+        if (camera instanceof THREE.PerspectiveCamera) {
+            matrix[8] -= this.viewShiftX;
+            matrix[9] -= this.viewShiftY;
+        } else {
+            matrix[12] += this.viewShiftX;
+            matrix[13] += this.viewShiftY;
+        }
+        camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
     }
 
     private camera(): THREE.Camera {

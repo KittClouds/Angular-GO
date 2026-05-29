@@ -39,6 +39,56 @@ type RendererProbe = {
     writeLorentzGuidePositions(output: Float32Array, cursor: number, guide: Record<string, unknown>, data: { ids: string[] }, positions: Float32Array, indexById: Map<string, number>): number;
 };
 
+type CameraProbe = RendererProbe & {
+    renderer: { render: ReturnType<typeof vi.fn>; domElement: { clientWidth: number; clientHeight: number } };
+    perspective: THREE.PerspectiveCamera;
+    panX: number;
+    panY: number;
+    panZ: number;
+    viewShiftX: number;
+    viewShiftY: number;
+    resetCamera(): void;
+    rotate(deltaX: number, deltaY: number): void;
+    zoomAt(delta: number, pointer: { x: number; y: number; width: number; height: number }): void;
+    pointerToCameraTargetPlane(pointer: { x: number; y: number; width: number; height: number }, out: THREE.Vector3): boolean;
+};
+
+function mountCameraProbe(): CameraProbe {
+    const renderer = new ThreeGalaxyRenderer() as unknown as CameraProbe;
+    renderer.renderer = { render: vi.fn(), domElement: { clientWidth: 800, clientHeight: 600 } };
+    renderer.resetCamera();
+    return renderer;
+}
+
+describe('Galaxy camera controls', () => {
+    it('keeps wheel zoom framing separate from the 3D orbit pivot', () => {
+        const renderer = mountCameraProbe();
+        const pointer = { x: 620, y: 250, width: 800, height: 600 };
+        const anchor = new THREE.Vector3();
+        const pointerNdcX = (pointer.x / pointer.width) * 2 - 1;
+        const pointerNdcY = -(pointer.y / pointer.height) * 2 + 1;
+
+        expect(renderer.pointerToCameraTargetPlane(pointer, anchor)).toBe(true);
+
+        renderer.zoomAt(-360, pointer);
+
+        expect(renderer.panX).toBeCloseTo(0);
+        expect(renderer.panY).toBeCloseTo(0);
+        expect(renderer.panZ).toBeCloseTo(0);
+        expect(Math.abs(renderer.viewShiftX) + Math.abs(renderer.viewShiftY)).toBeGreaterThan(0.001);
+
+        const projected = anchor.clone().project(renderer.perspective);
+        expect(projected.x).toBeCloseTo(pointerNdcX, 4);
+        expect(projected.y).toBeCloseTo(pointerNdcY, 4);
+
+        renderer.rotate(80, -20);
+
+        expect(renderer.panX).toBeCloseTo(0);
+        expect(renderer.panY).toBeCloseTo(0);
+        expect(renderer.panZ).toBeCloseTo(0);
+    });
+});
+
 describe('Product manifold guide styling', () => {
     it('keeps evidence fibers visually above scaffold and Lorentz guides', () => {
         const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
