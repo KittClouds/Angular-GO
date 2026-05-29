@@ -17,6 +17,7 @@ import {
     sparseEmbeddingSignature,
     sparseToDenseVector,
 } from '../../../../../graph-rebuild/graph-rebuild-embedding-signatures';
+import { createGraphModelV2ReadModel } from '../../../../../graph-rebuild/graph-model-v2-read-model';
 import { buildGraphSignalTruthIndex, type GraphSignalTruthRecord } from '../../../../../graph-rebuild/graph-rebuild-signal-truth';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 import type { EmbeddingAtlasData, EmbeddingAtlasSearchItem } from './graph-embedding-atlas';
@@ -719,14 +720,17 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
         }
         add(`embed:anchor-entity:${anchor.id}`, `embed:anchor:${anchor.id}`, `embed:entity:${anchor.entityId}`, 'anchor-entity', anchor.confidence);
     }
-    for (const edge of snapshot.edges) {
-        add(`embed:graph-edge:${edge.id}`, `embed:entity:${edge.sourceId}`, `embed:entity:${edge.targetId}`, edge.type, edge.confidence);
-    }
-    for (const relationship of snapshot.relationships) {
-        if (relationship.status === 'rejected') continue;
-        const factId = `embed:graph-fact:${relationship.id}`;
-        add(`embed:fact-source:${relationship.id}`, factId, `embed:entity:${relationship.sourceEntityId}`, relationship.relationType, relationship.confidence);
-        add(`embed:fact-target:${relationship.id}`, factId, `embed:entity:${relationship.targetEntityId}`, relationship.relationType, relationship.confidence);
+    const v2EdgesAdded = addGraphModelV2ProjectionEdges(snapshot, add);
+    if (!v2EdgesAdded) {
+        for (const edge of snapshot.edges) {
+            add(`embed:graph-edge:${edge.id}`, `embed:entity:${edge.sourceId}`, `embed:entity:${edge.targetId}`, edge.type, edge.confidence);
+        }
+        for (const relationship of snapshot.relationships) {
+            if (relationship.status === 'rejected') continue;
+            const factId = `embed:graph-fact:${relationship.id}`;
+            add(`embed:fact-source:${relationship.id}`, factId, `embed:entity:${relationship.sourceEntityId}`, relationship.relationType, relationship.confidence);
+            add(`embed:fact-target:${relationship.id}`, factId, `embed:entity:${relationship.targetEntityId}`, relationship.relationType, relationship.confidence);
+        }
     }
     for (const event of snapshot.events) {
         const eventId = `embed:event:${event.id}`;
@@ -748,6 +752,45 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
         add(edge.id, edge.sourceTargetId, edge.targetTargetId, `embedding-${edge.role}`, edge.score);
     }
     return dedupeEdges(edges);
+}
+
+function addGraphModelV2ProjectionEdges(
+    snapshot: GraphRebuildSnapshot,
+    add: (id: string, sourceId: string, targetId: string, type: string, confidence: number) => void,
+): boolean {
+    if (!snapshot.graphModelV2) return false;
+    const readModel = createGraphModelV2ReadModel(snapshot.graphModelV2);
+    let added = 0;
+    for (const edge of readModel.model.projectionEdges) {
+        if (edge.projectionKind === 'structure') continue;
+        const sourceId = graphModelV2TargetToEmbeddingId(edge.sourceId);
+        const targetId = graphModelV2TargetToEmbeddingId(edge.targetId);
+        if (!sourceId || !targetId) continue;
+        add(`embed:v2:${edge.id}`, sourceId, targetId, edge.edgeType.replace(/^role:/, ''), edge.confidence);
+        added += 1;
+    }
+    return added > 0;
+}
+
+function graphModelV2TargetToEmbeddingId(targetId: string): string | null {
+    const [prefix, kind, ...rest] = targetId.split(':');
+    const sourceId = rest.join(':');
+    if (!sourceId) return null;
+    if (prefix === 'atom') {
+        if (kind === 'document') return `embed:note:${sourceId}`;
+        if (kind === 'chunk') return `embed:chunk:${sourceId}`;
+        if (kind === 'evidence' || kind === 'sourceSpan') return `embed:anchor:${sourceId}`;
+        if (kind === 'entity') return `embed:entity:${sourceId}`;
+        if (kind === 'event') return `embed:event:${sourceId}`;
+        if (kind === 'state') return `embed:memory:${sourceId}`;
+    }
+    if (prefix === 'fact') {
+        if (kind === 'relationship') return `embed:graph-fact:${sourceId}`;
+        if (kind === 'temporal') return `embed:temporalFact:${sourceId}`;
+        if (kind === 'causal') return `embed:causalFact:${sourceId}`;
+        if (kind === 'memory') return `embed:memory:${sourceId}`;
+    }
+    return null;
 }
 
 function dedupeEdges(edges: GalaxyInputEdge[]): GalaxyInputEdge[] {

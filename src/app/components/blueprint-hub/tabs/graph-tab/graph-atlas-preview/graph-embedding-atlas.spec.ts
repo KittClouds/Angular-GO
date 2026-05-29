@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ENTITY_COLORS, DEFAULT_GRAPH_NODE_COLORS } from '../../../../../lib/store/entityColorStore';
 import type { NoteBlockProjection } from '../../../../../lib/dexie/db';
+import { buildGraphModelV2Snapshot } from '../../../../../graph-rebuild/graph-model-v2';
 import { buildLeafEmbeddingAtlas } from './graph-embedding-atlas';
 import { buildGraphRebuildEmbeddingAtlas } from './graph-rebuild-embedding-atlas';
 
@@ -196,6 +197,71 @@ describe('embedding atlas projection', () => {
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:observe') || '')).toBe(false);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:comment') || '')).toBe(false);
         expect(atlas.sourceLabel).toContain('graph rebuild snapshot');
+    });
+
+    it('uses graph model v2 projection edges for graph-rebuild relationship rendering', () => {
+        const snapshot = {
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-v2-atlas',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [{
+                id: 'approval-1',
+                sourceEntityId: 'kai',
+                targetEntityId: 'hazel',
+                relationType: 'approves',
+                status: 'accepted',
+                confidence: 0.82,
+                evidenceAnchorIds: [],
+                adjudicationSource: 'test',
+                adjudicationScore: 0.82,
+                rationale: 'accepted approval',
+                decisionEvidence: [],
+            }],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'Kai', evidenceIds: [] },
+                { id: 'embed:entity:hazel', kind: 'entity', sourceId: 'hazel', entityId: 'hazel', entityKind: 'CHARACTER', label: 'Hazel', text: 'Hazel', evidenceIds: [] },
+                { id: 'embed:graph-fact:approval-1', kind: 'graphFact', sourceId: 'approval-1', label: 'Kai approves Hazel', text: 'Kai approves Hazel [accepted]', evidenceIds: [] },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [
+                { entityId: 'kai', label: 'Kai', kind: 'CHARACTER', anchorIds: [] },
+                { entityId: 'hazel', label: 'Hazel', kind: 'CHARACTER', anchorIds: [] },
+            ],
+            edges: [],
+            counters: null as any,
+        } as any;
+        snapshot.graphModelV2 = buildGraphModelV2Snapshot(snapshot);
+
+        const atlas = buildGraphRebuildEmbeddingAtlas(snapshot, 'hybrid');
+
+        expect(atlas.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'embed:v2:projection:fact-role:approval-1:source',
+                sourceId: 'embed:graph-fact:approval-1',
+                targetId: 'embed:entity:kai',
+                type: 'source',
+            }),
+            expect.objectContaining({
+                id: 'embed:v2:projection:fact-role:approval-1:target',
+                sourceId: 'embed:graph-fact:approval-1',
+                targetId: 'embed:entity:hazel',
+                type: 'target',
+            }),
+        ]));
+        expect(atlas.edges.some((edge) => edge.id === 'embed:fact-source:approval-1')).toBe(false);
     });
 
     it('carries embedding topology into Product manifold metadata without linking identities', () => {
