@@ -48,6 +48,33 @@ pub enum HybridSpaceError {
     #[error("invalid cone weights: semantic={semantic}, hierarchy={hierarchy}")]
     InvalidConeWeights { semantic: f32, hierarchy: f32 },
 
+    #[error("empty Busemann prototype list")]
+    EmptyBusemannPrototypes,
+
+    #[error("invalid Busemann config field {field}: {value}")]
+    InvalidBusemannConfig { field: &'static str, value: f32 },
+
+    #[error("invalid Busemann top_k: {0}")]
+    InvalidBusemannTopK(usize),
+
+    #[error("invalid Busemann weights: commitment={commitment}, radial={radial}")]
+    InvalidBusemannWeights { commitment: f32, radial: f32 },
+
+    #[error("Busemann prototype family mismatch: expected {expected:?}, got {got:?}")]
+    BusemannPrototypeFamilyMismatch {
+        expected: PrototypeFamily,
+        got: PrototypeFamily,
+    },
+
+    #[error("invalid Busemann prototype {prototype_id}: {reason}")]
+    InvalidBusemannPrototype {
+        prototype_id: u64,
+        reason: &'static str,
+    },
+
+    #[error("Poincare point is outside the unit ball after curvature scaling: norm_sq={norm_sq}")]
+    BusemannPointOutsideBall { norm_sq: f32 },
+
     #[error(transparent)]
     Poincare(#[from] poincare::HyperbolicError),
 }
@@ -70,6 +97,153 @@ pub enum DepthMapping {
     /// depth is already a normalized value in [0, 1], then mapped
     /// against max_hyperbolic_radius.
     Normalized,
+}
+
+/// Which prototype family the Busemann interior is scoring.
+///
+/// Keep these lens-scoped. Do not run every prototype family at once unless
+/// you intentionally want diagnostic soup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrototypeFamily {
+    EntityKind,
+    RelationFamily,
+    EvidenceAuthority,
+    GraphStage,
+    ConceptDomain,
+}
+
+/// Selects what the hyperbolic interior means.
+///
+/// RadialDepth is the legacy behavior:
+/// - radius = hierarchy/depth signal
+///
+/// BusemannCommitment is the new behavior:
+/// - boundary directions = class/prototype ideals
+/// - interior point = unresolved candidate / graph artifact
+/// - Busemann score = commitment pressure toward a prototype
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum InteriorGeometry {
+    RadialDepth(DepthMapping),
+    BusemannCommitment(BusemannConfig),
+}
+
+impl Default for InteriorGeometry {
+    fn default() -> Self {
+        Self::RadialDepth(DepthMapping::Log1p)
+    }
+}
+
+/// Configuration for Busemann commitment scoring.
+///
+/// Convention:
+/// - lower raw Busemann score means stronger commitment to that prototype.
+/// - margin = second_best_score - best_score.
+/// - larger margin means cleaner classification.
+/// - entropy near 1.0 means ambiguity.
+/// - entropy near 0.0 means concentrated prototype pressure.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BusemannConfig {
+    pub family: PrototypeFamily,
+
+    /// Weight used when converting scores into softmax probabilities.
+    /// Higher values make the strongest prototype dominate harder.
+    pub commitment_weight: f32,
+
+    /// Optional confidence blend from radial position.
+    /// If radius means "evidence/resolution strength", this lets near-boundary
+    /// candidates contribute more confidence than near-origin candidates.
+    pub radial_weight: f32,
+
+    /// Maximum normalized entropy allowed before the candidate is considered
+    /// too ambiguous for promotion.
+    ///
+    /// Recommended v1: 0.35 - 0.55.
+    pub ambiguity_threshold: f32,
+
+    /// Minimum required score gap between best and second-best prototype.
+    ///
+    /// Recommended v1: 0.20 - 0.75 depending on score scale.
+    pub promotion_margin: f32,
+
+    /// Number of prototype scores to keep in the receipt.
+    pub top_k: usize,
+
+    /// Numerical guard.
+    pub eps: f32,
+}
+
+impl Default for BusemannConfig {
+    fn default() -> Self {
+        Self {
+            family: PrototypeFamily::EntityKind,
+            commitment_weight: 1.0,
+            radial_weight: 0.25,
+            ambiguity_threshold: 0.45,
+            promotion_margin: 0.35,
+            top_k: 4,
+            eps: DEFAULT_EPS,
+        }
+    }
+}
+
+/// Boundary prototype for a Busemann family.
+///
+/// `direction` should be in the same dimensionality as the interior point.
+/// It does not have to be perfectly normalized; scoring normalizes it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BusemannPrototype {
+    pub prototype_id: u64,
+    pub family: PrototypeFamily,
+    pub direction: Vec<f32>,
+}
+
+/// One prototype score in a Busemann signature.
+///
+/// Lower `score` is stronger.
+/// Higher `probability` is stronger after softmax conversion.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BusemannPrototypeScore {
+    pub prototype_id: u64,
+    pub family: PrototypeFamily,
+    pub score: f32,
+    pub probability: f32,
+}
+
+/// Diagnostic receipt for one candidate/node in the Busemann interior.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BusemannSignature {
+    pub family: PrototypeFamily,
+
+    pub top_prototype_id: u64,
+    pub top_score: f32,
+    pub top_probability: f32,
+
+    pub second_prototype_id: Option<u64>,
+    pub second_score: Option<f32>,
+    pub second_probability: Option<f32>,
+
+    /// second_score - top_score.
+    /// Larger means cleaner prototype commitment.
+    pub margin: f32,
+
+    /// Normalized softmax entropy in [0, 1].
+    /// Higher means more ambiguous.
+    pub entropy: f32,
+
+    /// Currently equal to entropy. Kept separate so UI/postprocess can evolve
+    /// without changing the receipt shape.
+    pub ambiguity_score: f32,
+
+    /// Blended confidence from margin and optional radial strength.
+    pub classification_confidence: f32,
+
+    /// True when margin and entropy pass the configured thresholds.
+    /// This is only a geometry/staging signal. Do not mutate graph truth here.
+    pub promotion_ready: bool,
+
+    pub radial_strength: f32,
+
+    pub top_k_scores: Vec<BusemannPrototypeScore>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -97,6 +271,12 @@ pub struct HybridSpaceConfig {
     pub min_non_root_hyperbolic_radius: f32,
 
     pub depth_mapping: DepthMapping,
+
+    /// Meaning of the Poincare/interior component.
+    ///
+    /// Defaults to legacy radial-depth behavior for serde/backward compatibility.
+    #[serde(default)]
+    pub interior_geometry: InteriorGeometry,
 }
 
 impl Default for HybridSpaceConfig {
@@ -108,6 +288,7 @@ impl Default for HybridSpaceConfig {
             max_hyperbolic_radius: 12.0,
             min_non_root_hyperbolic_radius: 0.15,
             depth_mapping: DepthMapping::Log1p,
+            interior_geometry: InteriorGeometry::RadialDepth(DepthMapping::Log1p),
         }
     }
 }
@@ -1398,6 +1579,457 @@ fn validate_positive(field: &'static str, value: f32) -> HybridSpaceResult<()> {
         return Err(HybridSpaceError::InvalidConeRadialThreshold { field, value });
     }
     Ok(())
+}
+
+pub fn validate_busemann_config(config: BusemannConfig) -> HybridSpaceResult<()> {
+    if !(config.eps.is_finite() && config.eps > 0.0) {
+        return Err(HybridSpaceError::InvalidBusemannConfig {
+            field: "eps",
+            value: config.eps,
+        });
+    }
+
+    if !(config.commitment_weight.is_finite() && config.commitment_weight >= 0.0) {
+        return Err(HybridSpaceError::InvalidBusemannConfig {
+            field: "commitment_weight",
+            value: config.commitment_weight,
+        });
+    }
+
+    if !(config.radial_weight.is_finite() && config.radial_weight >= 0.0) {
+        return Err(HybridSpaceError::InvalidBusemannConfig {
+            field: "radial_weight",
+            value: config.radial_weight,
+        });
+    }
+
+    if config.commitment_weight + config.radial_weight <= config.eps {
+        return Err(HybridSpaceError::InvalidBusemannWeights {
+            commitment: config.commitment_weight,
+            radial: config.radial_weight,
+        });
+    }
+
+    if !(config.ambiguity_threshold.is_finite()
+        && config.ambiguity_threshold >= 0.0
+        && config.ambiguity_threshold <= 1.0)
+    {
+        return Err(HybridSpaceError::InvalidBusemannConfig {
+            field: "ambiguity_threshold",
+            value: config.ambiguity_threshold,
+        });
+    }
+
+    if !(config.promotion_margin.is_finite() && config.promotion_margin >= 0.0) {
+        return Err(HybridSpaceError::InvalidBusemannConfig {
+            field: "promotion_margin",
+            value: config.promotion_margin,
+        });
+    }
+
+    if config.top_k == 0 {
+        return Err(HybridSpaceError::InvalidBusemannTopK(config.top_k));
+    }
+
+    Ok(())
+}
+
+pub fn validate_interior_geometry(geometry: InteriorGeometry) -> HybridSpaceResult<()> {
+    match geometry {
+        InteriorGeometry::RadialDepth(_) => Ok(()),
+        InteriorGeometry::BusemannCommitment(config) => validate_busemann_config(config),
+    }
+}
+
+/// Scores one point in the Poincare interior against boundary prototypes.
+///
+/// Inputs:
+/// - `point`: Poincare-ball point in your current curvature convention.
+/// - `curvature`: positive c, where hyperbolic curvature is -c.
+/// - `prototypes`: boundary directions in the same dimensionality as `point`.
+/// - `config.family`: only prototypes from this family are accepted.
+///
+/// Formula uses the Poincare-unit-ball Busemann expression:
+///
+/// B_p(x) = ln( ||p - x||^2 / (1 - ||x||^2) )
+///
+/// with x scaled by sqrt(c) before scoring.
+///
+/// Convention:
+/// lower score = stronger commitment.
+pub fn busemann_signature(
+    point: &[f32],
+    curvature: f32,
+    prototypes: &[BusemannPrototype],
+    config: BusemannConfig,
+) -> HybridSpaceResult<BusemannSignature> {
+    validate_busemann_config(config)?;
+
+    if point.is_empty() {
+        return Err(HybridSpaceError::EmptyVector);
+    }
+
+    if !(curvature.is_finite() && curvature > 0.0) {
+        return Err(HybridSpaceError::InvalidCurvature(curvature));
+    }
+
+    if prototypes.is_empty() {
+        return Err(HybridSpaceError::EmptyBusemannPrototypes);
+    }
+
+    let sqrt_c = curvature.sqrt();
+    let mut x_unit = Vec::with_capacity(point.len());
+    let mut x_norm_sq = 0.0_f32;
+
+    for value in point {
+        if !value.is_finite() {
+            return Err(HybridSpaceError::InvalidBusemannPrototype {
+                prototype_id: 0,
+                reason: "point contains non-finite coordinate",
+            });
+        }
+
+        let scaled = *value * sqrt_c;
+        x_norm_sq += scaled * scaled;
+        x_unit.push(scaled);
+    }
+
+    if !(x_norm_sq.is_finite() && x_norm_sq < 1.0 - config.eps) {
+        return Err(HybridSpaceError::BusemannPointOutsideBall {
+            norm_sq: x_norm_sq,
+        });
+    }
+
+    let mut scores = Vec::with_capacity(prototypes.len());
+
+    for prototype in prototypes {
+        if prototype.family != config.family {
+            return Err(HybridSpaceError::BusemannPrototypeFamilyMismatch {
+                expected: config.family,
+                got: prototype.family,
+            });
+        }
+
+        if prototype.direction.len() != point.len() {
+            return Err(HybridSpaceError::DimensionMismatch {
+                expected: point.len(),
+                got: prototype.direction.len(),
+            });
+        }
+
+        let score = busemann_score_unit_ball(
+            &x_unit,
+            x_norm_sq,
+            prototype,
+            config.eps,
+        )?;
+
+        scores.push(BusemannPrototypeScore {
+            prototype_id: prototype.prototype_id,
+            family: prototype.family,
+            score,
+            probability: 0.0,
+        });
+    }
+
+    apply_busemann_probabilities(&mut scores, config.commitment_weight, config.eps)?;
+
+    scores.sort_by(|a, b| match a.score.partial_cmp(&b.score) {
+        Some(ordering) => ordering,
+        None => Ordering::Equal,
+    });
+
+    let best = match scores.first() {
+        Some(score) => score.clone(),
+        None => return Err(HybridSpaceError::EmptyBusemannPrototypes),
+    };
+
+    let second = if scores.len() > 1 {
+        Some(scores[1].clone())
+    } else {
+        None
+    };
+
+    let margin = match &second {
+        Some(second_score) => second_score.score - best.score,
+        None => config.promotion_margin.max(1.0),
+    };
+
+    let entropy = normalized_probability_entropy(&scores, config.eps);
+    let radial_strength = x_norm_sq.sqrt().clamp(0.0, 1.0);
+
+    let clean_margin = if margin.is_finite() && margin > 0.0 {
+        margin
+    } else {
+        0.0
+    };
+
+    let commitment_confidence = clean_margin / (1.0 + clean_margin);
+
+    let weight_sum = config.commitment_weight + config.radial_weight;
+    let classification_confidence = if weight_sum <= config.eps {
+        commitment_confidence
+    } else {
+        ((config.commitment_weight * commitment_confidence)
+            + (config.radial_weight * radial_strength))
+            / weight_sum
+    }
+    .clamp(0.0, 1.0);
+
+    let promotion_ready =
+        clean_margin >= config.promotion_margin && entropy <= config.ambiguity_threshold;
+
+    let keep = config.top_k.min(scores.len());
+    let top_k_scores = scores.into_iter().take(keep).collect::<Vec<_>>();
+
+    Ok(BusemannSignature {
+        family: config.family,
+
+        top_prototype_id: best.prototype_id,
+        top_score: best.score,
+        top_probability: best.probability,
+
+        second_prototype_id: second.as_ref().map(|s| s.prototype_id),
+        second_score: second.as_ref().map(|s| s.score),
+        second_probability: second.as_ref().map(|s| s.probability),
+
+        margin: clean_margin,
+        entropy,
+        ambiguity_score: entropy,
+        classification_confidence,
+        promotion_ready,
+        radial_strength,
+
+        top_k_scores,
+    })
+}
+
+fn busemann_score_unit_ball(
+    x_unit: &[f32],
+    x_norm_sq: f32,
+    prototype: &BusemannPrototype,
+    eps: f32,
+) -> HybridSpaceResult<f32> {
+    let mut prototype_norm_sq = 0.0_f32;
+
+    for value in &prototype.direction {
+        if !value.is_finite() {
+            return Err(HybridSpaceError::InvalidBusemannPrototype {
+                prototype_id: prototype.prototype_id,
+                reason: "prototype direction contains non-finite coordinate",
+            });
+        }
+
+        prototype_norm_sq += *value * *value;
+    }
+
+    if !(prototype_norm_sq.is_finite() && prototype_norm_sq > eps) {
+        return Err(HybridSpaceError::InvalidBusemannPrototype {
+            prototype_id: prototype.prototype_id,
+            reason: "prototype direction has zero/invalid norm",
+        });
+    }
+
+    let inv_norm = 1.0 / prototype_norm_sq.sqrt();
+
+    let mut dist_sq = 0.0_f32;
+
+    for (x, p) in x_unit.iter().zip(prototype.direction.iter()) {
+        let p_unit = *p * inv_norm;
+        let delta = p_unit - *x;
+        dist_sq += delta * delta;
+    }
+
+    let numerator = dist_sq.max(eps);
+    let denominator = (1.0 - x_norm_sq).max(eps);
+
+    let score = (numerator / denominator).ln();
+
+    if !score.is_finite() {
+        return Err(HybridSpaceError::InvalidBusemannPrototype {
+            prototype_id: prototype.prototype_id,
+            reason: "Busemann score is non-finite",
+        });
+    }
+
+    Ok(score)
+}
+
+fn apply_busemann_probabilities(
+    scores: &mut [BusemannPrototypeScore],
+    commitment_weight: f32,
+    eps: f32,
+) -> HybridSpaceResult<()> {
+    if scores.is_empty() {
+        return Err(HybridSpaceError::EmptyBusemannPrototypes);
+    }
+
+    let mut max_logit = f32::NEG_INFINITY;
+
+    for score in scores.iter() {
+        if !score.score.is_finite() {
+            return Err(HybridSpaceError::InvalidBusemannPrototype {
+                prototype_id: score.prototype_id,
+                reason: "prototype score is non-finite",
+            });
+        }
+
+        // Lower Busemann score means stronger commitment, so negate.
+        let logit = -commitment_weight * score.score;
+
+        if logit > max_logit {
+            max_logit = logit;
+        }
+    }
+
+    let mut denom = 0.0_f32;
+
+    for score in scores.iter() {
+        let logit = -commitment_weight * score.score;
+        denom += (logit - max_logit).exp();
+    }
+
+    if !(denom.is_finite() && denom > eps) {
+        let uniform = 1.0 / scores.len() as f32;
+        for score in scores.iter_mut() {
+            score.probability = uniform;
+        }
+        return Ok(());
+    }
+
+    for score in scores.iter_mut() {
+        let logit = -commitment_weight * score.score;
+        score.probability = ((logit - max_logit).exp() / denom).clamp(0.0, 1.0);
+    }
+
+    Ok(())
+}
+
+fn normalized_probability_entropy(scores: &[BusemannPrototypeScore], eps: f32) -> f32 {
+    if scores.len() <= 1 {
+        return 0.0;
+    }
+
+    let mut entropy = 0.0_f32;
+
+    for score in scores {
+        let p = score.probability.max(eps).min(1.0);
+        entropy -= p * p.ln();
+    }
+
+    let max_entropy = (scores.len() as f32).ln();
+
+    if max_entropy <= eps {
+        0.0
+    } else {
+        (entropy / max_entropy).clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod busemann_tests {
+    use super::*;
+
+    fn proto(id: u64, x: f32, y: f32) -> BusemannPrototype {
+        BusemannPrototype {
+            prototype_id: id,
+            family: PrototypeFamily::EntityKind,
+            direction: vec![x, y],
+        }
+    }
+
+    #[test]
+    fn busemann_prefers_matching_boundary_direction() -> HybridSpaceResult<()> {
+        let config = BusemannConfig {
+            family: PrototypeFamily::EntityKind,
+            commitment_weight: 2.0,
+            radial_weight: 0.0,
+            ambiguity_threshold: 0.6,
+            promotion_margin: 0.25,
+            top_k: 2,
+            eps: DEFAULT_EPS,
+        };
+
+        let point = vec![0.45, 0.0];
+
+        let prototypes = vec![
+            proto(1, 1.0, 0.0),
+            proto(2, -1.0, 0.0),
+        ];
+
+        let sig = busemann_signature(&point, 1.0, &prototypes, config)?;
+
+        assert_eq!(sig.top_prototype_id, 1);
+        assert!(sig.margin > 0.25);
+        assert!(sig.top_probability > sig.second_probability.unwrap_or(0.0));
+
+        Ok(())
+    }
+
+    #[test]
+    fn busemann_center_is_ambiguous_between_opposites() -> HybridSpaceResult<()> {
+        let config = BusemannConfig {
+            family: PrototypeFamily::EntityKind,
+            commitment_weight: 2.0,
+            radial_weight: 0.0,
+            ambiguity_threshold: 0.4,
+            promotion_margin: 0.25,
+            top_k: 2,
+            eps: DEFAULT_EPS,
+        };
+
+        let point = vec![0.0, 0.0];
+
+        let prototypes = vec![
+            proto(1, 1.0, 0.0),
+            proto(2, -1.0, 0.0),
+        ];
+
+        let sig = busemann_signature(&point, 1.0, &prototypes, config)?;
+
+        assert!(sig.margin < 0.01);
+        assert!(sig.entropy > 0.95);
+        assert!(!sig.promotion_ready);
+
+        Ok(())
+    }
+
+    #[test]
+    fn busemann_rejects_point_outside_scaled_ball() {
+        let config = BusemannConfig::default();
+
+        let point = vec![1.2, 0.0];
+
+        let prototypes = vec![
+            proto(1, 1.0, 0.0),
+            proto(2, -1.0, 0.0),
+        ];
+
+        let err = busemann_signature(&point, 1.0, &prototypes, config);
+
+        assert!(matches!(
+            err,
+            Err(HybridSpaceError::BusemannPointOutsideBall { .. })
+        ));
+    }
+
+    #[test]
+    fn busemann_rejects_wrong_family() {
+        let config = BusemannConfig {
+            family: PrototypeFamily::RelationFamily,
+            ..BusemannConfig::default()
+        };
+
+        let point = vec![0.2, 0.0];
+        let prototypes = vec![proto(1, 1.0, 0.0)];
+
+        let err = busemann_signature(&point, 1.0, &prototypes, config);
+
+        assert!(matches!(
+            err,
+            Err(HybridSpaceError::BusemannPrototypeFamilyMismatch { .. })
+        ));
+    }
 }
 
 #[cfg(test)]

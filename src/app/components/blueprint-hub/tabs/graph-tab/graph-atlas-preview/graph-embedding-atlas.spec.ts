@@ -451,6 +451,85 @@ describe('embedding atlas projection', () => {
         expect(Number(byId.get('embed:entity:kai')?.['shellRadius'])).toBeGreaterThan(Number(byId.get('embed:anchor:a1')?.['shellRadius']));
     });
 
+    it('uses folder territories as hierarchy cap regions for notes and descendants', () => {
+        const folderFields = { folderId: 'folder-narrative', folderLabel: 'New Narrative', folderKind: 'NARRATIVE' };
+        const targets = [
+            { id: 'embed:note:note-1', kind: 'note', sourceId: 'note-1', noteId: 'note-1', ...folderFields, label: 'Untitled Note', text: 'chapter text', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionTier: 0 },
+            { id: 'embed:note:note-2', kind: 'note', sourceId: 'note-2', noteId: 'note-2', ...folderFields, label: '6 Chapter', text: 'chapter text', evidenceIds: [], lane: 'document_spine', structuralRole: 'root', admissionTier: 0 },
+            { id: 'embed:chunk:chunk-1', kind: 'chunk', sourceId: 'chunk-1', noteId: 'note-1', chunkId: 'chunk-1', ...folderFields, label: 'Chunk 1', text: 'sharp chunk', evidenceIds: [], lane: 'chunk_spine', structuralRole: 'spine', admissionTier: 0, parentIds: ['embed:note:note-1'] },
+            { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', ...folderFields, label: 'Kai', text: 'mentions:4', evidenceIds: ['a1'], lane: 'entity_anchor', structuralRole: 'child', admissionTier: 1, parentIds: ['embed:chunk:chunk-1'] },
+        ] as const;
+        const posts = targets.map((target, index) => overloadedHopfPost(target.id, 'embed:note:note-1', index / targets.length, target.kind));
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-folder-caps',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1', 'note-2'],
+            builtAt: 1,
+            chunks: [{ id: 'chunk-1', noteId: 'note-1', start: 0, end: 20, ordinal: 0, source: 'dynamic-chunking' }],
+            mentions: [],
+            entityAnchors: [{
+                id: 'a1',
+                noteId: 'note-1',
+                chunkId: 'chunk-1',
+                surface: 'Kai',
+                sourceStart: 0,
+                sourceEnd: 3,
+                source: 'dynamic-ner',
+                confidence: 0.92,
+                entityId: 'kai',
+                status: 'accepted',
+                generation: 1,
+            }],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [...targets],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [],
+            counters: null as any,
+            embeddingGraphPostProcess: {
+                schemaVersion: 'phoenix-embedding-graph-postprocess/v1',
+                targetCount: targets.length,
+                vectorDimensions: 384,
+                clusters: [],
+                productTopologyRegions: posts.map((post) => post.productTopologyRegion),
+                targets: posts,
+                backboneEdges: [],
+                bridgeEdges: [],
+                outlierTargetIds: [],
+                metrics: {
+                    clusterCount: 1,
+                    singletonCount: 0,
+                    largestClusterSize: targets.length,
+                    largestClusterRatio: 1,
+                    backboneEdgeCount: 0,
+                    bridgeEdgeCount: 0,
+                    outlierCount: 0,
+                    maxHubScore: 0.8,
+                    meanNeighborCount: 1,
+                },
+            },
+        }, 'lorentz');
+
+        for (const node of atlas.nodes) {
+            expect(node.metadata?.folderId).toBe('folder-narrative');
+            expect(node.metadata?.lorentz).toMatchObject({ capId: 'folder:folder-narrative' });
+        }
+        const note = atlas.nodes.find((node) => node.id === 'embed:note:note-1')?.metadata?.lorentz as Record<string, unknown>;
+        const chunk = atlas.nodes.find((node) => node.id === 'embed:chunk:chunk-1')?.metadata?.lorentz as Record<string, unknown>;
+        const entity = atlas.nodes.find((node) => node.id === 'embed:entity:kai')?.metadata?.lorentz as Record<string, unknown>;
+        expect(Number(note['shellRadius'])).toBeGreaterThan(Number(chunk['shellRadius']));
+        expect(Number(chunk['shellRadius'])).toBeGreaterThan(Number(entity['shellRadius']));
+    });
+
     it('carries graph-rebuild targets into Siegel-Finsler metadata', () => {
         const atlas = buildGraphRebuildEmbeddingAtlas({
             schemaVersion: 'phoenix-graph-rebuild/v1',

@@ -187,6 +187,10 @@ export interface GraphRebuildEmbeddingTarget {
     sourceId: string;
     noteId?: string;
     chunkId?: string;
+    folderId?: string;
+    folderLabel?: string;
+    folderKind?: string;
+    folderParentId?: string;
     entityId?: string;
     entityKind?: string;
     label: string;
@@ -643,6 +647,7 @@ export interface GraphRebuildBuildTimings {
     occurrenceLoadMs: number;
     chunkLoadMs: number;
     noteTextLoadMs: number;
+    noteFolderLoadMs: number;
     dbLoadMs: number;
     occurrenceRecoverMs: number;
     snapshotBuildMs: number;
@@ -792,6 +797,7 @@ export interface BuildGraphRebuildSnapshotInput {
     scopeKind: GraphRebuildScopeKind;
     scopeId: string;
     noteIds?: string[];
+    noteFolders?: Record<string, GraphRebuildNoteFolderContext>;
     entities: RegisteredEntity[];
     occurrences: EntityOccurrence[];
     chunks?: GraphRebuildChunk[];
@@ -802,4 +808,14 @@ export interface BuildGraphRebuildSnapshotInput {
     embeddingStagePolicy?: GraphIndexEmbeddingStagePolicy;
     candidateCount?: number;
     builtAt?: number;
+}
+
+export interface GraphRebuildNoteFolderContext {
+    folderId: string;
+    folderLabel: string;
+    folderKind?: string;
+    folderParentId?: string;
+    narrativeId?: string;
+    isNarrativeRoot?: boolean;
+    isTypedRoot?: boolean;
 }

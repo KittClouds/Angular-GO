@@ -17,6 +17,91 @@ export type GalaxyNodeShapeMode = 'atom' | 'halo' | 'sphere';
 export type GalaxyLayoutMode = 'single' | 'multiGalaxy' | 'hybridSpace' | 'hopfProjection' | 'lorentzTree' | 'productManifold' | 'siegelFinsler';
 export type GalaxyEmbeddingTopologyMode = 'off' | 'clusters' | 'regions' | 'lanes' | 'medoids' | 'outliers' | 'backbone' | 'bridges';
 
+export type GalaxyHybridInteriorMode = 'busemannCommitment';
+
+export type GalaxyPrototypeFamily =
+    | 'EntityKind'
+    | 'RelationFamily'
+    | 'EvidenceAuthority'
+    | 'GraphStage'
+    | 'ConceptDomain';
+
+export interface GalaxyVec3 {
+    x: number;
+    y: number;
+    z: number;
+}
+
+export interface GalaxyBusemannPrototypeScore {
+    prototypeId: string;
+    family: GalaxyPrototypeFamily;
+    score: number;
+    probability: number;
+}
+
+export interface GalaxyBusemannSignature {
+    family: GalaxyPrototypeFamily;
+
+    topPrototypeId: string;
+    topScore: number;
+    topProbability: number;
+
+    secondPrototypeId?: string | null;
+    secondScore?: number | null;
+    secondProbability?: number | null;
+
+    margin: number;
+    entropy: number;
+    ambiguityScore: number;
+    classificationConfidence: number;
+    promotionReady: boolean;
+    radialStrength: number;
+
+    topKScores?: GalaxyBusemannPrototypeScore[];
+}
+
+export interface GalaxyBusemannPrototype {
+    prototypeId: string;
+    family: GalaxyPrototypeFamily;
+    label: string;
+
+    /**
+     * Unit-ish boundary direction on the hybrid shell.
+     * Renderer normalizes this defensively.
+     */
+    direction: GalaxyVec3;
+
+    colorKind?: string;
+}
+
+export interface GalaxyHybridInteriorState {
+    mode: GalaxyHybridInteriorMode;
+
+    /**
+     * Preferred: backend-supplied Poincare/interior render coordinate.
+     * If absent, frontend approximates from prototype direction + confidence.
+     */
+    point?: GalaxyVec3;
+
+    /**
+     * Optional semantic direction, useful for ambiguous nodes.
+     */
+    surfaceDirection?: GalaxyVec3;
+
+    signature?: GalaxyBusemannSignature;
+}
+
+export interface GalaxyBusemannHorosphereSpec {
+    prototypeId: string;
+    family: string;
+    label: string;
+    tau: number;
+    center: GalaxyVec3;
+    radius: number;
+    opacity: number;
+    colorKind?: string;
+}
+
 export interface GalaxyRenderSettings {
     labelMode: GalaxyLabelMode;
     edgeMode: GalaxyEdgeMode;
@@ -41,6 +126,21 @@ export interface GalaxyRenderSettings {
     layoutMode: GalaxyLayoutMode;
     hybridShellVisible: boolean;
     hybridShellOpacity: number;
+
+    /**
+     * New hybrid interior rendering controls.
+     * Still uses layoutMode === 'hybridSpace'.
+     */
+    hybridInteriorMode?: GalaxyHybridInteriorMode;
+    hybridInteriorVisible?: boolean;
+    hybridHorospheresVisible?: boolean;
+    hybridPrototypeRaysVisible?: boolean;
+    hybridAmbiguityHalos?: boolean;
+    hybridPromotionPulse?: boolean;
+    hybridHorosphereOpacity?: number;
+    hybridInteriorOpacity?: number;
+    hybridInteriorScale?: number;
+
     hopfSpaceVisible: boolean;
     hopfSpaceIntensity: number;
     lorentzSpaceVisible: boolean;

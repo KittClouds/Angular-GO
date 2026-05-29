@@ -42,6 +42,10 @@ type HopfBaseAssignment = {
 type TargetHierarchyContext = {
     noteId?: string;
     chunkId?: string;
+    folderId?: string;
+    folderLabel?: string;
+    folderKind?: string;
+    folderParentId?: string;
 };
 
 export function buildGraphRebuildEmbeddingAtlas(
@@ -196,20 +200,24 @@ function hydrateTargetEntityKind(
 
 function buildTargetHierarchyContext(snapshot: GraphRebuildSnapshot): Map<string, TargetHierarchyContext> {
     const contexts = new Map<string, TargetHierarchyContext>();
+    const targetById = new Map(snapshot.embeddingTargets.map((target) => [target.id, target]));
     for (const noteId of snapshot.noteIds || []) {
-        contexts.set(`embed:note:${noteId}`, { noteId });
-        contexts.set(`embed:structure-root:${noteId}:document-structure`, { noteId });
-        contexts.set(`embed:structure-root:${noteId}:identity`, { noteId });
-        contexts.set(`embed:structure-root:${noteId}:temporal`, { noteId });
-        contexts.set(`embed:structure-root:${noteId}:causal`, { noteId });
-        contexts.set(`embed:structure-root:${noteId}:evidence`, { noteId });
+        const context = targetHierarchyBase(targetById.get(`embed:note:${noteId}`), { noteId });
+        contexts.set(`embed:note:${noteId}`, context);
+        contexts.set(`embed:structure-root:${noteId}:document-structure`, targetHierarchyBase(targetById.get(`embed:structure-root:${noteId}:document-structure`), context));
+        contexts.set(`embed:structure-root:${noteId}:identity`, targetHierarchyBase(targetById.get(`embed:structure-root:${noteId}:identity`), context));
+        contexts.set(`embed:structure-root:${noteId}:temporal`, targetHierarchyBase(targetById.get(`embed:structure-root:${noteId}:temporal`), context));
+        contexts.set(`embed:structure-root:${noteId}:causal`, targetHierarchyBase(targetById.get(`embed:structure-root:${noteId}:causal`), context));
+        contexts.set(`embed:structure-root:${noteId}:evidence`, targetHierarchyBase(targetById.get(`embed:structure-root:${noteId}:evidence`), context));
     }
     for (const chunk of snapshot.chunks || []) {
-        contexts.set(`embed:chunk:${chunk.id}`, { noteId: chunk.noteId, chunkId: chunk.id });
+        const fallback = contexts.get(`embed:note:${chunk.noteId}`) || { noteId: chunk.noteId };
+        contexts.set(`embed:chunk:${chunk.id}`, targetHierarchyBase(targetById.get(`embed:chunk:${chunk.id}`), { ...fallback, chunkId: chunk.id }));
     }
     const entityContexts = new Map<string, { confidence: number; context: TargetHierarchyContext }>();
     for (const anchor of snapshot.entityAnchors || []) {
-        const context = { noteId: anchor.noteId, chunkId: anchor.chunkId };
+        const fallback = contexts.get(`embed:chunk:${anchor.chunkId}`) || contexts.get(`embed:note:${anchor.noteId}`) || { noteId: anchor.noteId };
+        const context = targetHierarchyBase(targetById.get(`embed:anchor:${anchor.id}`), { ...fallback, noteId: anchor.noteId, chunkId: anchor.chunkId });
         contexts.set(`embed:anchor:${anchor.id}`, context);
         if (!anchor.entityId) continue;
         const existing = entityContexts.get(anchor.entityId);
@@ -221,6 +229,21 @@ function buildTargetHierarchyContext(snapshot: GraphRebuildSnapshot): Map<string
         contexts.set(`embed:entity:${entityId}`, value.context);
     }
     return contexts;
+}
+
+function targetHierarchyBase(
+    target: GraphRebuildEmbeddingTarget | undefined,
+    fallback: TargetHierarchyContext,
+): TargetHierarchyContext {
+    return {
+        ...fallback,
+        noteId: target?.noteId || fallback.noteId,
+        chunkId: target?.chunkId || fallback.chunkId,
+        folderId: target?.folderId || fallback.folderId,
+        folderLabel: target?.folderLabel || fallback.folderLabel,
+        folderKind: target?.folderKind || fallback.folderKind,
+        folderParentId: target?.folderParentId || fallback.folderParentId,
+    };
 }
 
 function targetNode(
@@ -266,6 +289,10 @@ function targetNode(
             targetConfidence: targetConfidence(target),
             noteId: target.noteId || hierarchyContext?.noteId,
             chunkId: target.chunkId || hierarchyContext?.chunkId,
+            folderId: target.folderId || hierarchyContext?.folderId,
+            folderLabel: target.folderLabel || hierarchyContext?.folderLabel,
+            folderKind: target.folderKind || hierarchyContext?.folderKind,
+            folderParentId: target.folderParentId || hierarchyContext?.folderParentId,
             sourceEntityId: target.entityId,
             embeddingClusterId: post?.clusterId,
             embeddingClusterRole: post?.clusterRole,
@@ -547,6 +574,8 @@ function productLorentzMetadata(
 }
 
 function productCapId(target: GraphRebuildEmbeddingTarget, fallback: string, hierarchyContext?: TargetHierarchyContext): string {
+    const folderId = target.folderId || hierarchyContext?.folderId;
+    if (folderId) return `folder:${folderId}`;
     const noteId = target.noteId || hierarchyContext?.noteId;
     if (noteId) return `document:${noteId}`;
     return fallback;

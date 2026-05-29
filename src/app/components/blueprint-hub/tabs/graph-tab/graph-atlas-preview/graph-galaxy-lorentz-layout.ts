@@ -183,7 +183,8 @@ function hierarchyDirection(info: HierarchyInfo, cap: CapInfo): Vec3 {
     const frame = tangentFrame(cap.center);
     const orbit = add(scale(frame.a, Math.cos(info.phase * TAU)), scale(frame.b, Math.sin(info.phase * TAU)));
     const spread = clamp(0.08 + info.ambiguity * 0.28 + (info.role === 'bridge' ? 0.08 : 0), 0.06, 0.42);
-    let shaped = normalize(add(add(scale(info.direction, 0.58), scale(cap.center, 0.34)), add(scale(lane, 0.18), scale(orbit, spread))), cap.center);
+    const base = normalize(add(add(scale(info.direction, 0.53), scale(cap.center, 0.31)), scale(lane, 0.16)), cap.center);
+    let shaped = normalize(add(scale(base, 1 - spread), scale(orbit, spread)), cap.center);
     if (info.lane === 'temporal') {
         shaped = normalize(add(scale(shaped, 0.56), scale(temporalRingDirection(info.phase), 0.44)), shaped);
     } else if (info.lane === 'causal') {
@@ -195,7 +196,7 @@ function hierarchyDirection(info: HierarchyInfo, cap: CapInfo): Vec3 {
 }
 
 function relaxCapLinks(nodes: GalaxyNode[], links: GalaxyEdge[], infos: HierarchyInfo[]): void {
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 8; pass++) {
         for (const link of links) {
             const source = nodes[link.source];
             const target = nodes[link.target];
@@ -489,6 +490,8 @@ function capIdFor(
 
 function structuralCapIdFor(node: GalaxyNode, lane: string): string {
     const metadata = node.entity.metadata || {};
+    const folderId = firstText(metadata['folderId'], metadata['folderCapId']);
+    if (folderId) return `folder:${folderId}`;
     const noteId = firstText(metadata['noteId'], /note|document|doc/.test(String(metadata['sourceType'] || node.entity.kind || '').toLowerCase()) ? metadata['sourceId'] : '');
     if (noteId) return `document:${noteId}`;
     if (lane === 'document' || lane === 'documentStructure') return 'document:root';

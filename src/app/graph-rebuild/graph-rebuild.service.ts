@@ -3,6 +3,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import {
     db,
     type EntityOccurrence,
+    type Folder,
     type Note,
     type NoteBlockProjection,
 } from '../lib/dexie/db';
@@ -18,6 +19,7 @@ import type {
     GraphRebuildBuildTimings,
     GraphRebuildChunk,
     GraphRebuildEmbeddingProfile,
+    GraphRebuildNoteFolderContext,
     GraphRebuildRelationshipHint,
     GraphRebuildScopeKind,
     GraphRebuildSnapshot,
@@ -79,6 +81,9 @@ export class GraphRebuildService {
             const noteTexts = await timedAsync(timings, 'noteTextLoadMs', () =>
                 this.loadNoteTexts(request.noteIds, persistedOccurrences)
             );
+            const noteFolders = await timedAsync(timings, 'noteFolderLoadMs', () =>
+                this.loadNoteFolderContexts(request.noteIds, persistedOccurrences)
+            );
             const recoverStarted = performance.now();
             const occurrences = mergeGraphRebuildOccurrences(
                 persistedOccurrences,
@@ -92,6 +97,7 @@ export class GraphRebuildService {
                 entities: request.entities,
                 occurrences,
                 chunks,
+                noteFolders,
                 noteTexts,
                 relationshipHints: request.relationshipHints,
                 embeddingProfile: request.embeddingProfile,
@@ -207,6 +213,25 @@ export class GraphRebuildService {
         const scopedNoteIds = noteIds.length ? noteIds : [...new Set(occurrences.map((row) => row.noteId))];
         const notes = (await Promise.all(scopedNoteIds.map((noteId) => db.notes.get(noteId)))).filter((note): note is Note => !!note);
         return Object.fromEntries(notes.map((note) => [note.id, notePlainText(note)]));
+    }
+
+    private async loadNoteFolderContexts(
+        noteIds: string[],
+        occurrences: EntityOccurrence[],
+    ): Promise<Record<string, GraphRebuildNoteFolderContext>> {
+        if (!canUseNotesTable()) return {};
+        const scopedNoteIds = noteIds.length ? noteIds : [...new Set(occurrences.map((row) => row.noteId))];
+        if (!scopedNoteIds.length) return {};
+        const notes = (await Promise.all(scopedNoteIds.map((noteId) => db.notes.get(noteId)))).filter((note): note is Note => !!note);
+        const folderIds = [...new Set(notes.map((note) => note.folderId || '').filter(Boolean))];
+        const folders = await Promise.all(folderIds.map((folderId) => db.folders.get(folderId)));
+        const folderById = new Map(folders.filter((folder): folder is Folder => !!folder).map((folder) => [folder.id, folder]));
+        const out: Record<string, GraphRebuildNoteFolderContext> = {};
+        for (const note of notes) {
+            const folder = note.folderId ? folderById.get(note.folderId) : undefined;
+            out[note.id] = folderContextForNote(note, folder);
+        }
+        return out;
     }
 
     private async loadChunks(noteIds: string[], occurrences: EntityOccurrence[]): Promise<GraphRebuildChunk[]> {
@@ -418,6 +443,7 @@ function emptyBuildTimings(): GraphRebuildBuildTimings {
         occurrenceLoadMs: 0,
         chunkLoadMs: 0,
         noteTextLoadMs: 0,
+        noteFolderLoadMs: 0,
         dbLoadMs: 0,
         occurrenceRecoverMs: 0,
         snapshotBuildMs: 0,
@@ -459,9 +485,29 @@ function timedSync<T>(
 }
 
 function finalizeBuildTimings(timings: GraphRebuildBuildTimings, totalStarted: number): void {
-    timings.dbLoadMs = timings.occurrenceLoadMs + timings.chunkLoadMs + timings.noteTextLoadMs;
+    timings.dbLoadMs = timings.occurrenceLoadMs + timings.chunkLoadMs + timings.noteTextLoadMs + timings.noteFolderLoadMs;
     timings.dbOpsMs = timings.dbLoadMs + timings.snapshotPersistMs;
     timings.totalMs = elapsedMs(totalStarted);
+}
+
+function folderContextForNote(note: Note, folder?: Folder): GraphRebuildNoteFolderContext {
+    if (!folder) {
+        const fallbackId = note.narrativeId ? `narrative:${note.narrativeId}` : 'global';
+        return {
+            folderId: fallbackId,
+            folderLabel: note.narrativeId ? 'Narrative' : 'Global',
+            folderKind: note.narrativeId ? 'narrative' : 'global',
+        };
+    }
+    return {
+        folderId: folder.id,
+        folderLabel: folder.name || folder.entityLabel || folder.id,
+        folderKind: folder.entityKind || folder.entitySubtype || (folder.isNarrativeRoot ? 'narrative' : 'folder'),
+        folderParentId: folder.parentId || undefined,
+        narrativeId: folder.narrativeId || note.narrativeId || undefined,
+        isNarrativeRoot: folder.isNarrativeRoot || undefined,
+        isTypedRoot: folder.isTypedRoot || undefined,
+    };
 }
 
 function elapsedMs(started: number): number {

@@ -42,7 +42,16 @@ export function buildGraphRebuildEmbeddingTargetPlan(
     const anchorsByChunkId = groupAnchorsByChunk(anchors);
     const eventById = new Map(events.map((event) => [event.id, event]));
     const noteIds = input.noteIds?.length ? input.noteIds : unique([...chunks.map((chunk) => chunk.noteId), ...anchors.map((anchor) => anchor.noteId)]);
-    for (const noteId of noteIds) targets.push({ id: `embed:note:${noteId}`, kind: 'note', sourceId: noteId, noteId, label: `Note ${noteId}`, text: noteText(input, noteId), evidenceIds: [] });
+    for (const noteId of noteIds) targets.push({
+        id: `embed:note:${noteId}`,
+        kind: 'note',
+        sourceId: noteId,
+        noteId,
+        ...folderFields(input, noteId),
+        label: `Note ${noteId}`,
+        text: noteText(input, noteId),
+        evidenceIds: [],
+    });
     for (const noteId of noteIds) {
         for (const root of STRUCTURAL_ROOTS) {
             targets.push({
@@ -50,6 +59,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
                 kind: 'structureRoot',
                 sourceId: `${noteId}:${root.key}`,
                 noteId,
+                ...folderFields(input, noteId),
                 label: root.label,
                 text: `structure_root:${root.key} note:${noteId} ${root.text}`,
                 evidenceIds: [],
@@ -63,6 +73,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
         sourceId: chunk.id,
         noteId: chunk.noteId,
         chunkId: chunk.id,
+        ...folderFields(input, chunk.noteId),
         label: `Chunk ${chunk.ordinal + 1}`,
         text: chunkText(input, chunk, anchorsByChunkId.get(chunk.id) || [], nodeByEntityId),
         evidenceIds: [],
@@ -76,6 +87,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
             sourceId: node.entityId,
             entityId: node.entityId,
             entityKind: node.kind,
+            ...entityFolderFields(input, entityAnchors),
             label: node.label,
             text: entityText(input, node, entityAnchors),
             evidenceIds: node.anchorIds,
@@ -90,6 +102,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
         chunkId: anchor.chunkId,
         entityId: anchor.entityId,
         entityKind: nodeByEntityId.get(anchor.entityId)?.kind,
+        ...folderFields(input, anchor.noteId),
         label: anchor.surface,
         text: anchorText(input, anchor, nodeByEntityId.get(anchor.entityId)),
         evidenceIds: [anchor.id],
@@ -103,6 +116,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
             id: `embed:graph-fact:${relationship.id}`,
             kind: 'graphFact',
             sourceId: relationship.id,
+            ...relationshipFolderFields(input, relationship, anchorById),
             label: `${sourceLabel} ${relationship.relationType} ${targetLabel}`,
             text: relationshipText(input, relationship, nodeByEntityId, anchorById),
             evidenceIds: relationship.evidenceAnchorIds,
@@ -116,6 +130,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
         noteId: event.noteId,
         chunkId: event.chunkId,
         entityId: event.entityIds[0],
+        ...folderFields(input, event.noteId),
         label: event.label,
         text: eventText(input, event, nodeByEntityId, anchorById),
         evidenceIds: event.evidenceAnchorIds,
@@ -129,6 +144,7 @@ export function buildGraphRebuildEmbeddingTargetPlan(
         sourceId: state.id,
         noteId: state.noteId,
         entityId: state.entityId,
+        ...folderFields(input, state.noteId),
         label: state.key,
         text: memoryText(input, state, nodeByEntityId, anchorById),
         evidenceIds: state.evidenceIds,
@@ -166,6 +182,7 @@ function temporalTarget(
         kind,
         sourceId: edge.id,
         noteId: source?.noteId || target?.noteId,
+        ...folderFields(input, source?.noteId || target?.noteId || noteIdsFromEvidence(edge.evidenceIds, anchorById)[0]),
         label: edge.relationType,
         text: limitText([
             `${source?.label || edge.sourceId} ${edge.relationType} ${target?.label || edge.targetId}`,
@@ -183,7 +200,9 @@ function temporalTarget(
 
 function noteText(input: BuildGraphRebuildSnapshotInput, noteId: string): string {
     const text = input.noteTexts?.[noteId]?.trim();
-    return text ? text.slice(0, 12000) : `note:${noteId}`;
+    const folder = input.noteFolders?.[noteId];
+    const prefix = folder?.folderLabel ? `folder:${folder.folderLabel}\n` : '';
+    return text ? `${prefix}${text.slice(0, 12000)}` : `${prefix}note:${noteId}`;
 }
 
 function chunkText(
@@ -285,6 +304,34 @@ function memoryText(
         `memory_key:${state.key}`,
         ...evidenceContexts(input, state.evidenceIds, anchorById, 3).map((context) => `evidence_context:${context}`),
     ].filter(Boolean).join('\n'), 1400);
+}
+
+function folderFields(input: BuildGraphRebuildSnapshotInput, noteId?: string): Pick<GraphRebuildEmbeddingTarget, 'folderId' | 'folderLabel' | 'folderKind' | 'folderParentId'> {
+    if (!noteId) return {};
+    const folder = input.noteFolders?.[noteId];
+    if (!folder?.folderId) return {};
+    return {
+        folderId: folder.folderId,
+        folderLabel: folder.folderLabel,
+        folderKind: folder.folderKind,
+        folderParentId: folder.folderParentId,
+    };
+}
+
+function entityFolderFields(
+    input: BuildGraphRebuildSnapshotInput,
+    anchors: GraphRebuildEntityAnchor[],
+): Pick<GraphRebuildEmbeddingTarget, 'folderId' | 'folderLabel' | 'folderKind' | 'folderParentId'> {
+    const best = [...anchors].sort(anchorOrder)[0];
+    return folderFields(input, best?.noteId);
+}
+
+function relationshipFolderFields(
+    input: BuildGraphRebuildSnapshotInput,
+    relationship: GraphRebuildRelationship,
+    anchorById: Map<string, GraphRebuildEntityAnchor>,
+): Pick<GraphRebuildEmbeddingTarget, 'folderId' | 'folderLabel' | 'folderKind' | 'folderParentId'> {
+    return folderFields(input, noteIdsFromEvidence(relationship.evidenceAnchorIds, anchorById)[0]);
 }
 
 function unique<T>(values: T[]): T[] {
