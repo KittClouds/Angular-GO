@@ -7,8 +7,8 @@ use super::ids::{
 };
 use super::projection::ProjectionProvenance;
 use super::types::{
-    EvidenceAnchor, EvidenceKind, FactBundle, FactLane, FactRole, GraphCompilerOutput,
-    ProjectedGraphEdge, RelationFact,
+    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole,
+    GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
 };
 use crate::types::GraphRelationship;
 
@@ -58,12 +58,45 @@ fn stage_bundle(
     output.bundles.push(FactBundle {
         id,
         lane,
+        bundle_kind: relationship_bundle_kind(relationship, evidence_ids.len()),
+        group_key: relationship_group_key(relationship),
         predicate: relationship.relation_type.clone(),
         source_record_id: relationship.id.clone(),
         status: relationship.status.clone(),
         evidence_ids,
         confidence: relationship.confidence,
     });
+}
+
+fn relationship_bundle_kind(
+    relationship: &GraphRelationship,
+    evidence_count: usize,
+) -> EvidenceBundleKind {
+    let relation_type = relationship.relation_type.to_ascii_lowercase();
+    if relation_type.contains("semantic") || relation_type.contains("similar") {
+        EvidenceBundleKind::SemanticSimilarity
+    } else if relation_type.contains("shadow") || relation_type.contains("identity") {
+        EvidenceBundleKind::ShadowIdentity
+    } else if evidence_count <= 1 {
+        EvidenceBundleKind::Span
+    } else {
+        EvidenceBundleKind::Neighborhood
+    }
+}
+
+fn relationship_group_key(relationship: &GraphRelationship) -> CompactString {
+    let (left, right) = if relationship.source_entity_id <= relationship.target_entity_id {
+        (
+            &relationship.source_entity_id,
+            &relationship.target_entity_id,
+        )
+    } else {
+        (
+            &relationship.target_entity_id,
+            &relationship.source_entity_id,
+        )
+    };
+    format_compact!("{}:{}:{}", relationship.relation_type, left.0, right.0)
 }
 
 fn promote_fact(

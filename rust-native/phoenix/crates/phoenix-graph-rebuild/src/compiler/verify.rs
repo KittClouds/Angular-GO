@@ -1,6 +1,7 @@
 use compact_str::{format_compact, CompactString};
 use hashbrown::{HashMap, HashSet};
 
+use super::contracts::validate_lane_promotion_contracts;
 use super::types::{
     EvidenceAnchor, EvidenceKind, FactLane, GraphAtom, GraphAtomKind, GraphCompileCounters,
     GraphCompileReceipts, GraphCompilerOutput, GraphRootReceipt,
@@ -113,6 +114,7 @@ pub fn verify_graph_compile_output(output: &GraphCompilerOutput) -> GraphCompile
             failures.push(format_compact!("lens frame {} has no span", evidence.id));
         }
     }
+    failures.extend(validate_lane_promotion_contracts(output));
 
     GraphCompileReceipts {
         counters: GraphCompileCounters {

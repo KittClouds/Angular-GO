@@ -9,8 +9,8 @@ use serde::Deserialize;
 
 use crate::{
     build_graph_rebuild_snapshot, compile_dual_write_snapshot, compile_graph_snapshot,
-    compile_legacy_snapshot_strict, EvidenceKind, FactLane, GraphAtomKind, GraphChunk,
-    GraphCompilerInput, GraphMention, GraphRebuildInput, GraphScopeKind,
+    compile_legacy_snapshot_strict, EvidenceBundleKind, EvidenceKind, FactLane, GraphAtomKind,
+    GraphChunk, GraphCompilerInput, GraphMention, GraphRebuildInput, GraphScopeKind,
 };
 
 const PARITY_FIXTURE: &str =
@@ -137,6 +137,18 @@ fn compiles_legacy_snapshot_into_fact_graph_with_receipts() {
         .iter()
         .any(|bundle| bundle.lane == FactLane::CooccurrenceWeak));
     assert!(compiled
+        .bundles
+        .iter()
+        .all(|bundle| !bundle.group_key.is_empty()));
+    assert!(compiled.bundles.iter().any(|bundle| matches!(
+        bundle.bundle_kind,
+        EvidenceBundleKind::Span | EvidenceBundleKind::Neighborhood
+    )));
+    assert!(!compiled
+        .facts
+        .iter()
+        .any(|fact| fact.lane == FactLane::CooccurrenceWeak));
+    assert!(compiled
         .projected_edges
         .iter()
         .filter(|edge| edge.projection_kind == "legacyBinary")
@@ -231,12 +243,20 @@ fn compiles_prepared_artifacts_without_legacy_rescan() {
         confidence: 1.0,
     }];
     let mention_graph = LensMentionGraph {
-        edges: vec![LensMentionEdge {
-            left: 1,
-            right: 2,
-            kind: LensMentionEdgeKind::DependencyCoreArgument,
-            weight: 0.91,
-        }],
+        edges: vec![
+            LensMentionEdge {
+                left: 1,
+                right: 2,
+                kind: LensMentionEdgeKind::DependencyCoreArgument,
+                weight: 0.91,
+            },
+            LensMentionEdge {
+                left: 1,
+                right: 2,
+                kind: LensMentionEdgeKind::SameNormalizedSurface,
+                weight: 0.77,
+            },
+        ],
     };
     let lens_frames = vec![LensChunk {
         id: "lens-relationship-prepared".into(),
@@ -293,6 +313,22 @@ fn compiles_prepared_artifacts_without_legacy_rescan() {
         .projected_edges
         .iter()
         .any(|edge| edge.projection_kind == "mentionGraph"));
+    assert!(!compiled
+        .facts
+        .iter()
+        .any(|fact| fact.lane == FactLane::CooccurrenceWeak));
+    assert!(compiled.bundles.iter().any(|bundle| {
+        bundle.bundle_kind == EvidenceBundleKind::ShadowIdentity
+            && bundle.lane == FactLane::CooccurrenceWeak
+    }));
+    assert!(compiled
+        .bundles
+        .iter()
+        .any(|bundle| bundle.bundle_kind == EvidenceBundleKind::Frame));
+    assert!(compiled
+        .projected_edges
+        .iter()
+        .any(|edge| edge.projection_kind == "mentionGraph" && edge.source_bundle_id.is_some()));
 }
 
 #[test]

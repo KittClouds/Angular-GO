@@ -6,8 +6,8 @@ use phoenix_types::TextRange;
 
 use super::ids::mention_evidence_id;
 use super::types::{
-    EvidenceAnchor, EvidenceKind, FactLane, FactRole, GraphCompilerOutput, ProjectedGraphEdge,
-    RelationFact,
+    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole,
+    GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
 };
 
 pub(super) fn prepared_artifacts(
@@ -23,6 +23,7 @@ pub(super) fn prepared_artifacts(
     }
     for frame in lens_frames {
         lens_frame_evidence(output, evidence_seen, note_id.clone(), frame);
+        lens_frame_bundle(output, frame);
     }
     if let Some(graph) = mention_graph {
         mention_graph_facts(output, evidence_seen, graph);
@@ -102,9 +103,37 @@ fn mention_graph_facts(
         );
 
         let fact_id = format_compact!("fact:{}", source_id);
+        let lane = mention_edge_lane(edge.kind);
+        let left_evidence = ensure_mention_evidence(output, evidence_seen, edge.left);
+        let right_evidence = ensure_mention_evidence(output, evidence_seen, edge.right);
+        if lane == FactLane::CooccurrenceWeak {
+            let bundle_id = format_compact!("bundle:{}", source_id);
+            output.bundles.push(FactBundle {
+                id: bundle_id.clone(),
+                lane,
+                bundle_kind: mention_bundle_kind(edge.kind),
+                group_key: mention_group_key(edge.kind, edge.left, edge.right),
+                predicate: format_compact!("{:?}", edge.kind),
+                source_record_id: source_id,
+                status: "prepared".into(),
+                evidence_ids: vec![evidence_id],
+                confidence: edge.weight,
+            });
+            output.projected_edges.push(ProjectedGraphEdge {
+                id: format_compact!("projection:{}", bundle_id),
+                source_id: left_evidence,
+                target_id: right_evidence,
+                edge_type: format_compact!("{:?}", edge.kind),
+                projection_kind: "mentionGraph".into(),
+                source_fact_id: None,
+                source_bundle_id: Some(bundle_id),
+                confidence: edge.weight,
+            });
+            continue;
+        }
         output.facts.push(RelationFact {
             id: fact_id.clone(),
-            lane: mention_edge_lane(edge.kind),
+            lane,
             predicate: format_compact!("{:?}", edge.kind),
             source_record_id: source_id,
             status: "prepared".into(),
@@ -112,8 +141,6 @@ fn mention_graph_facts(
             confidence: edge.weight,
         });
 
-        let left_evidence = ensure_mention_evidence(output, evidence_seen, edge.left);
-        let right_evidence = ensure_mention_evidence(output, evidence_seen, edge.right);
         output.roles.push(FactRole {
             fact_id: fact_id.clone(),
             role: "leftMention".into(),
@@ -145,6 +172,21 @@ fn mention_graph_facts(
     }
 }
 
+fn lens_frame_bundle(output: &mut GraphCompilerOutput, frame: &LensChunk) {
+    let evidence_id = lens_frame_evidence_id(&frame.id);
+    output.bundles.push(FactBundle {
+        id: format_compact!("bundle:lens-frame:{}", frame.id),
+        lane: FactLane::AnchorEvidence,
+        bundle_kind: EvidenceBundleKind::Frame,
+        group_key: format_compact!("frame:{:?}:{}-{}", frame.lens, frame.start, frame.end),
+        predicate: format_compact!("LensFrame::{:?}", frame.lens),
+        source_record_id: frame.id.as_str().into(),
+        status: "prepared".into(),
+        evidence_ids: vec![evidence_id],
+        confidence: lens_confidence(frame.lens),
+    });
+}
+
 fn ensure_mention_evidence(
     output: &mut GraphCompilerOutput,
     evidence_seen: &mut HashSet<CompactString>,
@@ -164,6 +206,31 @@ fn ensure_mention_evidence(
         0.62,
     );
     evidence_id
+}
+
+fn mention_bundle_kind(kind: LensMentionEdgeKind) -> EvidenceBundleKind {
+    match kind {
+        LensMentionEdgeKind::SameNormalizedSurface => EvidenceBundleKind::ShadowIdentity,
+        LensMentionEdgeKind::NearbyRepetition => EvidenceBundleKind::Neighborhood,
+        _ => EvidenceBundleKind::SemanticSimilarity,
+    }
+}
+
+fn mention_group_key(kind: LensMentionEdgeKind, left: u64, right: u64) -> CompactString {
+    let (first, second) = if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    match kind {
+        LensMentionEdgeKind::SameNormalizedSurface => {
+            format_compact!("shadowIdentity:{}:{}", first, second)
+        }
+        LensMentionEdgeKind::NearbyRepetition => {
+            format_compact!("neighborhood:{}:{}", first, second)
+        }
+        _ => format_compact!("semanticSimilarity:{:?}:{}:{}", kind, first, second),
+    }
 }
 
 fn push_evidence(

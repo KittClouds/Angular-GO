@@ -55,6 +55,16 @@ pub enum EvidenceKind {
     MentionGraphEdge,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EvidenceBundleKind {
+    Span,
+    Frame,
+    Neighborhood,
+    SemanticSimilarity,
+    ShadowIdentity,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphAtom {
@@ -97,6 +107,8 @@ pub struct RelationFact {
 pub struct FactBundle {
     pub id: CompactString,
     pub lane: FactLane,
+    pub bundle_kind: EvidenceBundleKind,
+    pub group_key: CompactString,
     pub predicate: CompactString,
     pub source_record_id: CompactString,
     pub status: CompactString,

@@ -263,6 +263,8 @@ function bundleVertex(bundle: GraphModelV2FactBundle, styleTags: GraphModelV2Sty
                 family: bundle.family,
                 relationType: bundle.relationType,
                 lane: bundle.lane,
+                bundleKind: bundle.bundleKind,
+                groupKey: bundle.groupKey,
                 status: bundle.status,
                 sourceRecordId: bundle.sourceRecordId,
                 styleTags: compactStyleTags(styleTags),
@@ -357,6 +359,8 @@ function projectionEdge(
                 sourceFactId: edge.sourceFactId,
                 sourceBundleId: edge.sourceBundleId,
                 factFamily: source?.family,
+                bundleKind: bundle?.bundleKind,
+                groupKey: bundle?.groupKey,
             },
         },
     });

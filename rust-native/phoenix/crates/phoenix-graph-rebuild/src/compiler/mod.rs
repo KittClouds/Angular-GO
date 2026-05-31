@@ -1,4 +1,5 @@
 mod build;
+mod contracts;
 mod dual_write;
 mod ids;
 mod prepared;
@@ -15,9 +16,9 @@ use crate::types::GraphRebuildSnapshot;
 pub use build::compile_graph_snapshot;
 pub use dual_write::{compile_dual_write_snapshot, project_ui_edges, GraphCompilerDualWrite};
 pub use types::{
-    EvidenceAnchor, EvidenceKind, FactBundle, FactLane, FactRole, GraphAtom, GraphAtomKind,
-    GraphCompileCounters, GraphCompileReceipts, GraphCompilerInput, GraphCompilerOutput,
-    GraphRootReceipt, ProjectedGraphEdge, RelationFact,
+    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole, GraphAtom,
+    GraphAtomKind, GraphCompileCounters, GraphCompileReceipts, GraphCompilerInput,
+    GraphCompilerOutput, GraphRootReceipt, ProjectedGraphEdge, RelationFact,
 };
 pub use verify::{assert_graph_compile_invariants, verify_graph_compile_output};
 

@@ -53,6 +53,12 @@ export type GraphCompilerEvidenceKind =
     | 'adjudicationVote'
     | 'eventReference'
     | 'mentionGraphEdge';
+export type GraphCompilerEvidenceBundleKind =
+    | 'span'
+    | 'frame'
+    | 'neighborhood'
+    | 'semanticSimilarity'
+    | 'shadowIdentity';
 
 export interface GraphCompilerAtom {
     id: string;
@@ -78,6 +84,8 @@ export interface GraphCompilerEvidenceAnchor {
 export interface GraphCompilerFactLike {
     id: string;
     lane: GraphCompilerFactLane;
+    bundleKind?: GraphCompilerEvidenceBundleKind | string;
+    groupKey?: string;
     predicate: string;
     sourceRecordId: string;
     status: GraphRebuildAdjudicationStatus | 'prepared' | string;
@@ -282,7 +290,7 @@ function graphModelFact(fact: GraphCompilerRelationFact, styleTags: GraphModelV2
 function graphModelBundle(bundle: GraphCompilerFactBundle, styleTags: GraphModelV2StyleTag[]): GraphModelV2FactBundle {
     const family = factFamily(bundle.predicate);
     styleTags.push(styleTag(bundle.id, 'bundle', 'relationFamily', family), styleTag(bundle.id, 'bundle', 'stage', bundle.status));
-    return { id: bundle.id, family, relationType: bundle.predicate, lane: signalLane(bundle.lane), status: graphBundleStatus(bundle.status), confidence: bundle.confidence, evidenceIds: bundle.evidenceIds, sourceRecordId: bundle.sourceRecordId };
+    return { id: bundle.id, family, relationType: bundle.predicate, lane: signalLane(bundle.lane), bundleKind: bundle.bundleKind, groupKey: bundle.groupKey, status: graphBundleStatus(bundle.status), confidence: bundle.confidence, evidenceIds: bundle.evidenceIds, sourceRecordId: bundle.sourceRecordId };
 }
 
 function graphModelProjectionEdge(edge: GraphCompilerProjectedEdge): GraphModelV2ProjectionEdge {

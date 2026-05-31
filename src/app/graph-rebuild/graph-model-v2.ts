@@ -96,6 +96,8 @@ export interface GraphModelV2FactBundle {
     family: GraphModelV2FactFamily;
     relationType: string;
     lane: GraphRebuildSignalTargetLane;
+    bundleKind?: string;
+    groupKey?: string;
     status: GraphRebuildAdjudicationStatus | 'prepared';
     confidence: number;
     evidenceIds: string[];

@@ -19,10 +19,10 @@ pub use builder::{
 pub use compiler::{
     assert_graph_compile_invariants, compile_dual_write_snapshot, compile_graph_snapshot,
     compile_legacy_snapshot, compile_legacy_snapshot_strict, project_ui_edges,
-    verify_graph_compile_output, EvidenceAnchor, EvidenceKind, FactBundle, FactLane, FactRole,
-    GraphAtom, GraphAtomKind, GraphCompileCounters, GraphCompileReceipts, GraphCompilerDualWrite,
-    GraphCompilerError, GraphCompilerInput, GraphCompilerOutput, GraphRootReceipt,
-    ProjectedGraphEdge, RelationFact,
+    verify_graph_compile_output, EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle,
+    FactLane, FactRole, GraphAtom, GraphAtomKind, GraphCompileCounters, GraphCompileReceipts,
+    GraphCompilerDualWrite, GraphCompilerError, GraphCompilerInput, GraphCompilerOutput,
+    GraphRootReceipt, ProjectedGraphEdge, RelationFact,
 };
 pub use types::{
     GraphAnchor, GraphChunk, GraphCounters, GraphDropReasons, GraphEdge, GraphEmbeddingTarget,

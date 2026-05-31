@@ -5,6 +5,7 @@ import type {
     GraphCompilerAtomKind,
     GraphCompilerDualWriteSidecar,
     GraphCompilerEvidenceAnchor,
+    GraphCompilerEvidenceBundleKind,
     GraphCompilerFactBundle,
     GraphCompilerFactLane,
     GraphCompilerFactLike,
@@ -73,7 +74,7 @@ function buildCompatibilityGraphCompilerOutput(snapshot: GraphRebuildSnapshot): 
         const edgeKey = compilerEdgeKey(relationship.sourceEntityId, relationship.targetEntityId, relationship.relationType);
         const legacyKey = compilerEdgeKey(relationship.sourceEntityId, relationship.targetEntityId, relationship.relationType === 'co_occurs_with' ? 'anchored-cooccurrence' : relationship.relationType);
         if (lane === 'cooccurrenceWeak') {
-            bundles.push(factLike(id, lane, relationship.relationType, relationship.id, relationship.status, evidenceIds, relationship.confidence));
+            bundles.push(bundleLike(id, lane, relationship.relationType, relationship.id, relationship.status, evidenceIds, relationship.confidence, relationship.sourceEntityId, relationship.targetEntityId));
             provenanceByEdge.set(edgeKey, { bundleId: id });
             provenanceByEdge.set(legacyKey, { bundleId: id });
             continue;
@@ -141,6 +142,14 @@ function factLike(id: string, lane: GraphCompilerFactLane, predicate: string, so
     return { id, lane, predicate, sourceRecordId, status, evidenceIds, confidence };
 }
 
+function bundleLike(id: string, lane: GraphCompilerFactLane, predicate: string, sourceRecordId: string, status: string, evidenceIds: string[], confidence: number, left: string, right: string): GraphCompilerFactBundle {
+    return {
+        ...factLike(id, lane, predicate, sourceRecordId, status, evidenceIds, confidence),
+        bundleKind: bundleKind(predicate, evidenceIds.length),
+        groupKey: bundleGroupKey(predicate, left, right),
+    };
+}
+
 function role(factId: string, roleName: string, atomIdValue: string, confidence: number): GraphCompilerFactRole {
     return { factId, role: roleName, atomId: atomIdValue, confidence };
 }
@@ -161,6 +170,18 @@ function compilerLaneForAtom(kind: GraphCompilerAtomKind): GraphCompilerFactLane
 
 function isCooccurrence(type: string): boolean {
     return type.includes('co_occurs') || type.includes('co-occurs') || type.includes('cooccurrence');
+}
+
+function bundleKind(type: string, evidenceCount: number): GraphCompilerEvidenceBundleKind {
+    const value = type.toLowerCase();
+    if (value.includes('semantic') || value.includes('similar')) return 'semanticSimilarity';
+    if (value.includes('shadow') || value.includes('identity')) return 'shadowIdentity';
+    return evidenceCount <= 1 ? 'span' : 'neighborhood';
+}
+
+function bundleGroupKey(type: string, left: string, right: string): string {
+    const [first, second] = [left, right].sort();
+    return `${type}:${first}:${second}`;
 }
 
 function atomId(kind: string, sourceId: string): string {
