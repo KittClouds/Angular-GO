@@ -265,11 +265,41 @@ impl Default for DomainProfile {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LabelBankSource {
+    Schema,
+    SourceFrameContext,
+    GraphContext,
+    DomainProfile,
+    UserType,
+    Gazetteer,
+}
+
+#[derive(Clone, Debug)]
+pub struct LabelBankContext<'a> {
+    pub domain_profile: Option<DomainProfile>,
+    pub source_frame_labels: &'a [EntityLabel],
+    pub graph_context_labels: &'a [EntityLabel],
+    pub user_type_labels: &'a [EntityLabel],
+}
+
+impl<'a> Default for LabelBankContext<'a> {
+    fn default() -> Self {
+        Self {
+            domain_profile: None,
+            source_frame_labels: &[],
+            graph_context_labels: &[],
+            user_type_labels: &[],
+        }
+    }
+}
+
 /// A scoped label set for model NER.
 #[derive(Clone, Debug)]
 pub struct LabelPack {
     pub domain: DomainProfile,
     pub labels: SmallVec<[EntityLabel; 16]>,
+    pub label_sources: SmallVec<[(EntityLabel, LabelBankSource); 16]>,
     pub seed_surfaces: SmallVec<[CompactString; 32]>,
     pub negative_labels: SmallVec<[EntityLabel; 8]>,
     pub max_labels: usize,
@@ -280,6 +310,7 @@ impl Default for LabelPack {
         Self {
             domain: DomainProfile::General,
             labels: SmallVec::new(),
+            label_sources: SmallVec::new(),
             seed_surfaces: SmallVec::new(),
             negative_labels: SmallVec::new(),
             max_labels: 14,
@@ -384,6 +415,7 @@ mod tests {
         let pack = LabelPack::default();
         assert_eq!(pack.max_labels, 14);
         assert!(pack.labels.is_empty());
+        assert!(pack.label_sources.is_empty());
     }
 
     #[test]

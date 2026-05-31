@@ -46,20 +46,21 @@ const hopfEdges: GalaxyInputEdge[] = [
 ];
 
 describe('Hopf galaxy visualization data', () => {
-    it('keeps Hopf projection deterministic while emitting rich guide geometry', () => {
+    it('keeps Hopf projection deterministic while emitting only data-formed fibers', () => {
         const settings = mergeGalaxySettings({ layoutMode: 'hopfProjection' });
         const first = buildGalaxyScene(hopfNodes, hopfEdges, settings);
         const second = buildGalaxyScene(hopfNodes, hopfEdges, settings);
 
         expect(first.layoutMode).toBe('hopfProjection');
         expect(first.nodes.map(positionOf)).toEqual(second.nodes.map(positionOf));
-        expect(first.hopfRibbons?.length).toBeGreaterThan(40);
-        expect(new Set(first.hopfRibbons?.map((ribbon) => ribbon.guideKind))).toEqual(new Set([
-            'dataFiber',
-            'spaceFiber',
-            'torusBand',
-            'axis',
-        ]));
+        expect(first.hopfRibbons?.length).toBe(1);
+        expect(new Set(first.hopfRibbons?.map((ribbon) => ribbon.guideKind))).toEqual(new Set(['dataFiber']));
+        expect(first.hopfRibbons?.[0]?.nodeIds).toEqual([
+            'hopf:anchor:kai',
+            'hopf:fiber:kai:evidence',
+            'hopf:fiber:kai:causal',
+        ]);
+        expect((first.hopfRibbons?.[0]?.positions3d.length || 0) / 6).toBeGreaterThan(48);
     });
 
     it('does not emit Hopf guide geometry for the hybrid universe', () => {

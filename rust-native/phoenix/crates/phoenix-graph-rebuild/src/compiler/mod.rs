@@ -1,4 +1,6 @@
 mod build;
+mod commitment;
+mod compression;
 mod contracts;
 mod dual_write;
 mod ids;
@@ -16,9 +18,13 @@ use crate::types::GraphRebuildSnapshot;
 pub use build::compile_graph_snapshot;
 pub use dual_write::{compile_dual_write_snapshot, project_ui_edges, GraphCompilerDualWrite};
 pub use types::{
-    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole, GraphAtom,
-    GraphAtomKind, GraphCompileCounters, GraphCompileReceipts, GraphCompilerInput,
-    GraphCompilerOutput, GraphRootReceipt, ProjectedGraphEdge, RelationFact,
+    BundleCommitmentInput, BundleCommitmentPoint, BundleCommitmentPolicy, BundleCompressionInput,
+    BundleCompressionModel, BundleCompressionPolicy, BundleEmbedding, BundlePrototype,
+    BundleRerankScore, BundleRerankSource, EvidenceAnchor, EvidenceBundleKind, EvidenceKind,
+    FactBundle, FactBundleCommitment, FactBundleCompression, FactBundlePrototypeScore, FactLane,
+    FactRole, GraphAtom, GraphAtomKind, GraphCompileCounters, GraphCompileReceipts,
+    GraphCompilerInput, GraphCompilerOutput, GraphPrototypeFamily, GraphRootReceipt,
+    ProjectedGraphEdge, RelationFact,
 };
 pub use verify::{assert_graph_compile_invariants, verify_graph_compile_output};
 
@@ -47,6 +53,8 @@ pub fn compile_legacy_snapshot(snapshot: &GraphRebuildSnapshot) -> GraphCompiler
         causal_edges: &snapshot.causal_edges,
         memory_state: &snapshot.memory_state,
         legacy_edges: &snapshot.edges,
+        bundle_compression: None,
+        bundle_commitment: None,
     })
 }
 

@@ -9,13 +9,13 @@ use crate::tts::{
     NativeTtsSpeakRequest, NativeTtsStatus, NativeTtsSynthResult,
 };
 use phoenix_graph_rebuild::{compile_dual_write_snapshot, GraphRebuildSnapshot};
-use phoenix_native::{runtime_banner, PhoenixNativeHost, SnapshotPartition};
 use phoenix_hyperbolic::lorentz_tree::{
     HyperboloidPoint, LorentzForest, LorentzForestIndex, LorentzNode, LorentzQueryMode,
     LorentzScoreConfig, LorentzTree, LorentzTreeKind, LorentzTreeMembership, LorentzTreeQuery,
     MmapLorentzForestIndex,
 };
 use phoenix_hyperbolic::siegel_finsler::{run_siegel_finsler_kernel, SiegelKernelRunRequest};
+use phoenix_native::{runtime_banner, PhoenixNativeHost, SnapshotPartition};
 use phoenix_types::{
     AnalyzeTextRequest, AtlasRichScanRequest, CommitRequest, CreateSessionRequest,
     GraphDeltaRequest, IngestRequest, QueryRequest, RebuildRequest, RuntimeConfig,
@@ -172,6 +172,14 @@ struct DesktopManifoldPayload {
     neighbor_rings: Vec<DesktopIcoNeighborRings>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     cone_traces: Vec<DesktopIcoConeTrace>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cone_programs: Vec<DesktopConeProgramRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pathlets: Vec<DesktopConePathletRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    obstructions: Vec<DesktopConeObstructionRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cone_program_traces: Vec<DesktopConeProgramTraceRecord>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     anchor_projections: Vec<DesktopAnchorProjection>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -386,6 +394,94 @@ struct DesktopIcoConeTraceStep {
     chart_stitch_score: f64,
     accepted: bool,
     reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopConeProgramOpRecord {
+    op: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ids: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    required_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_compatibility: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    require_evidence: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strict: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pathlet_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    rank_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopConeProgramRecord {
+    program_id: String,
+    intent: String,
+    seed_ids: Vec<String>,
+    ops: Vec<DesktopConeProgramOpRecord>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopConePathletRecord {
+    pathlet_id: String,
+    lane: String,
+    start_id: String,
+    end_id: String,
+    node_ids: Vec<String>,
+    edge_ids: Vec<String>,
+    support_score: f64,
+    compression_score: f64,
+    obstruction_ids: Vec<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopConeObstructionRecord {
+    obstruction_id: String,
+    kind: String,
+    severity: f64,
+    explanation: String,
+    node_ids: Vec<String>,
+    edge_ids: Vec<String>,
+    chart_ids: Vec<String>,
+    evidence_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane: Option<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopConeProgramTraceRecord {
+    trace_id: String,
+    program_id: String,
+    active_ids: Vec<String>,
+    pathlet_ids: Vec<String>,
+    obstruction_ids: Vec<String>,
+    path_edge_ids: Vec<String>,
+    explanations: Vec<String>,
+    geometry_version: &'static str,
+}
+
+#[derive(Default)]
+struct DesktopProductConeTraversal {
+    programs: Vec<DesktopConeProgramRecord>,
+    pathlets: Vec<DesktopConePathletRecord>,
+    obstructions: Vec<DesktopConeObstructionRecord>,
+    traces: Vec<DesktopConeProgramTraceRecord>,
 }
 
 #[derive(Debug, Serialize)]
@@ -693,10 +789,7 @@ impl PhoenixApi for PhoenixApiImpl {
         };
 
         if command == "graphRebuild:compileDualWrite" {
-            let snapshot_value = payload
-                .get("snapshot")
-                .cloned()
-                .unwrap_or(payload);
+            let snapshot_value = payload.get("snapshot").cloned().unwrap_or(payload);
             let snapshot = serde_json::from_value::<GraphRebuildSnapshot>(snapshot_value)
                 .map_err(|error| format!("invalid graph rebuild snapshot: {error}"))?;
             let dual = compile_dual_write_snapshot(&snapshot);
@@ -1175,6 +1268,10 @@ fn semantic_rows_to_payload(
         seams: Vec::new(),
         neighbor_rings: Vec::new(),
         cone_traces: Vec::new(),
+        cone_programs: Vec::new(),
+        pathlets: Vec::new(),
+        obstructions: Vec::new(),
+        cone_program_traces: Vec::new(),
         anchor_projections: Vec::new(),
         lorentz_trees: Vec::new(),
         lorentz_memberships: Vec::new(),
@@ -1300,6 +1397,10 @@ fn semantic_payload_to_hopf_payload(semantic: &DesktopManifoldPayload) -> Deskto
         seams: build_desktop_seams(&topology, &assignments),
         neighbor_rings: build_desktop_neighbor_rings(&topology, &assignments),
         cone_traces: build_desktop_cone_traces(&topology, &assignments),
+        cone_programs: Vec::new(),
+        pathlets: Vec::new(),
+        obstructions: Vec::new(),
+        cone_program_traces: Vec::new(),
         anchor_projections: assignments
             .iter()
             .map(|assignment| DesktopAnchorProjection {
@@ -1425,7 +1526,8 @@ fn ensure_lorentz_sidecar(
         cache = lorentz_cache_status(host, scope, limit)?;
         cache.rebuilt = true;
     }
-    let mmap = MmapLorentzForestIndex::open(&cache.cache_path).map_err(|error| error.to_string())?;
+    let mmap =
+        MmapLorentzForestIndex::open(&cache.cache_path).map_err(|error| error.to_string())?;
     cache.mmap = true;
     Ok(LorentzSidecar { mmap, cache })
 }
@@ -1504,8 +1606,12 @@ fn semantic_payload_to_lorentz_forest(
         let root_id = format!("lorentz:root:{tree_id}");
         forest
             .add_node(
-                LorentzNode::new(root_id.clone(), format!("{label} root"), HyperboloidPoint::origin())
-                    .map_err(|error| error.to_string())?,
+                LorentzNode::new(
+                    root_id.clone(),
+                    format!("{label} root"),
+                    HyperboloidPoint::origin(),
+                )
+                .map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
         forest
@@ -1536,7 +1642,10 @@ fn build_lorentz_parent_maps(
             continue;
         };
         let doc_node_id = format!("doc::{document_id}");
-        if semantic_ids.contains(&node.id) && semantic_ids.contains(&doc_node_id) && node.id != doc_node_id {
+        if semantic_ids.contains(&node.id)
+            && semantic_ids.contains(&doc_node_id)
+            && node.id != doc_node_id
+        {
             best.entry(LorentzTreeKind::DocumentStructure)
                 .or_default()
                 .insert(node.id.clone(), (doc_node_id, 1.0));
@@ -1561,7 +1670,10 @@ fn build_lorentz_parent_maps(
             })
             .unwrap_or(true);
         if replace {
-            by_target.insert(edge.target_id.clone(), (edge.source_id.clone(), edge.confidence));
+            by_target.insert(
+                edge.target_id.clone(),
+                (edge.source_id.clone(), edge.confidence),
+            );
         }
     }
     best.into_iter()
@@ -1632,6 +1744,10 @@ fn lorentz_index_to_payload(
         seams: Vec::new(),
         neighbor_rings: Vec::new(),
         cone_traces: Vec::new(),
+        cone_programs: Vec::new(),
+        pathlets: Vec::new(),
+        obstructions: Vec::new(),
+        cone_program_traces: Vec::new(),
         anchor_projections: Vec::new(),
         lorentz_trees: snapshot.trees,
         lorentz_memberships: snapshot.memberships,
@@ -1689,9 +1805,11 @@ fn product_index_to_payload(
         node.preview = semantic_node.preview.clone();
         node.kind = format!("PRODUCT:{}", semantic_node.kind);
     }
+    let edges = snapshot.edges;
+    let traversal = build_desktop_product_cone_traversal(&nodes, &edges);
     DesktopManifoldPayload {
         nodes,
-        edges: snapshot.edges,
+        edges,
         source_label: "native product Lorentz-Hopf atlas",
         projection_source: "real_snapshot_vectors",
         cells: build_desktop_cells(&topology, &assignments),
@@ -1699,6 +1817,10 @@ fn product_index_to_payload(
         seams: build_desktop_seams(&topology, &assignments),
         neighbor_rings: build_desktop_neighbor_rings(&topology, &assignments),
         cone_traces: build_desktop_cone_traces(&topology, &assignments),
+        cone_programs: traversal.programs,
+        pathlets: traversal.pathlets,
+        obstructions: traversal.obstructions,
+        cone_program_traces: traversal.traces,
         anchor_projections: assignments
             .iter()
             .map(|assignment| DesktopAnchorProjection {
@@ -1717,9 +1839,486 @@ fn product_index_to_payload(
     }
 }
 
+fn build_desktop_product_cone_traversal(
+    nodes: &[DesktopManifoldNode],
+    edges: &[DesktopManifoldEdge],
+) -> DesktopProductConeTraversal {
+    let by_id = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<HashMap<_, _>>();
+    let mut out = DesktopProductConeTraversal::default();
+    for edge in edges.iter().take(512) {
+        let Some(source) = by_id.get(edge.source_id.as_str()) else {
+            continue;
+        };
+        let Some(target) = by_id.get(edge.target_id.as_str()) else {
+            continue;
+        };
+        let source_lane = desktop_product_lane(source);
+        let target_lane = desktop_product_lane(target);
+        let lane = desktop_product_pathlet_lane(edge, &source_lane, &target_lane);
+        let obstruction =
+            desktop_product_edge_obstruction(edge, target, &source_lane, &target_lane);
+        let obstruction_ids = obstruction
+            .as_ref()
+            .map(|obs| vec![obs.obstruction_id.clone()])
+            .unwrap_or_default();
+        if let Some(obs) = obstruction {
+            out.obstructions.push(obs);
+        }
+        let support_score =
+            desktop_product_support(edge, source, target, &source_lane, &target_lane);
+        out.pathlets.push(DesktopConePathletRecord {
+            pathlet_id: format!("pathlet:{}", normalize_contract_token(&edge.id)),
+            lane,
+            start_id: edge.source_id.clone(),
+            end_id: edge.target_id.clone(),
+            node_ids: vec![edge.source_id.clone(), edge.target_id.clone()],
+            edge_ids: vec![edge.id.clone()],
+            support_score,
+            compression_score: (0.42 + support_score * 0.38).clamp(0.0, 1.0),
+            obstruction_ids,
+            geometry_version: PRODUCT_GEOMETRY_VERSION,
+        });
+    }
+    out.programs = desktop_product_programs(&out.pathlets, &out.obstructions);
+    out.traces = out
+        .programs
+        .iter()
+        .map(|program| desktop_product_trace(program, &out.pathlets, &out.obstructions))
+        .collect();
+    out
+}
+
+fn desktop_product_edge_obstruction(
+    edge: &DesktopManifoldEdge,
+    target: &DesktopManifoldNode,
+    source_lane: &str,
+    target_lane: &str,
+) -> Option<DesktopConeObstructionRecord> {
+    if source_lane != target_lane && !desktop_product_legal_move(source_lane, target_lane) {
+        return Some(desktop_product_obstruction(
+            &format!("edge:{}:lane", edge.id),
+            "LaneMismatch",
+            0.74,
+            target,
+            &[edge.source_id.clone(), edge.target_id.clone()],
+            &[edge.id.clone()],
+            &format!("{source_lane} cannot stitch directly to {target_lane}."),
+        ));
+    }
+    if edge.confidence < 0.24 {
+        return Some(desktop_product_obstruction(
+            &format!("edge:{}:evidence", edge.id),
+            "EvidenceMissing",
+            0.68,
+            target,
+            &[edge.source_id.clone(), edge.target_id.clone()],
+            &[edge.id.clone()],
+            "Low-evidence traversal candidate from native product index.",
+        ));
+    }
+    if edge.edge_type.contains("bridge") && edge.confidence < 0.52 {
+        return Some(desktop_product_obstruction(
+            &format!("edge:{}:bridge", edge.id),
+            "UnsupportedBridge",
+            0.58,
+            target,
+            &[edge.source_id.clone(), edge.target_id.clone()],
+            &[edge.id.clone()],
+            "Bridge traversal needs stronger graph support before promotion.",
+        ));
+    }
+    None
+}
+
+fn desktop_product_obstruction(
+    id: &str,
+    kind: &str,
+    severity: f64,
+    target: &DesktopManifoldNode,
+    node_ids: &[String],
+    edge_ids: &[String],
+    explanation: &str,
+) -> DesktopConeObstructionRecord {
+    DesktopConeObstructionRecord {
+        obstruction_id: format!("obstruction:{}", normalize_contract_token(id)),
+        kind: kind.to_owned(),
+        severity,
+        explanation: explanation.to_owned(),
+        node_ids: node_ids.to_vec(),
+        edge_ids: edge_ids.to_vec(),
+        chart_ids: target
+            .cell_id
+            .as_ref()
+            .map(|cell| vec![format!("chart:{cell}")])
+            .unwrap_or_default(),
+        evidence_refs: Vec::new(),
+        lane: Some(desktop_product_lane(target)),
+        geometry_version: PRODUCT_GEOMETRY_VERSION,
+    }
+}
+
+fn desktop_product_lane(node: &DesktopManifoldNode) -> String {
+    let text = format!(
+        "{} {} {} {}",
+        node.kind, node.source_type, node.label, node.preview
+    )
+    .to_ascii_lowercase();
+    if text.contains("evidence")
+        || text.contains("source")
+        || text.contains("document")
+        || text.contains("chunk")
+        || text.contains("anchor")
+    {
+        "evidence".to_owned()
+    } else if text.contains("entity")
+        || text.contains("identity")
+        || text.contains("character")
+        || text.contains("location")
+    {
+        "identity".to_owned()
+    } else if text.contains("temporal") || text.contains("timeline") {
+        "temporal".to_owned()
+    } else if text.contains("causal") || text.contains("cause") {
+        "causal".to_owned()
+    } else if text.contains("event") || text.contains("scene") {
+        "event".to_owned()
+    } else if text.contains("bridge") || text.contains("backbone") {
+        "bridge".to_owned()
+    } else if text.contains("relation") || text.contains("fact") {
+        "relationship".to_owned()
+    } else {
+        "semantic".to_owned()
+    }
+}
+
+fn desktop_product_pathlet_lane(
+    edge: &DesktopManifoldEdge,
+    source_lane: &str,
+    target_lane: &str,
+) -> String {
+    let edge_type = edge.edge_type.to_ascii_lowercase();
+    if edge_type.contains("causal") || edge_type.contains("cause") {
+        "causal".to_owned()
+    } else if edge_type.contains("temporal")
+        || edge_type.contains("before")
+        || edge_type.contains("after")
+    {
+        "temporal".to_owned()
+    } else if edge_type.contains("evidence")
+        || edge_type.contains("anchor")
+        || edge_type.contains("chunk")
+    {
+        "evidence".to_owned()
+    } else if edge_type.contains("identity")
+        || edge_type.contains("entity")
+        || edge_type.contains("alias")
+    {
+        "identity".to_owned()
+    } else if edge_type.contains("bridge") || edge_type.contains("backbone") {
+        "bridge".to_owned()
+    } else if target_lane != "semantic" {
+        target_lane.to_owned()
+    } else {
+        source_lane.to_owned()
+    }
+}
+
+fn desktop_product_support(
+    edge: &DesktopManifoldEdge,
+    _source: &DesktopManifoldNode,
+    _target: &DesktopManifoldNode,
+    source_lane: &str,
+    target_lane: &str,
+) -> f64 {
+    let lane_bonus = if source_lane == target_lane {
+        0.08
+    } else if desktop_product_legal_move(source_lane, target_lane) {
+        0.04
+    } else {
+        -0.16
+    };
+    (edge.confidence * 0.78 + lane_bonus).clamp(0.0, 1.0)
+}
+
+fn desktop_product_legal_move(source_lane: &str, target_lane: &str) -> bool {
+    matches!(
+        (source_lane, target_lane),
+        ("evidence", "identity")
+            | ("evidence", "relationship")
+            | ("evidence", "temporal")
+            | ("evidence", "causal")
+            | ("identity", "relationship")
+            | ("identity", "event")
+            | ("identity", "temporal")
+            | ("identity", "causal")
+            | ("relationship", "evidence")
+            | ("relationship", "identity")
+            | ("relationship", "temporal")
+            | ("relationship", "causal")
+            | ("event", "temporal")
+            | ("event", "causal")
+            | ("temporal", "event")
+            | ("temporal", "causal")
+            | ("causal", "event")
+            | ("causal", "temporal")
+            | ("bridge", "identity")
+            | ("bridge", "relationship")
+            | ("bridge", "evidence")
+            | ("semantic", "identity")
+            | ("semantic", "relationship")
+            | ("semantic", "evidence")
+    )
+}
+
+fn desktop_product_programs(
+    pathlets: &[DesktopConePathletRecord],
+    obstructions: &[DesktopConeObstructionRecord],
+) -> Vec<DesktopConeProgramRecord> {
+    let seed_ids = unique_limited(pathlets.iter().map(|pathlet| pathlet.start_id.clone()), 12);
+    let repair_ids = unique_limited(
+        obstructions
+            .iter()
+            .flat_map(|obstruction| obstruction.node_ids.iter().cloned()),
+        12,
+    );
+    let mut programs = Vec::new();
+    if !seed_ids.is_empty() {
+        programs.push(desktop_product_program(
+            "product:trace-supported-routes",
+            "trace",
+            seed_ids.clone(),
+            "evidence",
+            false,
+        ));
+        programs.push(desktop_product_program(
+            "product:validate-stitches",
+            "validate",
+            seed_ids,
+            "relationship",
+            true,
+        ));
+    }
+    if !repair_ids.is_empty() {
+        programs.push(desktop_product_program(
+            "product:repair-obstructions",
+            "repair",
+            repair_ids,
+            "bridge",
+            true,
+        ));
+    }
+    programs
+}
+
+fn desktop_product_program(
+    program_id: &str,
+    intent: &str,
+    seed_ids: Vec<String>,
+    lane: &str,
+    require_evidence: bool,
+) -> DesktopConeProgramRecord {
+    DesktopConeProgramRecord {
+        program_id: program_id.to_owned(),
+        intent: intent.to_owned(),
+        seed_ids: seed_ids.clone(),
+        geometry_version: PRODUCT_GEOMETRY_VERSION,
+        ops: vec![
+            desktop_program_op(
+                "seed",
+                None,
+                seed_ids,
+                Vec::new(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Vec::new(),
+            ),
+            desktop_program_op(
+                "followField",
+                Some(lane),
+                Vec::new(),
+                Vec::new(),
+                Some(if require_evidence { 0.72 } else { 0.92 }),
+                Some(64),
+                None,
+                None,
+                None,
+                Vec::new(),
+            ),
+            desktop_program_op(
+                "stitch",
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                Some(if require_evidence { 0.58 } else { 0.42 }),
+                Some(require_evidence),
+                None,
+                Vec::new(),
+            ),
+            desktop_program_op(
+                "ground",
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                None,
+                Some(require_evidence),
+                Vec::new(),
+            ),
+            desktop_program_op(
+                "rerank",
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                vec![
+                    "support".to_owned(),
+                    "stitchQuality".to_owned(),
+                    "cost".to_owned(),
+                ],
+            ),
+            desktop_program_op(
+                "explain",
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                Some(8),
+                None,
+                None,
+                None,
+                Vec::new(),
+            ),
+        ],
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn desktop_program_op(
+    op: &str,
+    lane: Option<&str>,
+    ids: Vec<String>,
+    required_ids: Vec<String>,
+    max_cost: Option<f64>,
+    limit: Option<u32>,
+    min_compatibility: Option<f64>,
+    require_evidence: Option<bool>,
+    strict: Option<bool>,
+    rank_by: Vec<String>,
+) -> DesktopConeProgramOpRecord {
+    DesktopConeProgramOpRecord {
+        op: op.to_owned(),
+        lane: lane.map(str::to_owned),
+        ids,
+        required_ids,
+        max_cost,
+        limit,
+        min_compatibility,
+        require_evidence,
+        strict,
+        pathlet_id: None,
+        rank_by,
+    }
+}
+
+fn desktop_product_trace(
+    program: &DesktopConeProgramRecord,
+    pathlets: &[DesktopConePathletRecord],
+    obstructions: &[DesktopConeObstructionRecord],
+) -> DesktopConeProgramTraceRecord {
+    let lane = program
+        .ops
+        .iter()
+        .find(|op| op.op == "followField")
+        .and_then(|op| op.lane.as_deref())
+        .unwrap_or_default();
+    let selected = pathlets
+        .iter()
+        .filter(|pathlet| lane.is_empty() || pathlet.lane == lane || program.intent == "repair")
+        .take(64)
+        .collect::<Vec<_>>();
+    let path_edge_ids = unique_limited(
+        selected
+            .iter()
+            .flat_map(|pathlet| pathlet.edge_ids.iter().cloned()),
+        128,
+    );
+    let pathlet_ids = selected
+        .iter()
+        .map(|pathlet| pathlet.pathlet_id.clone())
+        .collect::<Vec<_>>();
+    let active_ids = unique_limited(
+        selected
+            .iter()
+            .flat_map(|pathlet| pathlet.node_ids.iter().cloned()),
+        128,
+    );
+    let obstruction_ids = if program.intent == "repair" {
+        unique_limited(
+            obstructions.iter().map(|obs| obs.obstruction_id.clone()),
+            128,
+        )
+    } else {
+        unique_limited(
+            selected
+                .iter()
+                .flat_map(|pathlet| pathlet.obstruction_ids.iter().cloned()),
+            128,
+        )
+    };
+    DesktopConeProgramTraceRecord {
+        trace_id: format!("trace:{}", program.program_id),
+        program_id: program.program_id.clone(),
+        active_ids,
+        pathlet_ids,
+        obstruction_ids,
+        path_edge_ids,
+        explanations: vec![
+            format!("{} pathlets traversed", selected.len()),
+            format!("{} obstructions surfaced", obstructions.len()),
+        ],
+        geometry_version: PRODUCT_GEOMETRY_VERSION,
+    }
+}
+
+fn unique_limited<I>(values: I, limit: usize) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = HashSet::<String>::with_capacity(limit.saturating_mul(2));
+    let mut out = Vec::<String>::with_capacity(limit);
+    for value in values {
+        if value.is_empty() || !seen.insert(value.clone()) {
+            continue;
+        }
+        out.push(value);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
+}
+
 fn lorentz_index_to_snapshot(index: &LorentzForestIndex) -> DesktopLorentzForestSnapshot {
     let nodes = index.nodes.iter().map(lorentz_node_to_desktop).collect();
-    let trees = index.trees.iter().map(lorentz_tree_to_record).collect::<Vec<_>>();
+    let trees = index
+        .trees
+        .iter()
+        .map(lorentz_tree_to_record)
+        .collect::<Vec<_>>();
     let memberships = index
         .memberships
         .iter()
@@ -1798,7 +2397,11 @@ trait LorentzNodeDesktopExt {
 
 impl LorentzNodeDesktopExt for LorentzNode {
     fn coords_f64(&self) -> Vec<f64> {
-        self.point.coords.iter().map(|value| *value as f64).collect()
+        self.point
+            .coords
+            .iter()
+            .map(|value| *value as f64)
+            .collect()
     }
 }
 
@@ -1843,7 +2446,9 @@ fn lorentz_score_to_hit(
         index
             .memberships
             .iter()
-            .find(|membership| membership.tree_id == *tree_id && membership.node_id == score.node_id)
+            .find(|membership| {
+                membership.tree_id == *tree_id && membership.node_id == score.node_id
+            })
             .map(|membership| membership.path_key.clone())
     });
     DesktopLorentzQueryHit {
@@ -1851,7 +2456,9 @@ fn lorentz_score_to_hit(
         node_id: score.node_id,
         label,
         tree_id: score.tree_id,
-        tree_kind: score.tree_kind.map(|kind| lorentz_kind_name(kind).to_owned()),
+        tree_kind: score
+            .tree_kind
+            .map(|kind| lorentz_kind_name(kind).to_owned()),
         path_key,
         score: score.score,
         hyperbolic_distance: score.hyperbolic_distance,
@@ -1891,7 +2498,11 @@ fn lorentz_point_from_vector(vector: &[f64], salt: &str) -> Result<HyperboloidPo
             *slot = (byte / 255.0 - 0.5) * 0.1;
         }
     }
-    let norm = tangent.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let norm = tangent
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>()
+        .sqrt();
     if norm > 3.0 {
         for value in &mut tangent {
             *value = (*value / norm) * 3.0;

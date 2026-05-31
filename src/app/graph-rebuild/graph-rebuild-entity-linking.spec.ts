@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildGraphRebuildFinalLinkPatchLog } from './graph-rebuild-final-linking';
 import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
+import { buildBundleDedupeShadowLinks } from './graph-rebuild-shadow-linking';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import type {
     GraphRebuildEdge,
     GraphRebuildEntityAnchor,
     GraphRebuildMention,
     GraphRebuildNode,
+    GraphRebuildRelationship,
 } from './graph-rebuild-snapshot';
 
 describe('graph rebuild entity linking', () => {
@@ -109,9 +112,136 @@ describe('graph rebuild entity linking', () => {
                 candidateEntityId: 'e-new-rome',
                 linkerCandidateEntityIds: ['e-new-rome'],
                 linkerWindowId: 'note:1',
+                phase: 'shadow',
+                mutationAllowed: false,
+                shadowKind: 'same_entity_suspicion',
             }),
         ]));
         expect(result.counters.linkerCandidates).toBe(1);
+        expect(result.counters.shadowLinks).toBe(result.suggestions.length);
+    });
+
+    it('stages relation duplicate suspicion as shadow-only review data', () => {
+        const nodes = [
+            node('e-kai', 'Kai', 'CHARACTER', []),
+            node('e-hazel', 'Hazel', 'CHARACTER', []),
+        ];
+        const relationships = [
+            relationship('rel-a', 'e-kai', 'e-hazel', 'protects', 'review', 0.7),
+            relationship('rel-b', 'e-hazel', 'e-kai', 'protects', 'accepted', 0.82),
+        ];
+
+        const result = buildGraphRebuildEntityLinkSuggestions({
+            mentions: [],
+            entityAnchors: [],
+            nodes,
+            edges: [],
+            relationships,
+            structuralPostProcess: buildGraphRebuildStructuralPostProcess(nodes, []),
+        });
+
+        expect(result.suggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                shadowKind: 'relation_duplicate_suspicion',
+                mutationAllowed: false,
+                promotionState: 'blocked',
+                relatedRelationIds: ['rel-b', 'rel-a'],
+            }),
+        ]));
+    });
+
+    it('stages compressed bundle dedupe as shadow-only review data', () => {
+        const links = buildBundleDedupeShadowLinks([
+            {
+                id: 'bundle:canonical',
+                family: 'cooccurrence',
+                relationType: 'co_occurs_with',
+                lane: 'cooccurrence_weak',
+                status: 'review',
+                confidence: 0.81,
+                evidenceIds: ['evidence:a'],
+                sourceRecordId: 'rel:a',
+            },
+            {
+                id: 'bundle:duplicate',
+                family: 'cooccurrence',
+                relationType: 'co_occurs_with',
+                lane: 'cooccurrence_weak',
+                status: 'review',
+                confidence: 0.84,
+                evidenceIds: ['evidence:b'],
+                sourceRecordId: 'rel:b',
+                compression: {
+                    model: 'jinaai/jina-embeddings-v5-text-nano',
+                    clusterId: 'cluster:co:1',
+                    canonicalBundleId: 'bundle:canonical',
+                    duplicateOfBundleId: 'bundle:canonical',
+                    outlierScore: 0.03,
+                    neighborCount: 4,
+                    semanticRank: 2,
+                    rerankScore: 0.9,
+                    rerankSource: 'semantic_cluster',
+                    signals: ['compression:near_duplicate'],
+                },
+            },
+        ]);
+
+        expect(links).toEqual([expect.objectContaining({
+            shadowKind: 'bundle_dedupe',
+            mutationAllowed: false,
+            promotionState: 'blocked',
+            relatedBundleIds: ['bundle:duplicate', 'bundle:canonical'],
+            clusterHintIds: ['cluster:co:1'],
+        })]);
+
+        const patchLog = buildGraphRebuildFinalLinkPatchLog([
+            { ...links[0], promotionState: 'promoted' },
+        ], 456);
+        expect(patchLog.patches).toHaveLength(0);
+        expect(patchLog.counters.failedReceipts).toBeGreaterThan(0);
+    });
+
+    it('final linker writes only promoted clean candidates into a reversible patch log', () => {
+        const anchors = [
+            anchor('a-kai', 'e-kai', 'Kai'),
+            anchor('a-kai-rowan', 'e-kai', 'Kai Rowan'),
+        ];
+        const nodes = [node('e-kai', 'Kai', 'CHARACTER', ['K'], 8)];
+        const result = buildGraphRebuildEntityLinkSuggestions({
+            mentions: anchors,
+            entityAnchors: anchors,
+            nodes,
+            edges: [],
+            structuralPostProcess: buildGraphRebuildStructuralPostProcess(nodes, []),
+        });
+        const alias = result.suggestions.find((suggestion) => suggestion.decision === 'alias_of')!;
+        const promoted = {
+            ...alias,
+            confidence: 0.93,
+            promotionState: 'promoted' as const,
+            promotionBlockedReasons: [],
+        };
+
+        const patchLog = buildGraphRebuildFinalLinkPatchLog([
+            promoted,
+            { ...alias, id: 'shadow:unpromoted-alias' },
+        ], 123);
+
+        expect(patchLog.patches).toEqual([
+            expect.objectContaining({
+                kind: 'alias_of',
+                status: 'planned',
+                sourceShadowLinkId: alias.id,
+                canonicalEntityId: 'e-kai',
+                alias: 'Kai Rowan',
+                reversiblePatch: expect.objectContaining({
+                    undoOperation: 'remove_alias_of',
+                    createdAlias: 'Kai Rowan',
+                }),
+            }),
+        ]);
+        expect(patchLog.counters).toMatchObject({ planned: 1, failedReceipts: 0 });
+        expect(patchLog.patches[0].receipts.every((receipt) => receipt.status === 'passed')).toBe(true);
     });
 });
 
@@ -169,5 +299,28 @@ function edge(sourceId: string, targetId: string, weight: number): GraphRebuildE
         evidenceAnchorIds: [],
         scopeKeys: ['chunk'],
         noteIds: ['note'],
+    };
+}
+
+function relationship(
+    id: string,
+    sourceEntityId: string,
+    targetEntityId: string,
+    relationType: string,
+    status: GraphRebuildRelationship['status'],
+    confidence: number,
+): GraphRebuildRelationship {
+    return {
+        id,
+        sourceEntityId,
+        targetEntityId,
+        relationType,
+        evidenceAnchorIds: [`evidence:${id}`],
+        confidence,
+        status,
+        adjudicationSource: 'test',
+        adjudicationScore: confidence,
+        rationale: `${status} ${relationType}`,
+        decisionEvidence: [],
     };
 }

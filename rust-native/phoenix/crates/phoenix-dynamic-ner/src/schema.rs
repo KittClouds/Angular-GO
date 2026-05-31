@@ -4,11 +4,13 @@
 //! domain profile, gazetteer-proximal labels, chunk-local labels.
 //! GLiNER gets a scalpel, not a junk drawer.
 
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 
 use crate::known_lane::KnownCandidate;
 use crate::native_lane::NativeCandidate;
-use crate::types::{DomainProfile, EntityLabel, LabelPack, MentionKind};
+use crate::types::{
+    DomainProfile, EntityLabel, LabelBankContext, LabelBankSource, LabelPack, MentionKind,
+};
 
 /// Builds label packs from context signals.
 pub struct DynamicSchemaBuilder {
@@ -31,34 +33,51 @@ impl DynamicSchemaBuilder {
     /// Build a label pack for a sentence window.
     pub fn build_pack_for_window(
         &self,
+        window_start: u32,
+        window_end: u32,
+        known: &[KnownCandidate],
+        native: &[NativeCandidate],
+    ) -> LabelPack {
+        self.build_pack_for_window_v2(window_start, window_end, known, native, None)
+    }
+
+    pub fn build_pack_for_window_v2(
+        &self,
         _window_start: u32,
         _window_end: u32,
         known: &[KnownCandidate],
         native: &[NativeCandidate],
+        context: Option<&LabelBankContext<'_>>,
     ) -> LabelPack {
-        let domain = self.detect_domain(known, native);
-        let mut labels = SmallVec::new();
+        let domain = context
+            .and_then(|ctx| ctx.domain_profile)
+            .unwrap_or_else(|| self.detect_domain(known, native));
+        let mut bank = LabelBankDraft::default();
 
-        // Layer 1: Universal core (always present).
-        Self::add_universal_core(&mut labels);
+        Self::add_universal_core(&mut bank);
+        if let Some(ctx) = context {
+            Self::add_context_labels(&mut bank, ctx.user_type_labels, LabelBankSource::UserType);
+            Self::add_context_labels(
+                &mut bank,
+                ctx.source_frame_labels,
+                LabelBankSource::SourceFrameContext,
+            );
+            Self::add_context_labels(
+                &mut bank,
+                ctx.graph_context_labels,
+                LabelBankSource::GraphContext,
+            );
+        }
+        Self::add_domain_labels(&mut bank, domain);
+        Self::add_gazetteer_proximal(&mut bank, known);
 
-        // Layer 2: Domain profile labels.
-        Self::add_domain_labels(&mut labels, domain);
-
-        // Layer 3: Gazetteer-proximal labels from known entities.
-        Self::add_gazetteer_proximal(&mut labels, known);
-
-        // Cap to max.
-        labels.truncate(self.max_labels);
-
-        // Seed surfaces from known candidates.
-        let seed_surfaces = known.iter().map(|c| c.surface.clone()).collect();
-
+        bank.truncate(self.max_labels);
         LabelPack {
             domain,
-            labels,
-            seed_surfaces,
-            negative_labels: SmallVec::new(),
+            labels: bank.labels,
+            label_sources: bank.sources,
+            seed_surfaces: known.iter().map(|c| c.surface.clone()).collect(),
+            negative_labels: negative_labels_for(domain),
             max_labels: self.max_labels,
         }
     }
@@ -106,13 +125,13 @@ impl DynamicSchemaBuilder {
         }
     }
 
-    fn add_universal_core(labels: &mut SmallVec<[EntityLabel; 16]>) {
+    fn add_universal_core(bank: &mut LabelBankDraft) {
         for label in UNIVERSAL_CORE {
-            labels.push(EntityLabel::new(label));
+            bank.push(EntityLabel::new(label), LabelBankSource::Schema);
         }
     }
 
-    fn add_domain_labels(labels: &mut SmallVec<[EntityLabel; 16]>, domain: DomainProfile) {
+    fn add_domain_labels(bank: &mut LabelBankDraft, domain: DomainProfile) {
         let domain_labels: &[&str] = match domain {
             DomainProfile::Fantasy => {
                 &["Weapon", "Artifact", "Creature", "Ability", "Rank", "Spell"]
@@ -160,11 +179,11 @@ impl DynamicSchemaBuilder {
             DomainProfile::General => &["Role", "Object", "Attribute"],
         };
         for label in domain_labels {
-            labels.push(EntityLabel::new(label));
+            bank.push(EntityLabel::new(label), LabelBankSource::DomainProfile);
         }
     }
 
-    fn add_gazetteer_proximal(labels: &mut SmallVec<[EntityLabel; 16]>, known: &[KnownCandidate]) {
+    fn add_gazetteer_proximal(bank: &mut LabelBankDraft, known: &[KnownCandidate]) {
         let mut has_faction = false;
         let mut has_location = false;
 
@@ -179,14 +198,64 @@ impl DynamicSchemaBuilder {
 
         if has_faction {
             for label in &["Member", "Enemy", "Alliance"] {
-                labels.push(EntityLabel::new(label));
+                bank.push(EntityLabel::new(label), LabelBankSource::Gazetteer);
             }
         }
         if has_location {
             for label in &["Region", "Landmark"] {
-                labels.push(EntityLabel::new(label));
+                bank.push(EntityLabel::new(label), LabelBankSource::Gazetteer);
             }
         }
+    }
+
+    fn add_context_labels(
+        bank: &mut LabelBankDraft,
+        labels: &[EntityLabel],
+        source: LabelBankSource,
+    ) {
+        for label in labels {
+            bank.push(label.clone(), source);
+        }
+    }
+}
+
+#[derive(Default)]
+struct LabelBankDraft {
+    labels: SmallVec<[EntityLabel; 16]>,
+    sources: SmallVec<[(EntityLabel, LabelBankSource); 16]>,
+}
+
+impl LabelBankDraft {
+    fn push(&mut self, label: EntityLabel, source: LabelBankSource) {
+        if label.as_str().trim().is_empty() {
+            return;
+        }
+        if self
+            .labels
+            .iter()
+            .any(|existing| existing.as_str().eq_ignore_ascii_case(label.as_str()))
+        {
+            return;
+        }
+        self.sources.push((label.clone(), source));
+        self.labels.push(label);
+    }
+
+    fn truncate(&mut self, max_labels: usize) {
+        self.labels.truncate(max_labels);
+        self.sources.truncate(max_labels);
+    }
+}
+
+fn negative_labels_for(domain: DomainProfile) -> SmallVec<[EntityLabel; 8]> {
+    match domain {
+        DomainProfile::Technical => smallvec![
+            EntityLabel::new("FilePath"),
+            EntityLabel::new("CliFlag"),
+            EntityLabel::new("LogLevel")
+        ],
+        DomainProfile::Legal => smallvec![EntityLabel::new("Boilerplate")],
+        _ => SmallVec::new(),
     }
 }
 
@@ -218,6 +287,10 @@ mod tests {
         assert!(pack.labels.iter().any(|l| l.as_str() == "Character"));
         assert!(pack.labels.iter().any(|l| l.as_str() == "Location"));
         assert!(pack.labels.iter().any(|l| l.as_str() == "Event"));
+        assert!(pack
+            .label_sources
+            .iter()
+            .any(|(_, source)| *source == LabelBankSource::Schema));
     }
 
     #[test]
@@ -235,6 +308,74 @@ mod tests {
         let builder = DynamicSchemaBuilder::default();
         let domain = builder.detect_domain(&[], &[]);
         assert_eq!(domain, DomainProfile::General);
+    }
+
+    #[test]
+    fn label_bank_v2_layers_context_with_provenance() {
+        let builder = DynamicSchemaBuilder {
+            max_labels: 14,
+            ..Default::default()
+        };
+        let source_frame_labels = [EntityLabel::new("EvidenceBundle")];
+        let graph_context_labels = [EntityLabel::new("RelationshipLane")];
+        let user_type_labels = [EntityLabel::new("DragonHouse")];
+        let context = LabelBankContext {
+            domain_profile: Some(DomainProfile::Technical),
+            source_frame_labels: &source_frame_labels,
+            graph_context_labels: &graph_context_labels,
+            user_type_labels: &user_type_labels,
+        };
+
+        let pack = builder.build_pack_for_window_v2(0, 1, &[], &[], Some(&context));
+
+        for expected in [
+            "Character",
+            "EvidenceBundle",
+            "RelationshipLane",
+            "DragonHouse",
+            "Library",
+        ] {
+            assert!(
+                pack.labels.iter().any(|label| label.as_str() == expected),
+                "missing {expected} in {:?}",
+                pack.labels
+            );
+        }
+        assert!(has_source(&pack, "DragonHouse", LabelBankSource::UserType));
+        assert!(has_source(
+            &pack,
+            "EvidenceBundle",
+            LabelBankSource::SourceFrameContext
+        ));
+        assert!(has_source(
+            &pack,
+            "RelationshipLane",
+            LabelBankSource::GraphContext
+        ));
+        assert!(has_source(&pack, "Library", LabelBankSource::DomainProfile));
+        assert!(pack
+            .negative_labels
+            .iter()
+            .any(|label| label.as_str() == "FilePath"));
+    }
+
+    #[test]
+    fn label_bank_v2_dedupes_case_insensitively() {
+        let builder = DynamicSchemaBuilder::default();
+        let user_type_labels = [EntityLabel::new("character")];
+        let context = LabelBankContext {
+            user_type_labels: &user_type_labels,
+            ..Default::default()
+        };
+
+        let pack = builder.build_pack_for_window_v2(0, 1, &[], &[], Some(&context));
+        assert_eq!(
+            pack.labels
+                .iter()
+                .filter(|label| label.as_str().eq_ignore_ascii_case("character"))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -314,5 +455,11 @@ mod tests {
             builder.detect_domain(&[], &native),
             DomainProfile::Technical
         );
+    }
+
+    fn has_source(pack: &LabelPack, label: &str, source: LabelBankSource) -> bool {
+        pack.label_sources
+            .iter()
+            .any(|(actual, actual_source)| actual.as_str() == label && *actual_source == source)
     }
 }

@@ -37,6 +37,10 @@ describe('graph model v2 foundation', () => {
         expect(snapshot.graphCompileReceipts?.counters.bundles).toBeGreaterThan(0);
         expect(model?.atoms.some((atom) => String(atom.kind) === 'cooccurrence')).toBe(false);
         expect(model?.atoms.some((atom) => String(atom.kind) === 'relationship')).toBe(false);
+        expect(model?.atoms).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'atom:documentRoot:note-1', kind: 'documentRoot' }),
+            expect.objectContaining({ kind: 'laneRoot', sourceId: 'note:one:relationshipFact' }),
+        ]));
         expect(model?.laneRoots.map((lane) => lane.lane)).toEqual(expect.arrayContaining([
             'document_spine',
             'chunk_spine',
@@ -60,6 +64,9 @@ describe('graph model v2 foundation', () => {
             status: 'accepted',
             relationType: 'approves_or_accepts',
         });
+        expect(model?.atoms).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: `atom:relationFact:${approvedFact?.id}`, kind: 'relationFact' }),
+        ]));
         expect(model?.styleTags).toEqual(expect.arrayContaining([
             expect.objectContaining({ targetId: approvedFact?.id, targetType: 'fact', tagKind: 'relationFamily', value: 'approval' }),
             expect.objectContaining({ targetId: cooccurrenceBundles[0]?.id, targetType: 'bundle', tagKind: 'relationFamily', value: 'cooccurrence' }),

@@ -52,16 +52,51 @@ describe('GraphGalaxyParticles', () => {
         particles.dispose();
     });
 
+    it('keeps particle flow on the tube edge design', () => {
+        const scene = particleScene();
+        const particles = new GraphGalaxyParticles();
+        const settings = { ...DEFAULT_GALAXY_SETTINGS, particleFlow: true, particleSpeed: 0, particleOpacity: 1, edgeMode: 'tube' as const };
+        const probe = particles as unknown as { seeds: number[] };
+
+        particles.bind(scene, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(scene, scene.positions3d, settings, 0);
+
+        const position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const size = particles.points.geometry.getAttribute('flowSize') as THREE.BufferAttribute;
+        expect(position.getX(0)).toBeCloseTo(1, 1);
+        expect(position.getY(0)).toBeGreaterThan(0);
+        expect(Math.abs(position.getZ(0))).toBeGreaterThan(0);
+        expect(size.getX(0)).toBeGreaterThan(0.76);
+
+        particles.dispose();
+    });
+
     it('focuses Caps selection through structural ancestors instead of semantic hubs', () => {
         const scene = structuralCapsScene();
         const focus = buildGalaxyFocusMask(scene, 'kai', null);
 
-        expect([...focus.edgeLevels]).toEqual([2, 2, 2, 0]);
+        expect([...focus.edgeLevels]).toEqual([2, 2, 2, 2]);
         expect(focus.nodeLevels[0]).toBeGreaterThan(0);
         expect(focus.nodeLevels[1]).toBeGreaterThan(0);
         expect(focus.nodeLevels[2]).toBeGreaterThan(0);
         expect(focus.nodeLevels[3]).toBe(3);
-        expect(focus.nodeLevels[4]).toBe(0);
+        expect(focus.nodeLevels[4]).toBe(2);
+    });
+
+    it('focuses Caps hierarchy both upward and downward from shell nodes', () => {
+        const scene = structuralCapsScene();
+        const rootFocus = buildGalaxyFocusMask(scene, 'doc', null);
+        const leafFocus = buildGalaxyFocusMask(scene, 'kai', null);
+
+        expect([...rootFocus.edgeLevels]).toEqual([2, 2, 2, 0]);
+        expect(rootFocus.nodeLevels[1]).toBeGreaterThan(0);
+        expect(rootFocus.nodeLevels[2]).toBeGreaterThan(0);
+        expect(rootFocus.nodeLevels[3]).toBeGreaterThan(0);
+        expect(rootFocus.nodeLevels[4]).toBe(0);
+        expect(leafFocus.nodeLevels[0]).toBeGreaterThan(0);
+        expect(leafFocus.nodeLevels[1]).toBeGreaterThan(0);
+        expect(leafFocus.nodeLevels[2]).toBeGreaterThan(0);
     });
 
     it('keeps Caps particles on spherical shell edges without affecting map paths', () => {
@@ -116,6 +151,37 @@ describe('GraphGalaxyParticles', () => {
         position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
         expect(position.getX(0)).toBeCloseTo(1.16);
         expect(position.getY(0)).toBeCloseTo(0.87);
+
+        particles.dispose();
+    });
+
+    it('adds flow particles to live Product and Siegel guide lines', () => {
+        const settings = { ...DEFAULT_GALAXY_SETTINGS, particleFlow: true, particleSpeed: 0, particleOpacity: 1, edgeMode: 'straight' as const };
+        const product = guideParticleScene('productManifold');
+        const siegel = guideParticleScene('siegelFinsler');
+        const particles = new GraphGalaxyParticles();
+        const probe = particles as unknown as { seeds: number[]; flowSources: Array<{ kind: string; index: number }> };
+
+        particles.bind(product, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(product, product.positions3d, settings, 0);
+        let position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        let color = particles.points.geometry.getAttribute('color') as THREE.BufferAttribute;
+        expect(probe.flowSources).toEqual([{ kind: 'guide', index: 0 }]);
+        expect(position.getX(0)).toBeCloseTo(1);
+        expect(position.getY(0)).toBeGreaterThan(0);
+        expect(color.getZ(0)).toBeLessThan(0.9);
+        expect(color.getZ(0)).toBeGreaterThan(0.8);
+
+        product.positions3d = new Float32Array([2, 0, 0, 6, 0, 0]);
+        particles.update(product, product.positions3d, settings, 0);
+        expect(position.getX(0)).toBeCloseTo(3);
+
+        particles.bind(siegel, settings);
+        probe.seeds[0] = 0.5;
+        particles.update(siegel, siegel.positions3d, settings, 0);
+        position = particles.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+        expect(position.getX(0)).toBeCloseTo(1);
 
         particles.dispose();
     });
@@ -199,5 +265,43 @@ function structuralCapsScene(): GalaxySceneV2 {
         edgeColors: new Float32Array(4 * 6),
         edgeAlpha: new Float32Array([1, 1, 1, 1]),
         edgeKinds: new Uint8Array([2, 2, 2, 0]),
+    };
+}
+
+function guideParticleScene(layoutMode: 'productManifold' | 'siegelFinsler'): GalaxySceneV2 {
+    return {
+        ...particleScene(),
+        layoutMode,
+        ids: ['a', 'b'],
+        labels: ['A', 'B'],
+        kinds: ['character', 'location'],
+        groupIds: ['', ''],
+        positions3d: new Float32Array([0, 0, 0, 4, 0, 0]),
+        positions2d: new Float32Array([0, 0, 0, 4, 0, 0]),
+        radii: new Float32Array([0.08, 0.08]),
+        colors: new Float32Array([1, 0, 0, 0.1, 0.8, 1]),
+        edgePairs: new Uint32Array(0),
+        edgeColors: new Float32Array(0),
+        edgeAlpha: new Float32Array(0),
+        edgeKinds: new Uint8Array(0),
+        lorentzGuides: [{
+            id: `${layoutMode}:guide:a-b`,
+            nodeIds: ['a', 'b'],
+            positions3d: new Float32Array([
+                0, 0, 0, 1, 0.5, 0,
+                1, 0.5, 0, 4, 0, 0,
+            ]),
+            positions2d: new Float32Array([
+                0, 0, 0, 1, 0.5, 0,
+                1, 0.5, 0, 4, 0, 0,
+            ]),
+            color: { r: 0.2, g: 0.7, b: 1 },
+            importance: 1,
+            treeId: 'guide',
+            treeKind: 'relationship',
+            level: 1,
+            guideKind: 'membership',
+            guideWeight: 1,
+        }],
     };
 }

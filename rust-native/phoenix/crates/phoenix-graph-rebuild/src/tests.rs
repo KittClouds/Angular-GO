@@ -9,8 +9,10 @@ use serde::Deserialize;
 
 use crate::{
     build_graph_rebuild_snapshot, compile_dual_write_snapshot, compile_graph_snapshot,
-    compile_legacy_snapshot_strict, EvidenceBundleKind, EvidenceKind, FactLane, GraphAtomKind,
-    GraphChunk, GraphCompilerInput, GraphMention, GraphRebuildInput, GraphScopeKind,
+    compile_legacy_snapshot_strict, verify_graph_compile_output, EvidenceAnchor,
+    EvidenceBundleKind, EvidenceKind, FactLane, FactRole, GraphAtom, GraphAtomKind, GraphChunk,
+    GraphCompileReceipts, GraphCompilerInput, GraphCompilerOutput, GraphMention, GraphRebuildInput,
+    GraphScopeKind, RelationFact,
 };
 
 const PARITY_FIXTURE: &str =
@@ -294,6 +296,8 @@ fn compiles_prepared_artifacts_without_legacy_rescan() {
         causal_edges: &[],
         memory_state: &[],
         legacy_edges: &[],
+        bundle_compression: None,
+        bundle_commitment: None,
     });
 
     assert_eq!(compiled.receipts.counters.invariant_failures, 0);
@@ -309,6 +313,27 @@ fn compiles_prepared_artifacts_without_legacy_rescan() {
         .evidence_anchors
         .iter()
         .any(|evidence| evidence.kind == EvidenceKind::MentionGraphEdge));
+    assert!(compiled
+        .atoms
+        .iter()
+        .any(|atom| atom.kind == GraphAtomKind::DocumentRoot));
+    assert!(compiled
+        .atoms
+        .iter()
+        .any(|atom| atom.kind == GraphAtomKind::LaneRoot));
+    assert!(compiled
+        .atoms
+        .iter()
+        .any(|atom| atom.kind == GraphAtomKind::Frame));
+    assert!(compiled
+        .atoms
+        .iter()
+        .any(|atom| atom.kind == GraphAtomKind::RelationFact));
+    assert!(compiled.roles.iter().any(|role| role.role == "leftMention"));
+    assert!(compiled
+        .roles
+        .iter()
+        .any(|role| role.role == "rightMention"));
     assert!(compiled
         .projected_edges
         .iter()
@@ -329,6 +354,73 @@ fn compiles_prepared_artifacts_without_legacy_rescan() {
         .projected_edges
         .iter()
         .any(|edge| edge.projection_kind == "mentionGraph" && edge.source_bundle_id.is_some()));
+}
+
+#[test]
+fn rejects_roles_that_target_the_wrong_layer() {
+    let output = GraphCompilerOutput {
+        schema_version: "phoenix-graph-compiler/v1".into(),
+        scope_kind: GraphScopeKind::Note,
+        scope_id: "note:bad-role".into(),
+        built_at: 1,
+        atoms: vec![GraphAtom {
+            id: "atom:entity:e-kai".into(),
+            kind: GraphAtomKind::Entity,
+            source_id: "e-kai".into(),
+            label: "Kai".into(),
+            note_id: None,
+            chunk_id: None,
+            entity_id: Some(EntityId("e-kai".into())),
+            evidence_ids: vec!["evidence:anchor:kai".into()],
+        }],
+        evidence_anchors: vec![EvidenceAnchor {
+            id: "evidence:anchor:kai".into(),
+            kind: EvidenceKind::SourceSpan,
+            note_id: None,
+            chunk_id: None,
+            source_range: None,
+            source_id: "anchor:kai".into(),
+            confidence: 0.8,
+        }],
+        bundles: Vec::new(),
+        facts: vec![RelationFact {
+            id: "fact:bad-role".into(),
+            lane: FactLane::RelationshipFact,
+            predicate: "knows".into(),
+            source_record_id: "rel:bad-role".into(),
+            status: "accepted".into(),
+            evidence_ids: vec!["evidence:anchor:kai".into()],
+            confidence: 0.8,
+        }],
+        roles: vec![
+            FactRole {
+                fact_id: "fact:bad-role".into(),
+                role: "source".into(),
+                atom_id: "atom:entity:e-kai".into(),
+                confidence: 0.8,
+            },
+            FactRole {
+                fact_id: "fact:bad-role".into(),
+                role: "target".into(),
+                atom_id: "atom:entity:e-kai".into(),
+                confidence: 0.8,
+            },
+            FactRole {
+                fact_id: "fact:bad-role".into(),
+                role: "evidence".into(),
+                atom_id: "atom:entity:e-kai".into(),
+                confidence: 0.8,
+            },
+        ],
+        projected_edges: Vec::new(),
+        receipts: GraphCompileReceipts::default(),
+    };
+
+    let receipts = verify_graph_compile_output(&output);
+    assert!(receipts
+        .invariant_failures
+        .iter()
+        .any(|failure| failure.contains("illegal target")));
 }
 
 #[test]

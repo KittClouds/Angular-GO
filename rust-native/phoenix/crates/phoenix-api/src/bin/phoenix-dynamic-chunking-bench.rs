@@ -189,6 +189,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &surface_hit_batch.hits,
+            label_bank_context: None,
         })
         .map_err(|error| format!("dynamic NER failed for {}: {error}", case.name))?;
     let dynamic_ner_ms = ner_started.elapsed().as_millis();

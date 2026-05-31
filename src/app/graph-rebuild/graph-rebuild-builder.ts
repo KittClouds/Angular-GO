@@ -17,6 +17,8 @@ import { buildGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-
 import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
 import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
+import { buildGraphRebuildFinalLinkPatchLog } from './graph-rebuild-final-linking';
+import { buildBundleDedupeShadowLinks } from './graph-rebuild-shadow-linking';
 import { buildCompatibilityGraphCompilerSidecar } from './graph-compiler-compat';
 import { attachGraphCompilerReadModels } from './graph-compiler-read-model';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
@@ -93,6 +95,7 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
             entityAnchors,
             nodes,
             edges,
+            relationships,
             structuralPostProcess,
             embeddingGraphPostProcess,
         })
@@ -197,6 +200,17 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         input.graphCompilerSidecar || buildCompatibilityGraphCompilerSidecar(snapshot),
         input.graphCompilerSidecar ? 'rust' : 'typescriptCompatibility',
     );
+    const shadowLinkSuggestions = [
+        ...entityLinking.suggestions,
+        ...buildBundleDedupeShadowLinks(snapshot.graphModelV2?.bundles || []),
+    ];
+    const finalLinkPatchLog = buildGraphRebuildFinalLinkPatchLog(shadowLinkSuggestions, builtAt);
+    snapshot.entityLinkSuggestions = shadowLinkSuggestions;
+    snapshot.shadowLinkSuggestions = shadowLinkSuggestions;
+    snapshot.finalLinkPatchLog = finalLinkPatchLog;
+    snapshot.counters.shadowLinkSuggestions = shadowLinkSuggestions.length;
+    snapshot.counters.finalLinkPatches = finalLinkPatchLog.counters.planned;
+    snapshot.counters.finalLinkReceiptFailures = finalLinkPatchLog.counters.failedReceipts;
     return snapshot;
 }
 
@@ -439,6 +453,7 @@ function emptyEntityLinkCounters(mentions: GraphRebuildMention[]): GraphRebuildS
         newEntity: 0,
         ambiguous: 0,
         rejected: 0,
+        shadowLinks: 0,
         autoConfirmable: 0,
     };
 }

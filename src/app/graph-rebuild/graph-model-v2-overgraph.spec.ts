@@ -47,7 +47,8 @@ describe('graph model v2 OverGraph export', () => {
         });
         expect(exported.summary).toMatchObject({
             atomVertices: snapshot.graphModelV2?.atoms.length,
-            bundleVertices: snapshot.graphModelV2?.bundles.length,
+            bundleVertices: 0,
+            bundleReceipts: snapshot.graphModelV2?.bundles.length,
             factVertices: snapshot.graphModelV2?.facts.length,
             roleEdges: snapshot.graphModelV2?.roles.length,
             droppedProjectionEdges: expect.any(Number),
@@ -77,6 +78,61 @@ describe('graph model v2 OverGraph export', () => {
         expect(cooccurrenceEdges.length).toBeGreaterThan(0);
         expect(cooccurrenceEdges.every((edge) => edge.layer === 'candidate')).toBe(true);
         expect(exported.summary.candidateEdges).toBeGreaterThan(0);
+    });
+
+    it('exposes Busemann commitment receipts on candidate bundle projections without rendering bundle vertices', () => {
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note-1',
+            noteIds: ['note-1'],
+            entities: [entity('kai', 'Kai'), entity('hazel', 'Hazel')],
+            chunks: [{ id: 'chunk-1', noteId: 'note-1', start: 0, end: 18, ordinal: 0, source: 'note-block' }],
+            occurrences: [occurrence('kai', 'Kai', 0, 3), occurrence('hazel', 'Hazel', 8, 13)],
+            noteTexts: { 'note-1': 'Kai met Hazel.' },
+            builtAt: 23,
+        });
+        const bundle = snapshot.graphModelV2?.bundles[0];
+        expect(bundle).toBeTruthy();
+        bundle!.commitment = {
+            family: 'RelationFamily',
+            topPrototypeId: 'relation:cooccurrence',
+            topLabel: 'cooccurrence',
+            topScore: -0.8,
+            topProbability: 0.79,
+            secondPrototypeId: 'relation:approval',
+            secondScore: -0.2,
+            secondProbability: 0.21,
+            margin: 0.6,
+            entropy: 0.31,
+            ambiguityScore: 0.31,
+            classificationConfidence: 0.74,
+            promotionReady: true,
+            radialStrength: 0.7,
+            topKScores: [
+                { prototypeId: 'relation:cooccurrence', family: 'RelationFamily', score: -0.8, probability: 0.79 },
+            ],
+        };
+
+        const exported = buildGraphModelV2OverGraphExport(snapshot);
+        const bundleProjection = exported.graphBatch.edges.find((edge) =>
+            (edge.attributes.graphModelV2 as { sourceBundleId?: string } | undefined)?.sourceBundleId === bundle!.id
+        );
+        const graphModelV2 = bundleProjection?.attributes.graphModelV2 as Record<string, unknown> | undefined;
+
+        expect(exported.graphBatch.vertices.some((row) => row.id === bundle!.id)).toBe(false);
+        expect(graphModelV2).toMatchObject({
+            edgeKind: 'projection',
+            sourceBundleId: bundle!.id,
+            commitmentTopPrototypeId: 'relation:cooccurrence',
+            promotionReady: true,
+            hybridInterior: {
+                mode: 'busemannCommitment',
+                signature: expect.objectContaining({
+                    topPrototypeId: 'relation:cooccurrence',
+                    promotionReady: true,
+                }),
+            },
+        });
     });
 });
 

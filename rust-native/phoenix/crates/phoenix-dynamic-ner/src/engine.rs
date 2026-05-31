@@ -18,7 +18,7 @@ use crate::schema::DynamicSchemaBuilder;
 use crate::scoring::MentionWorkspace;
 use crate::surface_memory::SurfaceMemoryReport;
 use crate::traits::{AdjudicationDecision, DynamicNerModel, MentionAdjudicator, ModelNerWindow};
-use crate::types::{MentionPacket, NerRoute};
+use crate::types::{LabelBankContext, MentionPacket, NerRoute};
 
 // ---------------------------------------------------------------------------
 // Input / Output
@@ -33,6 +33,7 @@ pub struct SurfaceNerInput<'a> {
     pub scope: &'a ScopeKey,
     pub lexicon: Option<&'a Lexicon>,
     pub surface_hits: &'a [SurfaceHit],
+    pub label_bank_context: Option<&'a LabelBankContext<'a>>,
 }
 
 /// Output from the NER engine.
@@ -229,6 +230,7 @@ impl PhoenixNerEngine {
             &self.dynamic_schema,
             &known_candidates,
             &native_candidates,
+            input.label_bank_context,
         );
         if let Some(metrics) = metrics.as_deref_mut() {
             metrics.route_planning_ms = phase_started.elapsed().as_millis();
@@ -763,6 +765,7 @@ mod tests {
             scope: &ScopeKey::default(),
             lexicon: None,
             surface_hits: &[],
+            label_bank_context: None,
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result.mentions.is_empty());
@@ -802,6 +805,7 @@ mod tests {
             scope: &ScopeKey::default(),
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(!result.mentions.is_empty());
@@ -822,6 +826,7 @@ mod tests {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let left = engine.extract_mentions(&input).unwrap();
         let right = engine.extract_mentions(&input).unwrap();
@@ -852,6 +857,7 @@ mod tests {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result
@@ -875,6 +881,7 @@ mod tests {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result
@@ -903,6 +910,7 @@ mod tests {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let result = engine.extract_mentions(&input).unwrap();
         let unique = result
@@ -927,6 +935,7 @@ mod tests {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         };
         let started = std::time::Instant::now();
         let result = engine.extract_mentions(&input).unwrap();
@@ -952,6 +961,7 @@ mod tests {
             scope: &scope,
             lexicon: None,
             surface_hits: &[],
+            label_bank_context: None,
         };
 
         let result = engine.extract_mentions(&input).unwrap();

@@ -21,6 +21,7 @@ pub enum FactLane {
     TemporalFact,
     CausalFact,
     MemoryState,
+    EntityLinker,
     AnchorEvidence,
 }
 
@@ -28,7 +29,10 @@ pub enum FactLane {
 #[serde(rename_all = "camelCase")]
 pub enum GraphAtomKind {
     Document,
+    DocumentRoot,
+    LaneRoot,
     Chunk,
+    Frame,
     SourceSpan,
     EvidenceAnchor,
     Entity,
@@ -36,6 +40,7 @@ pub enum GraphAtomKind {
     Event,
     State,
     Claim,
+    RelationFact,
     TimeAnchor,
     Root,
 }
@@ -63,6 +68,150 @@ pub enum EvidenceBundleKind {
     Neighborhood,
     SemanticSimilarity,
     ShadowIdentity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BundleCompressionModel {
+    JinaV5Nano,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BundleRerankSource {
+    GliClass,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum GraphPrototypeFamily {
+    EntityKind,
+    RelationFamily,
+    EvidenceAuthority,
+    GraphStage,
+    ConceptDomain,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BundleCompressionPolicy {
+    pub cluster_similarity_threshold: f32,
+    pub duplicate_similarity_threshold: f32,
+    pub outlier_score_threshold: f32,
+}
+
+impl Default for BundleCompressionPolicy {
+    fn default() -> Self {
+        Self {
+            cluster_similarity_threshold: 0.72,
+            duplicate_similarity_threshold: 0.96,
+            outlier_score_threshold: 0.72,
+        }
+    }
+}
+
+pub struct BundleEmbedding<'a> {
+    pub bundle_id: &'a str,
+    pub vector: &'a [f32],
+}
+
+pub struct BundleRerankScore<'a> {
+    pub bundle_id: &'a str,
+    pub source: BundleRerankSource,
+    pub score: f32,
+}
+
+pub struct BundleCompressionInput<'a> {
+    pub model: BundleCompressionModel,
+    pub embeddings: &'a [BundleEmbedding<'a>],
+    pub rerank_scores: &'a [BundleRerankScore<'a>],
+    pub policy: BundleCompressionPolicy,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BundleCommitmentPolicy {
+    pub family: GraphPrototypeFamily,
+    pub curvature: f32,
+    pub commitment_weight: f32,
+    pub radial_weight: f32,
+    pub ambiguity_threshold: f32,
+    pub promotion_margin: f32,
+    pub top_k: usize,
+}
+
+impl Default for BundleCommitmentPolicy {
+    fn default() -> Self {
+        Self {
+            family: GraphPrototypeFamily::RelationFamily,
+            curvature: 1.0,
+            commitment_weight: 2.0,
+            radial_weight: 0.25,
+            ambiguity_threshold: 0.45,
+            promotion_margin: 0.35,
+            top_k: 4,
+        }
+    }
+}
+
+pub struct BundlePrototype<'a> {
+    pub prototype_id: &'a str,
+    pub family: GraphPrototypeFamily,
+    pub label: &'a str,
+    pub direction: &'a [f32],
+}
+
+pub struct BundleCommitmentPoint<'a> {
+    pub bundle_id: &'a str,
+    pub point: &'a [f32],
+}
+
+pub struct BundleCommitmentInput<'a> {
+    pub prototypes: &'a [BundlePrototype<'a>],
+    pub points: &'a [BundleCommitmentPoint<'a>],
+    pub policy: BundleCommitmentPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactBundlePrototypeScore {
+    pub prototype_id: CompactString,
+    pub family: GraphPrototypeFamily,
+    pub score: f32,
+    pub probability: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactBundleCommitment {
+    pub family: GraphPrototypeFamily,
+    pub top_prototype_id: CompactString,
+    pub top_label: CompactString,
+    pub top_score: f32,
+    pub top_probability: f32,
+    pub second_prototype_id: Option<CompactString>,
+    pub second_score: Option<f32>,
+    pub second_probability: Option<f32>,
+    pub margin: f32,
+    pub entropy: f32,
+    pub ambiguity_score: f32,
+    pub classification_confidence: f32,
+    pub promotion_ready: bool,
+    pub radial_strength: f32,
+    pub top_k_scores: Vec<FactBundlePrototypeScore>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactBundleCompression {
+    pub model: BundleCompressionModel,
+    pub cluster_id: CompactString,
+    pub canonical_bundle_id: CompactString,
+    pub duplicate_of_bundle_id: Option<CompactString>,
+    pub outlier_score: f32,
+    pub neighbor_count: u16,
+    pub semantic_rank: u16,
+    pub rerank_score: Option<f32>,
+    pub rerank_source: Option<BundleRerankSource>,
+    pub signals: Vec<CompactString>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +263,8 @@ pub struct FactBundle {
     pub status: CompactString,
     pub evidence_ids: Vec<CompactString>,
     pub confidence: f32,
+    pub compression: Option<FactBundleCompression>,
+    pub commitment: Option<FactBundleCommitment>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -204,4 +355,6 @@ pub struct GraphCompilerInput<'a> {
     pub causal_edges: &'a [GraphTemporalEdge],
     pub memory_state: &'a [GraphMemoryState],
     pub legacy_edges: &'a [GraphEdge],
+    pub bundle_compression: Option<&'a BundleCompressionInput<'a>>,
+    pub bundle_commitment: Option<&'a BundleCommitmentInput<'a>>,
 }

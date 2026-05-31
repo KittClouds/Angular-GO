@@ -20,6 +20,8 @@ export type GraphSignalTruthKind =
     | 'relationship'
     | 'graph_link_suggestion'
     | 'entity_link_suggestion'
+    | 'shadow_link_suggestion'
+    | 'final_link_patch'
     | 'resolution_suggestion';
 
 export interface GraphSignalTruthRecord {
@@ -109,7 +111,17 @@ export function buildGraphSignalTruthSummary(snapshot: GraphRebuildSnapshot): Gr
     for (const target of snapshot.embeddingTargets || []) add(graphTruthForEmbeddingTarget(target, relationshipById.get(target.sourceId)));
     for (const relationship of snapshot.relationships || []) add(graphTruthForRelationship(relationship));
     for (const suggestion of snapshot.graphAwareLinkSuggestions || []) add(graphTruthForGraphLinkSuggestion(suggestion));
-    for (const suggestion of snapshot.entityLinkSuggestions || []) add(graphTruthForEntityLinkSuggestion(suggestion));
+    for (const suggestion of snapshot.shadowLinkSuggestions || snapshot.entityLinkSuggestions || []) {
+        add(graphTruthForEntityLinkSuggestion(suggestion));
+    }
+    for (const patch of snapshot.finalLinkPatchLog?.patches || []) add({
+        id: patch.id,
+        kind: 'final_link_patch',
+        status: patch.status === 'applied' ? 'accepted' : patch.status === 'reverted' ? 'hidden' : 'review',
+        reason: patch.operation,
+        confidence: patch.confidence,
+        sourceId: patch.sourceShadowLinkId,
+    });
     for (const suggestion of snapshot.resolutionSuggestions || []) add(graphTruthForResolutionSuggestion(suggestion));
     return summary;
 }
@@ -170,7 +182,7 @@ export function graphTruthForEntityLinkSuggestion(suggestion: GraphRebuildEntity
             : 'review';
     return truth(
         suggestion.id,
-        'entity_link_suggestion',
+        'phase' in suggestion && suggestion.phase === 'shadow' ? 'shadow_link_suggestion' : 'entity_link_suggestion',
         status,
         suggestion.rationale[0] || 'entity-link suggestion',
         undefined,

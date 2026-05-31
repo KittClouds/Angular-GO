@@ -156,7 +156,7 @@ export function buildReviewClusterViews(
 
 function reviewClusterViews(snapshot: GraphRebuildSnapshot, entityId?: string): ProductDiagnosticsReviewCluster[] {
     return [
-        ...entityLinkClusters(snapshot.entityLinkSuggestions || [], entityId),
+        ...entityLinkClusters(snapshot.shadowLinkSuggestions || snapshot.entityLinkSuggestions || [], entityId),
         ...graphLinkClusters(snapshot.graphAwareLinkSuggestions || [], entityId),
     ]
         .sort((left, right) =>

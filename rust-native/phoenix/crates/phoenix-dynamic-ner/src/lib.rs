@@ -38,7 +38,7 @@ pub use traits::{
     Polarity, VerificationCase,
 };
 pub use types::{
-    DomainProfile, EntityLabel, LabelPack, LocalMentionId, MentionContext, MentionKind,
-    MentionPacket, MentionSemantics, MentionSourceKind, MentionStatus, MentionSyntax, MentionVote,
-    NerNeedVector, NerRoute, VoteReason,
+    DomainProfile, EntityLabel, LabelBankContext, LabelBankSource, LabelPack, LocalMentionId,
+    MentionContext, MentionKind, MentionPacket, MentionSemantics, MentionSourceKind, MentionStatus,
+    MentionSyntax, MentionVote, NerNeedVector, NerRoute, VoteReason,
 };

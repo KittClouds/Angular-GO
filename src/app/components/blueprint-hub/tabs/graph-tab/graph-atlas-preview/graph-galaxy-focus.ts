@@ -22,10 +22,12 @@ export function buildGalaxyFocusMask(data: GalaxySceneV2, selectedId: string | n
     }
 
     if (data.layoutMode === 'siegelFinsler' && focusDirectedHierarchy(data, focusIndex, nodeLevels, edgeLevels)) {
+        includeIncidentConnections(data, focusIndex, nodeLevels, edgeLevels);
         return { hasFocus: true, focusIndex, selectedIndex, hoverIndex, nodeLevels, edgeLevels };
     }
 
     if (data.layoutMode === 'lorentzTree' && focusStructuralHierarchy(data, focusIndex, nodeLevels, edgeLevels)) {
+        includeIncidentConnections(data, focusIndex, nodeLevels, edgeLevels);
         return { hasFocus: true, focusIndex, selectedIndex, hoverIndex, nodeLevels, edgeLevels };
     }
 
@@ -98,55 +100,78 @@ function focusStructuralHierarchy(
 ): boolean {
     const edgeCount = edgeLevels.length;
     nodeLevels[focusIndex] = 3;
-    let foundAncestor = false;
+    let found = false;
+    found = walkStructuralDirection(data, focusIndex, nodeLevels, edgeLevels, 'ancestor') || found;
+    found = walkStructuralDirection(data, focusIndex, nodeLevels, edgeLevels, 'descendant') || found;
+    return found;
+}
+
+function walkStructuralDirection(
+    data: GalaxySceneV2,
+    focusIndex: number,
+    nodeLevels: Uint8Array,
+    edgeLevels: Uint8Array,
+    direction: 'ancestor' | 'descendant',
+): boolean {
+    const edgeCount = edgeLevels.length;
     const seen = new Uint8Array(data.ids.length);
     const queue = new Uint32Array(data.ids.length);
     const depths = new Uint8Array(data.ids.length);
     let head = 0;
     let tail = 0;
+    let found = false;
     queue[tail++] = focusIndex;
     seen[focusIndex] = 1;
     while (head < tail) {
         const current = queue[head++];
         const depth = depths[current];
         if (depth >= 5) continue;
-        const currentRadius = nodeRadius(data, current);
         for (let edge = 0; edge < edgeCount; edge += 1) {
             if (data.edgeKinds[edge] !== 2) continue;
             const source = data.edgePairs[edge * 2];
             const target = data.edgePairs[edge * 2 + 1];
             const next = source === current ? target : target === current ? source : -1;
             if (next < 0) continue;
-            const nextRadius = nodeRadius(data, next);
-            const parent = currentRadius >= nextRadius ? current : next;
+            const parent = structuralParent(data, source, target);
             const child = parent === current ? next : current;
-            if (child !== current) continue;
-            foundAncestor = true;
+            const follow = direction === 'ancestor' ? child === current : parent === current;
+            const nextNode = direction === 'ancestor' ? parent : child;
+            if (!follow) continue;
+            found = true;
             edgeLevels[edge] = 2;
-            nodeLevels[parent] = Math.max(nodeLevels[parent], depth <= 1 ? 2 : 1);
-            if (!seen[parent]) {
-                seen[parent] = 1;
-                depths[parent] = depth + 1;
-                queue[tail++] = parent;
+            nodeLevels[nextNode] = Math.max(nodeLevels[nextNode], depth <= 1 ? 2 : 1);
+            if (!seen[nextNode]) {
+                seen[nextNode] = 1;
+                depths[nextNode] = depth + 1;
+                queue[tail++] = nextNode;
             }
         }
     }
-    if (foundAncestor) return true;
+    return found;
+}
 
-    let foundChild = false;
-    const focusRadius = nodeRadius(data, focusIndex);
+function includeIncidentConnections(
+    data: GalaxySceneV2,
+    focusIndex: number,
+    nodeLevels: Uint8Array,
+    edgeLevels: Uint8Array,
+): void {
+    const edgeCount = edgeLevels.length;
     for (let edge = 0; edge < edgeCount; edge += 1) {
-        if (data.edgeKinds[edge] !== 2) continue;
         const source = data.edgePairs[edge * 2];
         const target = data.edgePairs[edge * 2 + 1];
         const next = source === focusIndex ? target : target === focusIndex ? source : -1;
         if (next < 0) continue;
-        if (focusRadius < nodeRadius(data, next)) continue;
-        foundChild = true;
         edgeLevels[edge] = 2;
         nodeLevels[next] = Math.max(nodeLevels[next], 2);
     }
-    return foundChild;
+}
+
+function structuralParent(data: GalaxySceneV2, source: number, target: number): number {
+    const sourceRadius = nodeRadius(data, source);
+    const targetRadius = nodeRadius(data, target);
+    if (Math.abs(sourceRadius - targetRadius) <= 0.0001) return source;
+    return sourceRadius >= targetRadius ? source : target;
 }
 
 function nodeRadius(data: GalaxySceneV2, index: number): number {

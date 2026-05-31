@@ -9,8 +9,14 @@ import type {
     GraphRebuildEntityLinkSuggestion,
     GraphRebuildMention,
     GraphRebuildNode,
+    GraphRebuildRelationship,
+    GraphRebuildShadowLink,
     GraphRebuildStructuralPostProcess,
 } from './graph-rebuild-snapshot';
+import {
+    buildRelationDuplicateShadowLinks,
+    shadowEntityLink,
+} from './graph-rebuild-shadow-linking';
 
 const MAX_ENTITY_LINK_SUGGESTIONS = 48;
 const MAX_LINKER_CANDIDATES_PER_MENTION = 4;
@@ -32,15 +38,17 @@ export function buildGraphRebuildEntityLinkSuggestions(input: {
     entityAnchors: GraphRebuildEntityAnchor[];
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
+    relationships?: GraphRebuildRelationship[];
     structuralPostProcess: GraphRebuildStructuralPostProcess;
     embeddingGraphPostProcess?: GraphRebuildEmbeddingGraphPostProcess;
-}): { suggestions: GraphRebuildEntityLinkSuggestion[]; counters: GraphRebuildEntityLinkCounters } {
+}): { suggestions: GraphRebuildShadowLink[]; counters: GraphRebuildEntityLinkCounters } {
     const index = buildIndex(input);
     const suggestions = [
         ...unresolvedMentionSuggestions(input.mentions, index),
         ...linkerCandidateSuggestions(input.mentions, index),
         ...aliasSuggestions(input.entityAnchors, index),
         ...duplicateEntitySuggestions(input.nodes, index),
+        ...buildRelationDuplicateShadowLinks(input.relationships || [], input.nodes),
     ];
     const uniqueSuggestions = uniqueById(suggestions)
         .sort((left, right) => right.rerankScore - left.rerankScore || left.id.localeCompare(right.id))
@@ -81,26 +89,29 @@ function buildIndex(input: {
     return { nodesById, nodeSurfaceClaims, acceptedBySurface, structuralByEntity, edgeByPair, embeddingByEntity, embeddingEdgeByPair };
 }
 
-function unresolvedMentionSuggestions(mentions: GraphRebuildMention[], index: EntityLinkIndex): GraphRebuildEntityLinkSuggestion[] {
-    const out: GraphRebuildEntityLinkSuggestion[] = [];
+function unresolvedMentionSuggestions(mentions: GraphRebuildMention[], index: EntityLinkIndex): GraphRebuildShadowLink[] {
+    const out: GraphRebuildShadowLink[] = [];
     for (const mention of mentions) {
         if (mention.status === 'accepted') continue;
         const normalized = normalize(mention.surface);
         if (!normalized) continue;
         const candidates = uniqueNodes(index.nodeSurfaceClaims.get(normalized) || []);
         if (candidates.length === 1) {
-            out.push(suggestionForMention(mention, candidates[0], 'same_entity', index, ['surface: exact label or alias match']));
+            out.push(shadowEntityLink(
+                suggestionForMention(mention, candidates[0], 'same_entity', index, ['surface: exact label or alias match']),
+                'same_entity_suspicion',
+            ));
         } else if (candidates.length > 1) {
-            out.push(ambiguousSuggestion(mention, candidates, index));
+            out.push(shadowEntityLink(ambiguousSuggestion(mention, candidates, index), 'query_assist'));
         } else if (mention.status === 'dropped') {
-            out.push(newEntitySuggestion(mention));
+            out.push(shadowEntityLink(newEntitySuggestion(mention), 'query_assist'));
         }
     }
     return out;
 }
 
-function linkerCandidateSuggestions(mentions: GraphRebuildMention[], index: EntityLinkIndex): GraphRebuildEntityLinkSuggestion[] {
-    const out: GraphRebuildEntityLinkSuggestion[] = [];
+function linkerCandidateSuggestions(mentions: GraphRebuildMention[], index: EntityLinkIndex): GraphRebuildShadowLink[] {
+    const out: GraphRebuildShadowLink[] = [];
     for (const mention of mentions) {
         if (!shouldProbeLinkerCandidates(mention)) continue;
         const candidates = retrieveLinkerCandidates(mention, index).slice(0, MAX_LINKER_CANDIDATES_PER_MENTION);
@@ -120,32 +131,37 @@ function linkerCandidateSuggestions(mentions: GraphRebuildMention[], index: Enti
         suggestion.linkerWindowId = linkerWindowId(mention);
         suggestion.rerankSignals = unique([...suggestion.rerankSignals, `linker:candidate_set:${candidates.length}`, `linker:window:${suggestion.linkerWindowId}`]);
         suggestion.rationale = unique([...suggestion.rationale, ...best.reasons.map((reason) => `linker: ${reason}`)]);
-        out.push(suggestion);
+        out.push(shadowEntityLink(suggestion, 'same_entity_suspicion', {
+            clusterHintIds: suggestion.rerankSignals.filter((signal) => signal.startsWith('embedding:')),
+        }));
     }
     return out;
 }
 
-function aliasSuggestions(anchors: GraphRebuildEntityAnchor[], index: EntityLinkIndex): GraphRebuildEntityLinkSuggestion[] {
-    const out: GraphRebuildEntityLinkSuggestion[] = [];
+function aliasSuggestions(anchors: GraphRebuildEntityAnchor[], index: EntityLinkIndex): GraphRebuildShadowLink[] {
+    const out: GraphRebuildShadowLink[] = [];
     for (const anchor of anchors) {
         const node = index.nodesById.get(anchor.entityId);
         if (!node || knownSurface(node, anchor.surface)) continue;
         const repeated = (index.acceptedBySurface.get(normalize(anchor.surface)) || []).filter((row) => row.entityId === anchor.entityId);
         if (repeated.length < 1) continue;
-        out.push(suggestionForMention(anchor, node, 'alias_of', index, [
-            'surface: accepted anchor uses a non-canonical surface',
-            `alias: ${repeated.length} accepted occurrence(s) can become a registry alias`,
-        ]));
+        out.push(shadowEntityLink(
+            suggestionForMention(anchor, node, 'alias_of', index, [
+                'surface: accepted anchor uses a non-canonical surface',
+                `alias: ${repeated.length} accepted occurrence(s) can become a registry alias`,
+            ]),
+            'alias_suspicion',
+        ));
     }
     return out;
 }
 
-function duplicateEntitySuggestions(nodes: GraphRebuildNode[], index: EntityLinkIndex): GraphRebuildEntityLinkSuggestion[] {
+function duplicateEntitySuggestions(nodes: GraphRebuildNode[], index: EntityLinkIndex): GraphRebuildShadowLink[] {
     const buckets = new Map<string, GraphRebuildNode[]>();
     for (const node of nodes) {
         for (const token of normalizedTokens(node.label)) mapArray(buckets, token).push(node);
     }
-    const out: GraphRebuildEntityLinkSuggestion[] = [];
+    const out: GraphRebuildShadowLink[] = [];
     const seenPairs = new Set<string>();
     for (const bucket of buckets.values()) {
         if (bucket.length < 2 || bucket.length > 16) continue;
@@ -159,7 +175,7 @@ function duplicateEntitySuggestions(nodes: GraphRebuildNode[], index: EntityLink
                 seenPairs.add(key);
                 const lexical = jaccard(normalizedTokens(left.label), normalizedTokens(right.label));
                 if (lexical < 0.5) continue;
-                out.push(pairSuggestion(left, right, index, lexical));
+                out.push(shadowEntityLink(pairSuggestion(left, right, index, lexical), 'same_entity_suspicion'));
             }
         }
     }
@@ -369,7 +385,7 @@ function scoreEntityLink(leftId: string, rightId: string | undefined, index: Ent
     };
 }
 
-function countersFor(suggestions: GraphRebuildEntityLinkSuggestion[], mentions: GraphRebuildMention[]): GraphRebuildEntityLinkCounters {
+function countersFor(suggestions: GraphRebuildShadowLink[], mentions: GraphRebuildMention[]): GraphRebuildEntityLinkCounters {
     return {
         candidateMentions: mentions.filter((mention) => mention.status !== 'accepted').length,
         candidateLinks: suggestions.length,
@@ -378,6 +394,7 @@ function countersFor(suggestions: GraphRebuildEntityLinkSuggestion[], mentions: 
         newEntity: countDecision(suggestions, 'new_entity'),
         ambiguous: countDecision(suggestions, 'ambiguous'),
         rejected: countDecision(suggestions, 'reject'),
+        shadowLinks: suggestions.length,
         linkerCandidates: suggestions.filter((suggestion) => suggestion.linkerCandidateEntityIds?.length).length,
         autoConfirmable: suggestions.filter((suggestion) => suggestion.status === 'confirmed').length,
     };
@@ -416,7 +433,7 @@ function jaccard(left: string[], right: string[]): number {
     return shared / Math.max(1, a.size + b.size - shared);
 }
 
-function countDecision(suggestions: GraphRebuildEntityLinkSuggestion[], decision: GraphRebuildEntityLinkDecision): number {
+function countDecision(suggestions: GraphRebuildShadowLink[], decision: GraphRebuildEntityLinkDecision): number {
     return suggestions.filter((suggestion) => suggestion.decision === decision).length;
 }
 
@@ -424,7 +441,7 @@ function uniqueNodes(nodes: GraphRebuildNode[]): GraphRebuildNode[] {
     return uniqueBy(nodes, (node) => node.id);
 }
 
-function uniqueById(suggestions: GraphRebuildEntityLinkSuggestion[]): GraphRebuildEntityLinkSuggestion[] {
+function uniqueById(suggestions: GraphRebuildShadowLink[]): GraphRebuildShadowLink[] {
     return uniqueBy(suggestions, (suggestion) => suggestion.id);
 }
 

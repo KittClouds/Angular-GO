@@ -387,6 +387,59 @@ describe('GraphRebuildPipelineService', () => {
         ]));
     });
 
+    it('force postprocess carries cached anchors into the rebuilt snapshot', async () => {
+        const first = await service.postProcessAtlas(request());
+        Object.assign(first.snapshot, {
+            nodes: [
+                { entityId: 'entity-kai', label: 'Kai', kind: 'CHARACTER' },
+                { entityId: 'entity-hazel', label: 'Hazel', kind: 'CHARACTER' },
+            ],
+            entityAnchors: [
+                {
+                    id: 'anchor:kai',
+                    noteId: 'note-1',
+                    entityId: 'entity-kai',
+                    surface: 'Kai',
+                    sourceStart: 0,
+                    sourceEnd: 3,
+                    source: 'machine_suggestion',
+                    confidence: 0.9,
+                    status: 'accepted',
+                    generation: 2,
+                },
+                {
+                    id: 'anchor:hazel',
+                    noteId: 'note-1',
+                    entityId: 'entity-hazel',
+                    surface: 'Hazel',
+                    sourceStart: 8,
+                    sourceEnd: 13,
+                    source: 'machine_suggestion',
+                    confidence: 0.88,
+                    status: 'accepted',
+                    generation: 2,
+                },
+            ],
+        });
+        graphRebuild.loadPostProcessCache.mockResolvedValue(null);
+        graphRebuild.loadPersistedRunReceipt.mockResolvedValue(first.receipt);
+        graphRebuild.loadPersistedSnapshot.mockResolvedValue(first.snapshot);
+        graphRebuild.buildAndPersistSnapshot.mockClear();
+
+        await service.postProcessAtlas({
+            ...request(),
+            policy: 'force',
+        });
+
+        expect(graphRebuild.buildAndPersistSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            postProcessMode: 'full',
+            fallbackOccurrences: expect.arrayContaining([
+                expect.objectContaining({ entityId: 'entity-kai', surface: 'Kai' }),
+                expect.objectContaining({ entityId: 'entity-hazel', surface: 'Hazel' }),
+            ]),
+        }));
+    });
+
     it('keeps postprocess entity discovery disabled when only accepted entities change', async () => {
         const first = await service.postProcessAtlas(request());
         registryMock.entities = [
@@ -491,12 +544,15 @@ describe('GraphRebuildPipelineService', () => {
         expect(result.receipt.projectionReceipts).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 mode: 'hybrid',
-                status: 'skipped',
-                counters: expect.objectContaining({ nativeSemanticSidecarSkipped: 1 }),
+                status: 'synced',
+                counters: expect.objectContaining({
+                    graphRebuildReadModelProjection: 1,
+                    nativeSemanticSidecarBypassed: 1,
+                }),
             }),
-            expect.objectContaining({ mode: 'hopf', status: 'skipped' }),
-            expect.objectContaining({ mode: 'lorentz', status: 'skipped' }),
-            expect.objectContaining({ mode: 'product', status: 'skipped' }),
+            expect.objectContaining({ mode: 'hopf', status: 'synced' }),
+            expect.objectContaining({ mode: 'lorentz', status: 'synced' }),
+            expect.objectContaining({ mode: 'product', status: 'synced' }),
         ]));
     });
 

@@ -29,6 +29,7 @@ const DEFAULT_STAGE_LANES: GraphRebuildSignalTargetLane[] = [
     'event_identity',
     'story_signal',
     'anchor_evidence',
+    'entity_linker',
     'cooccurrence_weak',
     'unknown',
 ];
@@ -180,6 +181,7 @@ function targetStructuralRole(lane: GraphRebuildSignalTargetLane): GraphRebuildE
         case 'story_signal':
             return 'fact';
         case 'anchor_evidence': return 'evidence';
+        case 'entity_linker': return 'bridge';
         case 'cooccurrence_weak': return 'bridge';
         default: return 'context';
     }
@@ -195,6 +197,7 @@ function targetAdmissionReason(lane: GraphRebuildSignalTargetLane): string {
         case 'causal_fact': return 'typed_causal_fact';
         case 'event_identity': return 'typed_event_identity';
         case 'memory_state': return 'typed_memory_state';
+        case 'entity_linker': return 'entity_linker_candidate';
         case 'anchor_evidence': return 'representative_anchor_evidence';
         case 'cooccurrence_weak': return 'weak_cooccurrence_context';
         default: return 'fallback_signal';
@@ -204,13 +207,14 @@ function targetAdmissionReason(lane: GraphRebuildSignalTargetLane): string {
 function targetTier(lane: GraphRebuildSignalTargetLane): number {
     if (lane === 'document_spine' || lane === 'chunk_spine') return 0;
     if (lane === 'entity_anchor') return 1;
-    if (lane === 'anchor_evidence' || lane === 'cooccurrence_weak') return 3;
+    if (lane === 'anchor_evidence' || lane === 'cooccurrence_weak' || lane === 'entity_linker') return 3;
     if (lane === 'unknown') return 4;
     return 2;
 }
 
 function targetDeferReason(target: GraphRebuildEmbeddingTarget): string {
     if (target.lane === 'cooccurrence_weak') return 'weak_cooccurrence_not_promoted';
+    if (target.lane === 'entity_linker') return 'entity_linker_requires_final_linking';
     if (target.lane === 'anchor_evidence') return 'raw_anchor_evidence_not_promoted';
     return 'outside_current_embedding_budget';
 }

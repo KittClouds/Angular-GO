@@ -26,6 +26,16 @@ pub fn verify_graph_compile_output(output: &GraphCompilerOutput) -> GraphCompile
         .iter()
         .map(|evidence| evidence.id.clone())
         .collect::<HashSet<_>>();
+    let atom_kind_by_id = output
+        .atoms
+        .iter()
+        .map(|atom| (atom.id.clone(), atom.kind))
+        .collect::<HashMap<_, _>>();
+    let evidence_kind_by_id = output
+        .evidence_anchors
+        .iter()
+        .map(|evidence| (evidence.id.clone(), evidence.kind))
+        .collect::<HashMap<_, _>>();
     let fact_ids = output
         .facts
         .iter()
@@ -77,6 +87,17 @@ pub fn verify_graph_compile_output(output: &GraphCompilerOutput) -> GraphCompile
             failures.push(format_compact!(
                 "role {} references missing atom {}",
                 role.fact_id,
+                role.atom_id
+            ));
+        } else if !role_target_allowed(
+            role.role.as_str(),
+            atom_kind_by_id.get(&role.atom_id).copied(),
+            evidence_kind_by_id.get(&role.atom_id).copied(),
+        ) {
+            failures.push(format_compact!(
+                "role {}:{} has illegal target {}",
+                role.fact_id,
+                role.role,
                 role.atom_id
             ));
         }
@@ -218,22 +239,82 @@ fn all_lanes() -> Vec<FactLane> {
         FactLane::TemporalFact,
         FactLane::CausalFact,
         FactLane::MemoryState,
+        FactLane::EntityLinker,
         FactLane::AnchorEvidence,
     ]
 }
 
 fn atom_lane(atom: &GraphAtom) -> FactLane {
     match atom.kind {
-        GraphAtomKind::Document | GraphAtomKind::Root => FactLane::DocumentSpine,
+        GraphAtomKind::Document
+        | GraphAtomKind::DocumentRoot
+        | GraphAtomKind::LaneRoot
+        | GraphAtomKind::Root => FactLane::DocumentSpine,
         GraphAtomKind::Chunk => FactLane::ChunkSpine,
         GraphAtomKind::Entity | GraphAtomKind::Concept => FactLane::EntityAnchor,
         GraphAtomKind::Event | GraphAtomKind::TimeAnchor => FactLane::EventIdentity,
         GraphAtomKind::State => FactLane::MemoryState,
-        GraphAtomKind::SourceSpan | GraphAtomKind::EvidenceAnchor => FactLane::AnchorEvidence,
-        GraphAtomKind::Claim => FactLane::RelationshipFact,
+        GraphAtomKind::SourceSpan | GraphAtomKind::EvidenceAnchor | GraphAtomKind::Frame => {
+            FactLane::AnchorEvidence
+        }
+        GraphAtomKind::Claim | GraphAtomKind::RelationFact => FactLane::RelationshipFact,
     }
 }
 
 fn evidence_lane(_evidence: &EvidenceAnchor) -> FactLane {
     FactLane::AnchorEvidence
+}
+
+fn role_target_allowed(
+    role: &str,
+    atom_kind: Option<GraphAtomKind>,
+    evidence_kind: Option<EvidenceKind>,
+) -> bool {
+    if role == "evidence" {
+        return evidence_kind.is_some()
+            || matches!(
+                atom_kind,
+                Some(
+                    GraphAtomKind::EvidenceAnchor
+                        | GraphAtomKind::SourceSpan
+                        | GraphAtomKind::Chunk
+                        | GraphAtomKind::Frame
+                )
+            );
+    }
+    if role == "leftMention" || role == "rightMention" {
+        return evidence_kind.is_some()
+            || matches!(
+                atom_kind,
+                Some(GraphAtomKind::EvidenceAnchor | GraphAtomKind::SourceSpan)
+            );
+    }
+    if matches!(
+        role,
+        "subject"
+            | "source"
+            | "target"
+            | "actor"
+            | "speaker"
+            | "listener"
+            | "cause"
+            | "effect"
+            | "object"
+            | "location"
+            | "time"
+            | "state"
+    ) {
+        return matches!(
+            atom_kind,
+            Some(
+                GraphAtomKind::Entity
+                    | GraphAtomKind::Concept
+                    | GraphAtomKind::Event
+                    | GraphAtomKind::State
+                    | GraphAtomKind::Claim
+                    | GraphAtomKind::TimeAnchor
+            )
+        );
+    }
+    false
 }

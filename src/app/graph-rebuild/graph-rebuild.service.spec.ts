@@ -12,6 +12,7 @@ import {
     scopedDocumentToGraphModelV2OverGraphExport,
     scopedDocumentToGraphIndexReceipt,
     scopedDocumentToGraphRebuildSnapshot,
+    snapshotAnchorsToGraphRebuildOccurrences,
     dynamicChunksForNote,
 } from './graph-rebuild.service';
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
@@ -82,6 +83,39 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'entity')).toHaveLength(3);
         expect(snapshot.embeddingTargetPlan?.lanes.find((lane) => lane.lane === 'anchor_evidence')?.candidates).toBeGreaterThan(3);
         expect(snapshot.embeddingTargets.filter((target) => target.kind === 'anchor').length).toBeGreaterThan(0);
+    });
+
+    it('can carry cached snapshot anchors back into postprocess occurrence input', () => {
+        const entities = [entity('entity-kai', 'Kai', []), entity('entity-hazel', 'Hazel', [])];
+        const cached = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:note-1',
+            noteIds: ['note-1'],
+            entities,
+            occurrences: [
+                occurrence('note-1', 'entity-kai', 0, 3),
+                occurrence('note-1', 'entity-hazel', 12, 17),
+            ],
+            chunks: [{ id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 32, ordinal: 0, source: 'dynamic-chunking' }],
+            noteTexts: { 'note-1': 'Kai approved Hazel.' },
+            builtAt: 42,
+        });
+        const fallback = snapshotAnchorsToGraphRebuildOccurrences(cached, 84);
+        const rebuilt = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:note-1',
+            noteIds: ['note-1'],
+            entities,
+            occurrences: fallback,
+            chunks: [{ id: 'note-1:chunk:0', noteId: 'note-1', start: 0, end: 32, ordinal: 0, source: 'dynamic-chunking' }],
+            noteTexts: { 'note-1': 'Kai approved Hazel.' },
+            builtAt: 84,
+        });
+
+        expect(fallback).toHaveLength(2);
+        expect(fallback.map((row) => row.entityId).sort()).toEqual(['entity-hazel', 'entity-kai']);
+        expect(rebuilt.counters.acceptedAnchors).toBe(2);
+        expect(rebuilt.counters.nodes).toBe(2);
     });
 
     it('roundtrips explicit graph snapshots through Overgraph scoped documents', () => {
@@ -237,9 +271,9 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(document?.documentKey).toBe(GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY);
         expect(roundtripped?.schemaVersion).toBe('phoenix-graph-model-v2-overgraph/v1');
         const expectedVertices = (snapshot.graphModelV2?.counters.atoms || 0)
-            + (snapshot.graphModelV2?.counters.bundles || 0)
             + (snapshot.graphModelV2?.counters.facts || 0);
         expect(roundtripped?.graphBatch.vertices.length).toBe(expectedVertices);
+        expect(roundtripped?.summary.bundleReceipts).toBe(snapshot.graphModelV2?.counters.bundles || 0);
         expect(roundtripped?.graphBatch.edges.some((edge) => edge.edgeType === 'role:source')).toBe(true);
     });
 

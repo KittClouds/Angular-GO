@@ -47,7 +47,11 @@ function buildCompatibilityGraphCompilerOutput(snapshot: GraphRebuildSnapshot): 
         return evidenceId;
     });
 
-    for (const noteId of snapshot.noteIds) atoms.push(atom('document', atomId('document', noteId), noteId, `Document ${noteId}`, noteId));
+    for (const noteId of snapshot.noteIds) {
+        atoms.push(atom('document', atomId('document', noteId), noteId, `Document ${noteId}`, noteId));
+        atoms.push(atom('documentRoot', atomId('documentRoot', noteId), noteId, `Document root ${noteId}`, noteId));
+    }
+    for (const lane of compilerLanes()) atoms.push(atom('laneRoot', atomId('laneRoot', `${snapshot.scopeId}:${lane}`), `${snapshot.scopeId}:${lane}`, `${lane} root`));
     for (const chunk of snapshot.chunks) atoms.push(atom('chunk', atomId('chunk', chunk.id), chunk.id, `Chunk ${chunk.ordinal + 1}`, chunk.noteId, chunk.id));
     for (const mention of snapshot.mentions.filter((row) => row.status !== 'dropped')) {
         pushEvidence({ id: mentionEvidenceId(mention.id), kind: 'mentionPacket', noteId: mention.noteId, chunkId: mention.chunkId, sourceRange: { start: mention.sourceStart, end: mention.sourceEnd }, sourceId: mention.id, confidence: mention.confidence });
@@ -101,6 +105,7 @@ function buildCompatibilityGraphCompilerOutput(snapshot: GraphRebuildSnapshot): 
         projectedEdges.push({ id: `projection:legacy:${edge.id}`, sourceId: atomId('entity', edge.sourceId), targetId: atomId('entity', edge.targetId), edgeType: edge.type, projectionKind: 'legacyBinary', sourceFactId: provenance.factId, sourceBundleId: provenance.bundleId, confidence: edge.confidence });
     }
 
+    for (const fact of facts) atoms.push(atom('relationFact', atomId('relationFact', fact.id), fact.id, fact.predicate, undefined, undefined, undefined, fact.evidenceIds));
     const output: GraphCompilerOutput = { schemaVersion: 'phoenix-graph-compiler/v1', scopeKind: snapshot.scopeKind, scopeId: snapshot.scopeId, builtAt: snapshot.builtAt, atoms, evidenceAnchors, bundles, facts, roles, projectedEdges, receipts: emptyReceipts() };
     output.receipts = computeReceipts(output);
     return output;
@@ -159,13 +164,30 @@ function projection(id: string, sourceId: string, targetId: string, edgeType: st
 }
 
 function compilerLaneForAtom(kind: GraphCompilerAtomKind): GraphCompilerFactLane {
-    if (kind === 'document' || kind === 'root') return 'documentSpine';
+    if (kind === 'document' || kind === 'documentRoot' || kind === 'laneRoot' || kind === 'root') return 'documentSpine';
     if (kind === 'chunk') return 'chunkSpine';
     if (kind === 'entity' || kind === 'concept') return 'entityAnchor';
     if (kind === 'event' || kind === 'timeAnchor') return 'eventIdentity';
     if (kind === 'state') return 'memoryState';
-    if (kind === 'claim') return 'relationshipFact';
+    if (kind === 'claim' || kind === 'relationFact') return 'relationshipFact';
+    if (kind === 'frame') return 'anchorEvidence';
     return 'anchorEvidence';
+}
+
+function compilerLanes(): GraphCompilerFactLane[] {
+    return [
+        'documentSpine',
+        'chunkSpine',
+        'entityAnchor',
+        'relationshipFact',
+        'cooccurrenceWeak',
+        'eventIdentity',
+        'temporalFact',
+        'causalFact',
+        'memoryState',
+        'entityLinker',
+        'anchorEvidence',
+    ];
 }
 
 function isCooccurrence(type: string): boolean {

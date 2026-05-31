@@ -31,6 +31,7 @@ pub(super) fn validate_lane_promotion_contracts(
             | FactLane::ChunkSpine
             | FactLane::EntityAnchor
             | FactLane::EventIdentity
+            | FactLane::EntityLinker
             | FactLane::AnchorEvidence => failures.push(format_compact!(
                 "lane {:?} cannot promote fact {}",
                 fact.lane,
@@ -52,6 +53,7 @@ pub(super) fn validate_lane_promotion_contracts(
                     EvidenceBundleKind::ShadowIdentity,
                     FactLane::CooccurrenceWeak
                 )
+                | (EvidenceBundleKind::ShadowIdentity, FactLane::EntityLinker)
         );
         if !allowed_lane {
             failures.push(format_compact!(

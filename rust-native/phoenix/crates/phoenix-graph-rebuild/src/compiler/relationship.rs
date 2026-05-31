@@ -2,13 +2,13 @@ use compact_str::{format_compact, CompactString};
 use hashbrown::{HashMap, HashSet};
 
 use super::ids::{
-    anchor_evidence_id, entity_atom_id, legacy_relation_key, relationship_edge_key,
+    anchor_evidence_id, atom_id, entity_atom_id, legacy_relation_key, relationship_edge_key,
     relationship_lane,
 };
 use super::projection::ProjectionProvenance;
 use super::types::{
-    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole,
-    GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
+    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole, GraphAtom,
+    GraphAtomKind, GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
 };
 use crate::types::GraphRelationship;
 
@@ -65,6 +65,8 @@ fn stage_bundle(
         status: relationship.status.clone(),
         evidence_ids,
         confidence: relationship.confidence,
+        compression: None,
+        commitment: None,
     });
 }
 
@@ -114,6 +116,16 @@ fn promote_fact(
         status: relationship.status.clone(),
         evidence_ids: evidence_ids.clone(),
         confidence: relationship.confidence,
+    });
+    output.atoms.push(GraphAtom {
+        id: atom_id("relationFact", &fact_id),
+        kind: GraphAtomKind::RelationFact,
+        source_id: fact_id.clone(),
+        label: relationship.relation_type.clone(),
+        note_id: None,
+        chunk_id: None,
+        entity_id: None,
+        evidence_ids: evidence_ids.clone(),
     });
     role(
         output,

@@ -22,6 +22,8 @@ import { ThreeGalaxyRenderer } from './three-galaxy-renderer';
 type RendererProbe = {
     setSettings(settings: Record<string, unknown>): void;
     edgeMaterialOpacity(): number;
+    edgeStrokeCount(data?: { edgeAlpha: Float32Array; edgeKinds: Uint8Array }, edge?: number): number;
+    edgeStrokeOffset(data?: { edgeAlpha: Float32Array; edgeKinds: Uint8Array }, edge?: number): number;
     hybridShellOpacity(): number;
     hopfGuideWeightForKind(kind: string, surface?: string): number;
     hopfLayerOpacity(layer: string, kind: string, weight?: number, surface?: string): number;
@@ -31,12 +33,15 @@ type RendererProbe = {
     lorentzGuideTint(guide: Record<string, unknown>, index: number, surface?: string): { r: number; g: number; b: number };
     lorentzLayerOpacity(layer: string, guideKind: string, treeKind?: string, weight?: number, surface?: string): number;
     lorentzTubeRadius(guide: { guideKind: string }, layer: 'tubeCore' | 'tubeGlow', surface?: string): number;
-    writeLorentzGuideColor(colors: Float32Array, offset: number, guide: Record<string, unknown>, index: number, phase: number, surface: string): void;
+    buildLorentzTubeMesh(guide: Record<string, unknown>, index: number, layer: 'tubeCore' | 'tubeGlow', surface: string): THREE.Mesh | null;
+    writeLorentzGuideColor(colors: Float32Array, offset: number, guide: Record<string, unknown>, index: number, phase: number, surface: string, focusScale?: number): void;
     nodeDensityFactors(data: { ids: string[] }, positions: Float32Array): Float32Array;
     productKleinLayerOpacity(layer: string): number;
     capsSurfaceEdge(data: { layoutMode: string }, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
     capsSurfacePoint(out: THREE.Vector3, ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): boolean;
     writeLorentzGuidePositions(output: Float32Array, cursor: number, guide: Record<string, unknown>, data: { ids: string[] }, positions: Float32Array, indexById: Map<string, number>): number;
+    guideAttachmentContract(data: { layoutMode: string }): { liveLorentzGuides: boolean; localScale: number };
+    guidePositionsForContract(positions: Float32Array, contract: { liveLorentzGuides: boolean; localScale: number }): Float32Array;
 };
 
 type CameraProbe = RendererProbe & {
@@ -145,6 +150,20 @@ describe('Product manifold guide styling', () => {
         expect(renderer.hybridShellOpacity()).toBeLessThan(lowShell * 1.5);
     });
 
+    it('adds a tube edge mode with confidence-weighted thickness', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const data = {
+            edgeAlpha: new Float32Array([0.18, 1]),
+            edgeKinds: new Uint8Array([0, 1]),
+        };
+
+        renderer.setSettings({ edgeMode: 'tube', edgeWidth: 1.1, edgeOpacity: 0.7, glow: 1.8 });
+
+        expect(renderer.edgeMaterialOpacity()).toBeLessThan(0.35);
+        expect(renderer.edgeStrokeCount(data, 1)).toBeGreaterThan(renderer.edgeStrokeCount(data, 0));
+        expect(renderer.edgeStrokeOffset(data, 1)).toBeGreaterThan(renderer.edgeStrokeOffset(data, 0));
+    });
+
     it('dims Lorentz guides by node focus without changing graph edge focus', () => {
         const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
         const data = {
@@ -164,6 +183,36 @@ describe('Product manifold guide styling', () => {
         expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeCore', 'product')).toBeCloseTo(0.00396);
         expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeGlow', 'product')).toBeCloseTo(0.01125);
         expect(renderer.lorentzTubeRadius({ guideKind: 'membership' }, 'tubeCore')).toBeCloseTo(0.00432);
+    });
+
+    it('renders Lorentz tubes with edge-like normal blending and capped glow energy', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        const guide = {
+            id: 'caps:bridge:a-b',
+            guideKind: 'membership',
+            treeKind: 'relationship',
+            guideWeight: 1,
+            color: { r: 0.8, g: 0.22, b: 0.72 },
+            positions3d: new Float32Array([
+                0, 0, 0, 0.6, 0.18, 0,
+                0.6, 0.18, 0, 1.2, 0, 0,
+            ]),
+        };
+
+        const core = renderer.buildLorentzTubeMesh(guide, 0, 'tubeCore', 'default');
+        const glow = renderer.buildLorentzTubeMesh(guide, 0, 'tubeGlow', 'default');
+        const lineColor = new Float32Array(3);
+        renderer.writeLorentzGuideColor(lineColor, 0, guide, 0, 0.5, 'default', 1.4);
+
+        expect((core?.material as THREE.MeshBasicMaterial).blending).toBe(THREE.NormalBlending);
+        expect((glow?.material as THREE.MeshBasicMaterial).blending).toBe(THREE.NormalBlending);
+        expect((glow?.material as THREE.MeshBasicMaterial).opacity).toBeLessThan(0.04);
+        expect(Math.max(...lineColor)).toBeLessThanOrEqual(0.86);
+
+        core?.geometry.dispose();
+        (core?.material as THREE.Material | undefined)?.dispose();
+        glow?.geometry.dispose();
+        (glow?.material as THREE.Material | undefined)?.dispose();
     });
 
     it('preserves Product Lorentz lane colors instead of washing them to cyan', () => {
@@ -276,5 +325,23 @@ describe('Product manifold guide styling', () => {
         expect(Array.from(output.slice(0, 3))).toEqual([2, 0, 0]);
         expect(Array.from(output.slice(output.length - 3))).toEqual([4, 0, 0]);
         expect(output[4]).toBeGreaterThan(0);
+    });
+
+    it('uses one live guide attachment contract for Product and Siegel spaces', () => {
+        const renderer = new ThreeGalaxyRenderer() as unknown as RendererProbe;
+        renderer.setSettings({ edgeLength: 1.4, nodeDistance: 1.25 });
+        const product = renderer.guideAttachmentContract({ layoutMode: 'productManifold' });
+        const siegel = renderer.guideAttachmentContract({ layoutMode: 'siegelFinsler' });
+        const caps = renderer.guideAttachmentContract({ layoutMode: 'lorentzTree' });
+        const hybrid = renderer.guideAttachmentContract({ layoutMode: 'hybridSpace' });
+        const positions = new Float32Array([2, 0, 0, 4, 0, 0]);
+        const productLocal = renderer.guidePositionsForContract(positions, product);
+
+        expect(product.liveLorentzGuides).toBe(true);
+        expect(product.localScale).toBeGreaterThan(1);
+        expect(productLocal[0]).toBeLessThan(positions[0]);
+        expect(siegel).toEqual({ liveLorentzGuides: true, localScale: 1 });
+        expect(caps).toEqual({ liveLorentzGuides: true, localScale: 1 });
+        expect(hybrid.liveLorentzGuides).toBe(false);
     });
 });

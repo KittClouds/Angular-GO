@@ -7,6 +7,7 @@ import {
     type GalaxyInputEdge,
     type GalaxyRenderableNode,
 } from './graph-galaxy-engine';
+import { galaxySceneToV2 } from './graph-galaxy-scene-v2';
 import { entityColorStore } from '../../../../../lib/store/entityColorStore';
 
 describe('Graph galaxy scene prioritization', () => {
@@ -151,6 +152,25 @@ describe('Graph galaxy canonical colors', () => {
             entityColorStore.reset();
         }
     });
+
+    it('uses relation-family styles for co-occurrence edges without requiring co-occurrence nodes', () => {
+        entityColorStore.setColor('CHARACTER', '0 100% 50%');
+        entityColorStore.setGraphNodeColor('cooccurrence', '240 100% 50%');
+        try {
+            const scene = buildGalaxyScene([
+                { id: 'embed:entity:kai', label: 'Kai', kind: 'entity', metadata: { entityKind: 'CHARACTER' } },
+                { id: 'embed:entity:hazel', label: 'Hazel', kind: 'entity', metadata: { entityKind: 'CHARACTER' } },
+            ], [
+                { id: 'co-edge', sourceId: 'embed:entity:kai', targetId: 'embed:entity:hazel', type: 'co_occurs_with', confidence: 0.68 },
+            ], mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
+
+            const v2 = galaxySceneToV2(scene, 'embeddings');
+
+            expect([...v2.edgeColors.slice(0, 6)]).toEqual([0, 0, 1, 0, 0, 1]);
+        } finally {
+            entityColorStore.reset();
+        }
+    });
 });
 
 describe('Graph galaxy hybrid hierarchy', () => {
@@ -163,8 +183,9 @@ describe('Graph galaxy hybrid hierarchy', () => {
         const chunk = scene.nodes.find((node) => node.entity.id === 'chunk-leaf')!;
 
         expect(scene.layoutMode).toBe('hybridSpace');
-        expect(hybridRadiusOf(doc)).toBeLessThan(hybridRadiusOf(chunk) - 0.08);
-        expect(hybridRadiusOf(chunk)).toBeGreaterThan(0.96);
+        expect(hybridRadiusOf(doc)).toBeLessThan(hybridRadiusOf(chunk) - 0.2);
+        expect(hybridRadiusOf(chunk)).toBeGreaterThan(0.5);
+        expect(hybridRadiusOf(chunk)).toBeLessThan(0.72);
     });
 
     it('gives temporal and causal facts typed directions without leaving the Hybrid lane', () => {
@@ -179,6 +200,67 @@ describe('Graph galaxy hybrid hierarchy', () => {
         expect(Math.abs(temporal.y / Math.hypot(temporal.x, temporal.y, temporal.z))).toBeLessThan(0.28);
         expect(causal.x).toBeGreaterThan(0.35);
         expect(scene.links[0].alpha).toBeGreaterThan(0.1);
+    });
+
+    it('wires Busemann commitment signatures into the Hybrid interior', () => {
+        const scene = buildGalaxyScene([
+            {
+                id: 'bundle-approval',
+                label: 'Kai approves Hazel',
+                kind: 'graph-fact',
+                totalMentions: 2,
+                atlasX: 1,
+                atlasY: 0,
+                atlasZ: 0,
+                metadata: {
+                    sourceType: 'graphFact',
+                    graphColorKind: 'approval',
+                    graphRelationFamily: 'approval',
+                    busemannSignature: {
+                        family: 'RelationFamily',
+                        topPrototypeId: 'relation:approval',
+                        topScore: -1.2,
+                        topProbability: 0.86,
+                        secondPrototypeId: 'relation:transfer',
+                        secondScore: -0.1,
+                        secondProbability: 0.14,
+                        margin: 1.1,
+                        entropy: 0.18,
+                        ambiguityScore: 0.18,
+                        classificationConfidence: 0.82,
+                        promotionReady: true,
+                        radialStrength: 0.88,
+                        topKScores: [
+                            { prototypeId: 'relation:approval', family: 'RelationFamily', score: -1.2, probability: 0.86 },
+                            { prototypeId: 'relation:transfer', family: 'RelationFamily', score: -0.1, probability: 0.14 },
+                        ],
+                    },
+                },
+            },
+        ], [], mergeGalaxySettings({ layoutMode: 'hybridSpace', hybridHorospheresVisible: true }));
+        const bundle = scene.nodes[0] as typeof scene.nodes[number] & {
+            __hybridInterior?: { topPrototypeId: string; promotionReady: boolean };
+        };
+
+        expect(scene.layoutMode).toBe('hybridSpace');
+        expect(bundle.__hybridInterior).toMatchObject({
+            topPrototypeId: 'relation:approval',
+            promotionReady: true,
+        });
+        expect(hybridRadiusOf(bundle)).toBeLessThan(0.95);
+        expect(scene.busemannHorospheres?.some((spec) => spec.prototypeId === 'relation:approval')).toBe(true);
+    });
+
+    it('keeps uncertain Busemann bundles near the interior instead of shell regions', () => {
+        const ready = busemannBundleNode('ready-approval', 0.9, 0.08, 0.92, true);
+        const uncertain = busemannBundleNode('uncertain-approval', 0.42, 0.88, 0.28, false);
+        const scene = buildGalaxyScene([ready, uncertain], [], mergeGalaxySettings({ layoutMode: 'hybridSpace' }));
+        const readyNode = scene.nodes.find((node) => node.entity.id === 'ready-approval')!;
+        const uncertainNode = scene.nodes.find((node) => node.entity.id === 'uncertain-approval')!;
+
+        expect(hybridRadiusOf(uncertainNode)).toBeLessThan(hybridRadiusOf(readyNode) - 0.2);
+        expect(hybridRadiusOf(uncertainNode)).toBeLessThan(0.48);
+        expect(scene.busemannHorospheres?.some((spec) => spec.prototypeId === 'relation:approval')).toBe(true);
     });
 });
 
@@ -202,6 +284,30 @@ describe('Graph galaxy Siegel-Finsler layout', () => {
         expect(byId.get('entity')!.x).toBeGreaterThan(byId.get('chunk')!.x);
         expect(scene.lorentzGuides?.some((guide) => guide.id.startsWith('siegel:lane:document'))).toBe(true);
         expect(scene.lorentzGuides?.some((guide) => guide.id === 'siegel:direction-axis')).toBe(true);
+    });
+});
+
+describe('Graph galaxy Product traversal manifold', () => {
+    it('renders route stages, lane guides, and obstructions without Product-local Hopf ribbons', () => {
+        const scene = buildGalaxyScene([
+            productNode('evidence', 'Chunk evidence', 'chunk', 'evidence', 'chunk'),
+            productNode('entity', 'Kai', 'entity', 'identity', 'entity'),
+            productNode('causal', 'Kai causes signal', 'graph-fact', 'causal', 'causal-fact'),
+            productNode('dead-end', 'unsupported bridge', 'graph-fact', 'bridge', 'graph-fact', 'outlier'),
+        ], [
+            { id: 'evidence-entity', sourceId: 'evidence', targetId: 'entity', type: 'evidence_anchor', confidence: 0.9 },
+            { id: 'entity-causal', sourceId: 'entity', targetId: 'causal', type: 'causal', confidence: 0.82 },
+            { id: 'causal-dead-end', sourceId: 'causal', targetId: 'dead-end', type: 'embedding-bridge', confidence: 0.18 },
+        ], mergeGalaxySettings({ layoutMode: 'productManifold' }));
+        const byId = new Map(scene.nodes.map((node) => [node.entity.id, node]));
+
+        expect(scene.layoutMode).toBe('productManifold');
+        expect(scene.hopfRibbons?.length ?? 0).toBe(0);
+        expect(byId.get('evidence')!.x).toBeLessThan(byId.get('entity')!.x);
+        expect(byId.get('entity')!.x).toBeLessThan(byId.get('causal')!.x);
+        expect(byId.get('dead-end')!.x).toBeGreaterThan(byId.get('causal')!.x);
+        expect(scene.lorentzGuides?.some((guide) => guide.id === 'product:lane:evidence' && guide.guideKind === 'rootLane')).toBe(true);
+        expect(scene.lorentzGuides?.some((guide) => guide.id === 'product:route:causal-dead-end' && /unsupported|mismatch|missing/i.test(guide.treeKind))).toBe(true);
     });
 });
 
@@ -247,6 +353,47 @@ function hybridNode(
     };
 }
 
+function busemannBundleNode(
+    id: string,
+    confidence: number,
+    entropy: number,
+    radialStrength: number,
+    promotionReady: boolean,
+): GalaxyRenderableNode {
+    return {
+        id,
+        label: id,
+        kind: 'graph-fact',
+        totalMentions: 1,
+        atlasX: 1,
+        atlasY: 0,
+        atlasZ: 0,
+        metadata: {
+            sourceType: 'graphFact',
+            graphColorKind: 'approval',
+            busemannSignature: {
+                family: 'RelationFamily',
+                topPrototypeId: 'relation:approval',
+                topScore: -1,
+                topProbability: confidence,
+                secondPrototypeId: 'relation:transfer',
+                secondScore: -0.2,
+                secondProbability: 1 - confidence,
+                margin: Math.max(0, confidence - (1 - confidence)),
+                entropy,
+                ambiguityScore: entropy,
+                classificationConfidence: confidence,
+                promotionReady,
+                radialStrength,
+                topKScores: [
+                    { prototypeId: 'relation:approval', family: 'RelationFamily', score: -1, probability: confidence },
+                    { prototypeId: 'relation:transfer', family: 'RelationFamily', score: -0.2, probability: 1 - confidence },
+                ],
+            },
+        },
+    };
+}
+
 function siegelNode(
     id: string,
     label: string,
@@ -271,6 +418,41 @@ function siegelNode(
                 confidence: 0.9,
                 matrixCells: [0.5, 0.5, 0.5, 0.4, 0.6, 0.5],
                 parentIds,
+            },
+        },
+    };
+}
+
+function productNode(
+    id: string,
+    label: string,
+    kind: string,
+    lane: string,
+    sourceType: string,
+    role = 'core',
+): GalaxyRenderableNode {
+    return {
+        id,
+        label,
+        kind,
+        totalMentions: 1,
+        metadata: {
+            sourceType,
+            productLaneKind: lane,
+            productRegionRole: role,
+            graphKind: kind,
+            graphRelationFamily: lane === 'causal' || lane === 'temporal' ? lane : undefined,
+            product: {
+                dominantLane: lane,
+                region: {
+                    laneKind: lane,
+                    role,
+                    clusterId: `chart:${lane}`,
+                    outlierScore: role === 'outlier' ? 0.82 : 0.08,
+                    hubScore: role === 'core' ? 0.72 : 0.22,
+                },
+                fiber: { phase: lane.length * 0.37 },
+                lanes: { laneWeights: { [lane]: 0.92 } },
             },
         },
     };

@@ -164,7 +164,7 @@ describe('Phoenix graph rebuild builder', () => {
     it('uses an injected Rust compiler sidecar as the graph model authority', () => {
         const receipts = {
             roots: [],
-            counters: { atoms: 2, evidenceAnchors: 1, bundles: 1, facts: 0, roles: 0, projectedEdges: 1, invariantFailures: 0 },
+            counters: { atoms: 2, evidenceAnchors: 1, bundles: 2, facts: 0, roles: 0, projectedEdges: 1, invariantFailures: 0 },
             invariantFailures: [],
         };
         const graphCompilerSidecar = {
@@ -178,7 +178,58 @@ describe('Phoenix graph rebuild builder', () => {
                     { id: 'atom:entity:hazel', kind: 'entity', sourceId: 'hazel', label: 'Hazel', entityId: 'hazel', evidenceIds: ['evidence:anchor:hazel'] },
                 ],
                 evidenceAnchors: [{ id: 'evidence:anchor:kai', kind: 'sourceSpan', sourceId: 'kai:anchor', confidence: 0.9 }],
-                bundles: [{ id: 'bundle:rust:co', lane: 'cooccurrenceWeak', predicate: 'co_occurs_with', sourceRecordId: 'rust-co', status: 'review', evidenceIds: ['evidence:anchor:kai'], confidence: 0.8 }],
+                bundles: [
+                    {
+                        id: 'bundle:rust:co',
+                        lane: 'cooccurrenceWeak',
+                        predicate: 'co_occurs_with',
+                        sourceRecordId: 'rust-co',
+                        status: 'review',
+                        evidenceIds: ['evidence:anchor:kai'],
+                        confidence: 0.8,
+                        commitment: {
+                            family: 'RelationFamily',
+                            topPrototypeId: 'relation:cooccurrence',
+                            topLabel: 'cooccurrence',
+                            topScore: -0.9,
+                            topProbability: 0.82,
+                            secondPrototypeId: 'relation:approval',
+                            secondScore: -0.2,
+                            secondProbability: 0.18,
+                            margin: 0.7,
+                            entropy: 0.28,
+                            ambiguityScore: 0.28,
+                            classificationConfidence: 0.76,
+                            promotionReady: true,
+                            radialStrength: 0.72,
+                            topKScores: [
+                                { prototypeId: 'relation:cooccurrence', family: 'RelationFamily', score: -0.9, probability: 0.82 },
+                                { prototypeId: 'relation:approval', family: 'RelationFamily', score: -0.2, probability: 0.18 },
+                            ],
+                        },
+                    },
+                    {
+                        id: 'bundle:rust:co-duplicate',
+                        lane: 'cooccurrenceWeak',
+                        predicate: 'co_occurs_with',
+                        sourceRecordId: 'rust-co-duplicate',
+                        status: 'review',
+                        evidenceIds: ['evidence:anchor:hazel'],
+                        confidence: 0.84,
+                        compression: {
+                            model: 'jinaV5Nano',
+                            clusterId: 'cluster:rust:co',
+                            canonicalBundleId: 'bundle:rust:co',
+                            duplicateOfBundleId: 'bundle:rust:co',
+                            outlierScore: 0.04,
+                            neighborCount: 3,
+                            semanticRank: 2,
+                            rerankScore: 0.91,
+                            rerankSource: 'gliClass',
+                            signals: ['compression:near_duplicate'],
+                        },
+                    },
+                ],
                 facts: [],
                 roles: [],
                 projectedEdges: [{ id: 'projection:rust:co', sourceId: 'atom:entity:kai', targetId: 'atom:entity:hazel', edgeType: 'co_occurs_with', projectionKind: 'legacyBinary', sourceBundleId: 'bundle:rust:co', confidence: 0.8 }],
@@ -204,9 +255,22 @@ describe('Phoenix graph rebuild builder', () => {
         expect(snapshot.projectedUiGraph).toBe(graphCompilerSidecar.projectedUiGraph);
         expect(snapshot.graphModelV2?.facts).toHaveLength(0);
         expect(snapshot.graphModelV2?.bundles).toEqual(expect.arrayContaining([
-            expect.objectContaining({ id: 'bundle:rust:co', family: 'cooccurrence' }),
+            expect.objectContaining({
+                id: 'bundle:rust:co',
+                family: 'cooccurrence',
+                commitment: expect.objectContaining({
+                    topPrototypeId: 'relation:cooccurrence',
+                    promotionReady: true,
+                }),
+            }),
         ]));
         expect(snapshot.graphModelV2?.projectionEdges[0]).toMatchObject({ sourceBundleId: 'bundle:rust:co' });
+        expect(snapshot.shadowLinkSuggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                shadowKind: 'bundle_dedupe',
+                relatedBundleIds: ['bundle:rust:co-duplicate', 'bundle:rust:co'],
+            }),
+        ]));
     });
 
     it('defers disabled embedding lanes without hiding their candidates', () => {

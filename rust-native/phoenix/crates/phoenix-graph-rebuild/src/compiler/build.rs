@@ -2,6 +2,8 @@ use compact_str::{format_compact, CompactString};
 use hashbrown::{HashMap, HashSet};
 use phoenix_types::{EntityId, TextRange};
 
+use super::commitment::score_fact_bundle_commitments;
+use super::compression::compress_fact_bundles;
 use super::ids::{
     anchor_evidence_id, atom_id, entity_atom_id, event_evidence_id, mention_evidence_id,
 };
@@ -55,6 +57,8 @@ pub fn compile_graph_snapshot(input: GraphCompilerInput<'_>) -> GraphCompilerOut
         input.legacy_edges,
         &build.relation_by_edge,
     );
+    score_fact_bundle_commitments(&mut build.output, input.bundle_commitment);
+    compress_fact_bundles(&mut build.output, input.bundle_compression);
     let mut output = build.finish();
     output.receipts = verify_graph_compile_output(&output);
     output
@@ -68,7 +72,7 @@ struct CompilerBuild {
 
 impl CompilerBuild {
     fn new(scope_kind: GraphScopeKind, scope_id: &str, built_at: u64) -> Self {
-        Self {
+        let mut build = Self {
             output: GraphCompilerOutput {
                 schema_version: "phoenix-graph-compiler/v1".into(),
                 scope_kind,
@@ -84,7 +88,9 @@ impl CompilerBuild {
             },
             evidence_seen: HashSet::new(),
             relation_by_edge: HashMap::new(),
-        }
+        };
+        build.lane_roots();
+        build
     }
 
     fn documents(&mut self, note_ids: &[CompactString]) {
@@ -95,6 +101,32 @@ impl CompilerBuild {
                 note_id.clone(),
                 format_compact!("Document {}", note_id),
                 Some(note_id.clone()),
+                None,
+                None,
+                Vec::new(),
+            );
+            self.atom(
+                GraphAtomKind::DocumentRoot,
+                atom_id("documentRoot", note_id),
+                note_id.clone(),
+                format_compact!("Document root {}", note_id),
+                Some(note_id.clone()),
+                None,
+                None,
+                Vec::new(),
+            );
+        }
+    }
+
+    fn lane_roots(&mut self) {
+        for lane in compiler_lanes() {
+            let source_id = format_compact!("{}:{:?}", self.output.scope_id, lane);
+            self.atom(
+                GraphAtomKind::LaneRoot,
+                atom_id("laneRoot", &source_id),
+                source_id,
+                format_compact!("{:?} root", lane),
+                None,
                 None,
                 None,
                 Vec::new(),
@@ -335,6 +367,16 @@ impl CompilerBuild {
         evidence_ids: Vec<CompactString>,
         confidence: f32,
     ) {
+        self.atom(
+            GraphAtomKind::RelationFact,
+            atom_id("relationFact", &id),
+            id.clone(),
+            predicate.clone(),
+            None,
+            None,
+            None,
+            evidence_ids.clone(),
+        );
         self.output.facts.push(RelationFact {
             id,
             lane,
@@ -434,4 +476,20 @@ impl CompilerBuild {
     fn finish(self) -> GraphCompilerOutput {
         self.output
     }
+}
+
+fn compiler_lanes() -> [FactLane; 11] {
+    [
+        FactLane::DocumentSpine,
+        FactLane::ChunkSpine,
+        FactLane::EntityAnchor,
+        FactLane::RelationshipFact,
+        FactLane::CooccurrenceWeak,
+        FactLane::EventIdentity,
+        FactLane::TemporalFact,
+        FactLane::CausalFact,
+        FactLane::MemoryState,
+        FactLane::EntityLinker,
+        FactLane::AnchorEvidence,
+    ]
 }

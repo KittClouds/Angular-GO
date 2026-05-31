@@ -109,8 +109,8 @@ export const LORENTZ_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
 
 export const PRODUCT_MANIFOLD_ADAPTER: ManifoldAtlasAdapter = {
     mode: 'product',
-    label: 'Product',
-    traceLabel: 'Product trace',
+    label: 'Traversal',
+    traceLabel: 'Trace route',
     async load(phoenixUiApi, scope) {
         const snapshot = await phoenixUiApi.loadManifoldAtlasSnapshot('product', scope);
         if (snapshot?.payload.nodes.length) {
@@ -222,6 +222,10 @@ function withManifoldMetadata(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbed
             seams: snapshot.payload.seams || [],
             neighborRings: snapshot.payload.neighborRings || [],
             coneTraces: snapshot.payload.coneTraces || [],
+            conePrograms: snapshot.payload.conePrograms || [],
+            pathlets: snapshot.payload.pathlets || [],
+            obstructions: snapshot.payload.obstructions || [],
+            coneProgramTraces: snapshot.payload.coneProgramTraces || [],
             anchorProjections: snapshot.payload.anchorProjections || [],
             lorentzTrees: snapshot.payload.lorentzTrees || [],
             lorentzMemberships: snapshot.payload.lorentzMemberships || [],
@@ -232,6 +236,7 @@ function withManifoldMetadata(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbed
 
 function buildProductAtlas(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>): EmbeddingAtlasData {
     const lorentzAtlas = buildLorentzAtlas(snapshot);
+    const traversal = productTraversalMetadata(snapshot.payload);
     const nodes = lorentzAtlas.nodes.map((node, index) => {
         const phase = hashToken(`product:${node.id}:${index}`);
         const fiberKind = inferProductFiberKind(node.kind, node.metadata?.['preview']);
@@ -259,14 +264,64 @@ function buildProductAtlas(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbeddin
                     fiberKind,
                     phase,
                 },
+                ...(traversal.nodeMetadata.get(node.id) ? { productTraversal: traversal.nodeMetadata.get(node.id) } : {}),
             },
         };
     });
+    const edges = lorentzAtlas.edges.map((edge) => ({
+        ...edge,
+        metadata: {
+            ...(edge.metadata || {}),
+            ...(traversal.edgeMetadata.get(edge.id) ? { productTraversal: traversal.edgeMetadata.get(edge.id) } : {}),
+        },
+    }));
     return {
         ...lorentzAtlas,
         nodes,
+        edges,
         sourceLabel: snapshot.sourceLabel || 'product Lorentz-Hopf atlas',
     };
+}
+
+function productTraversalMetadata(payload: SemanticAtlasEmbeddingAtlas): {
+    nodeMetadata: Map<string, Record<string, unknown>>;
+    edgeMetadata: Map<string, Record<string, unknown>>;
+} {
+    const nodeMetadata = new Map<string, Record<string, unknown>>();
+    const edgeMetadata = new Map<string, Record<string, unknown>>();
+    const obstructionById = new Map((payload.obstructions || []).map((obstruction) => [obstruction.obstructionId, obstruction]));
+    for (const pathlet of payload.pathlets || []) {
+        const obstructionIds = pathlet.obstructionIds || [];
+        const obstructions = obstructionIds
+            .map((id) => obstructionById.get(id))
+            .filter((obstruction): obstruction is NonNullable<typeof obstruction> => Boolean(obstruction));
+        const obstructionScore = obstructions.reduce((max, obstruction) => Math.max(max, obstruction.severity), 0);
+        const obstructionKind = obstructions[0]?.kind;
+        for (const nodeId of pathlet.nodeIds) {
+            const current = nodeMetadata.get(nodeId) || {};
+            const pathletIds = Array.isArray(current['pathletIds']) ? current['pathletIds'] as string[] : [];
+            nodeMetadata.set(nodeId, {
+                ...current,
+                lane: pathlet.lane,
+                pathletIds: [...new Set([...pathletIds, pathlet.pathletId])],
+                obstructionIds: [...new Set([...(current['obstructionIds'] as string[] | undefined || []), ...obstructionIds])],
+                supportScore: Math.max(Number(current['supportScore'] || 0), pathlet.supportScore),
+                obstructionScore: Math.max(Number(current['obstructionScore'] || 0), obstructionScore),
+                obstructionKind: obstructionKind || current['obstructionKind'],
+            });
+        }
+        for (const edgeId of pathlet.edgeIds) {
+            edgeMetadata.set(edgeId, {
+                lane: pathlet.lane,
+                pathletId: pathlet.pathletId,
+                obstructionIds,
+                supportScore: pathlet.supportScore,
+                obstructionScore,
+                obstructionKind,
+            });
+        }
+    }
+    return { nodeMetadata, edgeMetadata };
 }
 
 function semanticSnapshotToHopfPayload(snapshot: ManifoldAtlasSnapshot<SemanticAtlasEmbeddingAtlas>): BackendEmbeddingAtlasPayload {

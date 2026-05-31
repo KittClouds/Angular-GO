@@ -257,6 +257,7 @@ fn run_once(
             scope: &scope,
             lexicon: Some(lexicon),
             surface_hits: &surface_hit_batch.hits,
+            label_bank_context: None,
         })
         .map_err(|error| format!("dynamic NER failed for {}: {error}", input.case_id))?;
     let dynamic_ner_us = elapsed_us(started);

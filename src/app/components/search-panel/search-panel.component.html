@@ -59,8 +59,8 @@
 
     <div class="graph-rebuild-active-card">
       <span>Active contract</span>
-      <strong>Dynamic NER -> hygiene/pre-link -> clean graph -> structural + embedding post-process -> graph-aware links -> projections</strong>
-      <small>One button builds the durable atlas for this scope. The graph tab only reads the latest snapshot and receipt.</small>
+      <strong>Prepared artifacts -> FactBundle staging -> ShadowLinker -> FinalLinker patch log -> projected read models</strong>
+      <small>One button builds the durable atlas for this scope. Promotion stays receipt-gated and reversible.</small>
     </div>
 
     <div class="backend-map-head compact">
@@ -148,111 +148,83 @@
       </div>
     </div>
 
-    <div class="postprocess-staging" *ngIf="postprocessStaging() as staging">
-      <div class="postprocess-staging-head">
-        <span>Postprocess staging</span>
-        <strong>{{ staging.targets | number:'1.0-0' }} admitted / {{ staging.candidates | number:'1.0-0' }} candidates</strong>
+    <div class="compiler-workbench" *ngIf="compilerWorkbench() as compiler">
+      <div class="compiler-console-head">
+        <span>Compiler control</span>
+        <strong [class.compiler-blocked]="compiler.blocked > 0">{{ compiler.source }}</strong>
+        <small>{{ compiler.detail }}</small>
       </div>
-      <div class="postprocess-stage-summary">
-        <span>
-          <strong>{{ staging.deferred | number:'1.0-0' }}</strong>
-          <small>deferred</small>
-        </span>
-        <span>
-          <strong>{{ staging.lanes.length | number:'1.0-0' }}</strong>
-          <small>lanes</small>
-        </span>
-        <span>
-          <strong>{{ enabledPostprocessStageCount() | number:'1.0-0' }}</strong>
-          <small>enabled</small>
+      <div class="compiler-metrics">
+        <span *ngFor="let metric of compiler.metrics" class="compiler-metric"
+          [ngClass]="compilerToneClass(metric.tone)" [title]="metric.label + ': ' + metric.detail">
+          <strong>{{ metric.value | number:'1.0-0' }}</strong>
+          <em>{{ metric.label }}</em>
+          <small>{{ metric.detail }}</small>
         </span>
       </div>
-      <div class="postprocess-stage-controls">
-        <button type="button" *ngFor="let lane of embeddingStageControls()" class="postprocess-stage-toggle"
-          [class.active]="lane.enabled" (click)="toggleEmbeddingStageLane(lane.id)">
-          <span>{{ lane.label }}</span>
-          <strong>{{ lane.enabled ? 'on' : 'off' }}</strong>
-        </button>
-        <button type="button" class="postprocess-stage-toggle linker-stage-toggle"
-          [class.active]="entityLinkerStageEnabled()" (click)="toggleEntityLinkerStage()">
-          <span>Entity linker</span>
-          <strong>{{ entityLinkerStageEnabled() ? 'on' : 'off' }}</strong>
+      <div class="compiler-queue-tabs" role="tablist">
+        <button type="button" *ngFor="let queue of compiler.queues" class="compiler-queue-tab"
+          [class.active]="queue.id === compiler.activeQueue" [ngClass]="compilerToneClass(queue.tone)"
+          [title]="queue.label + ': ' + queue.detail" (click)="setCompilerQueue(queue.id)">
+          <span>{{ queue.label }}</span>
+          <strong>{{ queue.count | number:'1.0-0' }}</strong>
+          <small>{{ queue.detail }}</small>
         </button>
       </div>
-      <div class="postprocess-lanes" *ngIf="staging.lanes.length">
-        <div *ngFor="let lane of staging.lanes" class="postprocess-lane">
-          <span>
-            <strong>{{ lane.label }}</strong>
-            <small>{{ lane.admitted | number:'1.0-0' }} in<ng-container *ngIf="lane.deferred > 0"> / {{ lane.deferred | number:'1.0-0' }} held</ng-container></small>
-          </span>
-          <em>{{ lane.percent | number:'1.0-0' }}%</em>
-          <i><b [style.width.%]="lane.percent"></b></i>
+      <div class="compiler-active-panel" [ngClass]="'compiler-active-' + compiler.activeQueue">
+        <div class="compiler-active-head">
+          <span>{{ compiler.activeLabel }}</span>
+          <strong>{{ compiler.items.length | number:'1.0-0' }} items</strong>
+          <small>{{ compiler.activeDetail }}</small>
         </div>
-      </div>
-    </div>
-
-    <div class="link-suggestion-card review-cluster-card" *ngIf="reviewClusters().length > 0">
-      <div class="link-suggestion-head">
-        <span>Review clusters</span>
-        <strong>{{ reviewClusters().length }} families</strong>
-      </div>
-      <div class="link-suggestion-rows review-cluster-rows">
-        <div *ngFor="let cluster of reviewClusters()" class="link-suggestion-row review-cluster-row"
-          [class.review-conflict]="cluster.conflicts > 0">
-          <span class="link-kind">{{ cluster.kind === 'entity-link' ? 'entity' : 'graph' }}</span>
-          <span class="link-main">
-            <strong>{{ cluster.label }}</strong>
-            <small>{{ cluster.action }} / {{ cluster.count }} items / {{ cluster.representativeCount }} examples<ng-container
-                *ngIf="cluster.conflicts > 0"> / {{ cluster.conflicts }} conflicts</ng-container></small>
-          </span>
-          <em>{{ confidencePercent(cluster.confidence) }}%</em>
-          <span class="review-cluster-impact">{{ confidencePercent(cluster.impact) }}</span>
+        <ng-container *ngIf="compiler.activeQueue === 'lanes'">
+          <div class="postprocess-stage-summary" *ngIf="compiler.staging as staging">
+            <span>
+              <strong>{{ staging.deferred | number:'1.0-0' }}</strong>
+              <small>deferred</small>
+            </span>
+            <span>
+              <strong>{{ staging.lanes.length | number:'1.0-0' }}</strong>
+              <small>lanes</small>
+            </span>
+            <span>
+              <strong>{{ enabledPostprocessStageCount() | number:'1.0-0' }}</strong>
+              <small>enabled</small>
+            </span>
+          </div>
+        </ng-container>
+        <div class="compiler-item-list" *ngIf="compiler.items.length > 0; else compilerEmpty">
+          <div *ngFor="let item of compiler.items" class="compiler-item-row"
+            [ngClass]="[compilerToneClass(item.tone), 'compiler-item-' + item.queue]" [title]="item.label + ': ' + item.detail">
+            <span class="compiler-item-kind">{{ item.kind }}</span>
+            <span class="compiler-item-main">
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.detail }}<ng-container *ngIf="item.evidenceCount > 0"> / {{ item.evidenceCount }} evidence</ng-container></small>
+              <small class="compiler-item-receipt" *ngIf="item.receiptSummary">{{ item.receiptSummary }}</small>
+              <span class="compiler-item-blockers" *ngIf="item.blockedReasons.length > 0">
+                <em *ngFor="let reason of item.blockedReasons">{{ reason }}</em>
+              </span>
+            </span>
+            <em class="compiler-item-confidence">{{ confidencePercent(item.confidence) }}%</em>
+            <strong class="compiler-item-status">{{ item.status }}</strong>
+            <span class="compiler-item-actions" *ngIf="item.primaryAction || item.secondaryAction">
+              <button type="button" *ngIf="item.primaryAction" class="compiler-action-btn primary"
+                (click)="runCompilerQueueAction(item, 'primary', $event)">
+                {{ item.primaryLabel }}
+              </button>
+              <button type="button" *ngIf="item.secondaryAction" class="compiler-action-btn secondary"
+                (click)="runCompilerQueueAction(item, 'secondary', $event)">
+                {{ item.secondaryLabel }}
+              </button>
+            </span>
+          </div>
         </div>
-      </div>
-    </div>
-
-    <div class="link-suggestion-card" *ngIf="entityLinkSuggestionTotal() > 0">
-      <div class="link-suggestion-head">
-        <span>Entity-link candidates</span>
-        <strong>{{ entityLinkSuggestions().length }} shown / {{ entityLinkSuggestionTotal() }} total</strong>
-      </div>
-      <div class="link-suggestion-rows">
-        <div *ngFor="let suggestion of entityLinkSuggestions()" class="link-suggestion-row entity-link-row">
-          <span class="link-kind">{{ entityLinkDecisionLabel(suggestion.decision) }}</span>
-          <span class="link-main">
-            <strong>{{ entityLinkTitle(suggestion) }}</strong>
-            <small>{{ suggestion.candidateKind || 'untyped' }} / {{ suggestion.status }}<ng-container *ngIf="suggestion.productLane"> / {{ suggestion.productLane }}</ng-container></small>
-          </span>
-          <em>{{ confidencePercent(suggestion.confidence) }}%</em>
-        </div>
-      </div>
-    </div>
-
-    <div class="link-suggestion-card" *ngIf="graphAwareLinkSuggestionTotal() > 0">
-      <div class="link-suggestion-head">
-        <span>Graph-aware links</span>
-        <strong>{{ graphAwareLinkSuggestionCount() }} open / {{ graphAwareLinkSuggestionTotal() }} total</strong>
-      </div>
-      <div class="link-suggestion-rows">
-        <div *ngFor="let suggestion of graphAwareLinkSuggestions()" class="link-suggestion-row"
-          [ngClass]="'link-kind-' + suggestion.kind">
-          <span class="link-kind">{{ linkSuggestionKindLabel(suggestion.kind) }}</span>
-          <span class="link-main">
-            <strong>{{ linkSuggestionTitle(suggestion) }}</strong>
-            <small>{{ suggestion.suggestedRelationType }} / {{ suggestion.semanticStatus }} / {{ suggestion.structuralRole }}<ng-container *ngIf="suggestion.embeddingRole"> / {{ suggestion.embeddingRole }}</ng-container></small>
-          </span>
-          <em>{{ confidencePercent(suggestion.confidence) }}%</em>
-          <span class="link-review-actions">
-            <button type="button" class="link-review-btn accept" title="Accept suggestion"
-              (click)="acceptLinkSuggestion(suggestion, $event)">
-              <ng-icon name="lucideCheck" class="h-3 w-3"></ng-icon>
-            </button>
-            <button type="button" class="link-review-btn reject" title="Reject suggestion"
-              (click)="rejectLinkSuggestion(suggestion, $event)">
-              <ng-icon name="lucideX" class="h-3 w-3"></ng-icon>
-            </button>
-          </span>
-        </div>
+        <ng-template #compilerEmpty>
+          <div class="compiler-empty">
+            <strong>No active items</strong>
+            <small>{{ compiler.activeDetail }}</small>
+          </div>
+        </ng-template>
       </div>
     </div>
   </section>

@@ -13,7 +13,7 @@ use phoenix_types::SentenceSpan;
 use crate::known_lane::KnownCandidate;
 use crate::native_lane::{NativeCandidate, NativeDiscoveryLane};
 use crate::schema::DynamicSchemaBuilder;
-use crate::types::{AdjudicateCase, MentionKind, NerNeedVector, NerRoute};
+use crate::types::{AdjudicateCase, LabelBankContext, MentionKind, NerNeedVector, NerRoute};
 
 /// Budget cap: max model-discovery seeds per document.
 ///
@@ -168,6 +168,7 @@ impl SurfaceRouter {
         schema_builder: &DynamicSchemaBuilder,
         known: &[KnownCandidate],
         native: &[NativeCandidate],
+        label_bank_context: Option<&LabelBankContext<'_>>,
     ) -> Vec<NerRoute> {
         let mut routes = Vec::new();
         let mut model_window_count = 0usize;
@@ -212,8 +213,13 @@ impl SurfaceRouter {
             while i < marked_model.len() && marked_model[i] {
                 i += 1;
             }
-            let label_pack =
-                schema_builder.build_pack_for_window(start as u32, i as u32, known, native);
+            let label_pack = schema_builder.build_pack_for_window_v2(
+                start as u32,
+                i as u32,
+                known,
+                native,
+                label_bank_context,
+            );
             routes.push(NerRoute::ModelDiscovery {
                 window_start_sentence: start as u32,
                 window_end_sentence: i as u32,
@@ -405,6 +411,11 @@ mod tests {
             native_candidate(1, 0, 5, "Aella"),
             native_candidate(2, 10, 13, "Kai"),
         ];
+        let user_type_labels = [crate::types::EntityLabel::new("DragonHouse")];
+        let label_bank_context = LabelBankContext {
+            user_type_labels: &user_type_labels,
+            ..Default::default()
+        };
         let router = SurfaceRouter::default();
         let needs = router.build_need_vectors(text, &sentences, &[], &native, &hits);
         let routes = router.plan_routes(
@@ -413,15 +424,27 @@ mod tests {
             &DynamicSchemaBuilder::default(),
             &[],
             &native,
+            Some(&label_bank_context),
         );
 
         assert!(needs[0].has_causal_or_temporal_cue);
         assert!(needs[0].has_domain_signature);
         assert!(needs[0].has_entity_pair);
         assert!(needs[0].has_named_event_candidate);
-        assert!(routes
+        let route_pack = routes
             .iter()
-            .any(|route| matches!(route, NerRoute::ModelDiscovery { .. })));
+            .find_map(|route| match route {
+                NerRoute::ModelDiscovery { label_pack, .. } => Some(label_pack),
+                _ => None,
+            })
+            .expect("model discovery route");
+        assert!(route_pack
+            .labels
+            .iter()
+            .any(|label| label.as_str() == "DragonHouse"));
+        assert!(route_pack.label_sources.iter().any(|(label, source)| {
+            label.as_str() == "DragonHouse" && *source == crate::types::LabelBankSource::UserType
+        }));
         assert!(!text.contains("because"));
         assert!(!text.contains("approved"));
     }

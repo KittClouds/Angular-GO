@@ -29,10 +29,14 @@ export type GraphCompilerFactLane =
     | 'temporalFact'
     | 'causalFact'
     | 'memoryState'
+    | 'entityLinker'
     | 'anchorEvidence';
 export type GraphCompilerAtomKind =
     | 'document'
+    | 'documentRoot'
+    | 'laneRoot'
     | 'chunk'
+    | 'frame'
     | 'sourceSpan'
     | 'evidenceAnchor'
     | 'entity'
@@ -40,6 +44,7 @@ export type GraphCompilerAtomKind =
     | 'event'
     | 'state'
     | 'claim'
+    | 'relationFact'
     | 'timeAnchor'
     | 'root';
 export type GraphCompilerEvidenceKind =
@@ -59,6 +64,53 @@ export type GraphCompilerEvidenceBundleKind =
     | 'neighborhood'
     | 'semanticSimilarity'
     | 'shadowIdentity';
+export type GraphCompilerBundleCompressionModel = 'jinaV5Nano' | string;
+export type GraphCompilerBundleRerankSource = 'gliClass' | string;
+export type GraphCompilerGraphPrototypeFamily =
+    | 'EntityKind'
+    | 'RelationFamily'
+    | 'EvidenceAuthority'
+    | 'GraphStage'
+    | 'ConceptDomain'
+    | string;
+
+export interface GraphCompilerFactBundleCompression {
+    model: GraphCompilerBundleCompressionModel;
+    clusterId: string;
+    canonicalBundleId: string;
+    duplicateOfBundleId?: string | null;
+    outlierScore: number;
+    neighborCount: number;
+    semanticRank: number;
+    rerankScore?: number | null;
+    rerankSource?: GraphCompilerBundleRerankSource | null;
+    signals: string[];
+}
+
+export interface GraphCompilerFactBundlePrototypeScore {
+    prototypeId: string;
+    family: GraphCompilerGraphPrototypeFamily;
+    score: number;
+    probability: number;
+}
+
+export interface GraphCompilerFactBundleCommitment {
+    family: GraphCompilerGraphPrototypeFamily;
+    topPrototypeId: string;
+    topLabel: string;
+    topScore: number;
+    topProbability: number;
+    secondPrototypeId?: string | null;
+    secondScore?: number | null;
+    secondProbability?: number | null;
+    margin: number;
+    entropy: number;
+    ambiguityScore: number;
+    classificationConfidence: number;
+    promotionReady: boolean;
+    radialStrength: number;
+    topKScores: GraphCompilerFactBundlePrototypeScore[];
+}
 
 export interface GraphCompilerAtom {
     id: string;
@@ -91,6 +143,8 @@ export interface GraphCompilerFactLike {
     status: GraphRebuildAdjudicationStatus | 'prepared' | string;
     evidenceIds: string[];
     confidence: number;
+    compression?: GraphCompilerFactBundleCompression | null;
+    commitment?: GraphCompilerFactBundleCommitment | null;
 }
 
 export type GraphCompilerFactBundle = GraphCompilerFactLike;
@@ -169,6 +223,7 @@ const COMPILER_LANE_TO_SIGNAL: Record<GraphCompilerFactLane, GraphRebuildSignalT
     temporalFact: 'temporal_fact',
     causalFact: 'causal_fact',
     memoryState: 'memory_state',
+    entityLinker: 'entity_linker',
     anchorEvidence: 'anchor_evidence',
 };
 
@@ -290,7 +345,7 @@ function graphModelFact(fact: GraphCompilerRelationFact, styleTags: GraphModelV2
 function graphModelBundle(bundle: GraphCompilerFactBundle, styleTags: GraphModelV2StyleTag[]): GraphModelV2FactBundle {
     const family = factFamily(bundle.predicate);
     styleTags.push(styleTag(bundle.id, 'bundle', 'relationFamily', family), styleTag(bundle.id, 'bundle', 'stage', bundle.status));
-    return { id: bundle.id, family, relationType: bundle.predicate, lane: signalLane(bundle.lane), bundleKind: bundle.bundleKind, groupKey: bundle.groupKey, status: graphBundleStatus(bundle.status), confidence: bundle.confidence, evidenceIds: bundle.evidenceIds, sourceRecordId: bundle.sourceRecordId };
+    return { id: bundle.id, family, relationType: bundle.predicate, lane: signalLane(bundle.lane), bundleKind: bundle.bundleKind, groupKey: bundle.groupKey, status: graphBundleStatus(bundle.status), confidence: bundle.confidence, evidenceIds: bundle.evidenceIds, sourceRecordId: bundle.sourceRecordId, compression: bundle.compression || undefined, commitment: bundle.commitment || undefined };
 }
 
 function graphModelProjectionEdge(edge: GraphCompilerProjectedEdge): GraphModelV2ProjectionEdge {
@@ -321,7 +376,7 @@ function graphModelAtomKind(kind: GraphCompilerAtomKind): GraphModelV2AtomKind |
 }
 
 function graphModelRole(roleName: string): GraphModelV2FactRole['role'] {
-    if (['subject', 'source', 'target', 'actor', 'speaker', 'listener', 'cause', 'effect', 'object', 'location', 'time', 'state', 'evidence'].includes(roleName)) return roleName as GraphModelV2FactRole['role'];
+    if (['subject', 'source', 'target', 'actor', 'speaker', 'listener', 'cause', 'effect', 'object', 'location', 'time', 'state', 'leftMention', 'rightMention', 'evidence'].includes(roleName)) return roleName as GraphModelV2FactRole['role'];
     return 'evidence';
 }
 
@@ -341,11 +396,13 @@ function graphBundleStatus(status: string): GraphModelV2FactBundle['status'] {
 }
 
 function laneForAtom(kind: GraphModelV2AtomKind): GraphRebuildSignalTargetLane {
-    if (kind === 'document') return 'document_spine';
+    if (kind === 'document' || kind === 'documentRoot' || kind === 'laneRoot') return 'document_spine';
     if (kind === 'chunk') return 'chunk_spine';
     if (kind === 'entity' || kind === 'concept') return 'entity_anchor';
     if (kind === 'event' || kind === 'timeAnchor') return 'event_identity';
     if (kind === 'state') return 'memory_state';
+    if (kind === 'relationFact' || kind === 'claim') return 'relationship_fact';
+    if (kind === 'frame') return 'anchor_evidence';
     return 'anchor_evidence';
 }
 

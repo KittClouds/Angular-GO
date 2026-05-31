@@ -1,6 +1,7 @@
 import type {
     GraphModelV2Atom,
     GraphModelV2FactBundle,
+    GraphModelV2FactBundleCommitment,
     GraphModelV2FactFamily,
     GraphModelV2ProjectionEdge,
     GraphModelV2RelationFact,
@@ -29,6 +30,7 @@ export interface GraphModelV2OverGraphScope {
 export interface GraphModelV2OverGraphSummary {
     atomVertices: number;
     bundleVertices: number;
+    bundleReceipts: number;
     factVertices: number;
     roleEdges: number;
     projectionEdges: number;
@@ -136,10 +138,9 @@ export function buildGraphModelV2OverGraphExport(snapshot: GraphRebuildSnapshot)
     const bundleById = new Map<string, GraphModelV2FactBundle>();
     for (const bundle of model.bundles) bundleById.set(bundle.id, bundle);
 
-    const vertices: GraphModelV2KernelVertex[] = new Array(model.atoms.length + model.bundles.length + model.facts.length);
+    const vertices: GraphModelV2KernelVertex[] = new Array(model.atoms.length + model.facts.length);
     let vertexIndex = 0;
     for (const atom of model.atoms) vertices[vertexIndex++] = atomVertex(atom, styleByTarget.get(atom.id) || []);
-    for (const bundle of model.bundles) vertices[vertexIndex++] = bundleVertex(bundle, styleByTarget.get(bundle.id) || []);
     for (const fact of model.facts) vertices[vertexIndex++] = factVertex(fact, styleByTarget.get(fact.id) || []);
 
     const edges: GraphModelV2KernelEdge[] = [];
@@ -190,7 +191,8 @@ export function buildGraphModelV2OverGraphExport(snapshot: GraphRebuildSnapshot)
         },
         summary: {
             atomVertices: model.atoms.length,
-            bundleVertices: model.bundles.length,
+            bundleVertices: 0,
+            bundleReceipts: model.bundles.length,
             factVertices: model.facts.length,
             roleEdges: model.roles.length,
             projectionEdges: edges.length - model.roles.length,
@@ -250,28 +252,24 @@ function factVertex(fact: GraphModelV2RelationFact, styleTags: GraphModelV2Style
     });
 }
 
-function bundleVertex(bundle: GraphModelV2FactBundle, styleTags: GraphModelV2StyleTag[]): GraphModelV2KernelVertex {
-    return baseVertex({
-        id: bundle.id,
-        kind: `graphModelV2Bundle:${bundle.family}`,
-        className: 'generic',
-        label: bundle.relationType,
-        evidenceIds: bundle.evidenceIds,
-        attributes: {
-            graphModelV2: {
-                targetType: 'bundle',
-                family: bundle.family,
-                relationType: bundle.relationType,
-                lane: bundle.lane,
-                bundleKind: bundle.bundleKind,
-                groupKey: bundle.groupKey,
-                status: bundle.status,
-                sourceRecordId: bundle.sourceRecordId,
-                styleTags: compactStyleTags(styleTags),
-            },
-        },
-        confidence: bundle.confidence,
-    });
+function graphModelBusemannSignature(commitment?: GraphModelV2FactBundleCommitment): Record<string, unknown> | undefined {
+    if (!commitment) return undefined;
+    return {
+        family: commitment.family,
+        topPrototypeId: commitment.topPrototypeId,
+        topScore: commitment.topScore,
+        topProbability: commitment.topProbability,
+        secondPrototypeId: commitment.secondPrototypeId,
+        secondScore: commitment.secondScore,
+        secondProbability: commitment.secondProbability,
+        margin: commitment.margin,
+        entropy: commitment.entropy,
+        ambiguityScore: commitment.ambiguityScore,
+        classificationConfidence: commitment.classificationConfidence,
+        promotionReady: commitment.promotionReady,
+        radialStrength: commitment.radialStrength,
+        topKScores: commitment.topKScores,
+    };
 }
 
 function baseVertex(input: {
@@ -344,6 +342,7 @@ function projectionEdge(
     bundle?: GraphModelV2FactBundle,
 ): GraphModelV2KernelEdge {
     const source = fact || bundle;
+    const busemannSignature = graphModelBusemannSignature(bundle?.commitment);
     return baseEdge({
         sourceId: edge.sourceId,
         targetId: edge.targetId,
@@ -361,6 +360,21 @@ function projectionEdge(
                 factFamily: source?.family,
                 bundleKind: bundle?.bundleKind,
                 groupKey: bundle?.groupKey,
+                bundleStatus: bundle?.status,
+                bundleCompressionClusterId: bundle?.compression?.clusterId,
+                bundleDuplicateOfBundleId: bundle?.compression?.duplicateOfBundleId,
+                bundleOutlierScore: bundle?.compression?.outlierScore,
+                bundleRerankScore: bundle?.compression?.rerankScore,
+                bundleRerankSource: bundle?.compression?.rerankSource,
+                commitmentTopPrototypeId: bundle?.commitment?.topPrototypeId,
+                commitmentTopLabel: bundle?.commitment?.topLabel,
+                commitmentConfidence: bundle?.commitment?.classificationConfidence,
+                promotionReady: bundle?.commitment?.promotionReady,
+                busemannSignature,
+                hybridInterior: busemannSignature ? {
+                    mode: 'busemannCommitment',
+                    signature: busemannSignature,
+                } : undefined,
             },
         },
     });

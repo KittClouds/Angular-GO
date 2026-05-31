@@ -224,6 +224,7 @@ export type GraphRebuildSignalTargetLane =
     | 'event_identity'
     | 'story_signal'
     | 'cooccurrence_weak'
+    | 'entity_linker'
     | 'anchor_evidence'
     | 'unknown';
 
@@ -546,6 +547,77 @@ export interface GraphRebuildEntityLinkSuggestion {
     rationale: string[];
 }
 
+export type GraphRebuildShadowLinkKind =
+    | 'bundle_dedupe'
+    | 'alias_suspicion'
+    | 'same_entity_suspicion'
+    | 'relation_duplicate_suspicion'
+    | 'cluster_hint'
+    | 'query_assist';
+
+export interface GraphRebuildShadowLink extends GraphRebuildEntityLinkSuggestion {
+    phase: 'shadow';
+    shadowKind: GraphRebuildShadowLinkKind;
+    mutationAllowed: false;
+    promotionState: 'shadow' | 'promoted' | 'blocked';
+    promotionBlockedReasons: string[];
+    relatedBundleIds?: string[];
+    relatedRelationIds?: string[];
+    clusterHintIds?: string[];
+}
+
+export type GraphRebuildFinalLinkPatchKind =
+    | 'canonical_identity'
+    | 'same_as'
+    | 'alias_of'
+    | 'merge_record';
+
+export interface GraphRebuildFinalLinkReceipt {
+    id: string;
+    sourceShadowLinkId: string;
+    invariant: string;
+    status: 'passed' | 'failed';
+    detail: string;
+}
+
+export interface GraphRebuildFinalLinkPatch {
+    id: string;
+    kind: GraphRebuildFinalLinkPatchKind;
+    status: 'planned' | 'applied' | 'reverted';
+    sourceShadowLinkId: string;
+    operation: string;
+    canonicalEntityId?: string;
+    sourceEntityId?: string;
+    targetEntityId?: string;
+    alias?: string;
+    mergeRecordId?: string;
+    confidence: number;
+    evidenceIds: string[];
+    receipts: GraphRebuildFinalLinkReceipt[];
+    reversiblePatch: {
+        undoOperation: string;
+        targetId?: string;
+        previousValue?: string;
+        createdEdgeId?: string;
+        createdAlias?: string;
+    };
+    createdAt: number;
+}
+
+export interface GraphRebuildFinalLinkPatchLog {
+    schemaVersion: 'phoenix-final-linker-patch-log/v1';
+    generatedAt: number;
+    patches: GraphRebuildFinalLinkPatch[];
+    receipts: GraphRebuildFinalLinkReceipt[];
+    counters: {
+        planned: number;
+        applied: number;
+        reverted: number;
+        blocked: number;
+        failedReceipts: number;
+    };
+}
+
 export interface GraphRebuildEntityLinkCounters {
     candidateMentions: number;
     candidateLinks: number;
@@ -554,6 +626,7 @@ export interface GraphRebuildEntityLinkCounters {
     newEntity: number;
     ambiguous: number;
     rejected: number;
+    shadowLinks?: number;
     linkerCandidates?: number;
     autoConfirmable: number;
 }
@@ -644,6 +717,9 @@ export interface GraphRebuildCounters {
     embeddingPrunedPairs?: number;
     graphAwareLinkSuggestions?: number;
     entityLinkSuggestions?: number;
+    shadowLinkSuggestions?: number;
+    finalLinkPatches?: number;
+    finalLinkReceiptFailures?: number;
     entityLinking?: GraphRebuildEntityLinkCounters;
     meaningFrameChunks?: number;
     eventAspects?: number;
@@ -703,6 +779,8 @@ export interface GraphRebuildSnapshot {
     graphModelV2?: GraphModelV2Snapshot;
     graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
     entityLinkSuggestions?: GraphRebuildEntityLinkSuggestion[];
+    shadowLinkSuggestions?: GraphRebuildShadowLink[];
+    finalLinkPatchLog?: GraphRebuildFinalLinkPatchLog;
     counters: GraphRebuildCounters;
     buildTimings?: GraphRebuildBuildTimings;
     resolutionSuggestions?: GraphRebuildResolutionSuggestion[];

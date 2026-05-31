@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type { GalaxyHopfRibbonView, GalaxyLorentzGuideView, GalaxySceneGroupView, GalaxySceneV2 } from './graph-galaxy-scene-v2';
+import type { GalaxyBusemannHorosphereView, GalaxyHopfRibbonView, GalaxyLorentzGuideView, GalaxySceneGroupView, GalaxySceneV2 } from './graph-galaxy-scene-v2';
 import { buildGalaxyFocusMask, type GalaxyFocusMask } from './graph-galaxy-focus';
 import { mergeGalaxySettings, type GalaxyRenderSettings } from './graph-galaxy-engine';
 import { GraphGalaxyForceController, productManifoldExpansionScale } from './graph-galaxy-force-controller';
@@ -10,6 +10,7 @@ import { makeAtomTexture, makeHaloTexture, makeLabelSprite, makeNodeTexture, typ
 import type { GraphRendererMode, GraphRendererPointer, GraphRendererPort } from './graph-renderer-port';
 
 const MAX_EDGE_SEGMENTS = 8;
+const MAX_EDGE_TUBE_SEGMENTS = 18;
 const MAX_EDGE_STROKES = 5;
 const MAX_HOPF_RIBBON_GUIDES = 128;
 const MAX_HOPF_DATA_TUBES = 20;
@@ -18,7 +19,7 @@ const HOPF_TUBE_SEGMENTS = 96;
 const HOPF_TUBE_RADIAL_SEGMENTS = 6;
 const MAX_LORENTZ_GUIDES = 260;
 const MAX_LORENTZ_TUBES = 40;
-const LORENTZ_TUBE_SEGMENTS = 36;
+const LORENTZ_TUBE_SEGMENTS = 64;
 const LORENTZ_TUBE_RADIAL_SEGMENTS = 5;
 const PRODUCT_KLEIN_RADIUS = 2.18;
 const PRODUCT_KLEIN_RING_SEGMENTS = 96;
@@ -30,6 +31,10 @@ const HYBRID_SURFACE_EDGE_MIN_RADIUS = 2.32 * 0.92;
 const HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.42;
 const MAX_CAMERA_VIEW_SHIFT = 2.6;
 type GuideSurface = 'default' | 'product';
+interface GuideAttachmentContract {
+    liveLorentzGuides: boolean;
+    localScale: number;
+}
 
 export class ThreeGalaxyRenderer implements GraphRendererPort {
     private renderer: THREE.WebGLRenderer | null = null;
@@ -52,6 +57,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private readonly color = new THREE.Color();
     private readonly densityVector = new THREE.Vector3();
     private readonly edgeSurfacePoint = new THREE.Vector3();
+    private readonly fieldVector = new THREE.Vector3();
     private readonly force = new GraphGalaxyForceController();
     private readonly dragVector = new THREE.Vector3();
     private readonly atomTexture = makeAtomTexture();
@@ -82,6 +88,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private densityBins = new Uint16Array(0);
     private densityNodeBins = new Int32Array(0);
     private densityFactors = new Float32Array(0);
+    private guidePositionBuffer = new Float32Array(0);
 
     mount(canvas: HTMLCanvasElement): boolean {
         if (this.renderer) return false;
@@ -128,9 +135,14 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
 
     setSettings(settings: Partial<GalaxyRenderSettings> | null): void {
         const previousShape = this.settings.nodeShape;
+        const previousHybridField = `${this.settings.hybridHorospheresVisible}:${this.settings.hybridPrototypeRaysVisible}`;
         this.settings = mergeGalaxySettings(settings);
         this.force.setSettings(this.settings);
         if (this.sceneData) this.particles.bind(this.sceneData, this.settings);
+        const nextHybridField = `${this.settings.hybridHorospheresVisible}:${this.settings.hybridPrototypeRaysVisible}`;
+        if (this.sceneData?.layoutMode === 'hybridSpace' && previousHybridField !== nextHybridField) {
+            this.rebuildShellObjects(this.sceneData);
+        }
         if (this.sceneData && previousShape !== this.settings.nodeShape) {
             this.nodeShape = this.settings.nodeShape;
             this.rebuildNodeObjects(this.sceneData);
@@ -141,6 +153,21 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         this.applyMaterialSettings();
         this.applyModePositions();
         this.render();
+    }
+
+    private rebuildShellObjects(data: GalaxySceneV2): void {
+        if (this.shells) {
+            this.scene.remove(this.shells);
+            this.shells.traverse((child) => {
+                const drawable = child as THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+                drawable.geometry?.dispose();
+                const material = drawable.material;
+                if (Array.isArray(material)) material.forEach((item) => item.dispose());
+                else material?.dispose();
+            });
+        }
+        this.shells = this.buildGroupShells(data);
+        if (this.shells) this.scene.add(this.shells);
     }
 
     setMode(mode: GraphRendererMode): void {
@@ -333,7 +360,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         if (!scene.edgePairs.length) return null;
         const geometry = new THREE.BufferGeometry();
         const edgeCount = scene.edgePairs.length / 2;
-        const vertexCapacity = edgeCount * MAX_EDGE_SEGMENTS * 2 * MAX_EDGE_STROKES;
+        const vertexCapacity = edgeCount * MAX_EDGE_TUBE_SEGMENTS * 2 * MAX_EDGE_STROKES;
         geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertexCapacity * 3), 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertexCapacity * 3), 3));
         const material = new THREE.LineBasicMaterial({
@@ -475,9 +502,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         positionAttr.array.fill(0);
         colorAttr.array.fill(0);
         let cursor = 0;
-        const baseSteps = this.settings.edgeMode === 'curved' ? MAX_EDGE_SEGMENTS : 1;
-        const strokes = this.edgeStrokeCount();
-        const strokeOffset = this.edgeStrokeOffset();
+        const tubeMode = this.settings.edgeMode === 'tube';
+        const baseSteps = tubeMode ? MAX_EDGE_TUBE_SEGMENTS : this.settings.edgeMode === 'curved' ? MAX_EDGE_SEGMENTS : 1;
         for (let edge = 0; edge < data.edgePairs.length / 2; edge++) {
             const interGalaxy = data.edgeKinds[edge] === 1;
             const source = data.edgePairs[edge * 2];
@@ -487,7 +513,9 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             const surfaceEdge = this.capsSurfaceEdge(data, ax, ay, az, bx, by, bz);
             const steps = surfaceEdge ? MAX_EDGE_SEGMENTS : baseSteps;
             const curveScale = THREE.MathUtils.clamp(this.settings.edgeCurveStrength, 0.25, 1.2) * (interGalaxy ? 0.92 : 0.58);
-            const lift = this.settings.edgeMode === 'curved'
+            const lift = tubeMode
+                ? this.edgeTubeLift(data, edge, source, target)
+                : this.settings.edgeMode === 'curved'
                 ? (0.08 + Math.abs(source - target) * 0.002) * curveScale + (interGalaxy ? 0.18 : 0)
                 : 0;
             const dx = bx - ax;
@@ -495,19 +523,25 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             const length = Math.hypot(dx, dy) || 1;
             const normalX = -dy / length;
             const normalY = dx / length;
+            const strokes = this.edgeStrokeCount(data, edge);
+            const strokeOffset = this.edgeStrokeOffset(data, edge);
             for (let stroke = 0; stroke < strokes; stroke++) {
                 const side = stroke === 0 ? 0 : Math.ceil(stroke / 2) * (stroke % 2 === 0 ? -1 : 1);
                 const ox = normalX * side * strokeOffset;
                 const oy = normalY * side * strokeOffset;
+                const tone = this.edgeStrokeTone(stroke, strokes);
                 for (let step = 0; step < steps; step++) {
                     const t0 = step / steps;
                     const t1 = (step + 1) / steps;
                     if (surfaceEdge) {
-                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t0);
-                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t1);
+                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t0, tone);
+                        cursor = this.writeCapsSurfaceEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax, ay, az, bx, by, bz, ox, oy, t1, tone);
+                    } else if (tubeMode) {
+                        cursor = this.writeTubeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t0, tone);
+                        cursor = this.writeTubeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t1, tone);
                     } else {
-                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t0);
-                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t1);
+                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t0, tone);
+                        cursor = this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, lift, t1, tone);
                     }
                 }
             }
@@ -677,6 +711,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
                 this.setGuideOpacity(material, this.productKleinLayerOpacity(layer));
             } else if (guideKind === 'multi') {
                 this.setGuideOpacity(material, this.multiShellOpacity());
+            } else if (guideKind === 'hybrid-field') {
+                // Field guides carry per-object opacity from Busemann receipts.
             } else {
                 this.setGuideOpacity(material, this.hybridShellOpacity());
             }
@@ -711,25 +747,48 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     }
 
     private updateLorentzGuideGeometry(data: GalaxySceneV2, positions: Float32Array): void {
-        if (data.layoutMode !== 'lorentzTree' || !this.shells) return;
+        const contract = this.guideAttachmentContract(data);
+        if (!contract.liveLorentzGuides || !this.shells) return;
         const indexById = this.nodeIndexById(data);
+        const guidePositions = this.guidePositionsForContract(positions, contract);
         this.shells.traverse((child) => {
             if (child.userData['guideKind'] !== 'lorentz') return;
             const guides = child.userData['lorentzGuides'] as GalaxyLorentzGuideView[] | undefined;
             if (child instanceof THREE.LineSegments && Array.isArray(guides)) {
-                this.updateLorentzGuideLinePositions(child, guides, data, positions, indexById);
+                this.updateLorentzGuideLinePositions(child, guides, data, guidePositions, indexById);
                 return;
             }
             const guide = child.userData['lorentzGuide'] as GalaxyLorentzGuideView | undefined;
             const layer = child.userData['lorentzLayer'];
             if (!(child instanceof THREE.Mesh) || !guide || (layer !== 'tubeCore' && layer !== 'tubeGlow')) return;
-            const points = this.lorentzGuidePath(guide, data, positions, indexById);
+            const points = this.lorentzGuidePath(guide, data, guidePositions, indexById);
             if (points.length < 4) return;
             const previous = child.geometry;
             const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.35);
             child.geometry = new THREE.TubeGeometry(curve, LORENTZ_TUBE_SEGMENTS, this.lorentzTubeRadius(guide, layer, this.guideSurface(child)), LORENTZ_TUBE_RADIAL_SEGMENTS, false);
             previous.dispose();
         });
+    }
+
+    private guideAttachmentContract(data: GalaxySceneV2): GuideAttachmentContract {
+        if (data.layoutMode === 'productManifold') {
+            return {
+                liveLorentzGuides: true,
+                localScale: productManifoldExpansionScale(this.settings),
+            };
+        }
+        if (data.layoutMode === 'lorentzTree' || data.layoutMode === 'siegelFinsler') {
+            return { liveLorentzGuides: true, localScale: 1 };
+        }
+        return { liveLorentzGuides: false, localScale: 1 };
+    }
+
+    private guidePositionsForContract(positions: Float32Array, contract: GuideAttachmentContract): Float32Array {
+        if (Math.abs(contract.localScale - 1) < 0.0001) return positions;
+        if (this.guidePositionBuffer.length !== positions.length) this.guidePositionBuffer = new Float32Array(positions.length);
+        const scale = 1 / Math.max(0.0001, contract.localScale);
+        for (let index = 0; index < positions.length; index++) this.guidePositionBuffer[index] = positions[index] * scale;
+        return this.guidePositionBuffer;
     }
 
     private updateLorentzGuideLinePositions(
@@ -888,22 +947,45 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
 
     private edgeMaterialOpacity(): number {
         const glow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        if (this.settings.edgeMode === 'tube') {
+            return Math.max(0.01, this.settings.edgeOpacity * (0.3 + glow * 0.075));
+        }
         return Math.max(0.012, this.settings.edgeOpacity * (0.46 + glow * 0.18));
     }
 
     private edgeMaterialWidth(): number {
         const glow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
+        if (this.settings.edgeMode === 'tube') {
+            return Math.max(1, this.settings.edgeWidth * (0.8 + glow * 0.08));
+        }
         return Math.max(1, this.settings.edgeWidth * (0.66 + glow * 0.08));
     }
 
-    private edgeStrokeCount(): number {
+    private edgeStrokeCount(data?: Pick<GalaxySceneV2, 'edgeAlpha' | 'edgeKinds'>, edge = 0): number {
         if (this.settings.edgeMode === 'hidden') return 1;
+        if (this.settings.edgeMode === 'tube') {
+            const confidence = THREE.MathUtils.clamp(data?.edgeAlpha[edge] ?? 0.45, 0.12, 1);
+            const bridgeBoost = data?.edgeKinds[edge] === 1 ? 1 : 0;
+            return THREE.MathUtils.clamp(2 + Math.round(this.settings.edgeWidth * 1.15 + confidence * 1.6 + bridgeBoost), 2, MAX_EDGE_STROKES);
+        }
         const width = Math.max(0, this.settings.edgeWidth - 0.55);
         return THREE.MathUtils.clamp(1 + Math.round(width * 1.4), 1, MAX_EDGE_STROKES);
     }
 
-    private edgeStrokeOffset(): number {
+    private edgeStrokeOffset(data?: Pick<GalaxySceneV2, 'edgeAlpha' | 'edgeKinds'>, edge = 0): number {
+        if (this.settings.edgeMode === 'tube') {
+            const confidence = THREE.MathUtils.clamp(data?.edgeAlpha[edge] ?? 0.45, 0.12, 1);
+            const bridgeBoost = data?.edgeKinds[edge] === 1 ? 1.18 : 1;
+            return 0.0022 * bridgeBoost * (0.65 + this.settings.edgeWidth * 0.55 + confidence * 0.52);
+        }
         return 0.0032 * Math.max(0, this.settings.edgeWidth - 0.55);
+    }
+
+    private edgeStrokeTone(stroke: number, strokes: number): number {
+        if (this.settings.edgeMode !== 'tube') return 1;
+        if (stroke === 0) return 1.08;
+        const ring = Math.ceil(stroke / 2);
+        return THREE.MathUtils.clamp(0.86 - ring * 0.18 + strokes * 0.02, 0.42, 0.88);
     }
 
     private rebuildNodeObjects(data: GalaxySceneV2): void {
@@ -926,7 +1008,7 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     }
 
     private buildGroupShells(scene: GalaxySceneV2): THREE.Group | null {
-        if (scene.layoutMode === 'hybridSpace') return this.buildHybridGuides();
+        if (scene.layoutMode === 'hybridSpace') return this.buildHybridGuides(scene);
         if (scene.layoutMode === 'hopfProjection') return this.buildHopfGuides(scene);
         if (scene.layoutMode === 'lorentzTree') return this.buildLorentzGuides(scene);
         if (scene.layoutMode === 'siegelFinsler') return this.buildLorentzGuides(scene);
@@ -991,23 +1073,94 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             transparent: true,
             side: THREE.BackSide,
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            depthTest: true,
+            blending: THREE.NormalBlending,
             toneMapped: false,
         });
     }
 
-    private buildHybridGuides(): THREE.Group {
+    private buildHybridGuides(scene?: GalaxySceneV2): THREE.Group {
         const group = new THREE.Group();
         const outer = new THREE.Mesh(new THREE.SphereGeometry(2.32, 48, 24), this.hybridGlassMaterial());
         outer.userData['guideKind'] = 'hybrid';
         outer.userData['pickable'] = false;
         group.add(outer);
+        if (scene?.layoutMode === 'hybridSpace') {
+            const field = this.buildBusemannFieldGuides(scene.busemannHorospheres ?? []);
+            if (field.children.length) group.add(field);
+        }
         return group;
+    }
+
+    private buildBusemannFieldGuides(specs: GalaxyBusemannHorosphereView[]): THREE.Group {
+        const group = new THREE.Group();
+        if (!this.settings.hybridHorospheresVisible || !specs.length) return group;
+        for (const spec of specs.slice(0, 36)) {
+            const material = new THREE.LineBasicMaterial({
+                color: new THREE.Color(spec.color.r, spec.color.g, spec.color.b),
+                transparent: true,
+                opacity: THREE.MathUtils.clamp(spec.opacity, 0, 0.16),
+                depthWrite: false,
+                depthTest: true,
+                blending: THREE.NormalBlending,
+                toneMapped: false,
+            });
+            const wire = new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.SphereGeometry(spec.radius, 28, 14)), material);
+            wire.position.set(spec.center.x, spec.center.y, spec.center.z);
+            wire.userData['guideKind'] = 'hybrid-field';
+            wire.userData['pickable'] = false;
+            group.add(wire);
+        }
+        if (this.settings.hybridPrototypeRaysVisible) {
+            const rays = this.buildBusemannPrototypeRays(specs);
+            if (rays) group.add(rays);
+        }
+        return group;
+    }
+
+    private buildBusemannPrototypeRays(specs: GalaxyBusemannHorosphereView[]): THREE.LineSegments | null {
+        const seen = new Map<string, GalaxyBusemannHorosphereView>();
+        for (const spec of specs) if (!seen.has(spec.prototypeId)) seen.set(spec.prototypeId, spec);
+        if (!seen.size) return null;
+        const positions = new Float32Array(seen.size * 2 * 3);
+        const colors = new Float32Array(seen.size * 2 * 3);
+        let cursor = 0;
+        let colorCursor = 0;
+        for (const spec of seen.values()) {
+            const direction = this.fieldVector.set(spec.center.x, spec.center.y, spec.center.z).normalize().multiplyScalar(2.22);
+            positions[cursor++] = 0;
+            positions[cursor++] = 0;
+            positions[cursor++] = 0;
+            positions[cursor++] = direction.x;
+            positions[cursor++] = direction.y;
+            positions[cursor++] = direction.z;
+            for (let i = 0; i < 2; i++) {
+                colors[colorCursor++] = spec.color.r * (i ? 0.84 : 0.22);
+                colors[colorCursor++] = spec.color.g * (i ? 0.84 : 0.22);
+                colors[colorCursor++] = spec.color.b * (i ? 0.84 : 0.22);
+            }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const material = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: THREE.MathUtils.clamp((this.settings.hybridInteriorOpacity ?? 1) * 0.18, 0, 0.24),
+            depthWrite: false,
+            depthTest: true,
+            blending: THREE.NormalBlending,
+            toneMapped: false,
+        });
+        const rays = new THREE.LineSegments(geometry, material);
+        rays.userData['guideKind'] = 'hybrid-field';
+        rays.userData['pickable'] = false;
+        return rays;
     }
 
     private buildProductGuides(scene: GalaxySceneV2): THREE.Group {
         const group = new THREE.Group();
-        const shell = this.buildHybridGuides();
+        const shell = this.buildHybridGuides(scene);
         if (shell.children.length) group.add(shell);
         const klein = this.buildProductKleinGuides();
         if (klein.children.length) group.add(klein);
@@ -1299,7 +1452,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             transparent: true,
             opacity: this.lorentzLayerOpacity(layer, guide.guideKind, guide.treeKind, guide.guideWeight, surface),
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            depthTest: true,
+            blending: THREE.NormalBlending,
             toneMapped: false,
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -1356,7 +1510,8 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             transparent: true,
             opacity: this.lorentzLayerOpacity('line', guideKind, guides[0]?.treeKind, this.lorentzGuideWeightForKind(guideKind), surface),
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            depthTest: true,
+            blending: THREE.NormalBlending,
             toneMapped: false,
         });
         const line = new THREE.LineSegments(geometry, material);
@@ -1411,9 +1566,10 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
     private buildHopfTubeMesh(ribbon: GalaxyHopfRibbonView, index: number, layer: 'tubeCore' | 'tubeGlow', surface: GuideSurface): THREE.Mesh | null {
         const points = this.hopfRibbonPath(ribbon);
         if (points.length < 4) return null;
-        const curve = new THREE.CatmullRomCurve3(points, true, 'centripetal', 0.45);
+        const closed = ribbon.guideKind !== 'dataFiber' && ribbon.guideKind !== 'crossFiberBraid';
+        const curve = new THREE.CatmullRomCurve3(points, closed, 'centripetal', 0.45);
         const radius = this.hopfTubeRadius(ribbon.guideKind, layer, surface);
-        const geometry = new THREE.TubeGeometry(curve, HOPF_TUBE_SEGMENTS, radius, HOPF_TUBE_RADIAL_SEGMENTS, true);
+        const geometry = new THREE.TubeGeometry(curve, HOPF_TUBE_SEGMENTS, radius, HOPF_TUBE_RADIAL_SEGMENTS, closed);
         const tint = this.hopfRibbonTint(ribbon, index, surface);
         const material = new THREE.MeshBasicMaterial({
             color: new THREE.Color(tint.r, tint.g, tint.b),
@@ -1688,10 +1844,11 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         focusScale = 1,
     ): void {
         const pulse = Math.sin((phase + this.stableUnit(guide.id)) * Math.PI) * 0.08;
-        const levelShade = THREE.MathUtils.clamp(0.08 - guide.level * 0.012, -0.04, 0.08);
-        colors[offset] = THREE.MathUtils.clamp(guide.color.r * (0.62 + pulse + levelShade), 0, 0.82);
-        colors[offset + 1] = THREE.MathUtils.clamp(guide.color.g * (0.66 + pulse + levelShade), 0, 0.86);
-        colors[offset + 2] = THREE.MathUtils.clamp(guide.color.b * (0.72 + pulse + levelShade), 0, 0.94);
+        const level = Number.isFinite(guide.level) ? guide.level : 0;
+        const levelShade = THREE.MathUtils.clamp(0.08 - level * 0.012, -0.04, 0.08);
+        colors[offset] = THREE.MathUtils.clamp(guide.color.r * (0.58 + pulse + levelShade), 0, 0.78);
+        colors[offset + 1] = THREE.MathUtils.clamp(guide.color.g * (0.62 + pulse + levelShade), 0, 0.84);
+        colors[offset + 2] = THREE.MathUtils.clamp(guide.color.b * (0.66 + pulse + levelShade), 0, 0.86);
         if (surface === 'product') {
             const root = guide.guideKind === 'rootLane';
             const colorBlend = guide.guideKind === 'membership' ? 0.04 : root ? 0.18 : 0.3;
@@ -1700,14 +1857,14 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
             colors[offset + 2] = THREE.MathUtils.lerp(colors[offset + 2], root ? 0.96 : 0.88, colorBlend);
         }
         if (guide.guideKind === 'wAxis') {
-            colors[offset] = THREE.MathUtils.clamp(0.18 + index * 0.003, 0, 0.46);
-            colors[offset + 1] = 0.82;
-            colors[offset + 2] = 0.94;
+            colors[offset] = THREE.MathUtils.clamp(0.16 + index * 0.002, 0, 0.42);
+            colors[offset + 1] = 0.74;
+            colors[offset + 2] = 0.82;
         }
         if (focusScale !== 1) {
-            colors[offset] = THREE.MathUtils.clamp(colors[offset] * focusScale, 0, 0.96);
-            colors[offset + 1] = THREE.MathUtils.clamp(colors[offset + 1] * focusScale, 0, 0.96);
-            colors[offset + 2] = THREE.MathUtils.clamp(colors[offset + 2] * focusScale, 0, 0.96);
+            colors[offset] = THREE.MathUtils.clamp(colors[offset] * focusScale, 0, 0.78);
+            colors[offset + 1] = THREE.MathUtils.clamp(colors[offset + 1] * focusScale, 0, 0.84);
+            colors[offset + 2] = THREE.MathUtils.clamp(colors[offset + 2] * focusScale, 0, 0.86);
         }
     }
 
@@ -1736,24 +1893,26 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         if (!this.settings.lorentzSpaceVisible) return 0;
         const intensity = THREE.MathUtils.clamp(this.settings.lorentzSpaceIntensity, 0, 1.4);
         const globalGlow = THREE.MathUtils.clamp(this.settings.glow, 0, 1.8);
-        const treeBoost = treeKind === 'evidence' || treeKind === 'causal' ? 1.08 : 1;
+        const treeBoost = treeKind === 'evidence' || treeKind === 'causal' ? 1.05 : 1;
         if (surface === 'product') {
             const rootBoost = guideKind === 'rootLane' ? 1.12 : 1;
-            if (layer === 'tubeCore') return THREE.MathUtils.clamp(0.09 * intensity * treeBoost * rootBoost * weight, 0, 0.18);
-            if (layer === 'tubeGlow') return THREE.MathUtils.clamp(0.02 * intensity * (0.76 + globalGlow * 0.18) * weight, 0, 0.05);
+            if (layer === 'tubeCore') return THREE.MathUtils.clamp(0.072 * intensity * treeBoost * rootBoost * weight, 0, 0.14);
+            if (layer === 'tubeGlow') return THREE.MathUtils.clamp(0.014 * intensity * (0.72 + globalGlow * 0.12) * weight, 0, 0.034);
             if (layer === 'shell') return THREE.MathUtils.clamp(0.018 * intensity * (0.68 + globalGlow * 0.16) * weight, 0, 0.045);
-            return THREE.MathUtils.clamp((0.024 + globalGlow * 0.008) * intensity * weight * this.lorentzGuideWeightForKind(guideKind), 0, 0.11);
+            return THREE.MathUtils.clamp((0.02 + globalGlow * 0.006) * intensity * weight * this.lorentzGuideWeightForKind(guideKind), 0, 0.082);
         }
-        if (layer === 'tubeCore') return THREE.MathUtils.clamp(0.105 * intensity * treeBoost * weight, 0, 0.2);
-        if (layer === 'tubeGlow') return THREE.MathUtils.clamp(0.026 * intensity * (0.8 + globalGlow * 0.2) * weight, 0, 0.06);
+        if (layer === 'tubeCore') return THREE.MathUtils.clamp(0.084 * intensity * treeBoost * weight, 0, 0.16);
+        if (layer === 'tubeGlow') return THREE.MathUtils.clamp(0.016 * intensity * (0.74 + globalGlow * 0.12) * weight, 0, 0.038);
         if (layer === 'shell') return THREE.MathUtils.clamp(0.022 * intensity * (0.72 + globalGlow * 0.18) * weight, 0, 0.055);
-        return THREE.MathUtils.clamp((0.028 + globalGlow * 0.018) * intensity * weight * this.lorentzGuideWeightForKind(guideKind), 0, 0.14);
+        return THREE.MathUtils.clamp((0.022 + globalGlow * 0.01) * intensity * weight * this.lorentzGuideWeightForKind(guideKind), 0, 0.096);
     }
 
     private lorentzTubeRadius(guide: GalaxyLorentzGuideView, layer: 'tubeCore' | 'tubeGlow', surface: GuideSurface = 'default'): number {
-        const rootBoost = guide.guideKind === 'rootLane' ? 1.22 : 1;
-        if (surface === 'product') return layer === 'tubeGlow' ? 0.01125 * rootBoost : 0.00396 * rootBoost;
-        return layer === 'tubeGlow' ? 0.0135 * rootBoost : 0.00432 * rootBoost;
+        const rootBoost = guide.guideKind === 'rootLane' ? 1.2 : 1;
+        const weightBoost = THREE.MathUtils.clamp(0.78 + Math.sqrt(Math.max(0.08, guide.guideWeight || 0.7)) * 0.32, 0.88, 1.22);
+        const core = surface === 'product' ? 0.00372 : 0.00405;
+        const glow = surface === 'product' ? 0.0084 : 0.0096;
+        return (layer === 'tubeGlow' ? glow : core) * rootBoost * weightBoost;
     }
 
     private lorentzGuideWeightForKind(kind: GalaxyLorentzGuideView['guideKind'] | undefined): number {
@@ -1947,6 +2106,48 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         return true;
     }
 
+    private edgeTubeLift(data: GalaxySceneV2, edge: number, source: number, target: number): number {
+        const confidence = THREE.MathUtils.clamp(data.edgeAlpha[edge] ?? 0.45, 0.12, 1);
+        const bridgeBoost = data.edgeKinds[edge] === 1 ? 1.38 : 1;
+        const span = Math.sqrt(Math.max(1, Math.abs(source - target)));
+        const curveScale = THREE.MathUtils.clamp(this.settings.edgeCurveStrength, 0.25, 1.2);
+        return (0.045 + confidence * 0.13 + span * 0.004) * bridgeBoost * curveScale;
+    }
+
+    private writeTubeEdgeVertex(
+        positionAttr: THREE.BufferAttribute,
+        colorAttr: THREE.BufferAttribute,
+        cursor: number,
+        data: GalaxySceneV2,
+        focus: GalaxyFocusMask,
+        edge: number,
+        ax: number,
+        ay: number,
+        az: number,
+        bx: number,
+        by: number,
+        bz: number,
+        lift: number,
+        t: number,
+        tone = 1,
+    ): number {
+        const dx = bx - ax;
+        const dy = by - ay;
+        const xy = Math.hypot(dx, dy) || 1;
+        const sign = this.stableUnit(`tube-edge:${edge}`) < 0.5 ? -1 : 1;
+        const sweep = Math.sin(Math.PI * t);
+        const braid = Math.sin(Math.PI * 2 * t + sign * 0.72) * lift * 0.08;
+        const lateral = lift * 0.34 * sweep * sign;
+        positionAttr.setXYZ(
+            cursor,
+            THREE.MathUtils.lerp(ax, bx, t) + (-dy / xy) * lateral,
+            THREE.MathUtils.lerp(ay, by, t) + (dx / xy) * lateral + lift * 0.38 * sweep,
+            THREE.MathUtils.lerp(az, bz, t) + (this.mode === '3d' ? lift * 0.24 * sweep * sign + braid : 0),
+        );
+        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t, tone);
+        return cursor + 1;
+    }
+
     private writeEdgeVertex(
         positionAttr: THREE.BufferAttribute,
         colorAttr: THREE.BufferAttribute,
@@ -1962,10 +2163,11 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         bz: number,
         lift: number,
         t: number,
+        tone = 1,
     ): number {
         const curve = lift * Math.sin(Math.PI * t);
         positionAttr.setXYZ(cursor, THREE.MathUtils.lerp(ax, bx, t), THREE.MathUtils.lerp(ay, by, t) + curve, THREE.MathUtils.lerp(az, bz, t));
-        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t);
+        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t, tone);
         return cursor + 1;
     }
 
@@ -1985,20 +2187,21 @@ export class ThreeGalaxyRenderer implements GraphRendererPort {
         ox: number,
         oy: number,
         t: number,
+        tone = 1,
     ): number {
         if (!this.capsSurfacePoint(this.edgeSurfacePoint, ax, ay, az, bx, by, bz, t)) {
-            return this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, 0, t);
+            return this.writeEdgeVertex(positionAttr, colorAttr, cursor, data, focus, edge, ax + ox, ay + oy, az, bx + ox, by + oy, bz, 0, t, tone);
         }
         positionAttr.setXYZ(cursor, this.edgeSurfacePoint.x + ox, this.edgeSurfacePoint.y + oy, this.edgeSurfacePoint.z);
-        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t);
+        this.writeEdgeColor(colorAttr, cursor, data, focus, edge, t, tone);
         return cursor + 1;
     }
 
-    private writeEdgeColor(colorAttr: THREE.BufferAttribute, cursor: number, data: GalaxySceneV2, focus: GalaxyFocusMask, edge: number, t: number): void {
+    private writeEdgeColor(colorAttr: THREE.BufferAttribute, cursor: number, data: GalaxySceneV2, focus: GalaxyFocusMask, edge: number, t: number, tone = 1): void {
         const color = this.edgeColor(data, edge, t);
         const bridgeBoost = data.edgeKinds[edge] === 1 ? 1.18 : 1;
         const glowBoost = 0.82 + THREE.MathUtils.clamp(this.settings.glow, 0, 1.8) * 0.2;
-        const boost = (focus.hasFocus ? (focus.edgeLevels[edge] ? 1.04 : 0.1) : 0.76) * bridgeBoost * glowBoost;
+        const boost = (focus.hasFocus ? (focus.edgeLevels[edge] ? 1.04 : 0.1) : 0.76) * bridgeBoost * glowBoost * tone;
         colorAttr.setXYZ(cursor, Math.min(0.78, color.r * boost), Math.min(0.86, color.g * boost), Math.min(0.88, color.b * boost));
     }
 

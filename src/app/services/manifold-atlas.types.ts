@@ -107,6 +107,65 @@ export interface AnchorProjectionRecord {
     geometryVersion: string;
 }
 
+export interface ConeProgramOpRecord {
+    op: string;
+    lane?: string;
+    ids?: string[];
+    requiredIds?: string[];
+    maxCost?: number;
+    limit?: number;
+    minCompatibility?: number;
+    requireEvidence?: boolean;
+    strict?: boolean;
+    pathletId?: string;
+    rankBy?: string[];
+}
+
+export interface ConeProgramRecord {
+    programId: string;
+    intent: 'trace' | 'validate' | 'repair' | string;
+    seedIds: string[];
+    ops: ConeProgramOpRecord[];
+    geometryVersion: string;
+}
+
+export interface ConePathletRecord {
+    pathletId: string;
+    lane: string;
+    startId: string;
+    endId: string;
+    nodeIds: string[];
+    edgeIds: string[];
+    supportScore: number;
+    compressionScore: number;
+    obstructionIds: string[];
+    geometryVersion: string;
+}
+
+export interface ConeObstructionRecord {
+    obstructionId: string;
+    kind: string;
+    severity: number;
+    explanation: string;
+    nodeIds: string[];
+    edgeIds: string[];
+    chartIds: string[];
+    evidenceRefs: string[];
+    lane?: string;
+    geometryVersion: string;
+}
+
+export interface ConeProgramTraceRecord {
+    traceId: string;
+    programId: string;
+    activeIds: string[];
+    pathletIds: string[];
+    obstructionIds: string[];
+    pathEdgeIds: string[];
+    explanations: string[];
+    geometryVersion: string;
+}
+
 export type LorentzTreeKind =
     | 'identity'
     | 'relationship'
@@ -243,6 +302,10 @@ export interface ManifoldTopologyPayload {
     seams?: IcoSeamRecord[];
     neighborRings?: IcoNeighborRingsRecord[];
     coneTraces?: IcoConeTraceRecord[];
+    conePrograms?: ConeProgramRecord[];
+    pathlets?: ConePathletRecord[];
+    obstructions?: ConeObstructionRecord[];
+    coneProgramTraces?: ConeProgramTraceRecord[];
     anchorProjections?: AnchorProjectionRecord[];
     lorentzTrees?: LorentzTreeRecord[];
     lorentzMemberships?: LorentzMembershipRecord[];

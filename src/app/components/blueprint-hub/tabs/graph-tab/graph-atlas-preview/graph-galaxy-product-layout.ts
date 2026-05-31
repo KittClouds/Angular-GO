@@ -20,8 +20,53 @@ const KIND_HSL: Record<string, string> = {
     bridge: '302 76% 66%',
     backbone: '190 72% 68%',
     outlier: '354 82% 65%',
+    traversal: '172 78% 62%',
+    unsupportedBridge: '350 82% 64%',
+    phaseMismatch: '286 84% 68%',
+    evidenceMissing: '42 88% 62%',
+    laneMismatch: '218 82% 66%',
     ...GRAPH_RELATION_FAMILY_HSL,
 };
+
+const ROUTE_STAGE_X = [-1.38, -0.86, -0.32, 0.24, 0.78, 1.18, 1.5] as const;
+const ROUTE_LANE_Y: Record<string, number> = {
+    evidence: 0.74,
+    identity: 0.44,
+    relationship: 0.16,
+    event: -0.1,
+    temporal: -0.36,
+    causal: -0.62,
+    bridge: -0.86,
+    obstruction: -1.06,
+    semantic: 0.02,
+};
+
+const LEGAL_ROUTE_MOVES = new Set([
+    'evidence>identity',
+    'evidence>relationship',
+    'evidence>temporal',
+    'evidence>causal',
+    'identity>relationship',
+    'identity>event',
+    'identity>temporal',
+    'identity>causal',
+    'relationship>evidence',
+    'relationship>identity',
+    'relationship>temporal',
+    'relationship>causal',
+    'event>temporal',
+    'event>causal',
+    'temporal>event',
+    'temporal>causal',
+    'causal>event',
+    'causal>temporal',
+    'bridge>identity',
+    'bridge>relationship',
+    'bridge>evidence',
+    'semantic>identity',
+    'semantic>relationship',
+    'semantic>evidence',
+]);
 
 interface ProductInfo {
     clusterId: string;
@@ -33,6 +78,10 @@ interface ProductInfo {
     phase: number;
     laneWeights: Record<string, number>;
     lorentz: Vec3;
+    routeStage: number;
+    traversalSupport: number;
+    traversalObstruction: number;
+    obstructionKind: string;
 }
 
 interface ProductBasin {
@@ -41,6 +90,13 @@ interface ProductBasin {
     center: Vec3;
     lane: string;
     medoidIndex: number;
+}
+
+interface ProductTraversalActivity {
+    incoming: number;
+    outgoing: number;
+    support: number;
+    obstruction: number;
 }
 
 interface Vec3 {
@@ -52,6 +108,7 @@ interface Vec3 {
 export function applyProductConsensusLayout(nodes: GalaxyNode[], links: GalaxyEdge[]): GalaxyLorentzGuide[] {
     if (!nodes.length) return [];
     const infos = nodes.map(productInfo);
+    const activity = buildTraversalActivity(nodes, links, infos);
     const basins = buildBasins(nodes, infos);
     placeBasinCenters(basins);
     const basinById = new Map(basins.map((basin) => [basin.id, basin]));
@@ -64,11 +121,7 @@ export function applyProductConsensusLayout(nodes: GalaxyNode[], links: GalaxyEd
         const node = nodes[index];
         const info = infos[index];
         const basin = basinById.get(info.clusterId) ?? basins[0];
-        const lane = laneDirection(info.lane);
-        const local = localOffset(node.entity.id, lane, info);
-        const lorentz = scale(info.lorentz, 0.12);
-        const rolePush = roleRadialPush(info.role, info.outlierScore);
-        const target = add(add(scale(basin.center, rolePush), local), lorentz);
+        const target = productTraversalTarget(node, info, activity[index], basin, index);
         node.x = target.x;
         node.y = target.y;
         node.z = target.z;
@@ -79,7 +132,7 @@ export function applyProductConsensusLayout(nodes: GalaxyNode[], links: GalaxyEd
         node.baseZ = node.z;
     }
 
-    relaxConsensus(nodes, links, infos, basinIndexByNode);
+    relaxConsensus(nodes, links, infos, activity);
     normalizeProductVolume(nodes);
     tuneProductLinks(nodes, links, infos);
     return buildProductGuides(nodes, links, infos, basinIndexByNode);
@@ -121,45 +174,81 @@ function placeBasinCenters(basins: ProductBasin[]): void {
     }
 }
 
+function buildTraversalActivity(nodes: GalaxyNode[], links: GalaxyEdge[], infos: ProductInfo[]): ProductTraversalActivity[] {
+    const activity = nodes.map((_, index) => ({
+        incoming: 0,
+        outgoing: 0,
+        support: infos[index].traversalSupport,
+        obstruction: infos[index].traversalObstruction,
+    }));
+    for (const link of links) {
+        const source = infos[link.source];
+        const target = infos[link.target];
+        if (!source || !target) continue;
+        const support = productSupportScore(link, source, target);
+        const obstruction = productObstructionScore(link, source, target);
+        activity[link.source].outgoing++;
+        activity[link.target].incoming++;
+        activity[link.source].support = Math.max(activity[link.source].support, support);
+        activity[link.target].support = Math.max(activity[link.target].support, support);
+        activity[link.source].obstruction = Math.max(activity[link.source].obstruction, obstruction * 0.42);
+        activity[link.target].obstruction = Math.max(activity[link.target].obstruction, obstruction);
+    }
+    return activity;
+}
+
+function productTraversalTarget(
+    node: GalaxyNode,
+    info: ProductInfo,
+    activity: ProductTraversalActivity,
+    basin: ProductBasin,
+    index: number,
+): Vec3 {
+    const lane = canonicalRouteLane(info.lane || productNodeKind(node));
+    const stage = routeStageFor(node, info, activity);
+    const local = localOffset(node.entity.id, laneDirection(lane), info);
+    const lorentz = scale(info.lorentz, 0.08);
+    const basinDrift = scale(normalize(basin.center), 0.08 + Math.min(0.09, basin.indexes.length * 0.006));
+    const routeLoad = Math.min(1, (activity.incoming + activity.outgoing) / 5);
+    const obstruction = clamp(Math.max(activity.obstruction, info.outlierScore * 0.78), 0, 1);
+    const phaseY = Math.sin(info.phase) * 0.055;
+    const phaseZ = Math.cos(info.phase) * 0.08;
+    const x = ROUTE_STAGE_X[stage] + (stableUnit(`${node.entity.id}:route:x`) - 0.5) * 0.14 + lorentz.x * 0.16;
+    const y = routeLaneBand(lane) + local.y * 0.42 + phaseY + (stableUnit(`${node.entity.id}:route:y`) - 0.5) * 0.055;
+    const z = -0.2 + routeLoad * 0.38 + phaseZ + local.z * 0.32 + basinDrift.z + lorentz.z * 0.18 + obstruction * 0.22;
+    const target = { x, y, z: z + (index % 7 - 3) * 0.012 };
+    return scaleToRadius(target, obstruction > 0.55 ? 1.74 : 1.52);
+}
+
 function relaxConsensus(
     nodes: GalaxyNode[],
     links: GalaxyEdge[],
     infos: ProductInfo[],
-    basinByNode: Map<number, ProductBasin>,
+    activity: ProductTraversalActivity[],
 ): void {
-    for (let pass = 0; pass < 4; pass++) {
+    for (let pass = 0; pass < 3; pass++) {
         for (const link of links) {
             const source = nodes[link.source];
             const target = nodes[link.target];
             if (!source || !target) continue;
             const sourceInfo = infos[link.source];
             const targetInfo = infos[link.target];
-            const sameBasin = sourceInfo.clusterId === targetInfo.clusterId;
-            const strength = productAffinity(link, sourceInfo, targetInfo);
-            const hopfAgreement = productHopfAgreement(sourceInfo, targetInfo);
+            const support = productSupportScore(link, sourceInfo, targetInfo);
+            const obstruction = productObstructionScore(link, sourceInfo, targetInfo);
             const hopfTension = productHopfTension(sourceInfo, targetInfo);
-            const phaseBridge = !sameBasin && hopfAgreement > 0.72;
-            const ideal = sameBasin ? 0.26 + hopfTension * 0.42 : phaseBridge ? 0.64 + hopfTension * 0.22 : link.type === 'embedding-bridge' ? 0.78 + hopfTension * 0.28 : 0.96 + hopfTension * 0.34;
-            pullPair(source, target, ideal, strength * (sameBasin ? 0.038 : 0.025));
+            const ideal = obstruction > 0.55 ? 0.94 + obstruction * 0.36 : 0.44 + hopfTension * 0.24 + (1 - support) * 0.18;
+            pullPair(source, target, ideal, support * (obstruction > 0.55 ? 0.006 : 0.016));
             if (hopfTension > 0.28) {
                 const braid = productHopfBraidDirection(sourceInfo, targetInfo, link.id);
-                const offset = (hopfTension - 0.28) * (sameBasin ? 0.024 : 0.024);
+                const offset = (hopfTension - 0.28) * (obstruction > 0.55 ? 0.034 : 0.02);
                 source.x -= braid.x * offset; source.y -= braid.y * offset; source.z -= braid.z * offset;
                 target.x += braid.x * offset; target.y += braid.y * offset; target.z += braid.z * offset;
             }
         }
-        for (const basin of new Set(basinByNode.values())) {
-            const medoid = basin.medoidIndex >= 0 ? nodes[basin.medoidIndex] : undefined;
-            if (!medoid) continue;
-            for (const index of basin.indexes) {
-                if (index === basin.medoidIndex) continue;
-                const node = nodes[index];
-                const info = infos[index];
-                const pull = info.role === 'bridge' ? 0.018 : info.role === 'outlier' ? 0.006 : 0.032;
-                node.x += (medoid.x - node.x) * pull;
-                node.y += (medoid.y - node.y) * pull;
-                node.z += (medoid.z - node.z) * pull;
-            }
+        for (let index = 0; index < nodes.length; index++) {
+            const node = nodes[index];
+            const stageX = ROUTE_STAGE_X[routeStageFor(node, infos[index], activity[index])];
+            node.x += (stageX - node.x) * 0.2;
         }
     }
 }
@@ -225,7 +314,7 @@ function buildProductGuides(
     infos: ProductInfo[],
     basinByNode: Map<number, ProductBasin>,
 ): GalaxyLorentzGuide[] {
-    const guides: GalaxyLorentzGuide[] = [];
+    const guides: GalaxyLorentzGuide[] = buildRouteLaneGuides(nodes, infos);
     for (const link of links) {
         const source = nodes[link.source];
         const target = nodes[link.target];
@@ -234,18 +323,19 @@ function buildProductGuides(
         const targetInfo = infos[link.target];
         const treeKind = productGuideKind(link, source, target, sourceInfo, targetInfo);
         const sameBasin = sourceInfo.clusterId === targetInfo.clusterId;
-        const level = sameBasin ? 1 : 2;
-        const strength = productAffinity(link, sourceInfo, targetInfo);
+        const obstruction = productObstructionScore(link, sourceInfo, targetInfo);
+        const support = productSupportScore(link, sourceInfo, targetInfo);
+        const level = obstruction > 0.55 ? 5 : sameBasin ? 2 : 3;
         guides.push({
-            id: `product:consensus-guide:${link.id}`,
+            id: `product:route:${link.id}`,
             nodeIds: [source.entity.id, target.entity.id],
-            positions3d: guideSegments(source, target, treeKind, sameBasin, strength, sourceInfo, targetInfo, basinByNode.get(link.source), basinByNode.get(link.target)),
-            importance: Math.max(source.radius, target.radius) * 0.54 + strength + link.confidence,
-            treeId: sameBasin ? `product:basin:${sourceInfo.clusterId}` : 'product:bridge-consensus',
+            positions3d: guideSegments(source, target, link, treeKind, sameBasin, support, sourceInfo, targetInfo, basinByNode.get(link.source), basinByNode.get(link.target)),
+            importance: Math.max(source.radius, target.radius) * 0.54 + support + link.confidence + obstruction * 0.42,
+            treeId: obstruction > 0.55 ? 'product:obstructions' : sameBasin ? `product:chart:${sourceInfo.clusterId}` : 'product:stitches',
             treeKind,
             level,
             guideKind: 'membership',
-            guideWeight: 0.42 + Math.min(0.42, strength * 0.32 + link.confidence * 0.08),
+            guideWeight: 0.36 + Math.min(0.5, support * 0.28 + link.confidence * 0.08 + obstruction * 0.2),
             ...rgbForKind(treeKind),
         });
     }
@@ -254,27 +344,70 @@ function buildProductGuides(
         .slice(0, PRODUCT_MAX_GUIDES);
 }
 
+function buildRouteLaneGuides(nodes: GalaxyNode[], infos: ProductInfo[]): GalaxyLorentzGuide[] {
+    const byLane = new Map<string, string[]>();
+    for (let index = 0; index < nodes.length; index++) {
+        const lane = canonicalRouteLane(infos[index].lane || productNodeKind(nodes[index]));
+        const ids = byLane.get(lane) ?? [];
+        if (ids.length < 80) ids.push(nodes[index].entity.id);
+        byLane.set(lane, ids);
+    }
+    const guides: GalaxyLorentzGuide[] = [];
+    for (const [lane, nodeIds] of byLane) {
+        const laneY = routeLaneBand(lane);
+        const z = -0.48 + stableUnit(`route-lane:${lane}`) * 0.18;
+        const positions = new Float32Array(6 * 4);
+        for (let index = 0; index < 4; index++) {
+            const left = index / 4;
+            const right = (index + 1) / 4;
+            writeQuadratic(positions, index * 6, { x: -1.52, y: laneY, z }, { x: 0, y: laneY + 0.04, z: z + 0.08 }, { x: 1.56, y: laneY, z }, left);
+            writeQuadratic(positions, index * 6 + 3, { x: -1.52, y: laneY, z }, { x: 0, y: laneY + 0.04, z: z + 0.08 }, { x: 1.56, y: laneY, z }, right);
+        }
+        guides.push({
+            id: `product:lane:${lane}`,
+            nodeIds,
+            positions3d: positions,
+            importance: 2 + nodeIds.length / Math.max(1, nodes.length),
+            treeId: 'product:cone-field-lanes',
+            treeKind: lane,
+            level: 0,
+            guideKind: 'rootLane',
+            guideWeight: 0.22 + Math.min(0.18, nodeIds.length / Math.max(1, nodes.length) * 0.28),
+            ...rgbForKind(lane),
+        });
+    }
+    return guides;
+}
+
 function guideSegments(
     source: GalaxyNode,
     target: GalaxyNode,
+    link: GalaxyEdge,
     treeKind: string,
     sameBasin: boolean,
-    strength: number,
+    support: number,
     sourceInfo: ProductInfo,
     targetInfo: ProductInfo,
     sourceBasin?: ProductBasin,
     targetBasin?: ProductBasin,
 ): Float32Array {
-    const steps = 10;
+    const steps = 12;
     const positions = new Float32Array(steps * 6);
     const sign = stableUnit(`${source.entity.id}:${target.entity.id}:${treeKind}`) > 0.5 ? 1 : -1;
+    const obstruction = productObstructionScore(link, sourceInfo, targetInfo);
+    const lane = obstruction > 0.55 ? 'obstruction' : canonicalRouteLane(treeKind || targetInfo.lane || sourceInfo.lane);
     const center = sourceBasin && targetBasin
         ? scale(add(sourceBasin.center, targetBasin.center), 0.5)
         : scale(add(vectorOf(source), vectorOf(target)), 0.5);
-    const lift = sameBasin ? 0.035 + strength * 0.03 : 0.11 + strength * 0.08;
+    const lift = obstruction > 0.55 ? 0.2 + obstruction * 0.18 : sameBasin ? 0.05 + support * 0.04 : 0.14 + support * 0.08;
     const tension = productHopfTension(sourceInfo, targetInfo);
     const braid = productHopfBraidDirection(sourceInfo, targetInfo, `${source.entity.id}:${target.entity.id}:${treeKind}`);
-    const midpoint = add(add(center, scale(laneDirection(treeKind), lift * sign)), scale(braid, (0.026 + tension * 0.12) * sign));
+    const laneTarget = {
+        x: (source.x + target.x) * 0.5 + (target.x < source.x ? 0.18 : 0),
+        y: routeLaneBand(lane) + (sameBasin ? 0.02 : 0.08 * sign),
+        z: Math.max(source.z, target.z, center.z) + lift,
+    };
+    const midpoint = add(add(scale(center, 0.28), scale(laneTarget, 0.72)), scale(braid, (0.026 + tension * 0.12) * sign));
     for (let index = 0; index < steps; index++) {
         const a = index / steps;
         const b = (index + 1) / steps;
@@ -291,8 +424,10 @@ function productInfo(node: GalaxyNode): ProductInfo {
     const lanes = record(product['lanes']);
     const fiber = record(product['fiber']);
     const hopf = record(metadata['hopf']);
+    const traversal = record(metadata['productTraversal']);
     const laneWeights = numberRecord(lanes['laneWeights']);
     const lane = firstText(
+        traversal['lane'],
         metadata['productLaneKind'],
         product['dominantLane'],
         region['laneKind'],
@@ -317,6 +452,10 @@ function productInfo(node: GalaxyNode): ProductInfo {
         phase: normalizeProductHopfPhase(fiber['phase'] ?? lanes['fiberPhase'] ?? hopf['phase'], `${node.entity.id}:${lane}`),
         laneWeights,
         lorentz: lorentzDirection(node),
+        routeStage: finite(traversal['routeStage']),
+        traversalSupport: finite(traversal['supportScore']),
+        traversalObstruction: finite(traversal['obstructionScore']),
+        obstructionKind: firstText(traversal['obstructionKind']),
     };
 }
 
@@ -350,15 +489,6 @@ function roleLocalRadius(role: string, outlierScore: number): number {
     return 0.24;
 }
 
-function roleRadialPush(role: string, outlierScore: number): number {
-    if (role === 'core') return 0.82;
-    if (role === 'backbone') return 0.98;
-    if (role === 'bridge') return 1.12;
-    if (role === 'boundary') return 1.22;
-    if (role === 'outlier') return 1.44 + clamp(outlierScore - 0.7, 0, 0.3) * 0.7;
-    return 1;
-}
-
 function nodeScale(info: ProductInfo): number {
     if (info.role === 'core') return 1.03;
     if (info.role === 'backbone') return 1.01;
@@ -381,7 +511,59 @@ function productAffinity(link: GalaxyEdge, source: ProductInfo, target: ProductI
     return clamp(score, 0.1, 1);
 }
 
+function productSupportScore(link: GalaxyEdge, source: ProductInfo, target: ProductInfo): number {
+    const traversal = record(link.metadata?.['productTraversal']);
+    const explicit = finite(traversal['supportScore']);
+    if (explicit > 0) return clamp(explicit, 0, 1);
+    const affinity = productAffinity(link, source, target);
+    const agreement = productHopfAgreement(source, target);
+    const sameLane = canonicalRouteLane(source.lane) === canonicalRouteLane(target.lane) ? 0.08 : 0;
+    const graphBacking = /evidence|anchor|fact|relation|temporal|causal|event|memory|state/i.test(link.type) ? 0.1 : 0;
+    return clamp(affinity * 0.58 + clamp(link.confidence, 0, 1) * 0.24 + agreement * 0.1 + sameLane + graphBacking, 0, 1);
+}
+
+function productObstructionScore(link: GalaxyEdge, source: ProductInfo, target: ProductInfo): number {
+    const traversal = record(link.metadata?.['productTraversal']);
+    const explicit = finite(traversal['obstructionScore']);
+    if (explicit > 0) return clamp(explicit, 0, 1);
+    const nodeObstruction = Math.max(source.traversalObstruction, target.traversalObstruction);
+    if (nodeObstruction > 0.55) return clamp(nodeObstruction, 0, 1);
+    const support = productSupportScore(link, source, target);
+    const tension = productHopfTension(source, target);
+    const sourceLane = canonicalRouteLane(source.lane);
+    const targetLane = canonicalRouteLane(target.lane);
+    let score = 0;
+    if (link.confidence < 0.28) score += 0.34;
+    if (link.type === 'embedding-bridge' && support < 0.48) score += 0.26;
+    if (!legalRouteMove(sourceLane, targetLane)) score += 0.3;
+    if (source.role === 'outlier' || target.role === 'outlier') score += 0.2;
+    if (tension > 0.68 && support < 0.62) score += 0.26;
+    return clamp(score + (1 - support) * 0.22, 0, 1);
+}
+
+function productObstructionKind(link: GalaxyEdge, source: ProductInfo, target: ProductInfo): string {
+    const traversal = record(link.metadata?.['productTraversal']);
+    const explicit = firstText(traversal['obstructionKind']);
+    if (explicit) return productKindKey(explicit);
+    if (target.obstructionKind) return productKindKey(target.obstructionKind);
+    if (source.obstructionKind && source.traversalObstruction > 0.62) return productKindKey(source.obstructionKind);
+    const sourceLane = canonicalRouteLane(source.lane);
+    const targetLane = canonicalRouteLane(target.lane);
+    const support = productSupportScore(link, source, target);
+    const tension = productHopfTension(source, target);
+    const text = link.type.toLowerCase();
+    if (/contradict|conflict|reversal/.test(text)) return 'contradiction';
+    if (link.confidence < 0.22) return 'evidenceMissing';
+    if (!legalRouteMove(sourceLane, targetLane)) return 'laneMismatch';
+    if (tension > 0.72 && support < 0.6) return 'phaseMismatch';
+    if (link.type === 'embedding-bridge' && support < 0.52) return 'unsupportedBridge';
+    if (source.role === 'outlier' || target.role === 'outlier') return 'unsupportedBridge';
+    return '';
+}
+
 function productGuideKind(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNode, sourceInfo: ProductInfo, targetInfo: ProductInfo): string {
+    const obstruction = productObstructionKind(link, sourceInfo, targetInfo);
+    if (obstruction && productObstructionScore(link, sourceInfo, targetInfo) > 0.48) return obstruction;
     const relation = relationFamilyFromText(link.type, source.entity.label, source.entity.metadata?.['preview'], target.entity.label, target.entity.metadata?.['preview']);
     if (relation) return relation;
     const sourceKind = productNodeKind(source);
@@ -397,7 +579,49 @@ function productGuideKind(link: GalaxyEdge, source: GalaxyNode, target: GalaxyNo
 
 function productNodeKind(node: GalaxyNode): string {
     const text = `${node.entity.kind || ''} ${node.entity.metadata?.['sourceType'] || ''} ${node.entity.label || ''}`.toLowerCase();
-    return /causal|cause|effect/.test(text) ? 'causal' : /event|scene/.test(text) ? 'event' : /memory|evidence|source|provenance/.test(text) ? 'evidence' : /chunk|anchor|note|document|doc/.test(text) ? 'documentStructure' : 'semantic';
+    return /causal|cause|effect/.test(text) ? 'causal' : /temporal|timeline|before|after/.test(text) ? 'temporal' : /event|scene/.test(text) ? 'event' : /memory|evidence|source|provenance/.test(text) ? 'evidence' : /entity|character|location|network|identity|alias/.test(text) ? 'identity' : /chunk|anchor|note|document|doc/.test(text) ? 'documentStructure' : 'semantic';
+}
+
+function productKindKey(kind: string): string {
+    const text = String(kind || '').trim();
+    return text ? text[0].toLowerCase() + text.slice(1) : '';
+}
+
+function canonicalRouteLane(lane: string): string {
+    const key = lane.toLowerCase();
+    if (/obstruction|unsupported|missing|mismatch|contradiction/.test(key)) return 'obstruction';
+    if (/evidence|source|provenance|document|structure|chunk|anchor|note|doc/.test(key)) return 'evidence';
+    if (/identity|entity|character|location|network|alias/.test(key)) return 'identity';
+    if (/temporal|timeline|before|after/.test(key)) return 'temporal';
+    if (/causal|cause|effect/.test(key)) return 'causal';
+    if (/event|scene/.test(key)) return 'event';
+    if (/relationship|relation|communication|approval|authority|family|intimacy|transfer|co.?occurs/.test(key)) return 'relationship';
+    if (/bridge|backbone|outlier/.test(key)) return 'bridge';
+    return 'semantic';
+}
+
+function routeStageFor(node: GalaxyNode, info: ProductInfo, activity: ProductTraversalActivity): number {
+    const lane = canonicalRouteLane(info.lane || productNodeKind(node));
+    if (Number.isFinite(info.routeStage) && info.routeStage > 0) return clamp(Math.round(info.routeStage), 0, 6);
+    if (activity.obstruction > 0.58 || info.role === 'outlier') return 6;
+    if (lane === 'evidence') return 0;
+    if (lane === 'identity') return 1;
+    if (lane === 'relationship' || lane === 'event' || lane === 'semantic') return 2;
+    if (lane === 'temporal') return 3;
+    if (lane === 'causal') return 4;
+    if (lane === 'bridge') return 5;
+    return 6;
+}
+
+function routeLaneBand(lane: string): number {
+    return ROUTE_LANE_Y[canonicalRouteLane(lane)] ?? ROUTE_LANE_Y['semantic'];
+}
+
+function legalRouteMove(sourceLane: string, targetLane: string): boolean {
+    if (sourceLane === targetLane) return true;
+    if (sourceLane === 'obstruction' || targetLane === 'obstruction') return false;
+    const key = `${sourceLane}>${targetLane}`;
+    return LEGAL_ROUTE_MOVES.has(key);
 }
 
 function laneDirection(lane: string): Vec3 {
@@ -507,6 +731,12 @@ function finite(value: unknown): number {
 function add(left: Vec3, right: Vec3): Vec3 { return { x: left.x + right.x, y: left.y + right.y, z: left.z + right.z }; }
 
 function scale(value: Vec3, amount: number): Vec3 { return { x: value.x * amount, y: value.y * amount, z: value.z * amount }; }
+
+function scaleToRadius(value: Vec3, maxRadius: number): Vec3 {
+    const radius = length(value);
+    if (radius <= maxRadius || radius <= 0.001) return value;
+    return scale(value, maxRadius / radius);
+}
 
 function cross(left: Vec3, right: Vec3): Vec3 {
     return { x: left.y * right.z - left.z * right.y, y: left.z * right.x - left.x * right.z, z: left.x * right.y - left.y * right.x };

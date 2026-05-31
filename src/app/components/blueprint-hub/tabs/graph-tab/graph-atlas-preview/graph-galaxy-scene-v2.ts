@@ -1,4 +1,15 @@
-import type { GalaxyGroup, GalaxyHopfRibbon, GalaxyLayoutMode, GalaxyLorentzGuide, GalaxyNode, GalaxyScene } from './graph-galaxy-engine';
+import { entityColorStore } from '../../../../../lib/store/entityColorStore';
+import {
+    hslToRgb,
+    type GalaxyGroup,
+    type GalaxyHopfRibbon,
+    type GalaxyLayoutMode,
+    type GalaxyLorentzGuide,
+    type GalaxyNode,
+    type GalaxyScene,
+    type GalaxyBusemannHorosphereSpec,
+} from './graph-galaxy-engine';
+import { relationFamilyFromText } from './graph-relation-visual-style';
 
 export type GalaxySceneSourceMode = 'entities' | 'graph' | 'embeddings';
 
@@ -38,6 +49,17 @@ export interface GalaxyLorentzGuideView {
     guideWeight: number;
 }
 
+export interface GalaxyBusemannHorosphereView {
+    prototypeId: string;
+    family: string;
+    label: string;
+    tau: number;
+    center: { x: number; y: number; z: number };
+    radius: number;
+    color: { r: number; g: number; b: number };
+    opacity: number;
+}
+
 export interface GalaxySceneV2 {
     sourceMode: GalaxySceneSourceMode;
     layoutMode: GalaxyLayoutMode;
@@ -50,6 +72,7 @@ export interface GalaxySceneV2 {
     groups: GalaxySceneGroupView[];
     hopfRibbons: GalaxyHopfRibbonView[];
     lorentzGuides: GalaxyLorentzGuideView[];
+    busemannHorospheres?: GalaxyBusemannHorosphereView[];
     positions3d: Float32Array;
     positions2d: Float32Array;
     radii: Float32Array;
@@ -98,8 +121,14 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         const target = scene.nodes[edge.target];
         edgePairs[index * 2] = edge.source;
         edgePairs[index * 2 + 1] = edge.target;
-        writeColor(edgeColors, index * 2, source);
-        writeColor(edgeColors, index * 2 + 1, target);
+        const relationColor = relationEdgeColor(edge.type, source, target);
+        if (relationColor) {
+            writeRgbColor(edgeColors, index * 2, relationColor);
+            writeRgbColor(edgeColors, index * 2 + 1, relationColor);
+        } else {
+            writeColor(edgeColors, index * 2, source);
+            writeColor(edgeColors, index * 2 + 1, target);
+        }
         edgeAlpha[index] = edge.alpha;
         edgeKinds[index] = edge.interGalaxy ? 1 : hierarchyEdgeKind(edge.type);
     }
@@ -116,6 +145,7 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
         groups: scene.groups.map(groupView),
         hopfRibbons: (scene.hopfRibbons ?? []).map(hopfRibbonView),
         lorentzGuides: (scene.lorentzGuides ?? []).map(lorentzGuideView),
+        busemannHorospheres: (scene.busemannHorospheres ?? []).map(busemannHorosphereView),
         positions3d,
         positions2d,
         radii,
@@ -127,8 +157,34 @@ export function galaxySceneToV2(scene: GalaxyScene, sourceMode: GalaxySceneSourc
     };
 }
 
+function busemannHorosphereView(spec: GalaxyBusemannHorosphereSpec): GalaxyBusemannHorosphereView {
+    const color = hslToRgb(entityColorStore.getRawGraphNodeHsl(spec.colorKind || spec.family || 'graphFact'));
+    return {
+        prototypeId: spec.prototypeId,
+        family: spec.family,
+        label: spec.label,
+        tau: spec.tau,
+        center: spec.center,
+        radius: spec.radius,
+        color: { r: color.r / 255, g: color.g / 255, b: color.b / 255 },
+        opacity: spec.opacity,
+    };
+}
+
 function hierarchyEdgeKind(type: string): number {
     return /target-parent|note-chunk|chunk-anchor|chunk-entity|anchor-entity|event-chunk|event-entity|memory-entity/i.test(type) ? 2 : 0;
+}
+
+function relationEdgeColor(type: string, source: GalaxyNode, target: GalaxyNode): { r: number; g: number; b: number } | null {
+    if (hierarchyEdgeKind(type) !== 0) return null;
+    const family = relationFamilyFromText(
+        type,
+        source.entity.label,
+        source.entity.metadata?.['preview'],
+        target.entity.label,
+        target.entity.metadata?.['preview'],
+    );
+    return family ? hslToRgb(entityColorStore.getRawGraphNodeHsl(family)) : null;
 }
 
 function hopfMetadata(node: GalaxyNode): Record<string, unknown> | null {
@@ -194,4 +250,11 @@ function writeColor(buffer: Float32Array, index: number, node: GalaxyNode): void
     buffer[offset] = node.r / 255;
     buffer[offset + 1] = node.g / 255;
     buffer[offset + 2] = node.b / 255;
+}
+
+function writeRgbColor(buffer: Float32Array, index: number, color: { r: number; g: number; b: number }): void {
+    const offset = index * 3;
+    buffer[offset] = color.r / 255;
+    buffer[offset + 1] = color.g / 255;
+    buffer[offset + 2] = color.b / 255;
 }

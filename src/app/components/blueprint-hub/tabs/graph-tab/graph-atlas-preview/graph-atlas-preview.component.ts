@@ -189,7 +189,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                         } @else {
                         <div class="flex rounded-xl border border-white/10 bg-black/40 p-1">
                             <button type="button" class="rounded-lg bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition"
-                                (click)="setLayoutMode('productManifold')">Product</button>
+                                (click)="setLayoutMode('productManifold')">Transit</button>
                         </div>
                         }
                         }
@@ -338,11 +338,14 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             @if (settings.layoutMode === 'hybridSpace' || settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHybridShell()">Shell<span>{{ settings.hybridShellVisible ? 'on' : 'off' }}</span></button>
                             }
-                            @if (settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') {
+                            @if (settings.layoutMode === 'hybridSpace') {
+                            <button type="button" class="galaxy-control-button" (click)="toggleHybridField()">Field<span>{{ settings.hybridHorospheresVisible ? 'on' : 'off' }}</span></button>
+                            }
+                            @if (settings.layoutMode === 'hopfProjection') {
                             <button type="button" class="galaxy-control-button" (click)="toggleHopfSpace()">Hopf Space<span>{{ settings.hopfSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
                             @if (settings.layoutMode === 'lorentzTree' || settings.layoutMode === 'productManifold' || settings.layoutMode === 'siegelFinsler') {
-                            <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">Cap Space<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
+                            <button type="button" class="galaxy-control-button" (click)="toggleLorentzSpace()">{{ settings.layoutMode === 'productManifold' ? 'Routes' : 'Cap Space' }}<span>{{ settings.lorentzSpaceVisible ? 'on' : 'off' }}</span></button>
                             }
                             @if (settings.layoutMode === 'productManifold') {
                             <button type="button" class="galaxy-control-button" (click)="toggleProductKlein()">Klein Ball<span>{{ settings.productKleinVisible ? 'on' : 'off' }}</span></button>
@@ -354,7 +357,7 @@ function readPersistedAtlasViewState(): PersistedAtlasViewState {
                             <input type="range" min="0" max="1" step="0.02" [value]="settings.hybridShellOpacity" class="galaxy-slider" (input)="setHybridShellOpacity($any($event.target).value)" />
                         </label>
                         }
-                        @if ((settings.layoutMode === 'hopfProjection' || settings.layoutMode === 'productManifold') && settings.hopfSpaceVisible) {
+                        @if (settings.layoutMode === 'hopfProjection' && settings.hopfSpaceVisible) {
                         <label class="settings-slider-row mt-3">
                             <span class="flex justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500"><span>Space</span><span>{{ settings.hopfSpaceIntensity | number:'1.1-1' }}</span></span>
                             <input type="range" min="0" max="1.4" step="0.05" [value]="settings.hopfSpaceIntensity" class="galaxy-slider" (input)="setHopfSpaceIntensity($any($event.target).value)" />
@@ -874,7 +877,9 @@ export class GraphAtlasPreviewComponent implements OnInit {
         } else if (mode === 'embeddings') {
             const layoutMode = this.layoutForManifold(this.manifoldMode());
             if (this.settings.layoutMode === 'single' || this.settings.layoutMode !== layoutMode && this.manifoldMode() !== 'hybrid') {
-                this.updateSettings({ layoutMode });
+                this.updateSettings(layoutMode === 'hybridSpace'
+                    ? { layoutMode, edgeMode: 'hidden', hybridHorospheresVisible: true, hybridShellOpacity: Math.min(this.settings.hybridShellOpacity, 0.72) }
+                    : { layoutMode });
             }
             void this.refreshEmbeddingAtlas(this.currentReadContext(), this.manifoldMode());
         }
@@ -901,7 +906,9 @@ export class GraphAtlasPreviewComponent implements OnInit {
         } else if (mode === 'siegelFinsler' && this.manifoldMode() !== 'siegel') {
             this.machine.setManifoldMode('siegel');
         }
-        this.updateSettings({ layoutMode: mode });
+        this.updateSettings(mode === 'hybridSpace'
+            ? { layoutMode: mode, edgeMode: 'hidden', hybridHorospheresVisible: true, hybridShellOpacity: Math.min(this.settings.hybridShellOpacity, 0.72) }
+            : { layoutMode: mode });
         this.persistViewState();
     }
 
@@ -909,7 +916,9 @@ export class GraphAtlasPreviewComponent implements OnInit {
         this.machine.setManifoldMode(mode);
         if (this.atlasMode !== 'embeddings') this.setAtlasMode('embeddings');
         const layoutMode = this.layoutForManifold(mode);
-        if (this.settings.layoutMode !== layoutMode) this.updateSettings({ layoutMode });
+        if (this.settings.layoutMode !== layoutMode) this.updateSettings(layoutMode === 'hybridSpace'
+            ? { layoutMode, edgeMode: 'hidden', hybridHorospheresVisible: true, hybridShellOpacity: Math.min(this.settings.hybridShellOpacity, 0.72) }
+            : { layoutMode });
         this.queryTrace.set(null);
         this.selectedEntityId = null;
         this.persistViewState();
@@ -966,9 +975,11 @@ export class GraphAtlasPreviewComponent implements OnInit {
             const snapshot = this.graphSnapshotSignal();
             const atlas = this.graphRebuildEmbeddingAtlas();
             const targets = atlas?.nodes.length ?? snapshot?.embeddingTargets.length ?? 0;
+            const totalTargets = snapshot?.embeddingTargets.length ?? targets;
+            const targetLabel = totalTargets > targets ? `${targets} visible / ${totalTargets} targets` : `${targets} targets`;
             const chunks = snapshot?.embeddingTargets.filter((target) => target.kind === 'chunk').length ?? snapshot?.chunks.length ?? 0;
             const entities = snapshot?.embeddingTargets.filter((target) => target.kind === 'entity').length ?? snapshot?.nodes.length ?? 0;
-            return `${targets} targets / ${chunks} chunks / ${entities} entities / ${atlas?.edges.length ?? 0} links`;
+            return `${targetLabel} / ${chunks} chunks / ${entities} entities / ${atlas?.edges.length ?? 0} links`;
         }
         const inventory = this.graphInventory();
         const counters = this.graphCounters;
@@ -1037,7 +1048,7 @@ export class GraphAtlasPreviewComponent implements OnInit {
     }
 
     cycleEdgeMode(): void {
-        const modes: GalaxyEdgeMode[] = ['curved', 'straight', 'hidden'];
+        const modes: GalaxyEdgeMode[] = ['curved', 'straight', 'tube', 'hidden'];
         this.updateSettings({ edgeMode: modes[(modes.indexOf(this.settings.edgeMode) + 1) % modes.length] });
     }
 
@@ -1104,6 +1115,10 @@ export class GraphAtlasPreviewComponent implements OnInit {
 
     toggleHybridShell(): void {
         this.updateSettings({ hybridShellVisible: !this.settings.hybridShellVisible });
+    }
+
+    toggleHybridField(): void {
+        this.updateSettings({ hybridHorospheresVisible: !this.settings.hybridHorospheresVisible });
     }
 
     toggleHopfSpace(): void {

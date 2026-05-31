@@ -10,7 +10,7 @@ import { buildGraphRebuildDeltaPostProcessPlan, deltaPostProcessPlanCounters, ty
 import { buildGraphRebuildEdgeJudgmentPlan, edgeJudgmentPlanCounters } from './graph-rebuild-edge-type-judgment-plan';
 import { embeddingProfileFromModelSelection } from './graph-rebuild-embedding-signatures';
 import { GLINER_LINKER_MODEL_ID } from './graph-rebuild-entity-linking';
-import { GraphRebuildService } from './graph-rebuild.service';
+import { GraphRebuildService, snapshotAnchorsToGraphRebuildOccurrences } from './graph-rebuild.service';
 import { buildSiegelBackboneProjectionReceipt } from './graph-rebuild-siegel-backbone';
 import { graphSignalTruthCounters } from './graph-rebuild-signal-truth';
 import type {
@@ -433,6 +433,8 @@ export class GraphRebuildPipelineService {
             const cachedReceipt = await this.safeLoadReceipt(scope.scopeId);
             const cachedSnapshot = postProcessCache?.snapshot || await this.safeLoadSnapshot(scope.scopeId);
             const cacheReceipt = postProcessCache?.receipt || cachedReceipt;
+            const scopedNoteTexts = Object.fromEntries(docs.map((doc) => [doc.id, doc.plainText]));
+            const fallbackOccurrences = snapshotAnchorsToGraphRebuildOccurrences(cachedSnapshot, Date.now(), scopedNoteTexts);
             const fingerprintMatched = Boolean(postProcessCache)
                 || (
                     cacheReceipt?.postProcessMode === 'full'
@@ -482,6 +484,7 @@ export class GraphRebuildPipelineService {
                 docs,
                 entities,
                 cachedSnapshot,
+                fallbackOccurrences,
             }));
 
             for (const capability of POSTPROCESS_FACT_CAPABILITIES) {
@@ -506,6 +509,7 @@ export class GraphRebuildPipelineService {
                     scopeId: scope.scopeId,
                     noteIds: scope.noteIds,
                     entities,
+                    fallbackOccurrences,
                     relationshipHints,
                     embeddingProfile: embeddingProfileFromModelSelection(request.modelSelection),
                     postProcessMode: 'full',
@@ -544,7 +548,7 @@ export class GraphRebuildPipelineService {
             appendSnapshotTimingStages(stageReceipts, completedSnapshot);
 
             for (const projection of PROJECTION_CAPABILITIES) {
-                projectionReceipts.push(skippedProjectionReceipt(projection.mode, completedSnapshot));
+                projectionReceipts.push(snapshotOwnedProjectionReceipt(projection.mode, completedSnapshot));
             }
             projectionReceipts.push(await buildSiegelBackboneProjectionReceipt(completedSnapshot));
 
@@ -1038,13 +1042,16 @@ function appendEntityLinkerPlanStage(
             narrowRetrieverReady: 1,
             modelRunnerReady: 0,
             modelCalls: 0,
-            candidateLinks: counters.candidateLinks || snapshot.counters.entityLinkSuggestions || 0,
+            shadowLinks: counters.shadowLinks || snapshot.counters.shadowLinkSuggestions || 0,
+            candidateLinks: counters.candidateLinks || snapshot.counters.shadowLinkSuggestions || snapshot.counters.entityLinkSuggestions || 0,
             linkerCandidates: counters.linkerCandidates || 0,
+            finalLinkPatches: snapshot.counters.finalLinkPatches || 0,
+            finalLinkReceiptFailures: snapshot.counters.finalLinkReceiptFailures || 0,
             autoConfirmableLinks: counters.autoConfirmable || 0,
             ambiguousLinks: counters.ambiguous || 0,
             rejectedLinks: counters.rejected || 0,
         },
-        `${GLINER_LINKER_MODEL_ID} inference pending; narrow candidates are staged for model rerank`,
+        `${GLINER_LINKER_MODEL_ID} inference pending; ShadowLinker stages candidates, FinalLinker waits for promoted clean receipts`,
     ));
 }
 
@@ -1136,6 +1143,7 @@ function signalCandidatePlanStage(input: {
     docs: ScopedDocument[];
     entities: Array<{ id: string }>;
     cachedSnapshot: GraphRebuildSnapshot | null | undefined;
+    fallbackOccurrences?: unknown[];
 }): GraphIndexStageReceipt {
     const discovery = input.discoveryStage.counters || {};
     const discoveryCandidates = discovery['candidateSuggestions'] || discovery['suggestions'] || discovery['candidates'] || 0;
@@ -1155,8 +1163,11 @@ function signalCandidatePlanStage(input: {
             discoveryCacheHit: discovery['discoveryCacheHit'] || 0,
             discoverySkipped: discovery['postprocessDiscoverySkipped'] || 0,
             priorTargets: prior?.counters.embeddingTargets || 0,
+            priorMentions: prior?.counters.mentions || 0,
+            priorAnchors: prior?.counters.acceptedAnchors || 0,
             priorGraphLinks: prior?.counters.graphAwareLinkSuggestions || 0,
             priorEntityLinks: prior?.counters.entityLinkSuggestions || 0,
+            fallbackAnchors: input.fallbackOccurrences?.length || 0,
             plannedModelCalls: 0,
         },
         'Candidate ledger ready for label-conditioned signal adjudication',
@@ -1213,24 +1224,26 @@ function instrumentationStage(
     };
 }
 
-function skippedProjectionReceipt(
+function snapshotOwnedProjectionReceipt(
     mode: GraphIndexProjectionMode,
     snapshot: GraphRebuildSnapshot | null,
 ): GraphIndexProjectionReceipt {
     const now = Date.now();
+    const targetCount = snapshot?.counters.embeddingTargets || 0;
     return {
         mode,
-        status: 'skipped',
+        status: 'synced',
         startedAt: now,
         completedAt: now,
         durationMs: 0,
-        targetCount: snapshot?.counters.embeddingTargets || 0,
-        vectorCount: snapshot?.counters.embeddingVectors || 0,
+        targetCount,
+        vectorCount: targetCount,
         counters: {
-            graphRebuildTargets: snapshot?.counters.embeddingTargets || 0,
-            nativeSemanticSidecarSkipped: 1,
+            graphRebuildTargets: targetCount,
+            graphRebuildReadModelProjection: 1,
+            nativeSemanticSidecarBypassed: 1,
         },
-        message: 'Native Semantic Atlas sidecar projection skipped; graph-rebuild snapshot owns postprocess topology',
+        message: 'Graph-rebuild snapshot projection synced; native Semantic Atlas sidecar bypassed because the snapshot owns postprocess topology',
     };
 }
 

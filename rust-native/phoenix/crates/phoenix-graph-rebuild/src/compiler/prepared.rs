@@ -6,8 +6,8 @@ use phoenix_types::TextRange;
 
 use super::ids::mention_evidence_id;
 use super::types::{
-    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole,
-    GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
+    EvidenceAnchor, EvidenceBundleKind, EvidenceKind, FactBundle, FactLane, FactRole, GraphAtom,
+    GraphAtomKind, GraphCompilerOutput, ProjectedGraphEdge, RelationFact,
 };
 
 pub(super) fn prepared_artifacts(
@@ -46,7 +46,7 @@ fn surface_hit_evidence(
         } else {
             EvidenceKind::CueHit
         },
-        note_id,
+        note_id.clone(),
         None,
         source_id,
         Some(hit.source_range),
@@ -65,7 +65,7 @@ fn lens_frame_evidence(
         evidence_seen,
         lens_frame_evidence_id(&frame.id),
         EvidenceKind::LensFrame,
-        note_id,
+        note_id.clone(),
         None,
         frame.id.as_str().into(),
         Some(TextRange {
@@ -74,6 +74,16 @@ fn lens_frame_evidence(
         }),
         lens_confidence(frame.lens),
     );
+    output.atoms.push(GraphAtom {
+        id: format_compact!("atom:frame:{}", frame.id),
+        kind: GraphAtomKind::Frame,
+        source_id: frame.id.as_str().into(),
+        label: format_compact!("Frame {:?} {}-{}", frame.lens, frame.start, frame.end),
+        note_id,
+        chunk_id: None,
+        entity_id: None,
+        evidence_ids: vec![lens_frame_evidence_id(&frame.id)],
+    });
 }
 
 fn mention_graph_facts(
@@ -118,6 +128,8 @@ fn mention_graph_facts(
                 status: "prepared".into(),
                 evidence_ids: vec![evidence_id],
                 confidence: edge.weight,
+                compression: None,
+                commitment: None,
             });
             output.projected_edges.push(ProjectedGraphEdge {
                 id: format_compact!("projection:{}", bundle_id),
@@ -131,6 +143,16 @@ fn mention_graph_facts(
             });
             continue;
         }
+        output.atoms.push(GraphAtom {
+            id: format_compact!("atom:relationFact:{}", fact_id),
+            kind: GraphAtomKind::RelationFact,
+            source_id: fact_id.clone(),
+            label: format_compact!("{:?}", edge.kind),
+            note_id: None,
+            chunk_id: None,
+            entity_id: None,
+            evidence_ids: vec![evidence_id.clone()],
+        });
         output.facts.push(RelationFact {
             id: fact_id.clone(),
             lane,
@@ -184,6 +206,8 @@ fn lens_frame_bundle(output: &mut GraphCompilerOutput, frame: &LensChunk) {
         status: "prepared".into(),
         evidence_ids: vec![evidence_id],
         confidence: lens_confidence(frame.lens),
+        compression: None,
+        commitment: None,
     });
 }
 

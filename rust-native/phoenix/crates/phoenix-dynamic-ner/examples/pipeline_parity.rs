@@ -302,6 +302,7 @@ fn run_doc(
         scope: &scope,
         lexicon: Some(&lexicon),
         surface_hits: &[],
+        label_bank_context: None,
     };
     let started = Instant::now();
     let output = engine.extract_mentions(&input)?;

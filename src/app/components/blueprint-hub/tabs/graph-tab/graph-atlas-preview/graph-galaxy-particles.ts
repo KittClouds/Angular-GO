@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import type { GalaxyRenderSettings } from './graph-galaxy-engine';
 import type { GalaxyFocusMask } from './graph-galaxy-focus';
-import type { GalaxySceneV2 } from './graph-galaxy-scene-v2';
+import type { GalaxyLorentzGuideView, GalaxySceneV2 } from './graph-galaxy-scene-v2';
 
 const MAX_FLOW_PARTICLES = 1800;
 const EMPTY_VEC3 = new Float32Array(0);
@@ -12,6 +12,7 @@ const CAPS_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.36;
 const CAPS_SHELL_RADII = [0.54, 0.98, 1.22, 1.34, 1.48, 1.68, 1.92];
 const HYBRID_SURFACE_EDGE_MIN_RADIUS = 2.32 * 0.92;
 const HYBRID_SURFACE_EDGE_MAX_RADIUS_DELTA = 0.42;
+type FlowSource = { kind: 'edge'; index: number } | { kind: 'guide'; index: number };
 
 export class GraphGalaxyParticles {
     readonly points: THREE.Points;
@@ -55,7 +56,7 @@ export class GraphGalaxyParticles {
             }
         `,
     });
-    private readonly edgeIndexes: number[] = [];
+    private readonly flowSources: FlowSource[] = [];
     private readonly seeds: number[] = [];
     private readonly speeds: number[] = [];
 
@@ -65,27 +66,33 @@ export class GraphGalaxyParticles {
     }
 
     bind(data: GalaxySceneV2, settings: GalaxyRenderSettings): void {
-        this.edgeIndexes.length = 0;
+        this.flowSources.length = 0;
         this.seeds.length = 0;
         this.speeds.length = 0;
         const edgeCount = data.edgePairs.length / 2;
-        if (!settings.particleFlow || edgeCount === 0) {
+        const guideIndexes = this.guideFlowIndexes(data);
+        const sourceCount = edgeCount + guideIndexes.length;
+        if (!settings.particleFlow || sourceCount === 0) {
             this.setEmptyAttributes();
             this.points.visible = false;
             return;
         }
 
-        const particleCount = Math.min(edgeCount, MAX_FLOW_PARTICLES);
-        const stride = edgeCount / particleCount;
+        const particleCount = Math.min(sourceCount, MAX_FLOW_PARTICLES);
+        const stride = sourceCount / particleCount;
         for (let i = 0; i < particleCount; i++) {
-            const edge = Math.min(edgeCount - 1, Math.floor(i * stride));
-            const seed = this.stableUnit(edge * 17 + 3);
-            this.edgeIndexes.push(edge);
+            const source = Math.min(sourceCount - 1, Math.floor(i * stride));
+            const sourceRef: FlowSource = source < edgeCount
+                ? { kind: 'edge', index: source }
+                : { kind: 'guide', index: guideIndexes[source - edgeCount] };
+            const seedKey = sourceRef.kind === 'edge' ? sourceRef.index * 17 + 3 : sourceRef.index * 23 + 101;
+            const seed = this.stableUnit(seedKey);
+            this.flowSources.push(sourceRef);
             this.seeds.push(seed);
-            this.speeds.push(0.23 + this.stableUnit(edge * 31 + 11) * 0.32);
+            this.speeds.push(0.23 + this.stableUnit(seedKey * 31 + 11) * 0.32);
         }
 
-        const count = this.edgeIndexes.length;
+        const count = this.flowSources.length;
         this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
         this.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
         this.geometry.setAttribute('alpha', new THREE.BufferAttribute(new Float32Array(count), 1));
@@ -96,7 +103,7 @@ export class GraphGalaxyParticles {
 
     updateSettings(settings: GalaxyRenderSettings): void {
         this.material.uniforms['uBaseSize'].value = 3.35 + settings.particleSize * 0.95;
-        this.points.visible = settings.particleFlow && this.edgeIndexes.length > 0;
+        this.points.visible = settings.particleFlow && this.flowSources.length > 0;
     }
 
     update(
@@ -113,17 +120,32 @@ export class GraphGalaxyParticles {
         const sizeAttr = this.geometry.getAttribute('flowSize') as THREE.BufferAttribute;
         const baseAlpha = settings.particleOpacity * (focus?.hasFocus ? 0.72 : 0.42);
         const flowSize = 0.62 + settings.particleSize * 0.1;
-        const curved = settings.edgeMode === 'curved';
-        for (let i = 0; i < this.edgeIndexes.length; i++) {
-            const edge = this.edgeIndexes[i];
-            const source = data.edgePairs[edge * 2];
-            const target = data.edgePairs[edge * 2 + 1];
+        const curved = settings.edgeMode === 'curved' || settings.edgeMode === 'tube';
+        for (let i = 0; i < this.flowSources.length; i++) {
+            const flowSource = this.flowSources[i];
             const t = (this.seeds[i] + time * 0.001 * this.speeds[i] * settings.particleSpeed) % 1;
-            const lift = curved ? this.edgeLift(data, settings, edge, source, target) : 0;
-            this.writeEdgePosition(positionAttr, i, data, positions, source, target, lift, t);
-            this.writeTargetColor(colorAttr, data, edge, i);
-            alphaAttr.setX(i, focus?.hasFocus && focus.edgeLevels[edge] === 0 ? 0 : baseAlpha);
-            sizeAttr.setX(i, flowSize);
+            if (flowSource.kind === 'edge') {
+                const edge = flowSource.index;
+                const source = data.edgePairs[edge * 2];
+                const target = data.edgePairs[edge * 2 + 1];
+                const lift = settings.edgeMode === 'tube'
+                    ? this.edgeTubeLift(data, settings, edge, source, target)
+                    : curved ? this.edgeLift(data, settings, edge, source, target) : 0;
+                if (settings.edgeMode === 'tube') {
+                    this.writeTubeEdgePosition(positionAttr, i, positions, edge, source, target, lift, t);
+                } else {
+                    this.writeEdgePosition(positionAttr, i, data, positions, source, target, lift, t);
+                }
+                this.writeTargetColor(colorAttr, data, edge, i);
+                alphaAttr.setX(i, focus?.hasFocus && focus.edgeLevels[edge] === 0 ? 0 : baseAlpha);
+                sizeAttr.setX(i, flowSize * (settings.edgeMode === 'tube' ? 1.08 : 1));
+                continue;
+            }
+            const guide = data.lorentzGuides[flowSource.index];
+            this.writeGuidePosition(positionAttr, i, data, positions, guide, t);
+            this.writeGuideColor(colorAttr, guide, i);
+            alphaAttr.setX(i, baseAlpha * 0.74 * this.guideFocusAlpha(data, focus, guide));
+            sizeAttr.setX(i, flowSize * THREE.MathUtils.clamp(0.72 + Math.sqrt(Math.max(0.08, guide.guideWeight || 0.7)) * 0.18, 0.82, 1.02));
         }
         positionAttr.needsUpdate = true;
         colorAttr.needsUpdate = true;
@@ -143,10 +165,31 @@ export class GraphGalaxyParticles {
         this.geometry.setAttribute('flowSize', new THREE.BufferAttribute(EMPTY_SCALAR, 1));
     }
 
+    private guideFlowIndexes(data: GalaxySceneV2): number[] {
+        if (!this.liveGuideFlow(data)) return [];
+        const indexes: number[] = [];
+        for (let index = 0; index < data.lorentzGuides.length; index++) {
+            const guide = data.lorentzGuides[index];
+            if ((guide.guideKind === 'membership' || guide.guideKind === 'rootLane') && guide.positions3d.length >= 6) indexes.push(index);
+        }
+        return indexes;
+    }
+
+    private liveGuideFlow(data: GalaxySceneV2): boolean {
+        return data.layoutMode === 'lorentzTree' || data.layoutMode === 'productManifold' || data.layoutMode === 'siegelFinsler';
+    }
+
     private edgeLift(data: GalaxySceneV2, settings: GalaxyRenderSettings, edge: number, source: number, target: number): number {
         const interGalaxy = data.edgeKinds[edge] === 1;
         const curveScale = THREE.MathUtils.clamp(settings.edgeCurveStrength, 0.25, 1.2) * (interGalaxy ? 0.92 : 0.58);
         return (0.08 + Math.abs(source - target) * 0.002) * curveScale + (interGalaxy ? 0.18 : 0);
+    }
+
+    private edgeTubeLift(data: GalaxySceneV2, settings: GalaxyRenderSettings, edge: number, source: number, target: number): number {
+        const confidence = THREE.MathUtils.clamp(data.edgeAlpha[edge] ?? 0.45, 0.12, 1);
+        const bridgeBoost = data.edgeKinds[edge] === 1 ? 1.38 : 1;
+        const span = Math.sqrt(Math.max(1, Math.abs(source - target)));
+        return (0.045 + confidence * 0.13 + span * 0.004) * bridgeBoost * THREE.MathUtils.clamp(settings.edgeCurveStrength, 0.25, 1.2);
     }
 
     private writeEdgePosition(
@@ -167,6 +210,87 @@ export class GraphGalaxyParticles {
             }
         }
         positionAttr.setXYZ(particle, this.edgeX(positions, source, target, t), this.edgeY(positions, source, target, lift, t), this.edgeZ(positions, source, target, t));
+    }
+
+    private writeTubeEdgePosition(
+        positionAttr: THREE.BufferAttribute,
+        particle: number,
+        positions: Float32Array,
+        edge: number,
+        source: number,
+        target: number,
+        lift: number,
+        t: number,
+    ): void {
+        const ax = positions[source * 3], ay = positions[source * 3 + 1], az = positions[source * 3 + 2];
+        const bx = positions[target * 3], by = positions[target * 3 + 1], bz = positions[target * 3 + 2];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const xy = Math.hypot(dx, dy) || 1;
+        const sign = this.stableUnit(edge * 41 + 7) < 0.5 ? -1 : 1;
+        const sweep = Math.sin(Math.PI * t);
+        const braid = Math.sin(Math.PI * 2 * t + sign * 0.72) * lift * 0.08;
+        const lateral = lift * 0.34 * sweep * sign;
+        positionAttr.setXYZ(
+            particle,
+            THREE.MathUtils.lerp(ax, bx, t) + (-dy / xy) * lateral,
+            THREE.MathUtils.lerp(ay, by, t) + (dx / xy) * lateral + lift * 0.38 * sweep,
+            THREE.MathUtils.lerp(az, bz, t) + lift * 0.24 * sweep * sign + braid,
+        );
+    }
+
+    private writeGuidePosition(
+        positionAttr: THREE.BufferAttribute,
+        particle: number,
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        guide: GalaxyLorentzGuideView,
+        t: number,
+    ): void {
+        const point = this.reanchoredGuidePoint(data, positions, guide, t) ?? this.staticGuidePoint(guide, t);
+        positionAttr.setXYZ(particle, point.x, point.y, point.z);
+    }
+
+    private reanchoredGuidePoint(
+        data: GalaxySceneV2,
+        positions: Float32Array,
+        guide: GalaxyLorentzGuideView,
+        t: number,
+    ): { x: number; y: number; z: number } | null {
+        if (positions !== data.positions3d && positions !== data.positions2d) return null;
+        const sourceIndex = data.ids.indexOf(guide.nodeIds[0] || '');
+        const targetIndex = data.ids.indexOf(guide.nodeIds[1] || '');
+        if (sourceIndex < 0 || targetIndex < 0 || guide.guideKind !== 'membership') return null;
+        const last = guide.positions3d.length - 3;
+        const oldA = { x: guide.positions3d[0], y: guide.positions3d[1], z: guide.positions3d[2] };
+        const oldB = { x: guide.positions3d[last], y: guide.positions3d[last + 1], z: guide.positions3d[last + 2] };
+        const point = this.staticGuidePoint(guide, t);
+        const odx = oldB.x - oldA.x, ody = oldB.y - oldA.y, odz = oldB.z - oldA.z;
+        const oldLenSq = Math.max(0.000001, odx * odx + ody * ody + odz * odz);
+        const newA = { x: positions[sourceIndex * 3], y: positions[sourceIndex * 3 + 1], z: positions[sourceIndex * 3 + 2] };
+        const newB = { x: positions[targetIndex * 3], y: positions[targetIndex * 3 + 1], z: positions[targetIndex * 3 + 2] };
+        const ndx = newB.x - newA.x, ndy = newB.y - newA.y, ndz = newB.z - newA.z;
+        const offsetScale = THREE.MathUtils.clamp(Math.sqrt((ndx * ndx + ndy * ndy + ndz * ndz) / oldLenSq), 0.25, 2.4);
+        const localT = THREE.MathUtils.clamp(((point.x - oldA.x) * odx + (point.y - oldA.y) * ody + (point.z - oldA.z) * odz) / oldLenSq, 0, 1);
+        const oldBase = { x: oldA.x + odx * localT, y: oldA.y + ody * localT, z: oldA.z + odz * localT };
+        return {
+            x: newA.x + ndx * localT + (point.x - oldBase.x) * offsetScale,
+            y: newA.y + ndy * localT + (point.y - oldBase.y) * offsetScale,
+            z: newA.z + ndz * localT + (point.z - oldBase.z) * offsetScale,
+        };
+    }
+
+    private staticGuidePoint(guide: GalaxyLorentzGuideView, t: number): { x: number; y: number; z: number } {
+        const segments = Math.max(1, Math.floor(guide.positions3d.length / 6));
+        const raw = THREE.MathUtils.clamp(t, 0, 0.999999) * segments;
+        const segment = Math.min(segments - 1, Math.floor(raw));
+        const local = raw - segment;
+        const offset = segment * 6;
+        return {
+            x: THREE.MathUtils.lerp(guide.positions3d[offset], guide.positions3d[offset + 3], local),
+            y: THREE.MathUtils.lerp(guide.positions3d[offset + 1], guide.positions3d[offset + 4], local),
+            z: THREE.MathUtils.lerp(guide.positions3d[offset + 2], guide.positions3d[offset + 5], local),
+        };
     }
 
     private capsSurfaceParticle(data: GalaxySceneV2, positions: Float32Array, source: number, target: number): boolean {
@@ -250,6 +374,22 @@ export class GraphGalaxyParticles {
     private writeTargetColor(colorAttr: THREE.BufferAttribute, data: GalaxySceneV2, edge: number, particle: number): void {
         const offset = edge * 6 + 3;
         colorAttr.setXYZ(particle, data.edgeColors[offset], data.edgeColors[offset + 1], data.edgeColors[offset + 2]);
+    }
+
+    private writeGuideColor(colorAttr: THREE.BufferAttribute, guide: GalaxyLorentzGuideView, particle: number): void {
+        colorAttr.setXYZ(
+            particle,
+            THREE.MathUtils.clamp(guide.color.r * 0.78, 0, 0.78),
+            THREE.MathUtils.clamp(guide.color.g * 0.82, 0, 0.84),
+            THREE.MathUtils.clamp(guide.color.b * 0.84, 0, 0.86),
+        );
+    }
+
+    private guideFocusAlpha(data: GalaxySceneV2, focus: GalaxyFocusMask | null | undefined, guide: GalaxyLorentzGuideView): number {
+        if (!focus?.hasFocus || focus.focusIndex < 0) return 0.78;
+        const focusId = data.ids[focus.focusIndex];
+        if (!guide.nodeIds.length) return 0.2;
+        return guide.nodeIds.includes(focusId) ? 1.08 : 0.08;
     }
 
     private stableUnit(value: number): number {

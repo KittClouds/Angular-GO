@@ -3744,6 +3744,7 @@ dependencies = [
  "memchr",
  "phoenix-alex 0.1.1",
  "phoenix-chunker 0.1.1",
+ "phoenix-hyperbolic 0.1.1",
  "phoenix-types 0.1.1",
  "serde",
  "serde_json",
@@ -3761,6 +3762,21 @@ dependencies = [
  "rand 0.8.5",
  "roaring",
  "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "phoenix-hyperbolic"
+version = "0.1.1"
+dependencies = [
+ "bincode",
+ "bytemuck",
+ "memmap2",
+ "rand 0.8.5",
+ "roaring",
+ "rustc-hash 1.1.0",
+ "serde",
+ "smallvec",
  "thiserror 1.0.69",
 ]
 
@@ -3953,7 +3969,7 @@ dependencies = [
  "phoenix-chunker 0.1.0",
  "phoenix-dynamic-ner",
  "phoenix-graph",
- "phoenix-hyperbolic",
+ "phoenix-hyperbolic 0.1.0",
  "phoenix-invarant-v2",
  "phoenix-kernel",
  "phoenix-lex",
@@ -4081,7 +4097,7 @@ dependencies = [
  "ort",
  "ort-sys",
  "phoenix-graph-rebuild",
- "phoenix-hyperbolic",
+ "phoenix-hyperbolic 0.1.0",
  "phoenix-native",
  "phoenix-types 0.1.0",
  "serde",

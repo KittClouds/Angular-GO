@@ -106,7 +106,7 @@ export function applyHybridBusemannLayout(
         }
 
         if (!position) {
-            const prototypeDir = normalize3(prototype.direction);
+            const prototypeDir = weightedPrototypeDirection(signature, prototypeById, prototype.direction);
             const semanticDir = normalizeNullable3(
                 state?.surfaceDirection ??
                     readVec3(node.entity.metadata?.['hybridSurfaceDirection']) ??
@@ -125,11 +125,17 @@ export function applyHybridBusemannLayout(
              * Radius means commitment/resolution strength now.
              * Not hierarchy depth.
              */
-            const r = lerp(
-                minR,
-                maxR,
-                clamp01(0.15 + radialStrength * 0.45 + confidence * 0.40),
+            const margin = clamp01(finiteOr(signature.margin, 0) / (Math.abs(finiteOr(signature.margin, 0)) + 1));
+            const ambiguity = clamp01(signature.ambiguityScore);
+            const readiness = clamp01(
+                radialStrength * 0.38 +
+                confidence * 0.34 +
+                margin * 0.18 +
+                (signature.promotionReady ? 0.1 : 0) -
+                entropy * 0.22 -
+                ambiguity * 0.12,
             );
+            const r = lerp(minR, maxR, 0.08 + readiness * 0.86);
 
             position = scale3(direction, r);
         }
@@ -321,6 +327,40 @@ function atlasDirection(node: GalaxyNode): GalaxyVec3 | null {
     }
 
     return null;
+}
+
+function weightedPrototypeDirection(
+    signature: GalaxyBusemannSignature,
+    prototypes: Map<string, GalaxyBusemannPrototype>,
+    fallback: GalaxyVec3,
+): GalaxyVec3 {
+    const scores = signature.topKScores?.length
+        ? signature.topKScores
+        : [
+            { prototypeId: signature.topPrototypeId, family: signature.family, score: signature.topScore, probability: signature.topProbability },
+            signature.secondPrototypeId
+                ? { prototypeId: signature.secondPrototypeId, family: signature.family, score: signature.secondScore ?? 0, probability: signature.secondProbability ?? 0 }
+                : null,
+        ].filter((score): score is NonNullable<typeof score> => !!score);
+    let total = 0;
+    let mixed = { x: 0, y: 0, z: 0 };
+
+    for (const score of scores.slice(0, 5)) {
+        const prototype = prototypes.get(String(score.prototypeId));
+        if (!prototype) continue;
+        const weight = Math.max(0, finiteOr(score.probability, 0));
+        if (weight <= 0) continue;
+        const direction = normalize3(prototype.direction);
+        mixed = {
+            x: mixed.x + direction.x * weight,
+            y: mixed.y + direction.y * weight,
+            z: mixed.z + direction.z * weight,
+        };
+        total += weight;
+    }
+
+    if (total <= EPS) return normalize3(fallback);
+    return normalize3(mixed);
 }
 
 function normalizeBackendInteriorPoint(

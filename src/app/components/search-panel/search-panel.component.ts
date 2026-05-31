@@ -47,6 +47,8 @@ import type {
   GraphRebuildSignalTargetLane,
   GraphRebuildEntityLinkSuggestion,
   GraphRebuildLinkSuggestion,
+  GraphRebuildShadowLink,
+  GraphRebuildSnapshot,
 } from '../../graph-rebuild/graph-rebuild-snapshot';
 import { smartGraphRegistry } from '../../lib/registry';
 import type {
@@ -132,10 +134,65 @@ interface PostprocessLaneView {
 }
 
 interface PostprocessStagingView {
+  title: string;
+  mode: 'plan' | 'budget';
   targets: number;
   candidates: number;
   deferred: number;
   lanes: PostprocessLaneView[];
+}
+
+type CompilerTone = 'ready' | 'review' | 'danger' | 'quiet';
+
+interface CompilerMetricView {
+  id: string;
+  label: string;
+  value: number;
+  detail: string;
+  tone: CompilerTone;
+}
+
+type CompilerQueueId = 'lanes' | 'bundles' | 'identity' | 'graph-links' | 'final-patches' | 'receipts';
+type CompilerQueueAction = 'toggle-lane' | 'promote' | 'dismiss' | 'accept-link' | 'reject-link' | 'apply-patch' | 'revert-patch';
+type CompilerQueueDecision = 'promoted' | 'dismissed' | 'applied' | 'reverted';
+
+interface CompilerQueueView {
+  id: CompilerQueueId;
+  label: string;
+  detail: string;
+  count: number;
+  tone: CompilerTone;
+}
+
+interface CompilerQueueItemView {
+  id: string;
+  queue: CompilerQueueId;
+  label: string;
+  detail: string;
+  kind: string;
+  confidence: number;
+  tone: CompilerTone;
+  status: string;
+  evidenceCount: number;
+  blockedReasons: string[];
+  receiptSummary: string;
+  primaryLabel?: string;
+  primaryAction?: CompilerQueueAction;
+  secondaryLabel?: string;
+  secondaryAction?: CompilerQueueAction;
+}
+
+interface CompilerWorkbenchView {
+  source: string;
+  detail: string;
+  blocked: number;
+  activeQueue: CompilerQueueId;
+  activeLabel: string;
+  activeDetail: string;
+  metrics: CompilerMetricView[];
+  queues: CompilerQueueView[];
+  items: CompilerQueueItemView[];
+  staging: PostprocessStagingView | null;
 }
 
 const EMBEDDING_STAGE_LANES: Array<{ id: GraphRebuildSignalTargetLane; label: string }> = [
@@ -181,7 +238,15 @@ const EMBEDDING_STAGE_LANES: Array<{ id: GraphRebuildSignalTargetLane; label: st
     lucideZap,
   })],
   templateUrl: './search-panel.component.html',
-  styleUrls: ['./search-panel.component.css', './search-panel.pipeline-map.css'],
+  styleUrls: [
+    './search-panel.component.css',
+    './search-panel.content.css',
+    './search-panel.run-ledger.css',
+    './search-panel.compiler-workbench.css',
+    './search-panel.pipeline-map.css',
+    './search-panel.pipeline-map-panels.css',
+    './search-panel.pipeline-map-rails.css',
+  ],
 })
 export class SearchPanelComponent implements OnInit {
   @ViewChild('workbenchScroll') private workbenchScroll?: ElementRef<HTMLElement>;
@@ -236,6 +301,8 @@ export class SearchPanelComponent implements OnInit {
   readonly collapsedCapabilityGroups = signal<string[]>([]);
   readonly buildPolicy = signal<'dirty-only' | 'force'>('dirty-only');
   readonly linkSuggestionDecisions = signal<Record<string, 'accepted' | 'rejected'>>({});
+  readonly activeCompilerQueue = signal<CompilerQueueId>('lanes');
+  readonly compilerQueueDecisions = signal<Record<string, CompilerQueueDecision>>({});
 
   readonly laneOptions = RETRIEVAL_LANE_OPTIONS;
   readonly models = EMBEDDING_MODELS;
@@ -435,7 +502,7 @@ export class SearchPanelComponent implements OnInit {
     }));
   });
   readonly postprocessStaging = computed(() =>
-    buildPostprocessStagingView(this.fullAtlasPipeline.lastReceipt())
+    buildPostprocessStagingView(this.fullAtlasPipeline.lastSnapshot(), this.fullAtlasPipeline.lastReceipt())
   );
   readonly graphAwareLinkSuggestionTotal = computed(() =>
     this.fullAtlasPipeline.lastSnapshot()?.counters.graphAwareLinkSuggestions
@@ -449,16 +516,34 @@ export class SearchPanelComponent implements OnInit {
   );
   readonly graphAwareLinkSuggestionCount = computed(() => this.graphAwareLinkSuggestions().length);
   readonly entityLinkSuggestionTotal = computed(() =>
-    this.fullAtlasPipeline.lastSnapshot()?.counters.entityLinkSuggestions
+    this.fullAtlasPipeline.lastSnapshot()?.counters.shadowLinkSuggestions
+      ?? this.fullAtlasPipeline.lastSnapshot()?.counters.entityLinkSuggestions
       ?? this.fullAtlasPipeline.lastReceipt()?.counters.entityLinkSuggestions
+      ?? this.fullAtlasPipeline.lastSnapshot()?.shadowLinkSuggestions?.length
       ?? this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions?.length
       ?? 0
   );
   readonly entityLinkSuggestions = computed(() =>
-    (this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions || []).slice(0, 12)
+    (this.fullAtlasPipeline.lastSnapshot()?.shadowLinkSuggestions
+      || this.fullAtlasPipeline.lastSnapshot()?.entityLinkSuggestions
+      || []).slice(0, 12)
   );
   readonly reviewClusters = computed<ProductDiagnosticsReviewCluster[]>(() =>
     buildReviewClusterViews(this.fullAtlasPipeline.lastSnapshot())
+  );
+  readonly compilerWorkbench = computed<CompilerWorkbenchView | null>(() =>
+    buildCompilerWorkbenchView(
+      this.fullAtlasPipeline.lastSnapshot(),
+      this.fullAtlasPipeline.lastReceipt(),
+      this.postprocessStaging(),
+      this.reviewClusters(),
+      this.graphAwareLinkSuggestions(),
+      this.activeCompilerQueue(),
+      this.compilerQueueDecisions(),
+      this.linkSuggestionDecisions(),
+      this.selectedEmbeddingStageLanes(),
+      this.entityLinkerStageEnabled(),
+    )
   );
   readonly selectedRecipePlan = computed(() => this.atlasRuntime.recipeState(this.selectedRecipe(), this.atlasRunOptions()));
   readonly selectedCapability = computed(() => atlasCapabilityById(this.selectedCapabilityId()));
@@ -1024,6 +1109,54 @@ export class SearchPanelComponent implements OnInit {
     return `${suggestion.surface} -> ${target}`;
   }
 
+  shadowLinkKindLabel(suggestion: GraphRebuildEntityLinkSuggestion): string {
+    const kind = (suggestion as Partial<GraphRebuildShadowLink>).shadowKind;
+    switch (kind) {
+      case 'bundle_dedupe': return 'bundle dedupe';
+      case 'alias_suspicion': return 'alias suspicion';
+      case 'same_entity_suspicion': return 'same entity';
+      case 'relation_duplicate_suspicion': return 'relation duplicate';
+      case 'cluster_hint': return 'cluster hint';
+      case 'query_assist': return 'query assist';
+      default: return suggestion.status;
+    }
+  }
+
+  compilerToneClass(tone: CompilerTone): string {
+    return `compiler-tone-${tone}`;
+  }
+
+  setCompilerQueue(queueId: CompilerQueueId): void {
+    this.activeCompilerQueue.set(queueId);
+  }
+
+  runCompilerQueueAction(item: CompilerQueueItemView, slot: 'primary' | 'secondary', event?: Event): void {
+    event?.stopPropagation();
+    const action = slot === 'primary' ? item.primaryAction : item.secondaryAction;
+    if (!action) return;
+    if (action === 'accept-link' || action === 'reject-link') {
+      const suggestion = this.fullAtlasPipeline.lastSnapshot()?.graphAwareLinkSuggestions
+        ?.find((row) => `graph-link:${row.id}` === item.id || row.id === item.id);
+      if (!suggestion) return;
+      if (action === 'accept-link') this.acceptLinkSuggestion(suggestion, event);
+      else this.rejectLinkSuggestion(suggestion, event);
+      return;
+    }
+    if (action === 'toggle-lane') {
+      const laneId = item.id.replace(/^lane:/, '') as GraphRebuildSignalTargetLane | 'entity_linker';
+      if (laneId === 'entity_linker') this.toggleEntityLinkerStage();
+      else this.toggleEmbeddingStageLane(laneId);
+      return;
+    }
+    const decision: CompilerQueueDecision =
+      action === 'apply-patch' ? 'applied'
+        : action === 'revert-patch' ? 'reverted'
+          : action === 'promote' ? 'promoted'
+            : 'dismissed';
+    this.compilerQueueDecisions.update((decisions) => ({ ...decisions, [item.id]: decision }));
+    this.notice.set(`${item.label}: ${compilerDecisionLabel(decision)}.`);
+  }
+
   acceptLinkSuggestion(suggestion: GraphRebuildLinkSuggestion, event?: Event): void {
     event?.stopPropagation();
     smartGraphRegistry.createEdge(
@@ -1568,7 +1701,33 @@ function buildLastRunReceiptRows(receipt: GraphIndexRunReceipt | null): LastRunR
   ];
 }
 
-function buildPostprocessStagingView(receipt: GraphIndexRunReceipt | null): PostprocessStagingView | null {
+function buildPostprocessStagingView(
+  snapshot: GraphRebuildSnapshot | null,
+  receipt: GraphIndexRunReceipt | null,
+): PostprocessStagingView | null {
+  if (snapshot?.embeddingTargetPlan?.lanes?.length) {
+    const plan = snapshot.embeddingTargetPlan;
+    const maxLane = Math.max(1, ...plan.lanes.map((lane) => lane.admitted));
+    const lanes = plan.lanes
+      .map((lane) => ({
+        id: lane.lane,
+        label: signalLaneLabel(lane.lane),
+        admitted: lane.admitted,
+        candidates: lane.candidates,
+        deferred: lane.deferred,
+        percent: Math.max(4, Math.min(100, (lane.admitted / maxLane) * 100)),
+      }))
+      .filter((lane) => lane.admitted > 0 || lane.candidates > 0 || zeroVisiblePostprocessLane(lane.id));
+    const mode = receipt?.postProcessMode === 'full' ? 'budget' : 'plan';
+    return {
+      title: mode === 'budget' ? 'Lane Budget Matrix' : 'Lane Plan Matrix',
+      mode,
+      targets: plan.admittedCount,
+      candidates: plan.candidateCount,
+      deferred: plan.deferredCount,
+      lanes,
+    };
+  }
   if (!receipt?.stageReceipts?.length) return null;
   const coverage = receipt.stageReceipts.find((stage) => stage.id === 'signalTargetCoverage');
   if (!coverage) return null;
@@ -1603,7 +1762,364 @@ function buildPostprocessStagingView(receipt: GraphIndexRunReceipt | null): Post
     ...lane,
     percent: Math.max(4, Math.min(100, (lane.admitted / maxLane) * 100)),
   }));
-  return { targets, candidates, deferred, lanes };
+  const mode = receipt.postProcessMode === 'full' ? 'budget' : 'plan';
+  return { title: mode === 'budget' ? 'Lane Budget Matrix' : 'Lane Plan Matrix', mode, targets, candidates, deferred, lanes };
+}
+
+function buildCompilerWorkbenchView(
+  snapshot: GraphRebuildSnapshot | null,
+  receipt: GraphIndexRunReceipt | null,
+  staging: PostprocessStagingView | null,
+  reviewClusters: ProductDiagnosticsReviewCluster[],
+  graphLinks: GraphRebuildLinkSuggestion[],
+  activeQueue: CompilerQueueId,
+  decisions: Record<string, CompilerQueueDecision>,
+  linkDecisions: Record<string, 'accepted' | 'rejected'>,
+  enabledLanes: GraphRebuildSignalTargetLane[],
+  entityLinkerEnabled: boolean,
+): CompilerWorkbenchView | null {
+  if (!snapshot && !receipt) return null;
+  const counters = snapshot?.counters || receipt?.counters;
+  const graphModelCounters = snapshot?.graphModelV2?.counters;
+  const graphCompileCounters = snapshot?.graphCompileReceipts?.counters;
+  const patchLogCounters = snapshot?.finalLinkPatchLog?.counters;
+  const laneItems = compilerLaneItems(staging, enabledLanes, entityLinkerEnabled);
+  const bundleItems = compilerBundleItems(reviewClusters, decisions);
+  const identityItems = compilerIdentityItems(snapshot, decisions);
+  const graphItems = compilerGraphLinkItems(graphLinks, linkDecisions);
+  const patchItems = compilerPatchItems(snapshot, decisions);
+  const receiptItems = compilerReceiptItems(snapshot);
+  const receiptFailures = receiptItems.length || patchLogCounters?.failedReceipts || counters?.finalLinkReceiptFailures || 0;
+  const bundles = graphModelCounters?.bundles ?? graphCompileCounters?.bundles ?? bundleItems.length;
+  const facts = graphModelCounters?.facts ?? graphCompileCounters?.facts ?? 0;
+  const projections = snapshot?.projectedUiGraph?.length
+    ?? graphModelCounters?.projectionEdges
+    ?? graphCompileCounters?.projectedEdges
+    ?? 0;
+  const compilerSource = snapshot?.graphCompilerSource === 'rust'
+    ? 'Rust compiler'
+    : snapshot?.graphCompilerSource === 'typescriptCompatibility'
+      ? 'TS compatibility bridge'
+      : 'Compiler pending';
+  const buckets: Record<CompilerQueueId, CompilerQueueItemView[]> = {
+    lanes: laneItems,
+    bundles: bundleItems,
+    identity: identityItems,
+    'graph-links': graphItems,
+    'final-patches': patchItems,
+    receipts: receiptItems,
+  };
+  const queues = [
+    queue('lanes', staging?.title || 'Lane Plan', laneItems.length, staging ? `${staging.targets} admitted / ${staging.deferred} deferred` : 'No target plan yet', laneItems.length ? 'ready' : 'quiet'),
+    queue('bundles', 'Bundles', bundleItems.length, 'Clustered bundle families and promotions', bundleItems.length ? 'review' : 'quiet'),
+    queue('identity', 'Identity', identityItems.length, 'ShadowLinker suspicions and promotions', identityItems.length ? 'review' : 'quiet'),
+    queue('graph-links', 'Graph Links', graphItems.length, 'Graph-aware suggestions with accept/reject', graphItems.length ? 'review' : 'quiet'),
+    queue('final-patches', 'Final Patches', patchItems.length, 'Receipt-gated reversible writes', receiptFailures ? 'danger' : patchItems.length ? 'ready' : 'quiet'),
+    queue('receipts', 'Receipts', receiptItems.length, 'Failed or blocking invariants', receiptFailures ? 'danger' : 'quiet'),
+  ];
+  const active = queues.some((queueView) => queueView.id === activeQueue) ? activeQueue : 'graph-links';
+  const activeView = queues.find((queueView) => queueView.id === active) || queues[0];
+  return {
+    source: compilerSource,
+    detail: 'Prepared artifacts -> staged bundles -> promoted facts -> projected read models',
+    blocked: receiptFailures,
+    activeQueue: active,
+    activeLabel: activeView.label,
+    activeDetail: activeView.detail,
+    metrics: [
+      metric('chunks', 'Chunks', counters?.chunks || 0, 'prepared source spans', 'ready'),
+      metric('mentions', 'Mentions', counters?.mentions || 0, 'NER + anchor packets', 'ready'),
+      metric('bundles', 'Bundles', bundles, 'staged fact bundles', bundles ? 'review' : 'quiet'),
+      metric('facts', 'Facts', facts, 'promoted relation facts', facts ? 'ready' : 'quiet'),
+      metric('projections', 'Projection edges', projections, 'UI read-model output', projections ? 'ready' : 'quiet'),
+      metric('shadow', 'Shadow links', identityItems.length, 'non-mutating suspicions', identityItems.length ? 'review' : 'quiet'),
+      metric('patches', 'Final patches', patchItems.length, 'reversible mutation log', patchItems.length ? 'ready' : 'quiet'),
+      metric('receipts', 'Receipt failures', receiptFailures, 'blocked invariants', receiptFailures ? 'danger' : 'ready'),
+    ],
+    queues,
+    items: buckets[active],
+    staging,
+  };
+}
+
+function compilerLaneItems(
+  staging: PostprocessStagingView | null,
+  enabledLanes: GraphRebuildSignalTargetLane[],
+  entityLinkerEnabled: boolean,
+): CompilerQueueItemView[] {
+  const enabled = new Set(enabledLanes);
+  const laneStats = new Map<GraphRebuildSignalTargetLane, PostprocessLaneView>();
+  for (const lane of staging?.lanes || []) {
+    const normalized = normalizeSignalLaneId(lane.id);
+    if (normalized) laneStats.set(normalized, lane);
+  }
+  const rows = EMBEDDING_STAGE_LANES.map((lane) => {
+    const stats = laneStats.get(lane.id);
+    const active = enabled.has(lane.id);
+    const admitted = stats?.admitted ?? 0;
+    const candidates = stats?.candidates ?? 0;
+    const deferred = stats?.deferred ?? 0;
+    return compilerItem({
+      id: `lane:${lane.id}`,
+      queue: 'lanes',
+      label: lane.label,
+      detail: `${admitted} admitted / ${candidates} candidates / ${deferred} deferred`,
+      kind: 'lane',
+      confidence: stats?.percent ? stats.percent / 100 : active ? 1 : 0,
+      tone: active ? 'ready' : 'quiet',
+      status: active ? 'enabled next run' : 'off next run',
+      primaryLabel: active ? 'Turn off' : 'Turn on',
+      primaryAction: 'toggle-lane',
+    });
+  });
+  rows.push(compilerItem({
+    id: 'lane:entity_linker',
+    queue: 'lanes',
+    label: 'Entity linker',
+    detail: 'Shadow linking and identity review lane',
+    kind: 'lane',
+    confidence: entityLinkerEnabled ? 1 : 0,
+    tone: entityLinkerEnabled ? 'ready' : 'quiet',
+    status: entityLinkerEnabled ? 'enabled next run' : 'off next run',
+    primaryLabel: entityLinkerEnabled ? 'Turn off' : 'Turn on',
+    primaryAction: 'toggle-lane',
+  }));
+  return rows;
+}
+
+function compilerBundleItems(
+  clusters: ProductDiagnosticsReviewCluster[],
+  decisions: Record<string, CompilerQueueDecision>,
+): CompilerQueueItemView[] {
+  return clusters
+    .filter((cluster) => decisions[`bundle:${cluster.id}`] !== 'dismissed')
+    .map((cluster) => {
+      const id = `bundle:${cluster.id}`;
+      const decision = decisions[id];
+      return compilerItem({
+        id,
+        queue: 'bundles',
+        label: cluster.label,
+        detail: `${cluster.action} / ${cluster.count} items / ${cluster.representativeCount} examples`,
+        kind: cluster.kind === 'entity-link' ? 'entity' : 'graph',
+        confidence: cluster.confidence,
+        tone: cluster.conflicts > 0 ? 'danger' : 'review',
+        status: decision ? compilerDecisionLabel(decision) : cluster.action,
+        evidenceCount: cluster.representativeCount,
+        blockedReasons: cluster.conflicts > 0 ? [`${cluster.conflicts} conflicts`] : [],
+        receiptSummary: cluster.signals.slice(0, 3).join(' / '),
+        primaryLabel: decision === 'promoted' ? undefined : 'Promote',
+        primaryAction: decision === 'promoted' ? undefined : 'promote',
+        secondaryLabel: 'Dismiss',
+        secondaryAction: 'dismiss',
+      });
+    });
+}
+
+function compilerIdentityItems(
+  snapshot: GraphRebuildSnapshot | null,
+  decisions: Record<string, CompilerQueueDecision>,
+): CompilerQueueItemView[] {
+  return (snapshot?.shadowLinkSuggestions || snapshot?.entityLinkSuggestions || [])
+    .filter((suggestion) => decisions[`identity:${suggestion.id}`] !== 'dismissed')
+    .slice(0, 24)
+    .map((suggestion) => {
+      const id = `identity:${suggestion.id}`;
+      const decision = decisions[id];
+      const blockedReasons = isShadowLink(suggestion) ? suggestion.promotionBlockedReasons : [];
+      return compilerItem({
+        id,
+        queue: 'identity',
+        label: entityLinkItemTitle(suggestion),
+        detail: `${shadowLinkKindText(suggestion)} / ${suggestion.candidateKind || 'untyped'}`,
+        kind: suggestion.decision,
+        confidence: suggestion.confidence,
+        tone: blockedReasons.length ? 'danger' : 'review',
+        status: decision ? compilerDecisionLabel(decision) : isShadowLink(suggestion) ? suggestion.promotionState : suggestion.status,
+        evidenceCount: suggestion.evidenceIds?.length || 0,
+        blockedReasons,
+        receiptSummary: suggestion.rationale?.slice(0, 2).join(' / ') || suggestion.rerankSignals?.slice(0, 3).join(' / '),
+        primaryLabel: blockedReasons.length || decision === 'promoted' ? undefined : 'Promote',
+        primaryAction: blockedReasons.length || decision === 'promoted' ? undefined : 'promote',
+        secondaryLabel: 'Dismiss',
+        secondaryAction: 'dismiss',
+      });
+    });
+}
+
+function compilerGraphLinkItems(
+  suggestions: GraphRebuildLinkSuggestion[],
+  linkDecisions: Record<string, 'accepted' | 'rejected'>,
+): CompilerQueueItemView[] {
+  return suggestions
+    .filter((suggestion) => !Object.keys(linkDecisions).some((key) => key.endsWith(`:${suggestion.id}`)))
+    .slice(0, 24)
+    .map((suggestion) => compilerItem({
+      id: `graph-link:${suggestion.id}`,
+      queue: 'graph-links',
+      label: `${suggestion.sourceEntityId} -> ${suggestion.targetEntityId}`,
+      detail: `${suggestion.suggestedRelationType} / ${suggestion.semanticStatus} / ${suggestion.structuralRole}`,
+      kind: suggestion.kind,
+      confidence: suggestion.confidence,
+      tone: 'review',
+      status: suggestion.kind.replace(/_/g, ' '),
+      evidenceCount: suggestion.evidenceIds?.length || 0,
+      receiptSummary: suggestion.rerankSignals?.slice(0, 3).join(' / '),
+      primaryLabel: 'Accept',
+      primaryAction: 'accept-link',
+      secondaryLabel: 'Reject',
+      secondaryAction: 'reject-link',
+    }));
+}
+
+function compilerPatchItems(
+  snapshot: GraphRebuildSnapshot | null,
+  decisions: Record<string, CompilerQueueDecision>,
+): CompilerQueueItemView[] {
+  return (snapshot?.finalLinkPatchLog?.patches || [])
+    .filter((patch) => !['applied', 'reverted'].includes(decisions[`patch:${patch.id}`] || patch.status))
+    .slice(0, 24)
+    .map((patch) => {
+      const failed = patch.receipts.filter((receipt) => receipt.status === 'failed');
+      return compilerItem({
+        id: `patch:${patch.id}`,
+        queue: 'final-patches',
+        label: patch.operation,
+        detail: `${patch.kind.replace(/_/g, ' ')} / ${patch.sourceEntityId || patch.alias || patch.sourceShadowLinkId}`,
+        kind: patch.kind,
+        confidence: patch.confidence,
+        tone: failed.length ? 'danger' : 'ready',
+        status: failed.length ? 'blocked' : patch.status,
+        evidenceCount: patch.evidenceIds?.length || 0,
+        blockedReasons: failed.map((receipt) => receipt.detail),
+        receiptSummary: patch.receipts.map((receipt) => `${receipt.invariant}: ${receipt.status}`).slice(0, 2).join(' / '),
+        primaryLabel: failed.length ? undefined : 'Apply',
+        primaryAction: failed.length ? undefined : 'apply-patch',
+        secondaryLabel: 'Revert',
+        secondaryAction: 'revert-patch',
+      });
+    });
+}
+
+function compilerReceiptItems(snapshot: GraphRebuildSnapshot | null): CompilerQueueItemView[] {
+  return (snapshot?.finalLinkPatchLog?.receipts || [])
+    .filter((receipt) => receipt.status === 'failed')
+    .slice(0, 24)
+    .map((receipt) => compilerItem({
+      id: `receipt:${receipt.id}`,
+      queue: 'receipts',
+      label: receipt.invariant,
+      detail: receipt.detail,
+      kind: 'receipt',
+      confidence: 0,
+      tone: 'danger',
+      status: receipt.status,
+      receiptSummary: `source ${receipt.sourceShadowLinkId}`,
+    }));
+}
+
+function compilerItem(item: {
+  id: string;
+  queue: CompilerQueueId;
+  label: string;
+  detail: string;
+  kind: string;
+  confidence: number;
+  tone: CompilerTone;
+  status: string;
+  evidenceCount?: number;
+  blockedReasons?: string[];
+  receiptSummary?: string;
+  primaryLabel?: string;
+  primaryAction?: CompilerQueueAction;
+  secondaryLabel?: string;
+  secondaryAction?: CompilerQueueAction;
+}): CompilerQueueItemView {
+  return {
+    evidenceCount: 0,
+    blockedReasons: [],
+    receiptSummary: '',
+    ...item,
+  };
+}
+
+function compilerDecisionLabel(decision: CompilerQueueDecision): string {
+  switch (decision) {
+    case 'promoted': return 'promoted overlay';
+    case 'dismissed': return 'dismissed';
+    case 'applied': return 'applied overlay';
+    case 'reverted': return 'reverted overlay';
+  }
+}
+
+function signalLaneLabel(lane: GraphRebuildSignalTargetLane | string): string {
+  const known = EMBEDDING_STAGE_LANES.find((row) => row.id === lane);
+  if (known) return known.label;
+  if (lane === 'entity_linker') return 'Entity linker';
+  if (lane === 'story_signal') return 'Story signal';
+  if (lane === 'unknown') return 'Unknown';
+  return titleCase(String(lane).replace(/_/g, ' '));
+}
+
+function normalizeSignalLaneId(id: string): GraphRebuildSignalTargetLane | null {
+  const direct = EMBEDDING_STAGE_LANES.find((lane) => lane.id === id)?.id;
+  if (direct) return direct;
+  const aliases: Record<string, GraphRebuildSignalTargetLane> = {
+    documentSpine: 'document_spine',
+    chunkSpine: 'chunk_spine',
+    entityAnchors: 'entity_anchor',
+    relationshipFacts: 'relationship_fact',
+    temporalFacts: 'temporal_fact',
+    causalFacts: 'causal_fact',
+    memoryStates: 'memory_state',
+    eventIdentities: 'event_identity',
+    anchorEvidence: 'anchor_evidence',
+    weakCooccurrence: 'cooccurrence_weak',
+    entityLinker: 'entity_linker',
+  };
+  return aliases[id] || null;
+}
+
+function isShadowLink(suggestion: GraphRebuildEntityLinkSuggestion): suggestion is GraphRebuildShadowLink {
+  return (suggestion as Partial<GraphRebuildShadowLink>).phase === 'shadow';
+}
+
+function entityLinkItemTitle(suggestion: GraphRebuildEntityLinkSuggestion): string {
+  const target = suggestion.candidateLabel || suggestion.candidateEntityId || 'new entity';
+  return `${suggestion.surface} -> ${target}`;
+}
+
+function shadowLinkKindText(suggestion: GraphRebuildEntityLinkSuggestion): string {
+  const kind = (suggestion as Partial<GraphRebuildShadowLink>).shadowKind;
+  switch (kind) {
+    case 'bundle_dedupe': return 'bundle dedupe';
+    case 'alias_suspicion': return 'alias suspicion';
+    case 'same_entity_suspicion': return 'same entity';
+    case 'relation_duplicate_suspicion': return 'relation duplicate';
+    case 'cluster_hint': return 'cluster hint';
+    case 'query_assist': return 'query assist';
+    default: return suggestion.status;
+  }
+}
+
+function metric(
+  id: string,
+  label: string,
+  value: number,
+  detail: string,
+  tone: CompilerTone,
+): CompilerMetricView {
+  return { id, label, value, detail, tone };
+}
+
+function queue(
+  id: CompilerQueueId,
+  label: string,
+  count: number,
+  detail: string,
+  tone: CompilerTone,
+): CompilerQueueView {
+  return { id, label, count, detail, tone };
 }
 
 function counterValue(counters: Record<string, number> | undefined, key: string): number {
@@ -1612,7 +2128,12 @@ function counterValue(counters: Record<string, number> | undefined, key: string)
 }
 
 function zeroVisiblePostprocessLane(id: string): boolean {
-  return id === 'relationshipFacts' || id === 'temporalFacts' || id === 'causalFacts' || id === 'memoryStates' || id === 'eventIdentities';
+  const lane = normalizeSignalLaneId(id);
+  return lane === 'relationship_fact'
+    || lane === 'temporal_fact'
+    || lane === 'causal_fact'
+    || lane === 'memory_state'
+    || lane === 'event_identity';
 }
 
 function graphIndexReceiptLabel(receipt: GraphIndexRunReceipt): string {
@@ -1654,6 +2175,13 @@ function projectionReceiptRow(projection: GraphIndexProjectionReceipt): LastRunR
 
 function projectionReceiptDetail(projection: GraphIndexProjectionReceipt): string {
   const counters = projection.counters || {};
+  if (counters['graphRebuildReadModelProjection'] || counters['nativeSemanticSidecarBypassed']) {
+    return [
+      'snapshot-owned',
+      valueLabel(projection.targetCount, 'target'),
+      'read-model topology',
+    ].join(' / ');
+  }
   const backendMs = counters['nativeLoadMs'] || counters['fallbackLoadMs'] || 0;
   const backendLabel = counters['nativeLoadMs'] ? 'native' : counters['fallbackLoadMs'] ? 'fallback' : '';
   const uiMs = counters['uiWrapperMs'] || 0;

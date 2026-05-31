@@ -1,5 +1,12 @@
 import type { Note, NoteBlockProjection } from '../../../../../lib/dexie/db';
-import type { AtlasManifoldMode, ManifoldCapabilities, ManifoldProjectionSource, ManifoldTopologyPayload } from '../../../../../services/manifold-atlas.types';
+import type {
+    AtlasManifoldMode,
+    ConeObstructionRecord,
+    ConePathletRecord,
+    ManifoldCapabilities,
+    ManifoldProjectionSource,
+    ManifoldTopologyPayload,
+} from '../../../../../services/manifold-atlas.types';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
 
 export interface EmbeddingAtlasData {
@@ -46,6 +53,9 @@ export interface EmbeddingManifoldTrace {
     mode: AtlasManifoldMode;
     geometryVersion: string;
     coneId?: string;
+    programId?: string;
+    pathletIds?: string[];
+    obstructionIds?: string[];
     cellIds: string[];
     chartIds: string[];
     pathEdgeIds: string[];
@@ -77,6 +87,7 @@ export interface BackendEmbeddingAtlasEdge {
     targetId: string;
     type: string;
     confidence: number;
+    metadata?: Record<string, unknown>;
 }
 
 export interface BackendEmbeddingAtlasPayload extends ManifoldTopologyPayload {
@@ -167,6 +178,7 @@ export function buildBackendEmbeddingAtlas(payload: BackendEmbeddingAtlasPayload
     const selected = payload.nodes
         .filter((node) => Array.isArray(node.vector) && node.vector.length > 0)
         .slice(0, limit);
+    const traversal = buildTraversalMetadata(payload);
     const signatures = selected.map((node) => ({
         vector: normalizeBackendVector(node.vector),
         tokens: Math.max(1, Math.round(node.vector.length / 8)),
@@ -193,6 +205,7 @@ export function buildBackendEmbeddingAtlas(payload: BackendEmbeddingAtlasPayload
                 tokenCount: signature.tokens,
                 preview: node.preview || `${node.sourceType || 'semantic'} vector from native Semantic Atlas`,
                 ...(hopf ? { hopf } : {}),
+                ...(traversal.nodeMetadata.get(node.id) ? { productTraversal: traversal.nodeMetadata.get(node.id) } : {}),
             },
         } satisfies GalaxyRenderableNode;
     });
@@ -205,6 +218,10 @@ export function buildBackendEmbeddingAtlas(payload: BackendEmbeddingAtlasPayload
             targetId: edge.targetId,
             type: edge.type || 'semantic-candidate',
             confidence: Number.isFinite(edge.confidence) ? edge.confidence : 0.35,
+            metadata: {
+                ...(edge.metadata || {}),
+                ...(traversal.edgeMetadata.get(edge.id) ? { productTraversal: traversal.edgeMetadata.get(edge.id) } : {}),
+            },
         }));
     return {
         nodes,
@@ -212,6 +229,47 @@ export function buildBackendEmbeddingAtlas(payload: BackendEmbeddingAtlasPayload
         sourceLabel: payload.sourceLabel || 'backend semantic atlas',
         searchIndex: buildSearchIndex(nodes, signatures),
     };
+}
+
+function buildTraversalMetadata(payload: ManifoldTopologyPayload): {
+    nodeMetadata: Map<string, Record<string, unknown>>;
+    edgeMetadata: Map<string, Record<string, unknown>>;
+} {
+    const nodeMetadata = new Map<string, Record<string, unknown>>();
+    const edgeMetadata = new Map<string, Record<string, unknown>>();
+    const obstructionById = new Map((payload.obstructions || []).map((obstruction) => [obstruction.obstructionId, obstruction]));
+    for (const pathlet of payload.pathlets || []) {
+        const obstructionIds = pathlet.obstructionIds || [];
+        const obstructions = obstructionIds.map((id) => obstructionById.get(id)).filter(Boolean) as ConeObstructionRecord[];
+        const obstructionScore = obstructions.reduce((max, obstruction) => Math.max(max, obstruction.severity), 0);
+        const obstructionKind = obstructions[0]?.kind;
+        for (const nodeId of pathlet.nodeIds) {
+            const current = nodeMetadata.get(nodeId) || {};
+            const pathletIds = Array.isArray(current['pathletIds']) ? current['pathletIds'] as string[] : [];
+            const currentSupport = Number(current['supportScore'] || 0);
+            const currentObstruction = Number(current['obstructionScore'] || 0);
+            nodeMetadata.set(nodeId, {
+                ...current,
+                lane: pathlet.lane,
+                pathletIds: [...new Set([...pathletIds, pathlet.pathletId])],
+                obstructionIds: [...new Set([...(current['obstructionIds'] as string[] | undefined || []), ...obstructionIds])],
+                supportScore: Math.max(currentSupport, pathlet.supportScore),
+                obstructionScore: Math.max(currentObstruction, obstructionScore),
+                obstructionKind: obstructionKind || current['obstructionKind'],
+            });
+        }
+        for (const edgeId of pathlet.edgeIds) {
+            edgeMetadata.set(edgeId, {
+                lane: pathlet.lane,
+                pathletId: pathlet.pathletId,
+                obstructionIds,
+                supportScore: pathlet.supportScore,
+                obstructionScore,
+                obstructionKind,
+            });
+        }
+    }
+    return { nodeMetadata, edgeMetadata };
 }
 
 function backendAtlasPoint(node: BackendEmbeddingAtlasNode, vector: Float32Array, index: number, total: number): { x: number; y: number; z: number } {
@@ -310,9 +368,12 @@ function buildManifoldTrace(atlas: EmbeddingAtlasData, nodeIds: string[], pathEd
         mode: manifold.mode,
         geometryVersion: manifold.geometryVersion,
         coneId: manifold.coneTraces?.[0]?.coneId,
+        programId: manifold.coneProgramTraces?.[0]?.programId,
+        pathletIds: manifold.coneProgramTraces?.[0]?.pathletIds || [],
+        obstructionIds: manifold.coneProgramTraces?.[0]?.obstructionIds || [],
         cellIds,
         chartIds: [...new Set(chartIds)],
-        pathEdgeIds,
+        pathEdgeIds: [...new Set([...pathEdgeIds, ...(manifold.coneProgramTraces?.[0]?.pathEdgeIds || [])])],
     };
 }
 

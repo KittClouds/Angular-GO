@@ -27,6 +27,7 @@ fn main() {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &[],
+            label_bank_context: None,
         })
         .expect("dynamic NER probe");
     let wall_ms = started.elapsed().as_millis();

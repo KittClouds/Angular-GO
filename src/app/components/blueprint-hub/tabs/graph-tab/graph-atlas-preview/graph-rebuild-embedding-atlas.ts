@@ -5,6 +5,10 @@ import {
     PRODUCT_MANIFOLD_CAPABILITIES,
     SIEGEL_FINSLER_CAPABILITIES,
     type AtlasManifoldMode,
+    type ConeObstructionRecord,
+    type ConePathletRecord,
+    type ConeProgramRecord,
+    type ConeProgramTraceRecord,
     type ManifoldCapabilities,
 } from '../../../../../services/manifold-atlas.types';
 import type {
@@ -17,6 +21,7 @@ import {
     sparseEmbeddingSignature,
     sparseToDenseVector,
 } from '../../../../../graph-rebuild/graph-rebuild-embedding-signatures';
+import type { GraphModelV2FactBundleCommitment } from '../../../../../graph-rebuild/graph-model-v2';
 import { createGraphModelV2ReadModel } from '../../../../../graph-rebuild/graph-model-v2-read-model';
 import { buildGraphSignalTruthIndex, type GraphSignalTruthRecord } from '../../../../../graph-rebuild/graph-rebuild-signal-truth';
 import type { GalaxyInputEdge, GalaxyRenderableNode } from './graph-galaxy-engine';
@@ -28,16 +33,25 @@ const VISIBLE_TARGET_LIMIT = 960;
 const STORY_TARGET_BUDGET = 120;
 const RELATION_TARGET_BUDGET = 96;
 const CO_OCCURRENCE_TARGET_BUDGET = 48;
-const HOPF_BASE_SPLIT_TARGET_LIMIT = 56;
-const HOPF_BASE_SPLIT_MEMBER_LIMIT = 96;
-const HOPF_SUBFIBER_TARGET_LIMIT = 28;
+const HOPF_RESONANCE_DIMS = 96;
+const HOPF_RESONANCE_NEIGHBORS = 8;
+const HOPF_RESONANCE_FIBER_MEMBER_LIMIT = HOPF_RESONANCE_NEIGHBORS + 1;
+const HOPF_RESONANCE_THRESHOLD = 0.56;
+const HOPF_RESONANCE_EDGE_FLOOR = 0.44;
 const STORY_TARGET_KINDS = new Set(['causalFact', 'temporalFact', 'event', 'memoryState']);
 
 type HopfBaseAssignment = {
-    rootBaseId: string;
-    baseId: string;
+    role: 'anchor' | 'fiber' | 'loose';
+    rootBaseId?: string;
+    baseId?: string;
     anchorTargetId?: string;
     splitKey?: string;
+    fiberKind: string;
+    phase: number;
+    support: number;
+    coherence: number;
+    frustration: number;
+    neighborCount: number;
 };
 
 type TargetHierarchyContext = {
@@ -47,6 +61,15 @@ type TargetHierarchyContext = {
     folderLabel?: string;
     folderKind?: string;
     folderParentId?: string;
+};
+
+type ProductTraversalBuild = {
+    programs: ConeProgramRecord[];
+    pathlets: ConePathletRecord[];
+    obstructions: ConeObstructionRecord[];
+    traces: ConeProgramTraceRecord[];
+    nodeMetadata: Map<string, Record<string, unknown>>;
+    edgeMetadata: Map<string, Record<string, unknown>>;
 };
 
 export function buildGraphRebuildEmbeddingAtlas(
@@ -60,15 +83,40 @@ export function buildGraphRebuildEmbeddingAtlas(
         .map((target) => hydrateTargetEntityKind(target, entityKindById));
     const hierarchyByTarget = buildTargetHierarchyContext(snapshot);
     const truthByTarget = buildGraphSignalTruthIndex(snapshot);
-    const hopfBasePlan = manifold === 'hopf' ? buildHopfBasePlan(selected, postByTarget) : undefined;
+    const commitmentBySourceId = buildBundleCommitmentIndex(snapshot);
     const vectors = selected.map((target) => textVector(target, profile.selectedDimensions));
-    const nodes = selected.map((target, index) =>
-        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id), hopfBasePlan?.get(target.id), hierarchyByTarget.get(target.id), truthByTarget.get(target.id)),
+    const hopfBasePlan = manifold === 'hopf' ? buildHopfResonancePlan(selected, vectors, postByTarget) : undefined;
+    const rawNodes = selected.map((target, index) =>
+        targetNode(target, vectors[index], index, selected.length, manifold, postByTarget.get(target.id), hopfBasePlan?.get(target.id), hierarchyByTarget.get(target.id), truthByTarget.get(target.id), commitmentBySourceId.get(target.sourceId) || commitmentBySourceId.get(target.id)),
     );
-    const nodeIds = new Set(nodes.map((node) => node.id));
+    const nodeIds = new Set(rawNodes.map((node) => node.id));
+    const rawEdges = buildTargetEdges(snapshot).filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId));
+    const traversal = manifold === 'product' ? buildGraphRebuildProductTraversal(selected, rawEdges) : emptyProductTraversal();
+    const nodes = rawNodes.map((node) => {
+        const productTraversal = traversal.nodeMetadata.get(node.id);
+        if (!productTraversal) return node;
+        return {
+            ...node,
+            metadata: {
+                ...node.metadata,
+                productTraversal,
+            },
+        };
+    });
+    const edges = rawEdges.map((edge) => {
+        const productTraversal = traversal.edgeMetadata.get(edge.id);
+        if (!productTraversal) return edge;
+        return {
+            ...edge,
+            metadata: {
+                ...(edge.metadata || {}),
+                productTraversal,
+            },
+        };
+    });
     return {
         nodes,
-        edges: buildTargetEdges(snapshot).filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId)),
+        edges,
         sourceLabel: `graph rebuild snapshot -> ${graphRebuildProjectionLabel(manifold)} projection`,
         searchIndex: nodes.map((node, index): EmbeddingAtlasSearchItem => ({
             nodeId: node.id,
@@ -85,6 +133,10 @@ export function buildGraphRebuildEmbeddingAtlas(
             seams: [],
             neighborRings: [],
             coneTraces: [],
+            conePrograms: traversal.programs,
+            pathlets: traversal.pathlets,
+            obstructions: traversal.obstructions,
+            coneProgramTraces: traversal.traces,
             anchorProjections: [],
         },
     };
@@ -92,7 +144,7 @@ export function buildGraphRebuildEmbeddingAtlas(
 
 function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmbeddingTarget[] {
     const candidates = snapshot.embeddingTargets.filter((target) => target.text.trim() || target.label.trim());
-    if (candidates.length <= VISIBLE_TARGET_LIMIT) return candidates;
+    if (candidates.length <= VISIBLE_TARGET_LIMIT) return candidates.filter(isVisibleAtlasTarget);
 
     const selected = new Map<string, GraphRebuildEmbeddingTarget>();
     const byId = new Map(candidates.map((target) => [target.id, target]));
@@ -115,8 +167,21 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
         add(byId.get(`embed:event:${edge.sourceId}`));
         add(byId.get(`embed:event:${edge.targetId}`));
     };
+    const addLinkedRelationshipEndpoints = (target: GraphRebuildEmbeddingTarget) => {
+        const relationship = relationshipById.get(target.sourceId);
+        if (!relationship) return;
+        addGroup([
+            byId.get(`embed:entity:${relationship.sourceEntityId}`),
+            byId.get(`embed:entity:${relationship.targetEntityId}`),
+        ]);
+    };
     const addLinkedRelationship = (target?: GraphRebuildEmbeddingTarget) => {
         if (!target || selectedRelationIds.has(target.id)) return;
+        if (!isVisibleAtlasTarget(target)) {
+            addLinkedRelationshipEndpoints(target);
+            selectedRelationIds.add(target.id);
+            return;
+        }
         if (displayKind(target.kind) !== 'graph-fact') {
             if (addGroup([target])) selectedRelationIds.add(target.id);
             return;
@@ -142,11 +207,21 @@ function selectEmbeddingTargets(snapshot: GraphRebuildSnapshot): GraphRebuildEmb
         addLinkedEvents(target);
     }
     const relationBudgetLeft = Math.max(0, RELATION_TARGET_BUDGET - selectedRelationIds.size);
-    for (const target of evenSample(relationTargets.filter((target) => !selectedRelationIds.has(target.id)), relationBudgetLeft)) {
+    for (const target of evenSample(relationTargets.filter((target) => isVisibleAtlasTarget(target) && !selectedRelationIds.has(target.id)), relationBudgetLeft)) {
         addLinkedRelationship(target);
     }
-    for (const target of coverageOrderedTargets(candidates)) add(target);
+    for (const target of coverageOrderedTargets(candidates).filter(isVisibleAtlasTarget)) add(target);
     return [...selected.values()];
+}
+
+function isVisibleAtlasTarget(target: GraphRebuildEmbeddingTarget): boolean {
+    return !isWeakCooccurrenceTarget(target);
+}
+
+function isWeakCooccurrenceTarget(target: GraphRebuildEmbeddingTarget): boolean {
+    return target.lane === 'cooccurrence_weak'
+        || (displayKind(target.kind) === 'graph-fact'
+            && relationFamilyFromText(target.label, target.text, target.sourceId) === 'cooccurrence');
 }
 
 function coverageOrderedTargets(targets: GraphRebuildEmbeddingTarget[]): GraphRebuildEmbeddingTarget[] {
@@ -188,6 +263,317 @@ function evenSample<T>(values: T[], limit: number): T[] {
     const out: T[] = [];
     for (let index = 0; index < limit; index += 1) out.push(values[Math.round(index * step)]);
     return out;
+}
+
+const PRODUCT_CONE_TRAVERSAL_GEOMETRY = 'graph_rebuild_product_cone_traversal_v1';
+const PRODUCT_ROUTE_LEGAL_MOVES = new Set([
+    'evidence>identity',
+    'evidence>relationship',
+    'evidence>temporal',
+    'evidence>causal',
+    'identity>relationship',
+    'identity>event',
+    'identity>temporal',
+    'identity>causal',
+    'relationship>evidence',
+    'relationship>identity',
+    'relationship>temporal',
+    'relationship>causal',
+    'event>temporal',
+    'event>causal',
+    'temporal>event',
+    'temporal>causal',
+    'causal>event',
+    'causal>temporal',
+    'bridge>identity',
+    'bridge>relationship',
+    'bridge>evidence',
+    'semantic>identity',
+    'semantic>relationship',
+    'semantic>evidence',
+]);
+
+function emptyProductTraversal(): ProductTraversalBuild {
+    return {
+        programs: [],
+        pathlets: [],
+        obstructions: [],
+        traces: [],
+        nodeMetadata: new Map(),
+        edgeMetadata: new Map(),
+    };
+}
+
+function buildGraphRebuildProductTraversal(
+    targets: GraphRebuildEmbeddingTarget[],
+    edges: GalaxyInputEdge[],
+): ProductTraversalBuild {
+    const out = emptyProductTraversal();
+    const targetById = new Map(targets.map((target) => [target.id, target]));
+    const obstructionByEdge = new Map<string, string[]>();
+
+    for (const target of targets) {
+        const lane = productRouteLaneForTarget(target);
+        const obstruction = productTargetObstruction(target, lane);
+        if (!obstruction) continue;
+        out.obstructions.push(obstruction);
+        mergeTraversalNode(out.nodeMetadata, target.id, {
+            lane,
+            routeStage: productRouteStage(lane),
+            supportScore: targetConfidence(target),
+            obstructionScore: obstruction.severity,
+            obstructionKind: obstruction.kind,
+            obstructionIds: [obstruction.obstructionId],
+        });
+    }
+
+    for (const edge of edges) {
+        const source = targetById.get(edge.sourceId);
+        const target = targetById.get(edge.targetId);
+        if (!source || !target) continue;
+        const sourceLane = productRouteLaneForTarget(source);
+        const targetLane = productRouteLaneForTarget(target);
+        const lane = productPathletLane(edge, sourceLane, targetLane);
+        const obstruction = productEdgeObstruction(edge, source, target, sourceLane, targetLane);
+        const obstructionIds = obstruction ? [obstruction.obstructionId] : [];
+        if (obstruction) {
+            out.obstructions.push(obstruction);
+            obstructionByEdge.set(edge.id, obstructionIds);
+        }
+        const supportScore = productPathletSupport(edge, source, target, sourceLane, targetLane);
+        const pathlet: ConePathletRecord = {
+            pathletId: `pathlet:${normalizeHopfToken(edge.id)}`,
+            lane,
+            startId: edge.sourceId,
+            endId: edge.targetId,
+            nodeIds: [edge.sourceId, edge.targetId],
+            edgeIds: [edge.id],
+            supportScore,
+            compressionScore: clamp01(0.42 + supportScore * 0.38 + parentOverlapScore(source, target)),
+            obstructionIds,
+            geometryVersion: PRODUCT_CONE_TRAVERSAL_GEOMETRY,
+        };
+        out.pathlets.push(pathlet);
+        out.edgeMetadata.set(edge.id, {
+            lane,
+            pathletId: pathlet.pathletId,
+            supportScore,
+            obstructionIds,
+            obstructionScore: obstruction?.severity ?? 0,
+            obstructionKind: obstruction?.kind,
+        });
+        mergeTraversalNode(out.nodeMetadata, edge.sourceId, productNodeTraversal(sourceLane, pathlet, obstruction));
+        mergeTraversalNode(out.nodeMetadata, edge.targetId, productNodeTraversal(targetLane, pathlet, obstruction));
+    }
+
+    out.programs = buildProductConePrograms(out.pathlets, out.obstructions);
+    out.traces = out.programs.map((program) => productTraceForProgram(program, out.pathlets, out.obstructions, obstructionByEdge));
+    return out;
+}
+
+function productNodeTraversal(lane: string, pathlet: ConePathletRecord, obstruction: ConeObstructionRecord | null): Record<string, unknown> {
+    return {
+        lane,
+        routeStage: productRouteStage(lane),
+        pathletIds: [pathlet.pathletId],
+        supportScore: pathlet.supportScore,
+        obstructionIds: pathlet.obstructionIds,
+        obstructionScore: obstruction?.severity ?? 0,
+        obstructionKind: obstruction?.kind,
+    };
+}
+
+function mergeTraversalNode(target: Map<string, Record<string, unknown>>, nodeId: string, next: Record<string, unknown>): void {
+    const current = target.get(nodeId) || {};
+    const pathletIds = [...new Set([...(current['pathletIds'] as string[] | undefined || []), ...(next['pathletIds'] as string[] | undefined || [])])];
+    const obstructionIds = [...new Set([...(current['obstructionIds'] as string[] | undefined || []), ...(next['obstructionIds'] as string[] | undefined || [])])];
+    target.set(nodeId, {
+        ...current,
+        ...next,
+        lane: current['lane'] || next['lane'],
+        routeStage: Math.max(Number(current['routeStage'] ?? next['routeStage'] ?? 0), Number(next['routeStage'] ?? 0)),
+        supportScore: Math.max(Number(current['supportScore'] || 0), Number(next['supportScore'] || 0)),
+        obstructionScore: Math.max(Number(current['obstructionScore'] || 0), Number(next['obstructionScore'] || 0)),
+        obstructionKind: next['obstructionKind'] || current['obstructionKind'],
+        pathletIds,
+        obstructionIds,
+    });
+}
+
+function productRouteLaneForTarget(target: GraphRebuildEmbeddingTarget): string {
+    const lane = String(target.lane || '').toLowerCase();
+    if (/document|chunk|anchor_evidence/.test(lane)) return 'evidence';
+    if (/entity_anchor|entity_linker/.test(lane)) return 'identity';
+    if (/relationship|cooccurrence/.test(lane)) return lane.includes('cooccurrence') ? 'bridge' : 'relationship';
+    if (/temporal/.test(lane)) return 'temporal';
+    if (/causal/.test(lane)) return 'causal';
+    if (/event/.test(lane)) return 'event';
+    if (/memory/.test(lane)) return 'relationship';
+    const kind = displayKind(target.kind);
+    if (/document|chunk|anchor/.test(kind)) return 'evidence';
+    if (/entity|character|location|network/.test(kind)) return 'identity';
+    if (/temporal/.test(kind)) return 'temporal';
+    if (/causal/.test(kind)) return 'causal';
+    if (/event/.test(kind)) return 'event';
+    if (/relationship|fact/.test(kind)) return 'relationship';
+    return 'semantic';
+}
+
+function productRouteStage(lane: string): number {
+    if (lane === 'evidence') return 0;
+    if (lane === 'identity') return 1;
+    if (lane === 'relationship' || lane === 'event' || lane === 'semantic') return 2;
+    if (lane === 'temporal') return 3;
+    if (lane === 'causal') return 4;
+    if (lane === 'bridge') return 5;
+    return 6;
+}
+
+function productTargetObstruction(target: GraphRebuildEmbeddingTarget, lane: string): ConeObstructionRecord | null {
+    if (target.admissionStatus === 'deferred') {
+        return productObstruction(
+            `target:${target.id}:deferred`,
+            'UnsupportedBridge',
+            0.66,
+            target,
+            [target.id],
+            [],
+            `Deferred ${lane} target: ${target.deferReason || target.admissionReason || 'lane budget held it for review'}`,
+        );
+    }
+    if (requiresEvidence(lane, target.kind) && target.evidenceIds.length === 0) {
+        return productObstruction(`target:${target.id}:evidence`, 'EvidenceMissing', 0.72, target, [target.id], [], `No evidence anchors attached to ${target.label || target.id}.`);
+    }
+    return null;
+}
+
+function productEdgeObstruction(
+    edge: GalaxyInputEdge,
+    source: GraphRebuildEmbeddingTarget,
+    target: GraphRebuildEmbeddingTarget,
+    sourceLane: string,
+    targetLane: string,
+): ConeObstructionRecord | null {
+    const legal = sourceLane === targetLane || PRODUCT_ROUTE_LEGAL_MOVES.has(`${sourceLane}>${targetLane}`);
+    if (!legal) {
+        return productObstruction(`edge:${edge.id}:lane`, 'LaneMismatch', 0.74, target, [edge.sourceId, edge.targetId], [edge.id], `${sourceLane} cannot stitch directly to ${targetLane}.`);
+    }
+    if (edge.confidence < 0.24) {
+        return productObstruction(`edge:${edge.id}:evidence`, 'EvidenceMissing', 0.68, target, [edge.sourceId, edge.targetId], [edge.id], `Low-evidence traversal candidate (${Math.round(edge.confidence * 100)}%).`);
+    }
+    if (edge.type.includes('embedding-bridge') && edge.confidence < 0.52) {
+        return productObstruction(`edge:${edge.id}:bridge`, 'UnsupportedBridge', 0.58, target, [edge.sourceId, edge.targetId], [edge.id], 'Embedding bridge needs graph evidence before promotion.');
+    }
+    return null;
+}
+
+function productObstruction(
+    id: string,
+    kind: string,
+    severity: number,
+    target: GraphRebuildEmbeddingTarget,
+    nodeIds: string[],
+    edgeIds: string[],
+    explanation: string,
+): ConeObstructionRecord {
+    return {
+        obstructionId: `obstruction:${normalizeHopfToken(id)}`,
+        kind,
+        severity,
+        explanation,
+        nodeIds,
+        edgeIds,
+        chartIds: target.chunkId ? [`chart:chunk:${target.chunkId}`] : target.noteId ? [`chart:note:${target.noteId}`] : [],
+        evidenceRefs: target.evidenceIds || [],
+        lane: productRouteLaneForTarget(target),
+        geometryVersion: PRODUCT_CONE_TRAVERSAL_GEOMETRY,
+    };
+}
+
+function productPathletLane(edge: GalaxyInputEdge, sourceLane: string, targetLane: string): string {
+    const text = edge.type.toLowerCase();
+    if (/causal|cause|effect/.test(text)) return 'causal';
+    if (/temporal|before|after|timeline/.test(text)) return 'temporal';
+    if (/evidence|anchor|chunk|source/.test(text)) return 'evidence';
+    if (/identity|entity|alias/.test(text)) return 'identity';
+    if (/bridge|backbone/.test(text)) return 'bridge';
+    return targetLane !== 'semantic' ? targetLane : sourceLane;
+}
+
+function productPathletSupport(
+    edge: GalaxyInputEdge,
+    source: GraphRebuildEmbeddingTarget,
+    target: GraphRebuildEmbeddingTarget,
+    sourceLane: string,
+    targetLane: string,
+): number {
+    const evidence = Math.min(0.18, (source.evidenceIds.length + target.evidenceIds.length) * 0.025);
+    const lane = sourceLane === targetLane ? 0.08 : PRODUCT_ROUTE_LEGAL_MOVES.has(`${sourceLane}>${targetLane}`) ? 0.04 : -0.16;
+    return clamp01(edge.confidence * 0.72 + evidence + lane);
+}
+
+function parentOverlapScore(source: GraphRebuildEmbeddingTarget, target: GraphRebuildEmbeddingTarget): number {
+    const parents = new Set(source.parentIds || []);
+    if (!parents.size) return 0;
+    return Math.min(0.16, (target.parentIds || []).filter((parent) => parents.has(parent)).length * 0.08);
+}
+
+function requiresEvidence(lane: string, kind: string): boolean {
+    return lane === 'relationship' || lane === 'temporal' || lane === 'causal' || /fact|event|memory/i.test(kind);
+}
+
+function buildProductConePrograms(pathlets: ConePathletRecord[], obstructions: ConeObstructionRecord[]): ConeProgramRecord[] {
+    const seedIds = [...new Set(pathlets.flatMap((pathlet) => [pathlet.startId]).slice(0, 12))];
+    const repairSeeds = [...new Set(obstructions.flatMap((obstruction) => obstruction.nodeIds).slice(0, 12))];
+    return [
+        coneProgram('product:trace-supported-routes', 'trace', seedIds, 'evidence', false),
+        coneProgram('product:validate-stitches', 'validate', seedIds, 'relationship', true),
+        coneProgram('product:repair-obstructions', 'repair', repairSeeds, 'bridge', true),
+    ].filter((program) => program.seedIds.length > 0);
+}
+
+function coneProgram(programId: string, intent: string, seedIds: string[], lane: string, requireEvidence: boolean): ConeProgramRecord {
+    return {
+        programId,
+        intent,
+        seedIds,
+        geometryVersion: PRODUCT_CONE_TRAVERSAL_GEOMETRY,
+        ops: [
+            { op: 'seed', ids: seedIds },
+            { op: 'followField', lane, maxCost: requireEvidence ? 0.72 : 0.92, limit: 64 },
+            { op: 'stitch', requiredIds: [], minCompatibility: requireEvidence ? 0.58 : 0.42, requireEvidence },
+            { op: 'ground', strict: requireEvidence },
+            { op: 'rerank', rankBy: ['support', 'stitchQuality', 'cost'] },
+            { op: 'explain', limit: 8 },
+        ],
+    };
+}
+
+function productTraceForProgram(
+    program: ConeProgramRecord,
+    pathlets: ConePathletRecord[],
+    obstructions: ConeObstructionRecord[],
+    obstructionByEdge: Map<string, string[]>,
+): ConeProgramTraceRecord {
+    const lane = String(program.ops.find((op) => op.op === 'followField')?.lane || '');
+    const selected = pathlets.filter((pathlet) => !lane || pathlet.lane === lane || program.intent === 'repair').slice(0, 64);
+    const selectedObstructions = program.intent === 'repair'
+        ? obstructions.slice(0, 64)
+        : obstructions.filter((obstruction) => selected.some((pathlet) => pathlet.obstructionIds.includes(obstruction.obstructionId))).slice(0, 64);
+    const pathEdgeIds = selected.flatMap((pathlet) => pathlet.edgeIds);
+    return {
+        traceId: `trace:${program.programId}`,
+        programId: program.programId,
+        activeIds: [...new Set(selected.flatMap((pathlet) => pathlet.nodeIds))],
+        pathletIds: selected.map((pathlet) => pathlet.pathletId),
+        obstructionIds: [...new Set([...selectedObstructions.map((obstruction) => obstruction.obstructionId), ...pathEdgeIds.flatMap((edgeId) => obstructionByEdge.get(edgeId) || [])])],
+        pathEdgeIds,
+        explanations: [
+            `${selected.length} pathlets traversed`,
+            `${selectedObstructions.length} obstructions surfaced`,
+        ],
+        geometryVersion: PRODUCT_CONE_TRAVERSAL_GEOMETRY,
+    };
 }
 
 function hydrateTargetEntityKind(
@@ -257,8 +643,10 @@ function targetNode(
     hopfBase?: HopfBaseAssignment,
     hierarchyContext?: TargetHierarchyContext,
     graphTruth?: GraphSignalTruthRecord,
+    commitment?: GraphModelV2FactBundleCommitment,
 ): GalaxyRenderableNode {
     const point = projectVector(vector, target.id, index, total, manifold);
+    const busemannSignature = graphModelBusemannSignature(commitment);
     const relationFamily = displayKind(target.kind) === 'graph-fact'
         ? relationFamilyFromText(target.label, target.text, target.sourceId)
         : null;
@@ -287,6 +675,15 @@ function targetNode(
             graphTruthStatus: graphTruth?.status,
             graphTruthReason: graphTruth?.reason,
             graphTruthKind: graphTruth?.kind,
+            commitmentTopPrototypeId: commitment?.topPrototypeId,
+            commitmentTopLabel: commitment?.topLabel,
+            commitmentConfidence: commitment?.classificationConfidence,
+            promotionReady: commitment?.promotionReady,
+            busemannSignature,
+            hybridInterior: busemannSignature ? {
+                mode: 'busemannCommitment',
+                signature: busemannSignature,
+            } : undefined,
             targetConfidence: targetConfidence(target),
             noteId: target.noteId || hierarchyContext?.noteId,
             chunkId: target.chunkId || hierarchyContext?.chunkId,
@@ -315,12 +712,45 @@ function targetNode(
             } : undefined,
             siegel: manifold === 'siegel' ? graphRebuildSiegelMetadata(target, post, hierarchyContext) : undefined,
             lorentz: post ? productLorentzMetadata(target, point, post, hierarchyContext) : undefined,
-            hopf: post ? graphRebuildHopfMetadata(target, post, manifold, hopfBase) : undefined,
+            hopf: manifold === 'hopf'
+                ? graphRebuildHopfMetadata(target, post, manifold, hopfBase)
+                : post ? graphRebuildHopfMetadata(target, post, manifold) : undefined,
             graphKind: targetRenderKind(target),
             graphRebuildEmbeddingTarget: true,
             manifold,
             preview: target.text || target.label,
         },
+    };
+}
+
+function buildBundleCommitmentIndex(snapshot: GraphRebuildSnapshot): Map<string, GraphModelV2FactBundleCommitment> {
+    const commitments = new Map<string, GraphModelV2FactBundleCommitment>();
+    for (const bundle of snapshot.graphModelV2?.bundles || []) {
+        if (!bundle.commitment) continue;
+        commitments.set(bundle.id, bundle.commitment);
+        commitments.set(bundle.sourceRecordId, bundle.commitment);
+        commitments.set(`embed:graph-fact:${bundle.sourceRecordId}`, bundle.commitment);
+    }
+    return commitments;
+}
+
+function graphModelBusemannSignature(commitment?: GraphModelV2FactBundleCommitment): Record<string, unknown> | undefined {
+    if (!commitment) return undefined;
+    return {
+        family: commitment.family,
+        topPrototypeId: commitment.topPrototypeId,
+        topScore: commitment.topScore,
+        topProbability: commitment.topProbability,
+        secondPrototypeId: commitment.secondPrototypeId,
+        secondScore: commitment.secondScore,
+        secondProbability: commitment.secondProbability,
+        margin: commitment.margin,
+        entropy: commitment.entropy,
+        ambiguityScore: commitment.ambiguityScore,
+        classificationConfidence: commitment.classificationConfidence,
+        promotionReady: commitment.promotionReady,
+        radialStrength: commitment.radialStrength,
+        topKScores: commitment.topKScores,
     };
 }
 
@@ -360,33 +790,52 @@ function graphRebuildSiegelMetadata(
 
 function graphRebuildHopfMetadata(
     target: GraphRebuildEmbeddingTarget,
-    post: GraphRebuildEmbeddingTargetPostProcess,
+    post: GraphRebuildEmbeddingTargetPostProcess | undefined,
     manifold: AtlasManifoldMode,
     assignment?: HopfBaseAssignment,
 ): Record<string, unknown> {
-    const fiberKind = productFiberKind(post.clusterRole, post.productTopologyRegion.laneKind);
+    const fiberKind = assignment?.fiberKind || (post ? productFiberKind(post.clusterRole, post.productTopologyRegion.laneKind) : hopfResonanceKind(target));
     if (manifold !== 'hopf') {
         return {
             role: 'anchor',
             baseId: target.id,
             fiberKind,
-            phase: post.productLaneFeatures.fiberPhase,
+            phase: post?.productLaneFeatures.fiberPhase ?? unitHash(`${target.id}:hopf-phase`),
         };
     }
 
-    const baseId = assignment?.baseId || hopfRootBaseId(target, post);
-    const role = target.id === (assignment?.anchorTargetId || baseId) ? 'anchor' : 'fiber';
+    if (!assignment || assignment.role === 'loose' || !assignment.baseId) {
+        return {
+            role: 'loose',
+            fiberKind,
+            phase: assignment?.phase ?? unitHash(`${target.id}:hopf-loose-phase`),
+            resonanceSource: 'point-formed',
+            resonanceAdmitted: false,
+            support: assignment?.support ?? 0,
+            coherence: assignment?.coherence ?? 0,
+            frustration: assignment?.frustration ?? 1,
+            neighborCount: assignment?.neighborCount ?? 0,
+        };
+    }
+
+    const role = target.id === assignment.anchorTargetId ? 'anchor' : 'fiber';
     return {
         role,
-        baseId,
+        baseId: assignment.baseId,
         fiberKind,
-        phase: role === 'anchor' ? 0 : stableHopfFiberPhase(target, post, assignment?.splitKey),
-        clusterId: post.clusterId,
-        medoidTargetId: post.medoidTargetId,
-        regionId: post.productTopologyRegion.id,
-        laneKind: post.productTopologyRegion.laneKind,
-        rootBaseId: assignment?.rootBaseId,
-        splitKey: assignment?.splitKey,
+        phase: assignment.phase,
+        clusterId: post?.clusterId,
+        medoidTargetId: post?.medoidTargetId,
+        regionId: post?.productTopologyRegion.id,
+        laneKind: post?.productTopologyRegion.laneKind,
+        rootBaseId: assignment.rootBaseId,
+        splitKey: assignment.splitKey,
+        resonanceSource: 'point-formed',
+        resonanceAdmitted: true,
+        support: assignment.support,
+        coherence: assignment.coherence,
+        frustration: assignment.frustration,
+        neighborCount: assignment.neighborCount,
     };
 }
 
@@ -418,103 +867,372 @@ function siegelMatrixCells(target: GraphRebuildEmbeddingTarget, lane: string, de
     return Array.from({ length: 6 }, (_, index) => unitHash(`${source}:${index}`));
 }
 
-function buildHopfBasePlan(
+type HopfResonanceEntry = {
+    target: GraphRebuildEmbeddingTarget;
+    post?: GraphRebuildEmbeddingTargetPostProcess;
+    vector: Float32Array;
+    norm: number;
+    kind: string;
+};
+
+type HopfResonanceEdge = {
+    other: number;
+    weight: number;
+};
+
+function buildHopfResonancePlan(
     targets: GraphRebuildEmbeddingTarget[],
+    vectors: Float32Array[],
     postByTarget: Map<string, GraphRebuildEmbeddingTargetPostProcess>,
 ): Map<string, HopfBaseAssignment> {
-    const byRoot = new Map<string, Array<{ target: GraphRebuildEmbeddingTarget; post: GraphRebuildEmbeddingTargetPostProcess }>>();
-    for (const target of targets) {
-        const post = postByTarget.get(target.id);
-        if (!post) continue;
-        const root = hopfRootBaseId(target, post);
-        const bucket = byRoot.get(root) || [];
-        bucket.push({ target, post });
-        byRoot.set(root, bucket);
-    }
-
     const plan = new Map<string, HopfBaseAssignment>();
-    for (const [rootBaseId, entries] of byRoot) {
-        const shouldSplit = entries.length > HOPF_BASE_SPLIT_TARGET_LIMIT
-            || entries.some(({ post }) => post.productTopologyRegion.memberCount > HOPF_BASE_SPLIT_MEMBER_LIMIT);
-        if (!shouldSplit) continue;
+    const count = targets.length;
+    if (!count) return plan;
 
-        const bySplitKey = new Map<string, typeof entries>();
-        for (const entry of entries) {
-            const coarseKey = hopfSemanticSubfiberKey(entry.target, entry.post);
-            const bucket = bySplitKey.get(coarseKey) || [];
-            bucket.push(entry);
-            bySplitKey.set(coarseKey, bucket);
-        }
+    const dims = Math.min(HOPF_RESONANCE_DIMS, vectors[0]?.length || 0);
+    const entries: HopfResonanceEntry[] = targets.map((target, index) => {
+        const post = postByTarget.get(target.id);
+        return {
+            target,
+            post,
+            vector: vectors[index],
+            norm: vectorNorm(vectors[index], dims),
+            kind: hopfResonanceKind(target, post),
+        };
+    });
+    const neighbors: HopfResonanceEdge[][] = Array.from({ length: count }, () => []);
 
-        for (const [coarseKey, coarseEntries] of bySplitKey) {
-            const shardCount = Math.max(1, Math.ceil(coarseEntries.length / HOPF_SUBFIBER_TARGET_LIMIT));
-            const byShard = new Map<string, typeof entries>();
-            for (const entry of coarseEntries) {
-                const shard = shardCount > 1
-                    ? Math.min(shardCount - 1, Math.floor(unitHash(`${coarseKey}:${entry.target.entityId || entry.target.noteId || entry.target.sourceId || entry.target.id}`) * shardCount))
-                    : 0;
-                const splitKey = shardCount > 1 ? `${coarseKey}:shard-${shard}` : coarseKey;
-                const bucket = byShard.get(splitKey) || [];
-                bucket.push(entry);
-                byShard.set(splitKey, bucket);
+    for (let left = 0; left < count; left++) {
+        for (let right = left + 1; right < count; right++) {
+            const semantic = cosineLimited(entries[left], entries[right], dims);
+            const support = hopfPairSupport(entries[left], entries[right]);
+            let weight = clamp01(((semantic + 1) * 0.5) * 0.72 + support);
+            if (!hopfCrossKindCompatible(entries[left], entries[right], semantic)) {
+                weight = Math.min(weight, HOPF_RESONANCE_THRESHOLD - 0.02);
             }
-
-            for (const [splitKey, splitEntries] of byShard) {
-                const anchorTargetId = hopfSubfiberAnchor(rootBaseId, splitEntries);
-                const baseId = anchorTargetId === rootBaseId ? rootBaseId : `${rootBaseId}:hopf:${splitKey}`;
-                for (const { target } of splitEntries) {
-                    plan.set(target.id, { rootBaseId, baseId, anchorTargetId, splitKey });
-                }
+            if (weight >= HOPF_RESONANCE_EDGE_FLOOR) {
+                pushHopfNeighbor(neighbors[left], { other: right, weight });
+                pushHopfNeighbor(neighbors[right], { other: left, weight });
             }
         }
     }
+
+    const assigned = new Set<number>();
+    const anchors = Array.from({ length: count }, (_, index) => index)
+        .sort((left, right) =>
+            hopfAnchorScore(entries[right], neighbors[right]) - hopfAnchorScore(entries[left], neighbors[left])
+            || entries[left].target.id.localeCompare(entries[right].target.id),
+        );
+    for (const anchorIndex of anchors) {
+        if (assigned.has(anchorIndex)) continue;
+        const memberIndexes = hopfLocalFiberMembers(anchorIndex, neighbors, assigned);
+        if (memberIndexes.length < 2) continue;
+        applyHopfComponentPlan(entries, neighbors, memberIndexes, dims, plan);
+        const admitted = memberIndexes.filter((index) => {
+            const assignment = plan.get(entries[index].target.id);
+            return assignment?.role === 'anchor' || assignment?.role === 'fiber';
+        });
+        if (admitted.length < 2) continue;
+        for (const index of admitted) assigned.add(index);
+    }
+
+    for (let index = 0; index < count; index++) {
+        if (!plan.has(targets[index].id)) {
+            plan.set(targets[index].id, looseHopfAssignment(entries[index], neighbors[index]));
+        }
+    }
+
     return plan;
 }
 
-function hopfRootBaseId(
-    target: GraphRebuildEmbeddingTarget,
-    post: GraphRebuildEmbeddingTargetPostProcess,
-): string {
-    return post.medoidTargetId || post.productTopologyRegion.medoidTargetId || post.clusterId || post.productTopologyRegion.id || target.id;
+function hopfAnchorScore(entry: HopfResonanceEntry, neighbors: HopfResonanceEdge[]): number {
+    const support = neighbors.length ? neighbors.reduce((sum, edge) => sum + edge.weight, 0) / neighbors.length : 0;
+    const structuralPenalty = isHopfStructuralOnly(entry.target) ? -0.18 : 0;
+    return support * 10 + targetConfidence(entry.target) + Math.min(0.6, neighbors.length * 0.06) + structuralPenalty;
 }
 
-function hopfSubfiberAnchor(
-    rootBaseId: string,
-    entries: Array<{ target: GraphRebuildEmbeddingTarget; post: GraphRebuildEmbeddingTargetPostProcess }>,
-): string {
-    const root = entries.find(({ target }) => target.id === rootBaseId);
-    if (root) return root.target.id;
-    return [...entries]
-        .sort((left, right) => right.post.hubScore - left.post.hubScore
-            || right.post.neighborCount - left.post.neighborCount
-            || left.target.id.localeCompare(right.target.id))[0]?.target.id || rootBaseId;
+function hopfLocalFiberMembers(anchorIndex: number, neighbors: HopfResonanceEdge[][], assigned: Set<number>): number[] {
+    const members = [anchorIndex];
+    for (const edge of neighbors[anchorIndex]) {
+        if (assigned.has(edge.other)) continue;
+        if (edge.weight < HOPF_RESONANCE_THRESHOLD) continue;
+        members.push(edge.other);
+        if (members.length >= HOPF_RESONANCE_FIBER_MEMBER_LIMIT) break;
+    }
+    return members;
 }
 
-function hopfSemanticSubfiberKey(
-    target: GraphRebuildEmbeddingTarget,
-    post: GraphRebuildEmbeddingTargetPostProcess,
-): string {
-    const lane = post.productTopologyRegion.laneKind || post.productLaneFeatures.dominantLane;
+function applyHopfComponentPlan(
+    entries: HopfResonanceEntry[],
+    neighbors: HopfResonanceEdge[][],
+    memberIndexes: number[],
+    dims: number,
+    plan: Map<string, HopfBaseAssignment>,
+): void {
+    if (memberIndexes.length < 2) {
+        const index = memberIndexes[0];
+        if (index !== undefined) plan.set(entries[index].target.id, looseHopfAssignment(entries[index], neighbors[index]));
+        return;
+    }
+
+    const support = componentSupport(memberIndexes, neighbors);
+    if (support < HOPF_RESONANCE_THRESHOLD || memberIndexes.every((index) => isHopfStructuralOnly(entries[index].target))) {
+        for (const index of memberIndexes) plan.set(entries[index].target.id, looseHopfAssignment(entries[index], neighbors[index]));
+        return;
+    }
+
+    const center = normalizedMean(entries, memberIndexes, dims);
+    const e1 = dominantResidualAxis(entries, memberIndexes, center, dims);
+    const e2 = secondaryResidualAxis(entries, memberIndexes, center, e1, dims);
+    const anchorIndex = hopfResonanceAnchor(entries, neighbors, memberIndexes);
+    const anchor = entries[anchorIndex];
+    const baseId = `hopf:resonance:${normalizeHopfToken(anchor.target.id)}`;
+    const fiberKind = dominantHopfFiberKind(entries, memberIndexes);
+    const splitKey = `point-formed:${fiberKind}`;
+    const phases = new Map<number, number>();
+
+    let sumCos = 0;
+    let sumSin = 0;
+    for (const index of memberIndexes) {
+        const phase = tangentPhase(entries[index], center, e1, e2, dims);
+        phases.set(index, phase);
+        sumCos += Math.cos(phase * Math.PI * 2);
+        sumSin += Math.sin(phase * Math.PI * 2);
+    }
+    const circularVariance = 1 - Math.min(1, Math.hypot(sumCos, sumSin) / memberIndexes.length);
+    const coherence = clamp01(support * 0.72 + (1 - circularVariance) * 0.28);
+    const frustration = clamp01(1 - coherence);
+
+    for (const index of memberIndexes) {
+        const localSupport = localHopfSupport(neighbors[index], memberIndexes);
+        if (isHopfStructuralOnly(entries[index].target) && localSupport < HOPF_RESONANCE_THRESHOLD + 0.08) {
+            plan.set(entries[index].target.id, looseHopfAssignment(entries[index], neighbors[index]));
+            continue;
+        }
+        plan.set(entries[index].target.id, {
+            role: index === anchorIndex ? 'anchor' : 'fiber',
+            rootBaseId: baseId,
+            baseId,
+            anchorTargetId: anchor.target.id,
+            splitKey,
+            fiberKind,
+            phase: index === anchorIndex ? 0 : phases.get(index) ?? unitHash(`${entries[index].target.id}:hopf-phase`),
+            support: localSupport,
+            coherence,
+            frustration,
+            neighborCount: neighbors[index].length,
+        });
+    }
+}
+
+function looseHopfAssignment(entry: HopfResonanceEntry, neighbors: HopfResonanceEdge[]): HopfBaseAssignment {
+    const support = neighbors.length ? neighbors.reduce((sum, edge) => sum + edge.weight, 0) / neighbors.length : 0;
+    return {
+        role: 'loose',
+        fiberKind: entry.kind,
+        phase: unitHash(`${entry.target.id}:hopf-loose`),
+        support: clamp01(support),
+        coherence: 0,
+        frustration: 1,
+        neighborCount: neighbors.length,
+    };
+}
+
+function pushHopfNeighbor(bucket: HopfResonanceEdge[], edge: HopfResonanceEdge): void {
+    bucket.push(edge);
+    bucket.sort((left, right) => right.weight - left.weight || left.other - right.other);
+    if (bucket.length > HOPF_RESONANCE_NEIGHBORS) bucket.length = HOPF_RESONANCE_NEIGHBORS;
+}
+
+function vectorNorm(vector: Float32Array, dims: number): number {
+    let sum = 0;
+    for (let index = 0; index < dims; index++) sum += vector[index] * vector[index];
+    return Math.sqrt(sum);
+}
+
+function cosineLimited(left: HopfResonanceEntry, right: HopfResonanceEntry, dims: number): number {
+    const denom = left.norm * right.norm;
+    if (denom <= 0.000001) return 0;
+    let dot = 0;
+    for (let index = 0; index < dims; index++) dot += left.vector[index] * right.vector[index];
+    return clampRange(dot / denom, -1, 1);
+}
+
+function hopfPairSupport(left: HopfResonanceEntry, right: HopfResonanceEntry): number {
+    let support = 0;
+    if (left.kind === right.kind) support += 0.1;
+    if (left.target.entityId && left.target.entityId === right.target.entityId) support += 0.24;
+    if (left.target.chunkId && left.target.chunkId === right.target.chunkId) support += 0.12;
+    if (left.target.noteId && left.target.noteId === right.target.noteId) support += 0.05;
+    if (left.target.lane && left.target.lane === right.target.lane) support += 0.06;
+    if (left.post?.clusterId && left.post.clusterId === right.post?.clusterId) support += 0.1;
+    if (left.post?.productTopologyRegion.laneKind && left.post.productTopologyRegion.laneKind === right.post?.productTopologyRegion.laneKind) support += 0.05;
+    if (parentOverlap(left.target, right.target)) support += 0.08;
+    return Math.min(0.34, support);
+}
+
+function hopfCrossKindCompatible(left: HopfResonanceEntry, right: HopfResonanceEntry, semantic: number): boolean {
+    if (left.kind === right.kind) return true;
+    if (left.target.entityId && left.target.entityId === right.target.entityId) return true;
+    if (left.target.chunkId && left.target.chunkId === right.target.chunkId) return true;
+    if (parentOverlap(left.target, right.target)) return true;
+    return semantic > 0.82;
+}
+
+function parentOverlap(left: GraphRebuildEmbeddingTarget, right: GraphRebuildEmbeddingTarget): boolean {
+    const parents = new Set(left.parentIds || []);
+    return Boolean(parents.size && (right.parentIds || []).some((parent) => parents.has(parent)));
+}
+
+function componentSupport(memberIndexes: number[], neighbors: HopfResonanceEdge[][]): number {
+    let sum = 0;
+    let count = 0;
+    const members = new Set(memberIndexes);
+    for (const index of memberIndexes) {
+        for (const edge of neighbors[index]) {
+            if (!members.has(edge.other)) continue;
+            sum += edge.weight;
+            count += 1;
+        }
+    }
+    return count ? sum / count : 0;
+}
+
+function localHopfSupport(neighbors: HopfResonanceEdge[], memberIndexes: number[]): number {
+    const members = new Set(memberIndexes);
+    let sum = 0;
+    let count = 0;
+    for (const edge of neighbors) {
+        if (!members.has(edge.other)) continue;
+        sum += edge.weight;
+        count += 1;
+    }
+    return count ? sum / count : 0;
+}
+
+function normalizedMean(entries: HopfResonanceEntry[], memberIndexes: number[], dims: number): Float32Array {
+    const mean = new Float32Array(dims);
+    for (const index of memberIndexes) {
+        const entry = entries[index];
+        const invNorm = entry.norm > 0.000001 ? 1 / entry.norm : 0;
+        for (let dim = 0; dim < dims; dim++) mean[dim] += entry.vector[dim] * invNorm;
+    }
+    normalizeMutable(mean);
+    return mean;
+}
+
+function dominantResidualAxis(entries: HopfResonanceEntry[], memberIndexes: number[], center: Float32Array, dims: number): Float32Array {
+    let bestIndex = memberIndexes[0];
+    let bestNorm = -1;
+    for (const index of memberIndexes) {
+        const norm = residualNorm(entries[index], center, dims);
+        if (norm > bestNorm) {
+            bestNorm = norm;
+            bestIndex = index;
+        }
+    }
+    return residualAxis(entries[bestIndex], center, dims);
+}
+
+function secondaryResidualAxis(entries: HopfResonanceEntry[], memberIndexes: number[], center: Float32Array, e1: Float32Array, dims: number): Float32Array {
+    let best: Float32Array | null = null;
+    let bestNorm = -1;
+    for (const index of memberIndexes) {
+        const residual = residualAxis(entries[index], center, dims);
+        const dot = dotArray(residual, e1);
+        for (let dim = 0; dim < dims; dim++) residual[dim] -= e1[dim] * dot;
+        const norm = normalizeMutable(residual);
+        if (norm > bestNorm) {
+            bestNorm = norm;
+            best = residual;
+        }
+    }
+    return bestNorm > 0.000001 && best ? best : fallbackOrthogonalAxis(e1);
+}
+
+function residualNorm(entry: HopfResonanceEntry, center: Float32Array, dims: number): number {
+    const invNorm = entry.norm > 0.000001 ? 1 / entry.norm : 0;
+    let dot = 0;
+    for (let dim = 0; dim < dims; dim++) dot += entry.vector[dim] * invNorm * center[dim];
+    let sum = 0;
+    for (let dim = 0; dim < dims; dim++) {
+        const value = entry.vector[dim] * invNorm - center[dim] * dot;
+        sum += value * value;
+    }
+    return Math.sqrt(sum);
+}
+
+function residualAxis(entry: HopfResonanceEntry, center: Float32Array, dims: number): Float32Array {
+    const out = new Float32Array(dims);
+    const invNorm = entry.norm > 0.000001 ? 1 / entry.norm : 0;
+    let dot = 0;
+    for (let dim = 0; dim < dims; dim++) dot += entry.vector[dim] * invNorm * center[dim];
+    for (let dim = 0; dim < dims; dim++) out[dim] = entry.vector[dim] * invNorm - center[dim] * dot;
+    normalizeMutable(out);
+    return out;
+}
+
+function tangentPhase(entry: HopfResonanceEntry, center: Float32Array, e1: Float32Array, e2: Float32Array, dims: number): number {
+    const residual = residualAxis(entry, center, dims);
+    const angle = Math.atan2(dotArray(residual, e2), dotArray(residual, e1));
+    return unitPhase(angle / (Math.PI * 2));
+}
+
+function hopfResonanceAnchor(entries: HopfResonanceEntry[], neighbors: HopfResonanceEdge[][], memberIndexes: number[]): number {
+    return [...memberIndexes].sort((left, right) =>
+        localHopfSupport(neighbors[right], memberIndexes) - localHopfSupport(neighbors[left], memberIndexes)
+        || targetConfidence(entries[right].target) - targetConfidence(entries[left].target)
+        || entries[left].target.id.localeCompare(entries[right].target.id),
+    )[0];
+}
+
+function dominantHopfFiberKind(entries: HopfResonanceEntry[], memberIndexes: number[]): string {
+    const counts = new Map<string, number>();
+    for (const index of memberIndexes) counts.set(entries[index].kind, (counts.get(entries[index].kind) || 0) + 1);
+    return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] || 'resonance';
+}
+
+function hopfResonanceKind(target: GraphRebuildEmbeddingTarget, post?: GraphRebuildEmbeddingTargetPostProcess): string {
     const kind = targetRenderKind(target);
-    if (kind === 'graph-fact') return `relation:${relationFamilyFromText(target.label, target.text, target.sourceId)}`;
-    if (target.kind === 'chunk') return `document:${target.noteId || target.chunkId || 'unknown'}`;
-    if (target.kind === 'entity') return `entity:${normalizeHopfToken(target.entityKind || target.kind || 'entity')}`;
-    if (target.entityId) return `${lane}:${kind}:entity-${normalizeHopfToken(target.entityId)}`;
-    return `${lane}:${kind}`;
+    if (kind === 'graph-fact') return relationFamilyFromText(target.label, target.text, target.sourceId) || 'relationship';
+    if (target.kind === 'entity') return normalizeHopfToken(target.entityKind || 'identity');
+    if (target.kind === 'chunk' || kind === 'note' || kind === 'structure-root') return 'document-echo';
+    if (target.kind === 'event') return 'event';
+    if (kind === 'temporal-fact') return 'temporal';
+    if (kind === 'causal-fact') return 'causal';
+    if (kind === 'memory-state') return 'memory-state';
+    return normalizeHopfToken(post?.productTopologyRegion.laneKind || post?.productLaneFeatures.dominantLane || kind || 'resonance');
 }
 
-function stableHopfFiberPhase(
-    target: GraphRebuildEmbeddingTarget,
-    post: GraphRebuildEmbeddingTargetPostProcess,
-    splitKey?: string,
-): number {
-    const raw = unitPhase(post.productLaneFeatures.fiberPhase);
-    const lane = unitHash(`${post.clusterId}:${post.productTopologyRegion.laneKind}:hopf-lane`);
-    const split = splitKey ? unitHash(`${post.clusterId}:${splitKey}:hopf-subfiber`) : 0;
-    const order = unitHash(`${post.clusterId}:${post.productTopologyRegion.laneKind}:${target.id}:hopf-order`);
-    return splitKey
-        ? unitPhase(raw * 0.46 + lane * 0.14 + split * 0.16 + order * 0.24)
-        : unitPhase(raw * 0.74 + lane * 0.18 + order * 0.08);
+function isHopfStructuralOnly(target: GraphRebuildEmbeddingTarget): boolean {
+    const kind = displayKind(target.kind);
+    return kind === 'note' || kind === 'structure-root' || ((kind === 'chunk' || target.lane === 'chunk_spine') && target.evidenceIds.length === 0);
+}
+
+function normalizeMutable(vector: Float32Array): number {
+    const norm = Math.sqrt(dotArray(vector, vector));
+    if (norm <= 0.000001) return 0;
+    for (let index = 0; index < vector.length; index++) vector[index] /= norm;
+    return norm;
+}
+
+function dotArray(left: Float32Array, right: Float32Array): number {
+    let sum = 0;
+    for (let index = 0; index < left.length; index++) sum += left[index] * right[index];
+    return sum;
+}
+
+function fallbackOrthogonalAxis(axis: Float32Array): Float32Array {
+    const fallback = new Float32Array(axis.length);
+    let smallest = 0;
+    for (let index = 1; index < axis.length; index++) {
+        if (Math.abs(axis[index]) < Math.abs(axis[smallest])) smallest = index;
+    }
+    fallback[smallest] = 1;
+    const dot = dotArray(fallback, axis);
+    for (let index = 0; index < fallback.length; index++) fallback[index] -= axis[index] * dot;
+    normalizeMutable(fallback);
+    return fallback;
 }
 
 function productLorentzMetadata(
@@ -720,6 +1438,17 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
         }
         add(`embed:anchor-entity:${anchor.id}`, `embed:anchor:${anchor.id}`, `embed:entity:${anchor.entityId}`, 'anchor-entity', anchor.confidence);
     }
+    for (const relationship of snapshot.relationships) {
+        if (relationship.status === 'rejected') continue;
+        if (relationFamilyFromText(relationship.relationType, relationship.id) !== 'cooccurrence') continue;
+        add(
+            `embed:relationship:${relationship.id}`,
+            `embed:entity:${relationship.sourceEntityId}`,
+            `embed:entity:${relationship.targetEntityId}`,
+            relationship.relationType,
+            relationship.confidence,
+        );
+    }
     const v2EdgesAdded = addGraphModelV2ProjectionEdges(snapshot, add);
     if (!v2EdgesAdded) {
         for (const edge of snapshot.edges) {
@@ -727,6 +1456,7 @@ function buildTargetEdges(snapshot: GraphRebuildSnapshot): GalaxyInputEdge[] {
         }
         for (const relationship of snapshot.relationships) {
             if (relationship.status === 'rejected') continue;
+            if (relationFamilyFromText(relationship.relationType, relationship.id) === 'cooccurrence') continue;
             const factId = `embed:graph-fact:${relationship.id}`;
             add(`embed:fact-source:${relationship.id}`, factId, `embed:entity:${relationship.sourceEntityId}`, relationship.relationType, relationship.confidence);
             add(`embed:fact-target:${relationship.id}`, factId, `embed:entity:${relationship.targetEntityId}`, relationship.relationType, relationship.confidence);

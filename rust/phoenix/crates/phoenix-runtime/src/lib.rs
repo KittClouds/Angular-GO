@@ -4485,6 +4485,7 @@ impl PhoenixRuntime {
                     scope: &dynamic_scope,
                     lexicon: dynamic_lexicon.as_ref(),
                     surface_hits: &[],
+                    label_bank_context: None,
                 })
                 .map_err(|error| StoreError::Query(format!("dynamic NER failed: {error}")))?;
             result.mention_count += output.mentions.len();

@@ -14,7 +14,10 @@ import type {
 
 export type GraphModelV2AtomKind =
     | 'document'
+    | 'documentRoot'
+    | 'laneRoot'
     | 'chunk'
+    | 'frame'
     | 'sourceSpan'
     | 'evidenceAnchor'
     | 'entity'
@@ -22,6 +25,7 @@ export type GraphModelV2AtomKind =
     | 'event'
     | 'state'
     | 'claim'
+    | 'relationFact'
     | 'timeAnchor';
 
 export type GraphModelV2FactFamily =
@@ -52,6 +56,8 @@ export type GraphModelV2RoleKind =
     | 'location'
     | 'time'
     | 'state'
+    | 'leftMention'
+    | 'rightMention'
     | 'evidence';
 
 export type GraphModelV2StyleTagKind =
@@ -91,6 +97,52 @@ export interface GraphModelV2RelationFact {
     sourceRecordId: string;
 }
 
+export interface GraphModelV2FactBundleCompression {
+    model: string;
+    clusterId: string;
+    canonicalBundleId: string;
+    duplicateOfBundleId?: string | null;
+    outlierScore: number;
+    neighborCount: number;
+    semanticRank: number;
+    rerankScore?: number | null;
+    rerankSource?: string | null;
+    signals: string[];
+}
+
+export type GraphModelV2GraphPrototypeFamily =
+    | 'EntityKind'
+    | 'RelationFamily'
+    | 'EvidenceAuthority'
+    | 'GraphStage'
+    | 'ConceptDomain'
+    | string;
+
+export interface GraphModelV2FactBundlePrototypeScore {
+    prototypeId: string;
+    family: GraphModelV2GraphPrototypeFamily;
+    score: number;
+    probability: number;
+}
+
+export interface GraphModelV2FactBundleCommitment {
+    family: GraphModelV2GraphPrototypeFamily;
+    topPrototypeId: string;
+    topLabel: string;
+    topScore: number;
+    topProbability: number;
+    secondPrototypeId?: string | null;
+    secondScore?: number | null;
+    secondProbability?: number | null;
+    margin: number;
+    entropy: number;
+    ambiguityScore: number;
+    classificationConfidence: number;
+    promotionReady: boolean;
+    radialStrength: number;
+    topKScores: GraphModelV2FactBundlePrototypeScore[];
+}
+
 export interface GraphModelV2FactBundle {
     id: string;
     family: GraphModelV2FactFamily;
@@ -102,6 +154,8 @@ export interface GraphModelV2FactBundle {
     confidence: number;
     evidenceIds: string[];
     sourceRecordId: string;
+    compression?: GraphModelV2FactBundleCompression;
+    commitment?: GraphModelV2FactBundleCommitment;
 }
 
 export interface GraphModelV2FactRole {

@@ -187,13 +187,12 @@ describe('embedding atlas projection', () => {
         expect(nodes.get('embed:anchor:anchor-1')?.metadata?.graphTruthStatus).toBe('evidence');
         expect(nodes.get('embed:entity:kai')?.metadata?.signalParentIds).toEqual(['embed:chunk:chunk-1', 'embed:note:note-1']);
         expect(nodes.get('embed:anchor:anchor-location')?.kind).toBe('anchor');
+        expect(nodes.has('embed:graph-fact:co')).toBe(false);
         expect(colors.get('embed:entity:baton')).toBe(DEFAULT_ENTITY_COLORS.LOCATION);
         expect(colors.get('embed:anchor:anchor-location')).toBe(DEFAULT_GRAPH_NODE_COLORS.anchor);
-        expect(colors.get('embed:graph-fact:co')).toBe(DEFAULT_GRAPH_NODE_COLORS.cooccurrence);
         expect(colors.get('embed:graph-fact:observe')).toBe(DEFAULT_GRAPH_NODE_COLORS.observation);
         expect(colors.get('embed:graph-fact:comment')).toBe(DEFAULT_GRAPH_NODE_COLORS.communication);
         expect(colors.get('embed:graph-fact:authority')).toBe(DEFAULT_GRAPH_NODE_COLORS.authority);
-        expect(styleLabDefaults.has(colors.get('embed:graph-fact:co') || '')).toBe(false);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:observe') || '')).toBe(false);
         expect(styleLabDefaults.has(colors.get('embed:graph-fact:comment') || '')).toBe(false);
         expect(atlas.sourceLabel).toContain('graph rebuild snapshot');
@@ -244,8 +243,38 @@ describe('embedding atlas projection', () => {
             counters: null as any,
         } as any;
         snapshot.graphModelV2 = buildGraphModelV2Snapshot(snapshot);
+        snapshot.graphModelV2.bundles.push({
+            id: 'bundle:approval-1',
+            family: 'approval',
+            relationType: 'approves',
+            lane: 'cooccurrence_weak',
+            status: 'prepared',
+            confidence: 0.72,
+            evidenceIds: [],
+            sourceRecordId: 'approval-1',
+            commitment: {
+                family: 'RelationFamily',
+                topPrototypeId: 'relation:approval',
+                topLabel: 'approval',
+                topScore: -1.1,
+                topProbability: 0.84,
+                secondPrototypeId: 'relation:transfer',
+                secondScore: -0.3,
+                secondProbability: 0.16,
+                margin: 0.8,
+                entropy: 0.22,
+                ambiguityScore: 0.22,
+                classificationConfidence: 0.8,
+                promotionReady: true,
+                radialStrength: 0.78,
+                topKScores: [
+                    { prototypeId: 'relation:approval', family: 'RelationFamily', score: -1.1, probability: 0.84 },
+                ],
+            },
+        });
 
         const atlas = buildGraphRebuildEmbeddingAtlas(snapshot, 'hybrid');
+        const byId = new Map(atlas.nodes.map((node) => [node.id, node]));
 
         expect(atlas.edges).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -262,6 +291,17 @@ describe('embedding atlas projection', () => {
             }),
         ]));
         expect(atlas.edges.some((edge) => edge.id === 'embed:fact-source:approval-1')).toBe(false);
+        expect(byId.get('embed:graph-fact:approval-1')?.metadata).toMatchObject({
+            commitmentTopPrototypeId: 'relation:approval',
+            promotionReady: true,
+            hybridInterior: {
+                mode: 'busemannCommitment',
+                signature: expect.objectContaining({
+                    topPrototypeId: 'relation:approval',
+                    promotionReady: true,
+                }),
+            },
+        });
     });
 
     it('carries embedding topology into Product manifold metadata without linking identities', () => {
@@ -427,6 +467,57 @@ describe('embedding atlas projection', () => {
             fiberKind: 'identity',
             phase: 0.33,
         });
+    });
+
+    it('feeds Product with ConeProgram pathlets and obstruction trace payloads from graph-rebuild signals', () => {
+        const atlas = buildGraphRebuildEmbeddingAtlas({
+            schemaVersion: 'phoenix-graph-rebuild/v1',
+            id: 'snapshot-product-traversal',
+            source: 'phoenix-graph-rebuild',
+            scopeKind: 'global',
+            scopeId: 'global',
+            noteIds: ['note-1'],
+            builtAt: 1,
+            chunks: [],
+            mentions: [],
+            entityAnchors: [],
+            relationships: [],
+            events: [],
+            episodes: [],
+            temporalEdges: [],
+            causalEdges: [],
+            memoryState: [],
+            embeddingTargets: [
+                { id: 'embed:entity:kai', kind: 'entity', sourceId: 'kai', entityId: 'kai', entityKind: 'CHARACTER', label: 'Kai', text: 'Kai', evidenceIds: ['a1'], lane: 'entity_anchor' },
+                { id: 'embed:entity:rift', kind: 'entity', sourceId: 'rift', entityId: 'rift', entityKind: 'LOCATION', label: 'Rift', text: 'Rift', evidenceIds: [], lane: 'entity_anchor' },
+                { id: 'embed:graph-fact:rel-1', kind: 'graphFact', sourceId: 'rel-1', label: 'Kai observes Rift', text: 'Kai observes Rift', evidenceIds: [], lane: 'relationship_fact', admissionStatus: 'deferred', deferReason: 'missing evidence' },
+            ],
+            embeddingVectors: [],
+            projectionRefs: [],
+            nodes: [],
+            edges: [{
+                id: 'rel-1',
+                sourceId: 'kai',
+                targetId: 'rift',
+                type: 'observes',
+                weight: 0.2,
+                confidence: 0.2,
+                evidenceAnchorIds: [],
+                scopeKeys: [],
+                noteIds: ['note-1'],
+            }],
+            counters: null as any,
+        }, 'product');
+
+        const graphEdge = atlas.edges.find((edge) => edge.id === 'embed:graph-edge:rel-1')!;
+        const fact = atlas.nodes.find((node) => node.id === 'embed:graph-fact:rel-1')!;
+
+        expect(atlas.manifold?.conePrograms?.some((program) => program.intent === 'repair')).toBe(true);
+        expect(atlas.manifold?.pathlets?.some((pathlet) => pathlet.edgeIds.includes('embed:graph-edge:rel-1'))).toBe(true);
+        expect(atlas.manifold?.obstructions?.map((obstruction) => obstruction.kind)).toEqual(expect.arrayContaining(['EvidenceMissing', 'UnsupportedBridge']));
+        expect(atlas.manifold?.coneProgramTraces?.some((trace) => trace.obstructionIds.length > 0)).toBe(true);
+        expect(graphEdge.metadata?.productTraversal).toMatchObject({ obstructionKind: 'EvidenceMissing' });
+        expect(fact.metadata?.productTraversal).toMatchObject({ obstructionKind: 'UnsupportedBridge' });
     });
 
     it('maps graph-rebuild signal lanes into hierarchy cap shells', () => {
@@ -642,7 +733,7 @@ describe('embedding atlas projection', () => {
         expect(atlas.edges.map((edge) => edge.type)).toContain('target-parent');
     });
 
-    it('uses postprocess clusters as Hopf bases instead of making every target its own anchor', () => {
+    it('forms Hopf bases from point resonance instead of postprocess medoids', () => {
         const atlas = buildGraphRebuildEmbeddingAtlas({
             schemaVersion: 'phoenix-graph-rebuild/v1',
             id: 'snapshot-hopf',
@@ -692,14 +783,17 @@ describe('embedding atlas projection', () => {
         const rowan = atlas.nodes.find((node) => node.id === 'embed:entity:rowan')!;
         expect(kai.metadata?.hopf).toMatchObject({
             role: 'anchor',
-            baseId: 'embed:entity:kai',
+            baseId: 'hopf:resonance:embed-entity-kai',
             phase: 0,
+            resonanceSource: 'point-formed',
+            resonanceAdmitted: true,
         });
         expect(rowan.metadata?.hopf).toMatchObject({
             role: 'fiber',
-            baseId: 'embed:entity:kai',
+            baseId: 'hopf:resonance:embed-entity-kai',
             fiberKind: 'identity',
             clusterId: 'embedding-cluster:0',
+            resonanceSource: 'point-formed',
         });
         expect(rowan.metadata?.hopf?.['phase']).not.toBe(0.8);
     });
@@ -719,11 +813,11 @@ describe('embedding atlas projection', () => {
                 evidenceIds: [],
             })),
             ...Array.from({ length: 35 }, (_, index) => ({
-                id: `embed:relationship:co-${index}`,
+                id: `embed:relationship:observe-${index}`,
                 kind: 'graphFact',
-                sourceId: `co-${index}`,
-                label: `Co-occurrence ${index}`,
-                text: `Kai co-occurs with Hazel near Red Mesa ${index}`,
+                sourceId: `observe-${index}`,
+                label: `Observation ${index}`,
+                text: `Kai observes Hazel near Red Mesa ${index}`,
                 evidenceIds: [],
             })),
             ...Array.from({ length: 35 }, (_, index) => ({
@@ -780,11 +874,12 @@ describe('embedding atlas projection', () => {
         const counts = new Map<string, number>();
         for (const node of atlas.nodes) {
             const baseId = String(node.metadata?.hopf?.['baseId'] || '');
+            if (!baseId) continue;
             counts.set(baseId, (counts.get(baseId) || 0) + 1);
         }
-        expect(counts.size).toBeGreaterThan(4);
-        expect(Math.max(...counts.values())).toBeLessThanOrEqual(28);
-        expect(atlas.nodes.some((node) => String(node.metadata?.hopf?.['splitKey'] || '').includes('relation:cooccurrence'))).toBe(true);
+        expect(counts.size).toBeGreaterThan(1);
+        expect(Math.max(...counts.values())).toBeLessThanOrEqual(9);
+        expect(atlas.nodes.some((node) => String(node.metadata?.hopf?.['fiberKind'] || '').includes('observation'))).toBe(true);
     });
 
     it('keeps story structure targets visible when multi-note targets exceed the render cap', () => {
@@ -862,12 +957,11 @@ describe('embedding atlas projection', () => {
         }, 'product');
 
         const nodeIds = new Set(atlas.nodes.map((node) => node.id));
-        expect(atlas.nodes).toHaveLength(fillerTargets.length + 7);
-        expect(nodeIds.has('embed:graph-fact:co-1')).toBe(true);
+        expect(atlas.nodes).toHaveLength(fillerTargets.length + 6);
+        expect(nodeIds.has('embed:graph-fact:co-1')).toBe(false);
         expect([...nodeIds].filter((id) => id.includes('kai') || id.includes('hazel') || id.includes('co-1')).sort()).toEqual([
             'embed:entity:hazel',
             'embed:entity:kai',
-            'embed:graph-fact:co-1',
         ]);
         expect(nodeIds.has('embed:temporalFact:temporal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);
         expect(nodeIds.has('embed:causalFact:causal:event:note-1:0:dialogue_event:event:note-1:1:process_event')).toBe(true);

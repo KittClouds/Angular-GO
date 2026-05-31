@@ -149,6 +149,7 @@ fn run(config: Config) -> Result<Phase123SmokeReport, String> {
             scope: &scope,
             lexicon: Some(&lexicon),
             surface_hits: &surface_hit_batch.hits,
+            label_bank_context: None,
         })
         .map_err(|error| format!("dynamic NER failed: {error}"))?;
     validate_phase2(&ner_output.mentions, &ner_output.chunk_hints)?;

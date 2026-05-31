@@ -1,17 +1,14 @@
 use phoenix_dynamic_ner::{
-    DynamicNerModel, DynamicSchemaBuilder, EntityLabel, LabelPack, LocalMentionId, MentionVote,
-    ModelNerWindow, NerModelError, PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceRouter,
-    VerificationCase,
+    DynamicNerModel, DynamicSchemaBuilder, LabelPack, LocalMentionId, MentionVote, ModelNerWindow,
+    NerModelError, PhoenixNerEngineBuilder, SurfaceNerInput, SurfaceRouter,
 };
 use phoenix_rel_post::{GlinerBiModel, GlinerBiPredictOptions};
 use phoenix_types::{ScopeKey, SentenceSpan, TextRange, TokenSpan};
 use std::env;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 struct CliGlinerModel {
     gliner: GlinerBiModel,
-    next_id: AtomicU64,
 }
 
 impl DynamicNerModel for CliGlinerModel {
@@ -153,10 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading GLiNER model from {}...", model_dir.display());
 
     let gliner = GlinerBiModel::load(&model_dir)?;
-    let model = CliGlinerModel {
-        gliner,
-        next_id: AtomicU64::new(10000), // High base ID for model mentions
-    };
+    let model = CliGlinerModel { gliner };
 
     let engine = PhoenixNerEngineBuilder::new()
         .router(SurfaceRouter::default())
@@ -175,6 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scope: &ScopeKey::default(),
         lexicon: None, // No known lexicon for this simple test
         surface_hits: &[],
+        label_bank_context: None,
     };
 
     println!("Running NER pipeline...");
@@ -200,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Sentence {}: {:?}", i, need);
     }
     let schema_builder = phoenix_dynamic_ner::DynamicSchemaBuilder::default();
-    let routes = router.plan_routes(input.sentences, &needs, &schema_builder, &[], &native);
+    let routes = router.plan_routes(input.sentences, &needs, &schema_builder, &[], &native, None);
     for route in routes {
         println!("Route: {:?}", route);
     }

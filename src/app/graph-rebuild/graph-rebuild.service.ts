@@ -55,6 +55,7 @@ export interface GraphRebuildBuildRequest {
     scopeId: string;
     noteIds: string[];
     entities: RegisteredEntity[];
+    fallbackOccurrences?: EntityOccurrence[];
     relationshipHints?: GraphRebuildRelationshipHint[];
     embeddingProfile?: Partial<GraphRebuildEmbeddingProfile>;
     postProcessMode?: GraphIndexPostProcessMode;
@@ -94,8 +95,9 @@ export class GraphRebuildService {
                 this.loadNoteFolderContexts(request.noteIds, persistedOccurrences)
             );
             const recoverStarted = performance.now();
+            const fallbackOccurrences = request.fallbackOccurrences || [];
             const occurrences = mergeGraphRebuildOccurrences(
-                persistedOccurrences,
+                mergeGraphRebuildOccurrences(persistedOccurrences, fallbackOccurrences),
                 recoverGraphRebuildOccurrences(noteTexts, request.entities),
             );
             timings.occurrenceRecoverMs = elapsedMs(recoverStarted);
@@ -302,6 +304,50 @@ export function recoverGraphRebuildOccurrences(
     return rows;
 }
 
+export function snapshotAnchorsToGraphRebuildOccurrences(
+    snapshot: GraphRebuildSnapshot | null | undefined,
+    now = Date.now(),
+    noteTexts?: Record<string, string>,
+): EntityOccurrence[] {
+    if (!snapshot?.entityAnchors?.length) return [];
+    const nodeByEntityId = new Map((snapshot.nodes || []).map((node) => [node.entityId, node]));
+    return snapshot.entityAnchors
+        .filter((anchor) => Number.isFinite(anchor.sourceStart) && Number.isFinite(anchor.sourceEnd))
+        .filter((anchor) => anchorSpanStillMatches(anchor.noteId, anchor.sourceStart, anchor.sourceEnd, anchor.surface, noteTexts))
+        .map((anchor): EntityOccurrence => {
+            const node = nodeByEntityId.get(anchor.entityId);
+            return {
+                id: `${anchor.id}:snapshot-fallback`,
+                noteId: anchor.noteId,
+                entityId: anchor.entityId,
+                entityLabel: node?.label || anchor.surface,
+                entityKind: node?.kind || 'UNKNOWN',
+                sourceStart: anchor.sourceStart,
+                sourceEnd: anchor.sourceEnd,
+                surface: anchor.surface,
+                source: occurrenceSourceFromAnchor(anchor.source),
+                confidence: anchor.confidence,
+                excerpt: anchor.surface,
+                generation: anchor.generation || now,
+                createdAt: now,
+                updatedAt: now,
+            };
+        });
+}
+
+function anchorSpanStillMatches(
+    noteId: string,
+    start: number,
+    end: number,
+    surface: string,
+    noteTexts?: Record<string, string>,
+): boolean {
+    if (!noteTexts || !Object.prototype.hasOwnProperty.call(noteTexts, noteId)) return true;
+    const text = noteTexts[noteId] || '';
+    if (start < 0 || end > text.length || end <= start) return false;
+    return normalizeSurface(text.slice(start, end)).toLocaleLowerCase() === normalizeSurface(surface).toLocaleLowerCase();
+}
+
 export function mergeGraphRebuildOccurrences(
     persisted: EntityOccurrence[],
     recovered: EntityOccurrence[],
@@ -317,6 +363,13 @@ export function mergeGraphRebuildOccurrences(
         merged.push(occurrence);
     }
     return merged;
+}
+
+function occurrenceSourceFromAnchor(source: string): EntityOccurrence['source'] {
+    if (source === 'manual_tag' || source === 'dictionary_match' || source === 'machine_evidence' || source === 'machine_suggestion') {
+        return source;
+    }
+    return 'machine_suggestion';
 }
 
 function entitySurfaces(entity: RegisteredEntity): string[] {
