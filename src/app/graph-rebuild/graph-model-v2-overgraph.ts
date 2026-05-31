@@ -1,5 +1,6 @@
 import type {
     GraphModelV2Atom,
+    GraphModelV2FactBundle,
     GraphModelV2FactFamily,
     GraphModelV2ProjectionEdge,
     GraphModelV2RelationFact,
@@ -27,6 +28,7 @@ export interface GraphModelV2OverGraphScope {
 
 export interface GraphModelV2OverGraphSummary {
     atomVertices: number;
+    bundleVertices: number;
     factVertices: number;
     roleEdges: number;
     projectionEdges: number;
@@ -131,10 +133,13 @@ export function buildGraphModelV2OverGraphExport(snapshot: GraphRebuildSnapshot)
     const styleByTarget = styleTagsByTarget(model.styleTags);
     const factById = new Map<string, GraphModelV2RelationFact>();
     for (const fact of model.facts) factById.set(fact.id, fact);
+    const bundleById = new Map<string, GraphModelV2FactBundle>();
+    for (const bundle of model.bundles) bundleById.set(bundle.id, bundle);
 
-    const vertices: GraphModelV2KernelVertex[] = new Array(model.atoms.length + model.facts.length);
+    const vertices: GraphModelV2KernelVertex[] = new Array(model.atoms.length + model.bundles.length + model.facts.length);
     let vertexIndex = 0;
     for (const atom of model.atoms) vertices[vertexIndex++] = atomVertex(atom, styleByTarget.get(atom.id) || []);
+    for (const bundle of model.bundles) vertices[vertexIndex++] = bundleVertex(bundle, styleByTarget.get(bundle.id) || []);
     for (const fact of model.facts) vertices[vertexIndex++] = factVertex(fact, styleByTarget.get(fact.id) || []);
 
     const edges: GraphModelV2KernelEdge[] = [];
@@ -151,7 +156,7 @@ export function buildGraphModelV2OverGraphExport(snapshot: GraphRebuildSnapshot)
             droppedProjectionEdges += 1;
             continue;
         }
-        edges[edgeIndex++] = projectionEdge(edge, factById.get(edge.sourceFactId || ''));
+        edges[edgeIndex++] = projectionEdge(edge, factById.get(edge.sourceFactId || ''), bundleById.get(edge.sourceBundleId || ''));
     }
     edges.length = edgeIndex;
 
@@ -185,6 +190,7 @@ export function buildGraphModelV2OverGraphExport(snapshot: GraphRebuildSnapshot)
         },
         summary: {
             atomVertices: model.atoms.length,
+            bundleVertices: model.bundles.length,
             factVertices: model.facts.length,
             roleEdges: model.roles.length,
             projectionEdges: edges.length - model.roles.length,
@@ -241,6 +247,28 @@ function factVertex(fact: GraphModelV2RelationFact, styleTags: GraphModelV2Style
             },
         },
         confidence: fact.confidence,
+    });
+}
+
+function bundleVertex(bundle: GraphModelV2FactBundle, styleTags: GraphModelV2StyleTag[]): GraphModelV2KernelVertex {
+    return baseVertex({
+        id: bundle.id,
+        kind: `graphModelV2Bundle:${bundle.family}`,
+        className: 'generic',
+        label: bundle.relationType,
+        evidenceIds: bundle.evidenceIds,
+        attributes: {
+            graphModelV2: {
+                targetType: 'bundle',
+                family: bundle.family,
+                relationType: bundle.relationType,
+                lane: bundle.lane,
+                status: bundle.status,
+                sourceRecordId: bundle.sourceRecordId,
+                styleTags: compactStyleTags(styleTags),
+            },
+        },
+        confidence: bundle.confidence,
     });
 }
 
@@ -308,21 +336,27 @@ function roleEdge(
     });
 }
 
-function projectionEdge(edge: GraphModelV2ProjectionEdge, fact?: GraphModelV2RelationFact): GraphModelV2KernelEdge {
+function projectionEdge(
+    edge: GraphModelV2ProjectionEdge,
+    fact?: GraphModelV2RelationFact,
+    bundle?: GraphModelV2FactBundle,
+): GraphModelV2KernelEdge {
+    const source = fact || bundle;
     return baseEdge({
         sourceId: edge.sourceId,
         targetId: edge.targetId,
         edgeType: edge.edgeType,
-        relationClass: edge.projectionKind === 'structure' ? 'structural' : relationClass(fact?.family || edge.edgeType),
+        relationClass: edge.projectionKind === 'structure' ? 'structural' : relationClass(source?.family || edge.edgeType),
         confidence: edge.confidence,
-        layer: fact?.status === 'review' || fact?.status === 'rejected' ? 'candidate' : 'asserted',
-        evidenceIds: fact?.evidenceIds || [],
+        layer: source?.status === 'review' || source?.status === 'rejected' || source?.status === 'prepared' || bundle ? 'candidate' : 'asserted',
+        evidenceIds: source?.evidenceIds || [],
         attributes: {
             graphModelV2: {
                 edgeKind: 'projection',
                 projectionKind: edge.projectionKind,
                 sourceFactId: edge.sourceFactId,
-                factFamily: fact?.family,
+                sourceBundleId: edge.sourceBundleId,
+                factFamily: source?.family,
             },
         },
     });

@@ -203,6 +203,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sentences: &sentences,
         scope: &scope,
         lexicon: Some(&lexicon),
+        surface_hits: &[],
     };
 
     let run_started = Instant::now();

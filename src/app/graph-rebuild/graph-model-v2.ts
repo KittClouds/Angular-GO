@@ -91,6 +91,17 @@ export interface GraphModelV2RelationFact {
     sourceRecordId: string;
 }
 
+export interface GraphModelV2FactBundle {
+    id: string;
+    family: GraphModelV2FactFamily;
+    relationType: string;
+    lane: GraphRebuildSignalTargetLane;
+    status: GraphRebuildAdjudicationStatus | 'prepared';
+    confidence: number;
+    evidenceIds: string[];
+    sourceRecordId: string;
+}
+
 export interface GraphModelV2FactRole {
     factId: string;
     role: GraphModelV2RoleKind;
@@ -100,7 +111,7 @@ export interface GraphModelV2FactRole {
 
 export interface GraphModelV2StyleTag {
     targetId: string;
-    targetType: 'atom' | 'fact' | 'role' | 'lane' | 'projectionEdge';
+    targetType: 'atom' | 'bundle' | 'fact' | 'role' | 'lane' | 'projectionEdge';
     tagKind: GraphModelV2StyleTagKind;
     value: string;
 }
@@ -112,16 +123,19 @@ export interface GraphModelV2ProjectionEdge {
     edgeType: string;
     projectionKind: 'legacyBinary' | 'factRole' | 'structure';
     sourceFactId?: string;
+    sourceBundleId?: string;
     confidence: number;
 }
 
 export interface GraphModelV2Counters {
     atoms: number;
     laneRoots: number;
+    bundles: number;
     facts: number;
     roles: number;
     styleTags: number;
     projectionEdges: number;
+    stagedCooccurrenceBundles: number;
     weakCooccurrenceFacts: number;
     hyperedgeFacts: number;
 }
@@ -132,6 +146,7 @@ export interface GraphModelV2Snapshot {
     builtAt: number;
     atoms: GraphModelV2Atom[];
     laneRoots: GraphModelV2LaneRoot[];
+    bundles: GraphModelV2FactBundle[];
     facts: GraphModelV2RelationFact[];
     roles: GraphModelV2FactRole[];
     styleTags: GraphModelV2StyleTag[];
@@ -276,6 +291,7 @@ export function buildGraphModelV2Snapshot(snapshot: GraphRebuildSnapshot): Graph
         builtAt: snapshot.builtAt,
         atoms,
         laneRoots,
+        bundles: [],
         facts,
         roles,
         styleTags,
@@ -283,10 +299,12 @@ export function buildGraphModelV2Snapshot(snapshot: GraphRebuildSnapshot): Graph
         counters: {
             atoms: atoms.length,
             laneRoots: laneRoots.length,
+            bundles: 0,
             facts: facts.length,
             roles: roles.length,
             styleTags: styleTags.length,
             projectionEdges: dedupedProjectionEdges.length,
+            stagedCooccurrenceBundles: 0,
             weakCooccurrenceFacts: facts.filter((fact) => fact.family === 'cooccurrence' && fact.lane === 'cooccurrence_weak').length,
             hyperedgeFacts: facts.filter((fact) => (roleCounts.get(fact.id) || 0) > 2).length,
         },
@@ -420,7 +438,7 @@ function structuralTag(targetId: string, value: string): GraphModelV2StyleTag {
 function dedupeProjectionEdges(edges: GraphModelV2ProjectionEdge[]): GraphModelV2ProjectionEdge[] {
     const seen = new Set<string>();
     return edges.filter((edge) => {
-        const key = `${edge.sourceId}|${edge.targetId}|${edge.edgeType}|${edge.projectionKind}|${edge.sourceFactId || ''}`;
+        const key = `${edge.sourceId}|${edge.targetId}|${edge.edgeType}|${edge.projectionKind}|${edge.sourceFactId || ''}|${edge.sourceBundleId || ''}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;

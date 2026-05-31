@@ -8,7 +8,7 @@
 
 use phoenix_types::{KnownMatch, LexiconEntry, LexiconSnapshot, ScopeKey};
 
-use crate::{AlexError, ExactSurfacePattern, Lexicon, LexiconBuilder};
+use crate::{AlexError, ExactSurfacePattern, Lexicon, LexiconBuilder, SurfaceHitBatch};
 
 pub fn build_snapshot(entries: &[LexiconEntry]) -> Result<LexiconSnapshot, AlexError> {
     LexiconBuilder::build(entries)
@@ -28,6 +28,10 @@ pub fn lookup(lexicon: &Lexicon, surface: &str, scope: &ScopeKey) -> Vec<Lexicon
 
 pub fn scan_text(lexicon: &Lexicon, text: &str, scope: &ScopeKey) -> Vec<KnownMatch> {
     lexicon.scan(text, scope)
+}
+
+pub fn scan_surface_hits(lexicon: &Lexicon, text: &str, scope: &ScopeKey) -> SurfaceHitBatch {
+    lexicon.scan_surface_hits(text, scope)
 }
 
 pub fn fuzzy_anchor(lexicon: &Lexicon, token: &str, scope: &ScopeKey) -> Option<KnownMatch> {

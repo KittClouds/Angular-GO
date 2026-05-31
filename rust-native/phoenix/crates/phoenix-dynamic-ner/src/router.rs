@@ -7,11 +7,13 @@
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
+use phoenix_alex::{SurfaceHit, SurfaceHitKind};
+use phoenix_types::SentenceSpan;
+
 use crate::known_lane::KnownCandidate;
 use crate::native_lane::{NativeCandidate, NativeDiscoveryLane};
 use crate::schema::DynamicSchemaBuilder;
 use crate::types::{AdjudicateCase, MentionKind, NerNeedVector, NerRoute};
-use phoenix_types::SentenceSpan;
 
 /// Budget cap: max model-discovery seeds per document.
 ///
@@ -43,6 +45,7 @@ impl SurfaceRouter {
         sentences: &[SentenceSpan],
         known: &[KnownCandidate],
         native: &[NativeCandidate],
+        surface_hits: &[SurfaceHit],
     ) -> Vec<NerNeedVector> {
         let num_sentences = sentences.len();
         if num_sentences == 0 {
@@ -51,6 +54,8 @@ impl SurfaceRouter {
         let mut needs = vec![NerNeedVector::default(); num_sentences];
         let mut known_named_by_sentence = vec![0u16; num_sentences];
         let mut native_named_by_sentence = vec![0u16; num_sentences];
+        let mut native_entity_like_by_sentence = vec![0u16; num_sentences];
+        let mut relation_or_evidence_cue_by_sentence = vec![false; num_sentences];
         let mut ambiguous_native_by_sentence = vec![false; num_sentences];
 
         // Count normalized surface frequencies across native candidates.
@@ -86,11 +91,15 @@ impl SurfaceRouter {
                 MentionKind::Nominal => {
                     need.has_nominal_role = true;
                     ambiguous_native_by_sentence[idx] = true;
+                    native_entity_like_by_sentence[idx] =
+                        native_entity_like_by_sentence[idx].saturating_add(1);
                 }
                 MentionKind::Named => {
                     need.has_unknown_cap_span = true;
                     need.unknown_named_count = need.unknown_named_count.saturating_add(1);
                     native_named_by_sentence[idx] = native_named_by_sentence[idx].saturating_add(1);
+                    native_entity_like_by_sentence[idx] =
+                        native_entity_like_by_sentence[idx].saturating_add(1);
                 }
             }
             if surface_counts
@@ -110,15 +119,42 @@ impl SurfaceRouter {
             }
         }
 
+        for hit in surface_hits {
+            let Some(idx) =
+                sentence_index_for_range(sentences, hit.source_range.start, hit.source_range.end)
+            else {
+                continue;
+            };
+            let Some(need) = needs.get_mut(idx) else {
+                continue;
+            };
+            match hit.kind {
+                SurfaceHitKind::TemporalCue | SurfaceHitKind::CausalCue => {
+                    need.has_causal_or_temporal_cue = true;
+                }
+                SurfaceHitKind::RelationCue | SurfaceHitKind::EvidenceCue => {
+                    relation_or_evidence_cue_by_sentence[idx] = true;
+                    need.has_domain_signature = true;
+                }
+                SurfaceHitKind::StructureCue | SurfaceHitKind::GuardCue => {
+                    need.has_domain_signature = true;
+                }
+                SurfaceHitKind::EntityAlias => {}
+            }
+        }
+
         // Chunk-hint signals used by downstream substrate guidance.
         for (idx, need) in needs.iter_mut().enumerate() {
             let known_named = usize::from(known_named_by_sentence[idx]);
             let native_named = usize::from(native_named_by_sentence[idx]);
+            let native_entity_like = usize::from(native_entity_like_by_sentence[idx]);
             let has_ambiguous_native = ambiguous_native_by_sentence[idx];
-            need.has_entity_pair = known_named + native_named >= 2;
+            let relation_or_evidence_cue = relation_or_evidence_cue_by_sentence[idx];
+            need.has_entity_pair = known_named + native_named >= 2
+                || (relation_or_evidence_cue && known_named + native_entity_like >= 2);
             need.has_ambiguous_reference = has_ambiguous_native && known_named + native_named > 0;
             need.has_named_event_candidate =
-                need.has_causal_or_temporal_cue && known_named + native_named > 0;
+                need.has_causal_or_temporal_cue && known_named + native_entity_like > 0;
         }
 
         needs
@@ -220,6 +256,15 @@ impl SurfaceRouter {
         if need.has_entity_pair {
             p += 2;
         }
+        if need.has_domain_signature {
+            p += 1;
+        }
+        if need.has_causal_or_temporal_cue {
+            p += 2;
+        }
+        if need.has_named_event_candidate {
+            p += 3;
+        }
         if need.has_ambiguous_reference {
             p += 2;
         }
@@ -237,6 +282,8 @@ impl SurfaceRouter {
                     || need.has_repeated_unknown_surface))
             || (need.has_nominal_role && (need.has_unknown_cap_span || need.has_dialogue_structure))
             || (need.has_known_seed && need.has_repeated_unknown_surface)
+            || need.has_named_event_candidate
+            || (need.has_domain_signature && need.has_entity_pair)
     }
 
     /// Should we route this sentence to adjudication?
@@ -263,9 +310,19 @@ impl SurfaceRouter {
     }
 }
 
+fn sentence_index_for_range(sentences: &[SentenceSpan], start: u32, end: u32) -> Option<usize> {
+    let midpoint = start + end.saturating_sub(start) / 2;
+    sentences
+        .iter()
+        .position(|sentence| midpoint >= sentence.range.start && midpoint < sentence.range.end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compact_str::CompactString;
+    use phoenix_alex::{AlexSnapshotId, PatternId};
+    use phoenix_types::TextRange;
 
     #[test]
     fn need_priority_empty_is_zero() {
@@ -328,5 +385,73 @@ mod tests {
             ..Default::default()
         };
         assert!(!SurfaceRouter::needs_adjudication(&need));
+    }
+
+    #[test]
+    fn surface_cues_drive_need_vector_without_text_substring_checks() {
+        let text = "Aella met Kai.";
+        let sentences = [SentenceSpan {
+            index: 0,
+            range: TextRange {
+                start: 0,
+                end: text.len() as u32,
+            },
+        }];
+        let hits = [
+            surface_hit(SurfaceHitKind::CausalCue, 6, 9, "because"),
+            surface_hit(SurfaceHitKind::RelationCue, 6, 9, "approved"),
+        ];
+        let native = [
+            native_candidate(1, 0, 5, "Aella"),
+            native_candidate(2, 10, 13, "Kai"),
+        ];
+        let router = SurfaceRouter::default();
+        let needs = router.build_need_vectors(text, &sentences, &[], &native, &hits);
+        let routes = router.plan_routes(
+            &sentences,
+            &needs,
+            &DynamicSchemaBuilder::default(),
+            &[],
+            &native,
+        );
+
+        assert!(needs[0].has_causal_or_temporal_cue);
+        assert!(needs[0].has_domain_signature);
+        assert!(needs[0].has_entity_pair);
+        assert!(needs[0].has_named_event_candidate);
+        assert!(routes
+            .iter()
+            .any(|route| matches!(route, NerRoute::ModelDiscovery { .. })));
+        assert!(!text.contains("because"));
+        assert!(!text.contains("approved"));
+    }
+
+    fn surface_hit(kind: SurfaceHitKind, start: u32, end: u32, normalized: &str) -> SurfaceHit {
+        SurfaceHit {
+            snapshot_id: AlexSnapshotId(1),
+            pattern_id: PatternId(1),
+            kind,
+            source_range: TextRange { start, end },
+            normalized_range: TextRange {
+                start: 0,
+                end: normalized.len() as u32,
+            },
+            surface: CompactString::from(normalized),
+            normalized: CompactString::from(normalized),
+            confidence: 1.0,
+        }
+    }
+
+    fn native_candidate(id: u64, start: u32, end: u32, surface: &str) -> NativeCandidate {
+        NativeCandidate {
+            mention_id: crate::types::LocalMentionId(id),
+            range: TextRange { start, end },
+            surface: CompactString::from(surface),
+            normalized: CompactString::from(surface.to_ascii_lowercase()),
+            mention_kind: MentionKind::Named,
+            entity_ref: None,
+            votes: SmallVec::new(),
+            sentence_index: 0,
+        }
     }
 }

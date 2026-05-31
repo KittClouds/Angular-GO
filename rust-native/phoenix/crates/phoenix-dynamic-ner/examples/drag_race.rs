@@ -272,6 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokens: &tokens,
         sentences: &sentences,
         lexicon: Some(&lexicon),
+        surface_hits: &[],
     };
 
     let warm_started = Instant::now();

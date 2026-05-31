@@ -247,6 +247,7 @@ fn run_once(
     let (tokens, sentences) = tokenize_for_ner(&input.text);
     let started = Instant::now();
     let dynamic_ner = PhoenixNerEngineBuilder::new().build();
+    let surface_hit_batch = lexicon.scan_surface_hits(&input.text, &scope);
     let dynamic_output = dynamic_ner
         .extract_mentions(&SurfaceNerInput {
             document_id: &input.case_id,
@@ -255,6 +256,7 @@ fn run_once(
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(lexicon),
+            surface_hits: &surface_hit_batch.hits,
         })
         .map_err(|error| format!("dynamic NER failed for {}: {error}", input.case_id))?;
     let dynamic_ner_us = elapsed_us(started);

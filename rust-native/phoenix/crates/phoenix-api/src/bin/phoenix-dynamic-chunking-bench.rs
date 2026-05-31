@@ -3,12 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use phoenix_alex::Lexicon;
+use phoenix_alex::{Lexicon, SurfaceHit, SurfaceHitKind};
 use phoenix_chunker::{
     build_lens_chunks, build_structural_substrate, BaseChunk, ChunkerConfig, GraphBuildContext,
     GraphDelta, LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind,
     LensChunkHintSource, LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge,
-    LensMentionEdgeKind, LensMentionGraph, LensMentionKind, LensVoteReason,
+    LensMentionEdgeKind, LensMentionGraph, LensMentionKind, LensSurfaceHit, LensSurfaceHitKind,
+    LensVoteReason,
 };
 use phoenix_dynamic_ner::{
     ChunkHint, ChunkHintKind, ChunkHintSource, MentionEdgeKind, MentionKind, MentionPacket,
@@ -175,6 +176,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
     let (tokens, sentences) = tokenize_for_ner(&case.text);
     let lexicon = shortrun_lexicon()?;
     let scope = ScopeKey::default();
+    let surface_hit_batch = lexicon.scan_surface_hits(&case.text, &scope);
     let engine = PhoenixNerEngineBuilder::new().build();
 
     let ner_started = Instant::now();
@@ -186,6 +188,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &surface_hit_batch.hits,
         })
         .map_err(|error| format!("dynamic NER failed for {}: {error}", case.name))?;
     let dynamic_ner_ms = ner_started.elapsed().as_millis();
@@ -214,6 +217,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
         .map(to_lens_hint)
         .collect::<Vec<_>>();
     let lens_graph = to_lens_graph(&ner_output.mention_graph, &active_mention_ids);
+    let lens_surface_hits = to_lens_surface_hits(&surface_hit_batch.hits);
     let rich_prepare_ms = prepare_started.elapsed().as_millis();
     let lens_started = Instant::now();
     let lens_chunks = build_lens_chunks(
@@ -223,6 +227,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
             mentions: &lens_mentions,
             ner_hints: &lens_hints,
             mention_graph: &lens_graph,
+            surface_hits: &lens_surface_hits,
         },
         &LensChunkerConfig::default(),
     );
@@ -239,6 +244,7 @@ fn run_case(case: BenchCase, profile_lenses: bool) -> Result<BenchCaseReport, St
             &lens_mentions,
             &lens_hints,
             &lens_graph,
+            &lens_surface_hits,
         )
     } else {
         BTreeMap::new()
@@ -524,6 +530,7 @@ fn profile_lens_build_ms(
     mentions: &[LensMention],
     ner_hints: &[LensChunkHint],
     mention_graph: &LensMentionGraph,
+    surface_hits: &[LensSurfaceHit],
 ) -> BTreeMap<String, u128> {
     let mut out = BTreeMap::new();
     for lens in [
@@ -546,6 +553,7 @@ fn profile_lens_build_ms(
                 mentions,
                 ner_hints,
                 mention_graph,
+                surface_hits,
             },
             &config,
         );
@@ -738,6 +746,33 @@ fn to_lens_graph(
                 weight: edge.weight,
             })
             .collect(),
+    }
+}
+
+fn to_lens_surface_hits(hits: &[SurfaceHit]) -> Vec<LensSurfaceHit> {
+    hits.iter()
+        .map(|hit| LensSurfaceHit {
+            id: format!(
+                "surface-hit:{}:{}:{}-{}",
+                hit.snapshot_id.0, hit.pattern_id.0, hit.source_range.start, hit.source_range.end
+            ),
+            kind: to_lens_surface_hit_kind(hit.kind),
+            range: hit.source_range,
+            surface: hit.surface.to_string(),
+            normalized: hit.normalized.to_string(),
+        })
+        .collect()
+}
+
+fn to_lens_surface_hit_kind(kind: SurfaceHitKind) -> LensSurfaceHitKind {
+    match kind {
+        SurfaceHitKind::EntityAlias => LensSurfaceHitKind::EntityAlias,
+        SurfaceHitKind::RelationCue => LensSurfaceHitKind::RelationCue,
+        SurfaceHitKind::TemporalCue => LensSurfaceHitKind::TemporalCue,
+        SurfaceHitKind::CausalCue => LensSurfaceHitKind::CausalCue,
+        SurfaceHitKind::EvidenceCue => LensSurfaceHitKind::EvidenceCue,
+        SurfaceHitKind::StructureCue => LensSurfaceHitKind::StructureCue,
+        SurfaceHitKind::GuardCue => LensSurfaceHitKind::GuardCue,
     }
 }
 

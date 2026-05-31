@@ -224,8 +224,9 @@ fn add_pair_and_relationship_hints(
         if !ambiguous.is_empty() {
             let mut nearby_entities = entities.clone();
             if nearby_entities.is_empty() {
-                if let Some(previous_sentence) =
-                    sentence_index.checked_sub(1).and_then(|idx| by_sentence.get(idx as usize))
+                if let Some(previous_sentence) = sentence_index
+                    .checked_sub(1)
+                    .and_then(|idx| by_sentence.get(idx as usize))
                 {
                     nearby_entities.extend(previous_sentence.iter().copied().filter(|packet| {
                         packet.mention_kind == MentionKind::Named && packet.is_hint_eligible()

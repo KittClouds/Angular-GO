@@ -26,6 +26,7 @@ fn main() {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         })
         .expect("dynamic NER probe");
     let wall_ms = started.elapsed().as_millis();
@@ -69,7 +70,10 @@ fn input_path() -> PathBuf {
             }
         }
     }
-    PathBuf::from("..").join("..").join("docs").join("shortrun.md")
+    PathBuf::from("..")
+        .join("..")
+        .join("docs")
+        .join("shortrun.md")
 }
 
 fn tokenize_for_ner(text: &str) -> (Vec<TokenSpan>, Vec<SentenceSpan>) {

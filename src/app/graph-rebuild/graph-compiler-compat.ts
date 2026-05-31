@@ -1,0 +1,192 @@
+import type {
+    GraphCompileCounters,
+    GraphCompileReceipts,
+    GraphCompilerAtom,
+    GraphCompilerAtomKind,
+    GraphCompilerDualWriteSidecar,
+    GraphCompilerEvidenceAnchor,
+    GraphCompilerFactBundle,
+    GraphCompilerFactLane,
+    GraphCompilerFactLike,
+    GraphCompilerFactRole,
+    GraphCompilerOutput,
+    GraphCompilerProjectedEdge,
+    GraphCompilerRelationFact,
+    GraphRootReceipt,
+} from './graph-compiler-read-model';
+import { projectUiGraphFromCompilerOutput } from './graph-compiler-read-model';
+import type { GraphRebuildSnapshot } from './graph-rebuild-snapshot';
+
+export function buildCompatibilityGraphCompilerSidecar(snapshot: GraphRebuildSnapshot): GraphCompilerDualWriteSidecar {
+    const factGraph = buildCompatibilityGraphCompilerOutput(snapshot);
+    return {
+        factGraph,
+        receipts: factGraph.receipts,
+        projectedUiGraph: projectUiGraphFromCompilerOutput(factGraph),
+    };
+}
+
+function buildCompatibilityGraphCompilerOutput(snapshot: GraphRebuildSnapshot): GraphCompilerOutput {
+    const atoms: GraphCompilerAtom[] = [];
+    const evidenceAnchors: GraphCompilerEvidenceAnchor[] = [];
+    const evidenceSeen = new Set<string>();
+    const bundles: GraphCompilerFactBundle[] = [];
+    const facts: GraphCompilerRelationFact[] = [];
+    const roles: GraphCompilerFactRole[] = [];
+    const projectedEdges: GraphCompilerProjectedEdge[] = [];
+    const provenanceByEdge = new Map<string, { factId?: string; bundleId?: string }>();
+    const pushEvidence = (evidence: GraphCompilerEvidenceAnchor) => {
+        if (evidenceSeen.has(evidence.id)) return;
+        evidenceSeen.add(evidence.id);
+        evidenceAnchors.push(evidence);
+    };
+    const ensureAnchorEvidence = (ids: string[]) => ids.map((id) => {
+        const evidenceId = anchorEvidenceId(id);
+        pushEvidence({ id: evidenceId, kind: 'sourceSpan', sourceId: id, confidence: 0.62 });
+        return evidenceId;
+    });
+
+    for (const noteId of snapshot.noteIds) atoms.push(atom('document', atomId('document', noteId), noteId, `Document ${noteId}`, noteId));
+    for (const chunk of snapshot.chunks) atoms.push(atom('chunk', atomId('chunk', chunk.id), chunk.id, `Chunk ${chunk.ordinal + 1}`, chunk.noteId, chunk.id));
+    for (const mention of snapshot.mentions.filter((row) => row.status !== 'dropped')) {
+        pushEvidence({ id: mentionEvidenceId(mention.id), kind: 'mentionPacket', noteId: mention.noteId, chunkId: mention.chunkId, sourceRange: { start: mention.sourceStart, end: mention.sourceEnd }, sourceId: mention.id, confidence: mention.confidence });
+    }
+    for (const anchor of snapshot.entityAnchors) {
+        const evidenceId = anchorEvidenceId(anchor.id);
+        pushEvidence({ id: evidenceId, kind: 'sourceSpan', noteId: anchor.noteId, chunkId: anchor.chunkId, sourceRange: { start: anchor.sourceStart, end: anchor.sourceEnd }, sourceId: anchor.id, confidence: anchor.confidence });
+        atoms.push(atom('evidenceAnchor', evidenceId, anchor.id, anchor.surface, anchor.noteId, anchor.chunkId, anchor.entityId, [evidenceId]));
+    }
+    for (const node of snapshot.nodes) {
+        atoms.push(atom(node.kind.toLowerCase() === 'concept' ? 'concept' : 'entity', atomId('entity', node.entityId), node.entityId, node.label, undefined, undefined, node.entityId, node.anchorIds.map(anchorEvidenceId)));
+    }
+    for (const event of snapshot.events) {
+        const evidenceId = eventEvidenceId(event.id);
+        pushEvidence({ id: evidenceId, kind: 'eventReference', noteId: event.noteId, chunkId: event.chunkId, sourceId: event.id, confidence: event.confidence });
+        atoms.push(atom('event', atomId('event', event.id), event.id, event.label, event.noteId, event.chunkId, event.entityIds[0], [evidenceId]));
+    }
+    for (const state of snapshot.memoryState) atoms.push(atom('state', atomId('state', state.id), state.id, state.key, state.noteId, undefined, state.entityId, state.evidenceIds.map(anchorEvidenceId)));
+
+    for (const relationship of snapshot.relationships) {
+        const id = `fact:relationship:${relationship.id}`;
+        const lane = isCooccurrence(relationship.relationType) ? 'cooccurrenceWeak' : 'relationshipFact';
+        const evidenceIds = ensureAnchorEvidence(relationship.evidenceAnchorIds);
+        const edgeKey = compilerEdgeKey(relationship.sourceEntityId, relationship.targetEntityId, relationship.relationType);
+        const legacyKey = compilerEdgeKey(relationship.sourceEntityId, relationship.targetEntityId, relationship.relationType === 'co_occurs_with' ? 'anchored-cooccurrence' : relationship.relationType);
+        if (lane === 'cooccurrenceWeak') {
+            bundles.push(factLike(id, lane, relationship.relationType, relationship.id, relationship.status, evidenceIds, relationship.confidence));
+            provenanceByEdge.set(edgeKey, { bundleId: id });
+            provenanceByEdge.set(legacyKey, { bundleId: id });
+            continue;
+        }
+        facts.push(factLike(id, lane, relationship.relationType, relationship.id, relationship.status, evidenceIds, relationship.confidence));
+        roles.push(role(id, 'source', atomId('entity', relationship.sourceEntityId), relationship.confidence), role(id, 'target', atomId('entity', relationship.targetEntityId), relationship.confidence));
+        for (const evidenceId of evidenceIds) roles.push(role(id, 'evidence', evidenceId, relationship.confidence));
+        projectedEdges.push(projection(`projection:fact-role:${relationship.id}:source`, id, atomId('entity', relationship.sourceEntityId), 'role:source', 'factRole', relationship.confidence, id));
+        projectedEdges.push(projection(`projection:fact-role:${relationship.id}:target`, id, atomId('entity', relationship.targetEntityId), 'role:target', 'factRole', relationship.confidence, id));
+        provenanceByEdge.set(edgeKey, { factId: id });
+        provenanceByEdge.set(legacyKey, { factId: id });
+    }
+    for (const edge of snapshot.temporalEdges) pushStoryFact(edge.id, 'temporalFact', edge.relationType, edge.sourceId, edge.targetId, edge.evidenceIds, edge.confidence, 'source', 'target');
+    for (const edge of snapshot.causalEdges) pushStoryFact(edge.id, 'causalFact', edge.relationType, edge.sourceId, edge.targetId, edge.evidenceIds, edge.confidence, 'cause', 'effect');
+    for (const state of snapshot.memoryState) {
+        const id = `fact:memory:${state.id}`;
+        const evidenceIds = ensureAnchorEvidence(state.evidenceIds);
+        facts.push(factLike(id, 'memoryState', state.key, state.id, 'accepted', evidenceIds, 0.72));
+        roles.push(role(id, 'subject', atomId('entity', state.entityId), 0.72), role(id, 'state', atomId('state', state.id), 0.72));
+        for (const evidenceId of evidenceIds) roles.push(role(id, 'evidence', evidenceId, 0.72));
+    }
+    for (const edge of snapshot.edges) {
+        const provenance = provenanceByEdge.get(compilerEdgeKey(edge.sourceId, edge.targetId, edge.type)) || {};
+        projectedEdges.push({ id: `projection:legacy:${edge.id}`, sourceId: atomId('entity', edge.sourceId), targetId: atomId('entity', edge.targetId), edgeType: edge.type, projectionKind: 'legacyBinary', sourceFactId: provenance.factId, sourceBundleId: provenance.bundleId, confidence: edge.confidence });
+    }
+
+    const output: GraphCompilerOutput = { schemaVersion: 'phoenix-graph-compiler/v1', scopeKind: snapshot.scopeKind, scopeId: snapshot.scopeId, builtAt: snapshot.builtAt, atoms, evidenceAnchors, bundles, facts, roles, projectedEdges, receipts: emptyReceipts() };
+    output.receipts = computeReceipts(output);
+    return output;
+
+    function pushStoryFact(idSource: string, lane: GraphCompilerFactLane, predicate: string, sourceId: string, targetId: string, evidenceSourceIds: string[], confidence: number, leftRole: string, rightRole: string): void {
+        const id = `fact:${lane}:${idSource}`;
+        const evidenceIds = ensureAnchorEvidence(evidenceSourceIds);
+        facts.push(factLike(id, lane, predicate, idSource, 'accepted', evidenceIds, confidence));
+        roles.push(role(id, leftRole, atomId('event', sourceId), confidence), role(id, rightRole, atomId('event', targetId), confidence));
+        for (const evidenceId of evidenceIds) roles.push(role(id, 'evidence', evidenceId, confidence));
+        projectedEdges.push(projection(`projection:${lane}:${idSource}`, atomId('event', sourceId), atomId('event', targetId), predicate, 'legacyBinary', confidence, id));
+    }
+}
+
+function computeReceipts(output: GraphCompilerOutput): GraphCompileReceipts {
+    const roots = new Map<GraphCompilerFactLane, GraphRootReceipt>();
+    const root = (lane: GraphCompilerFactLane) => roots.get(lane) || roots.set(lane, { lane, ...emptyCounters() }).get(lane)!;
+    for (const atomRow of output.atoms) root(compilerLaneForAtom(atomRow.kind)).atoms += 1;
+    for (const evidence of output.evidenceAnchors) root('anchorEvidence').evidenceAnchors += 1;
+    for (const bundle of output.bundles) root(bundle.lane).bundles += 1;
+    for (const fact of output.facts) root(fact.lane).facts += 1;
+    const factLane = new Map(output.facts.map((fact) => [fact.id, fact.lane]));
+    for (const roleRow of output.roles) root(factLane.get(roleRow.factId) || 'relationshipFact').roles += 1;
+    for (const edge of output.projectedEdges) root(projectionLane(edge, output)).projectedEdges += 1;
+    return { roots: [...roots.values()], counters: { ...emptyCounters(), atoms: output.atoms.length, evidenceAnchors: output.evidenceAnchors.length, bundles: output.bundles.length, facts: output.facts.length, roles: output.roles.length, projectedEdges: output.projectedEdges.length }, invariantFailures: [] };
+}
+
+function projectionLane(edge: GraphCompilerProjectedEdge, output: GraphCompilerOutput): GraphCompilerFactLane {
+    if (edge.sourceFactId) return output.facts.find((fact) => fact.id === edge.sourceFactId)?.lane || 'relationshipFact';
+    if (edge.sourceBundleId) return output.bundles.find((bundle) => bundle.id === edge.sourceBundleId)?.lane || 'cooccurrenceWeak';
+    return 'documentSpine';
+}
+
+function atom(kind: GraphCompilerAtomKind, id: string, sourceId: string, label: string, noteId?: string, chunkId?: string, entityId?: string, evidenceIds: string[] = []): GraphCompilerAtom {
+    return { id, kind, sourceId, label, noteId, chunkId, entityId, evidenceIds };
+}
+
+function factLike(id: string, lane: GraphCompilerFactLane, predicate: string, sourceRecordId: string, status: string, evidenceIds: string[], confidence: number): GraphCompilerFactLike {
+    return { id, lane, predicate, sourceRecordId, status, evidenceIds, confidence };
+}
+
+function role(factId: string, roleName: string, atomIdValue: string, confidence: number): GraphCompilerFactRole {
+    return { factId, role: roleName, atomId: atomIdValue, confidence };
+}
+
+function projection(id: string, sourceId: string, targetId: string, edgeType: string, projectionKind: string, confidence: number, sourceFactId?: string): GraphCompilerProjectedEdge {
+    return { id, sourceId, targetId, edgeType, projectionKind, sourceFactId, confidence };
+}
+
+function compilerLaneForAtom(kind: GraphCompilerAtomKind): GraphCompilerFactLane {
+    if (kind === 'document' || kind === 'root') return 'documentSpine';
+    if (kind === 'chunk') return 'chunkSpine';
+    if (kind === 'entity' || kind === 'concept') return 'entityAnchor';
+    if (kind === 'event' || kind === 'timeAnchor') return 'eventIdentity';
+    if (kind === 'state') return 'memoryState';
+    if (kind === 'claim') return 'relationshipFact';
+    return 'anchorEvidence';
+}
+
+function isCooccurrence(type: string): boolean {
+    return type.includes('co_occurs') || type.includes('co-occurs') || type.includes('cooccurrence');
+}
+
+function atomId(kind: string, sourceId: string): string {
+    return `atom:${kind}:${sourceId}`;
+}
+
+function anchorEvidenceId(id: string): string {
+    return `evidence:anchor:${id}`;
+}
+
+function mentionEvidenceId(id: string): string {
+    return `evidence:mention:${id}`;
+}
+
+function eventEvidenceId(id: string): string {
+    return `evidence:event:${id}`;
+}
+
+function compilerEdgeKey(left: string, right: string, edgeType: string): string {
+    return [left, right].sort().join(':') + `:${edgeType}`;
+}
+
+function emptyReceipts(): GraphCompileReceipts {
+    return { roots: [], counters: emptyCounters(), invariantFailures: [] };
+}
+
+function emptyCounters(): GraphCompileCounters {
+    return { atoms: 0, evidenceAnchors: 0, bundles: 0, facts: 0, roles: 0, projectedEdges: 0, invariantFailures: 0 };
+}

@@ -1,4 +1,6 @@
-use compact_str::format_compact;
+use std::collections::BTreeMap;
+
+use compact_str::{format_compact, CompactString};
 
 use crate::types::{
     GraphAnchor, GraphChunk, GraphEmbeddingTarget, GraphEvent, GraphMemoryState, GraphNode,
@@ -26,7 +28,7 @@ pub fn build_embedding_targets(
             + temporal_edges.len()
             + causal_edges.len()
             + memory_state.len()
-            + 1,
+            + 6,
     );
     targets.push(GraphEmbeddingTarget {
         id: format_compact!("embed:note:{note_id}"),
@@ -39,6 +41,7 @@ pub fn build_embedding_targets(
         text: note_embedding_text(note_id, note_text),
         evidence_ids: Vec::new(),
     });
+    targets.extend(structure_root_targets(note_id));
     targets.extend(chunks.iter().map(|chunk| GraphEmbeddingTarget {
         id: format_compact!("embed:chunk:{}", chunk.id),
         kind: "chunk".into(),
@@ -61,21 +64,26 @@ pub fn build_embedding_targets(
         text: node.label.clone(),
         evidence_ids: node.anchor_ids.clone(),
     }));
-    targets.extend(anchors.iter().map(|anchor| GraphEmbeddingTarget {
-        id: format_compact!("embed:anchor:{}", anchor.id),
-        kind: "anchor".into(),
-        source_id: anchor.id.clone(),
-        note_id: Some(anchor.note_id.clone()),
-        chunk_id: anchor.chunk_id.clone(),
-        entity_id: Some(anchor.entity_id.clone()),
-        label: anchor.surface.clone(),
-        text: anchor.surface.clone(),
-        evidence_ids: vec![anchor.id.clone()],
+    targets.extend(representative_anchors(anchors).into_iter().map(|anchor| {
+        GraphEmbeddingTarget {
+            id: format_compact!("embed:anchor:{}", anchor.id),
+            kind: "anchor".into(),
+            source_id: anchor.id.clone(),
+            note_id: Some(anchor.note_id.clone()),
+            chunk_id: anchor.chunk_id.clone(),
+            entity_id: Some(anchor.entity_id.clone()),
+            label: anchor.surface.clone(),
+            text: anchor.surface.clone(),
+            evidence_ids: vec![anchor.id.clone()],
+        }
     }));
     targets.extend(
         relationships
             .iter()
             .filter(|relationship| relationship.status != "rejected")
+            .filter(|relationship| {
+                relationship.status == "accepted" || !is_weak_cooccurrence(relationship)
+            })
             .map(|relationship| GraphEmbeddingTarget {
                 id: format_compact!("embed:graph-fact:{}", relationship.id),
                 kind: "graphFact".into(),
@@ -134,6 +142,82 @@ pub fn build_embedding_targets(
     targets
 }
 
+fn structure_root_targets(note_id: &str) -> Vec<GraphEmbeddingTarget> {
+    [
+        (
+            "document-structure",
+            "Document structure",
+            "document spine and chunk hierarchy root",
+        ),
+        (
+            "identity",
+            "Identity root",
+            "accepted entity and alias provenance root",
+        ),
+        (
+            "temporal",
+            "Temporal root",
+            "event order and before/after signal root",
+        ),
+        (
+            "causal",
+            "Causal root",
+            "cause, explanation, authority, and consequence signal root",
+        ),
+        (
+            "evidence",
+            "Evidence root",
+            "raw anchor evidence and supporting context root",
+        ),
+    ]
+    .into_iter()
+    .map(|(key, label, text)| GraphEmbeddingTarget {
+        id: format_compact!("embed:structure-root:{note_id}:{key}"),
+        kind: "structureRoot".into(),
+        source_id: format_compact!("{note_id}:{key}"),
+        note_id: Some(note_id.into()),
+        chunk_id: None,
+        entity_id: None,
+        label: label.into(),
+        text: format_compact!("structure_root:{} note:{} {}", key, note_id, text),
+        evidence_ids: Vec::new(),
+    })
+    .collect()
+}
+
+fn representative_anchors(anchors: &[GraphAnchor]) -> Vec<&GraphAnchor> {
+    let mut by_entity = BTreeMap::<&str, &GraphAnchor>::new();
+    for anchor in anchors {
+        by_entity
+            .entry(anchor.entity_id.0.as_str())
+            .and_modify(|current| {
+                if anchor_quality(anchor) > anchor_quality(current) {
+                    *current = anchor;
+                }
+            })
+            .or_insert(anchor);
+    }
+    by_entity.into_values().collect()
+}
+
+fn anchor_quality(anchor: &GraphAnchor) -> u32 {
+    let source_score = match anchor.source.as_str() {
+        "manual_tag" | "accepted_suggestion" => 50,
+        "dictionary_match" | "Some(ExactCanonical)" | "Some(ExactAlias)" => 40,
+        "machine_suggestion" | "machine_evidence" => 36,
+        _ => 20,
+    };
+    (anchor.confidence.clamp(0.0, 1.0) * 100.0) as u32
+        + source_score
+        + u32::from(anchor.chunk_id.is_some()) * 10
+        + (anchor.surface.len() as u32).min(16)
+}
+
+fn is_weak_cooccurrence(relationship: &GraphRelationship) -> bool {
+    relationship.relation_type == "co_occurs_with"
+        || relationship.relation_type == "anchored-cooccurrence"
+}
+
 fn temporal_target(note_id: &str, edge: &GraphTemporalEdge, prefix: &str) -> GraphEmbeddingTarget {
     GraphEmbeddingTarget {
         id: format_compact!("embed:{}:{}", prefix, edge.id),
@@ -153,7 +237,7 @@ fn temporal_target(note_id: &str, edge: &GraphTemporalEdge, prefix: &str) -> Gra
     }
 }
 
-fn note_embedding_text(note_id: &str, note_text: &str) -> compact_str::CompactString {
+fn note_embedding_text(note_id: &str, note_text: &str) -> CompactString {
     let trimmed = note_text.trim();
     if trimmed.is_empty() {
         return format_compact!("note:{note_id}");
@@ -161,7 +245,7 @@ fn note_embedding_text(note_id: &str, note_text: &str) -> compact_str::CompactSt
     safe_prefix(trimmed, 12_000).into()
 }
 
-fn chunk_embedding_text(note_text: &str, chunk: &GraphChunk) -> compact_str::CompactString {
+fn chunk_embedding_text(note_text: &str, chunk: &GraphChunk) -> CompactString {
     safe_slice(note_text, chunk.start as usize, chunk.end as usize)
         .trim()
         .into()

@@ -17,7 +17,8 @@ import { buildGraphRebuildEmbeddingTargetPlan } from './graph-rebuild-embedding-
 import { buildGraphRebuildEmbeddingGraphPostProcess } from './graph-rebuild-embedding-postprocess';
 import { buildGraphRebuildEntityLinkSuggestions } from './graph-rebuild-entity-linking';
 import { buildGraphAwareLinkSuggestions } from './graph-rebuild-link-suggestions';
-import { buildGraphModelV2Snapshot } from './graph-model-v2';
+import { buildCompatibilityGraphCompilerSidecar } from './graph-compiler-compat';
+import { attachGraphCompilerReadModels } from './graph-compiler-read-model';
 import { buildGraphRebuildStructuralPostProcess } from './graph-rebuild-structural-postprocess';
 import {
     buildGraphRebuildAliasResolver,
@@ -191,7 +192,11 @@ export function buildGraphRebuildSnapshot(input: BuildGraphRebuildSnapshotInput)
         },
         resolutionSuggestions: hygiene.suggestions,
     };
-    snapshot.graphModelV2 = buildGraphModelV2Snapshot(snapshot);
+    attachGraphCompilerReadModels(
+        snapshot,
+        input.graphCompilerSidecar || buildCompatibilityGraphCompilerSidecar(snapshot),
+        input.graphCompilerSidecar ? 'rust' : 'typescriptCompatibility',
+    );
     return snapshot;
 }
 

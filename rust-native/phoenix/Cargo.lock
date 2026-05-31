@@ -2491,6 +2491,7 @@ name = "phoenix-alex"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "compact_str 0.8.1",
  "daachorse",
  "fst",
  "js-sys",

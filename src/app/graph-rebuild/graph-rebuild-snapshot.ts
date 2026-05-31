@@ -1,5 +1,12 @@
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
+import type {
+    GraphCompileReceipts,
+    GraphCompilerDualWriteSidecar,
+    GraphCompilerOutput,
+    GraphCompilerProjectedUiEdge,
+    GraphCompilerSource,
+} from './graph-compiler-read-model';
 import type { GraphModelV2Snapshot } from './graph-model-v2';
 
 export type GraphRebuildScopeKind = 'global' | 'folder' | 'narrative' | 'note' | 'multiNote';
@@ -689,6 +696,10 @@ export interface GraphRebuildSnapshot {
     nodes: GraphRebuildNode[];
     edges: GraphRebuildEdge[];
     structuralPostProcess?: GraphRebuildStructuralPostProcess;
+    graphCompiler?: GraphCompilerOutput;
+    graphCompileReceipts?: GraphCompileReceipts;
+    graphCompilerSource?: GraphCompilerSource;
+    projectedUiGraph?: GraphCompilerProjectedUiEdge[];
     graphModelV2?: GraphModelV2Snapshot;
     graphAwareLinkSuggestions?: GraphRebuildLinkSuggestion[];
     entityLinkSuggestions?: GraphRebuildEntityLinkSuggestion[];
@@ -810,6 +821,7 @@ export interface BuildGraphRebuildSnapshotInput {
     embeddingStagePolicy?: GraphIndexEmbeddingStagePolicy;
     candidateCount?: number;
     builtAt?: number;
+    graphCompilerSidecar?: GraphCompilerDualWriteSidecar;
 }
 
 export interface GraphRebuildNoteFolderContext {

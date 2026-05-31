@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use phoenix_alex::Lexicon;
+use phoenix_alex::{Lexicon, SurfaceHit};
 use phoenix_types::{Diagnostic, ScopeKey, SentenceSpan, TextRange, TokenSpan};
 use thiserror::Error;
 
@@ -32,6 +32,7 @@ pub struct SurfaceNerInput<'a> {
     pub sentences: &'a [SentenceSpan],
     pub scope: &'a ScopeKey,
     pub lexicon: Option<&'a Lexicon>,
+    pub surface_hits: &'a [SurfaceHit],
 }
 
 /// Output from the NER engine.
@@ -220,6 +221,7 @@ impl PhoenixNerEngine {
             input.sentences,
             &known_candidates,
             &native_candidates,
+            input.surface_hits,
         );
         let routes = self.router.plan_routes(
             input.sentences,
@@ -760,6 +762,7 @@ mod tests {
             sentences: &[],
             scope: &ScopeKey::default(),
             lexicon: None,
+            surface_hits: &[],
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result.mentions.is_empty());
@@ -798,6 +801,7 @@ mod tests {
             sentences: &sentences,
             scope: &ScopeKey::default(),
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(!result.mentions.is_empty());
@@ -817,6 +821,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let left = engine.extract_mentions(&input).unwrap();
         let right = engine.extract_mentions(&input).unwrap();
@@ -846,6 +851,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result
@@ -868,6 +874,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let result = engine.extract_mentions(&input).unwrap();
         assert!(result
@@ -895,6 +902,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let result = engine.extract_mentions(&input).unwrap();
         let unique = result
@@ -918,6 +926,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: Some(&lexicon),
+            surface_hits: &[],
         };
         let started = std::time::Instant::now();
         let result = engine.extract_mentions(&input).unwrap();
@@ -942,6 +951,7 @@ mod tests {
             sentences: &sentences,
             scope: &scope,
             lexicon: None,
+            surface_hits: &[],
         };
 
         let result = engine.extract_mentions(&input).unwrap();

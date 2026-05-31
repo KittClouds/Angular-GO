@@ -45,6 +45,8 @@ pub struct LensChunk {
     pub mention_ids: Vec<u64>,
     pub surfaces: Vec<String>,
     pub trigger_terms: Vec<String>,
+    pub surface_hit_ids: Vec<String>,
+    pub cue_hit_ids: Vec<String>,
     pub source_hint_ids: Vec<String>,
     pub content_hash: u64,
 }
@@ -92,7 +94,9 @@ pub fn build_graph_delta_for_lens(
     for chunk in &lens_chunks {
         node_keys.extend(chunk.surfaces.iter().cloned());
         node_keys.extend(chunk.trigger_terms.iter().cloned());
+        node_keys.extend(chunk.cue_hit_ids.iter().cloned());
         edge_count += chunk.mention_ids.len().saturating_sub(1);
+        edge_count += chunk.cue_hit_ids.len();
         edge_count += chunk.source_hint_ids.len();
     }
     if lens_chunks.len() > 1 {
@@ -121,6 +125,30 @@ pub struct LensChunkInput<'a> {
     pub mentions: &'a [LensMention],
     pub ner_hints: &'a [LensChunkHint],
     pub mention_graph: &'a LensMentionGraph,
+    pub surface_hits: &'a [LensSurfaceHit],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LensSurfaceHitKind {
+    EntityAlias,
+    RelationCue,
+    EventCue,
+    TemporalCue,
+    CausalCue,
+    EvidenceCue,
+    StructureCue,
+    GuardCue,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LensSurfaceHit {
+    pub id: String,
+    pub kind: LensSurfaceHitKind,
+    pub range: TextRange,
+    pub surface: String,
+    pub normalized: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -275,6 +303,8 @@ struct DraftLensChunk {
     mention_ids: BTreeSet<u64>,
     surfaces: BTreeSet<String>,
     trigger_terms: BTreeSet<String>,
+    surface_hit_ids: BTreeSet<String>,
+    cue_hit_ids: BTreeSet<String>,
     source_hint_ids: BTreeSet<String>,
 }
 
@@ -289,6 +319,7 @@ struct LensSentenceFeature {
     padded_lower: String,
     mention_indices: SmallVec<[usize; 8]>,
     hint_indices: SmallVec<[usize; 4]>,
+    surface_hit_indices: SmallVec<[usize; 4]>,
 }
 
 #[derive(Clone, Debug)]
@@ -321,6 +352,7 @@ impl LensBuildIndex {
                     padded_lower,
                     mention_indices: SmallVec::new(),
                     hint_indices: SmallVec::new(),
+                    surface_hit_indices: SmallVec::new(),
                 }
             })
             .collect::<Vec<_>>();
@@ -341,6 +373,13 @@ impl LensBuildIndex {
             let (start, end) = sentences.sentence_span_for_tuple(text_range_tuple(hint.range));
             for sentence in start..end {
                 features[sentence].hint_indices.push(index);
+            }
+        }
+
+        for (index, hit) in input.surface_hits.iter().enumerate() {
+            let (start, end) = sentences.sentence_span_for_tuple(text_range_tuple(hit.range));
+            for sentence in start..end {
+                features[sentence].surface_hit_indices.push(index);
             }
         }
 
@@ -396,6 +435,40 @@ impl LensBuildIndex {
                 }
             }
         }
+    }
+
+    fn add_surface_hits_in_range<F>(
+        &self,
+        input: &LensChunkInput<'_>,
+        range: (usize, usize),
+        draft: &mut DraftLensChunk,
+        keep: F,
+    ) where
+        F: Fn(LensSurfaceHitKind) -> bool,
+    {
+        let (start, end) = self.sentences.sentence_span_for_tuple(range);
+        for sentence in start..end {
+            for &hit_index in &self.features[sentence].surface_hit_indices {
+                let Some(hit) = input.surface_hits.get(hit_index) else {
+                    continue;
+                };
+                if keep(hit.kind) && ranges_overlap_tuple(hit.range, range) {
+                    draft.add_surface_hit(hit);
+                }
+            }
+        }
+    }
+
+    fn sentence_has_cue<F>(&self, input: &LensChunkInput<'_>, idx: usize, keep: F) -> bool
+    where
+        F: Fn(LensSurfaceHitKind) -> bool,
+    {
+        self.features
+            .get(idx)
+            .into_iter()
+            .flat_map(|feature| feature.surface_hit_indices.iter())
+            .filter_map(|hit_index| input.surface_hits.get(*hit_index))
+            .any(|hit| keep(hit.kind))
     }
 }
 
@@ -517,7 +590,13 @@ fn build_relationship_lens(
         draft.add_hint(hint);
         index.add_mentions_in_range(input, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
-        if !draft.trigger_terms.is_empty() || hint.kind != LensChunkHintKind::DialogueSpeaker {
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Relationship)
+        });
+        if !draft.trigger_terms.is_empty()
+            || !draft.cue_hit_ids.is_empty()
+            || hint.kind != LensChunkHintKind::DialogueSpeaker
+        {
             drafts.push(draft);
         }
     }
@@ -553,6 +632,9 @@ fn build_relationship_lens(
         draft.add_mention(right);
         index.add_mentions_in_range(input, draft.range, &mut draft);
         add_relation_triggers(input.text, draft.range, &mut draft);
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Relationship)
+        });
         drafts.push(draft);
     }
 
@@ -568,7 +650,10 @@ fn build_relationship_lens(
             continue;
         }
         let triggers = relation_triggers_for_sentence(&index.features[idx]);
-        if triggers.is_empty() {
+        let has_relation_cue = index.sentence_has_cue(input, idx, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Relationship)
+        });
+        if triggers.is_empty() && !has_relation_cue {
             continue;
         }
         let sentence_window =
@@ -582,6 +667,9 @@ fn build_relationship_lens(
             draft.add_mention(mention);
         }
         draft.trigger_terms.extend(triggers);
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Relationship)
+        });
         drafts.push(draft);
     }
 }
@@ -602,7 +690,10 @@ fn build_event_lens(
                     && ranges_overlap_tuple(hint.range, sentence)
             })
         });
-        if triggers.is_empty() && !has_event_hint {
+        let has_event_cue = index.sentence_has_cue(input, idx, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Event)
+        });
+        if triggers.is_empty() && !has_event_hint && !has_event_cue {
             continue;
         }
         let sentence_window = sentence_window(sentences, idx, config.event_context_sentences);
@@ -614,6 +705,9 @@ fn build_event_lens(
         draft.trigger_terms.extend(triggers);
         index.add_hints_in_range(input, sentence, &mut draft, |hint| {
             hint.kind == LensChunkHintKind::NamedEventCandidate
+        });
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Event)
         });
         index.add_mentions_in_range(input, draft.range, &mut draft);
         add_event_keywords(input.text, draft.range, &mut draft);
@@ -637,7 +731,10 @@ fn build_temporal_lens(
             &index.features[idx],
             &temporal_extractor,
         );
-        if triggers.is_empty() {
+        let has_temporal_cue = index.sentence_has_cue(input, idx, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Temporal)
+        });
+        if triggers.is_empty() && !has_temporal_cue {
             continue;
         }
         let padding = if triggers
@@ -655,6 +752,9 @@ fn build_temporal_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Temporal)
+        });
         index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
@@ -669,7 +769,10 @@ fn build_causal_lens(
     let sentences = &index.sentences;
     for idx in 0..sentences.ranges.len() {
         let triggers = causal_triggers_for_sentence(&index.features[idx]);
-        if triggers.is_empty() {
+        let has_causal_cue = index.sentence_has_cue(input, idx, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Causal)
+        });
+        if triggers.is_empty() && !has_causal_cue {
             continue;
         }
         let sentence_window = causal_sentence_window(index, idx, config.causal_context_sentences);
@@ -679,6 +782,9 @@ fn build_causal_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Causal)
+        });
         index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
     }
@@ -744,6 +850,9 @@ fn build_evidence_lens(
     for idx in 0..sentences.ranges.len() {
         let sentence = sentences.ranges[idx];
         let mut triggers = evidence_triggers_for_sentence(&index.features[idx]);
+        let has_evidence_cue = index.sentence_has_cue(input, idx, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Evidence)
+        });
         if triggers.is_empty() {
             for &hint_index in &index.features[idx].hint_indices {
                 let Some(hint) = input.ner_hints.get(hint_index) else {
@@ -758,7 +867,7 @@ fn build_evidence_lens(
                 }
             }
         }
-        if triggers.is_empty() {
+        if triggers.is_empty() && !has_evidence_cue {
             continue;
         }
         let sentence_window = sentence_window(sentences, idx, config.evidence_context_sentences);
@@ -768,6 +877,9 @@ fn build_evidence_lens(
             sentence_window,
         );
         draft.trigger_terms.extend(triggers);
+        index.add_surface_hits_in_range(input, draft.range, &mut draft, |kind| {
+            surface_cue_supports_lens(kind, LensKind::Evidence)
+        });
         index.add_hints_in_range(input, draft.range, &mut draft, |_| true);
         index.add_mentions_in_range(input, draft.range, &mut draft);
         drafts.push(draft);
@@ -792,8 +904,16 @@ fn finalize_lens_chunks(
         let mention_ids = draft.mention_ids.iter().copied().collect::<Vec<_>>();
         let surfaces = draft.surfaces.iter().cloned().collect::<Vec<_>>();
         let trigger_terms = draft.trigger_terms.iter().cloned().collect::<Vec<_>>();
+        let surface_hit_ids = draft.surface_hit_ids.iter().cloned().collect::<Vec<_>>();
+        let cue_hit_ids = draft.cue_hit_ids.iter().cloned().collect::<Vec<_>>();
         let source_hint_ids = draft.source_hint_ids.iter().cloned().collect::<Vec<_>>();
-        let stable_key = stable_chunk_key(draft.lens, draft.range, &surfaces, &trigger_terms);
+        let stable_key = stable_chunk_key(
+            draft.lens,
+            draft.range,
+            &surfaces,
+            &trigger_terms,
+            &cue_hit_ids,
+        );
         let chunk = LensChunk {
             id: format!(
                 "lens-{}-{:016x}",
@@ -810,6 +930,8 @@ fn finalize_lens_chunks(
             mention_ids,
             surfaces,
             trigger_terms,
+            surface_hit_ids,
+            cue_hit_ids,
             source_hint_ids,
             content_hash: stable_hash(slice.as_bytes()),
         };
@@ -829,6 +951,8 @@ impl DraftLensChunk {
             mention_ids: BTreeSet::new(),
             surfaces: BTreeSet::new(),
             trigger_terms: BTreeSet::new(),
+            surface_hit_ids: BTreeSet::new(),
+            cue_hit_ids: BTreeSet::new(),
             source_hint_ids: BTreeSet::new(),
         }
     }
@@ -851,6 +975,38 @@ impl DraftLensChunk {
             self.surfaces.insert(surface.to_string());
         }
     }
+
+    fn add_surface_hit(&mut self, hit: &LensSurfaceHit) {
+        self.surface_hit_ids.insert(hit.id.clone());
+        if is_cue_hit_kind(hit.kind) {
+            self.cue_hit_ids.insert(hit.id.clone());
+            if !hit.normalized.is_empty() {
+                self.trigger_terms
+                    .insert(hit.normalized.to_ascii_lowercase());
+            }
+        }
+    }
+}
+
+fn surface_cue_supports_lens(kind: LensSurfaceHitKind, lens: LensKind) -> bool {
+    match lens {
+        LensKind::Relationship => kind == LensSurfaceHitKind::RelationCue,
+        LensKind::Event => matches!(
+            kind,
+            LensSurfaceHitKind::EventCue
+                | LensSurfaceHitKind::TemporalCue
+                | LensSurfaceHitKind::CausalCue
+        ),
+        LensKind::Temporal => kind == LensSurfaceHitKind::TemporalCue,
+        LensKind::Causal => kind == LensSurfaceHitKind::CausalCue,
+        LensKind::Evidence => kind == LensSurfaceHitKind::EvidenceCue,
+        LensKind::Entity => kind == LensSurfaceHitKind::EntityAlias,
+        LensKind::Attribute | LensKind::Worldbuilding => false,
+    }
+}
+
+fn is_cue_hit_kind(kind: LensSurfaceHitKind) -> bool {
+    kind != LensSurfaceHitKind::EntityAlias
 }
 
 impl SentenceIndex {
@@ -1229,15 +1385,21 @@ fn stable_chunk_key(
     range: (usize, usize),
     surfaces: &[String],
     triggers: &[String],
+    cue_hit_ids: &[String],
 ) -> String {
-    format!(
+    let mut key = format!(
         "{:?}:{}:{}:{}:{}",
         lens,
         range.0,
         range.1,
         surfaces.join("|"),
         triggers.join("|")
-    )
+    );
+    if !cue_hit_ids.is_empty() {
+        key.push_str(":cue:");
+        key.push_str(&cue_hit_ids.join("|"));
+    }
+    key
 }
 
 fn lens_name(lens: LensKind) -> &'static str {
@@ -1457,6 +1619,25 @@ mod tests {
         crate::build_structural_substrate(text, &crate::ChunkerConfig::default()).base_chunks
     }
 
+    fn surface_hit(
+        id: &str,
+        kind: LensSurfaceHitKind,
+        start: usize,
+        end: usize,
+        normalized: &str,
+    ) -> LensSurfaceHit {
+        LensSurfaceHit {
+            id: id.to_owned(),
+            kind,
+            range: TextRange {
+                start: start as u32,
+                end: end as u32,
+            },
+            surface: normalized.to_owned(),
+            normalized: normalized.to_owned(),
+        }
+    }
+
     #[test]
     fn entity_lens_preserves_description_sentence() {
         let text = "Brynwyn entered the hall. Brynwyn is a tall cartographer with silver-black hair. Her coat had brass buttons.";
@@ -1471,6 +1652,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &LensChunkerConfig::default());
         let entity = chunks
@@ -1505,6 +1687,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &hints,
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &LensChunkerConfig::default());
         let relationship = chunks
@@ -1513,6 +1696,73 @@ mod tests {
             .unwrap();
         assert!((&text[relationship.start..relationship.end]).contains("Aella trusts Kai"));
         assert!(relationship.trigger_terms.contains(&"trusts".to_owned()));
+    }
+
+    #[test]
+    fn cue_hit_ids_are_primary_for_core_lenses() {
+        let text = "Aella met Kai. Rowan waited. Len watched. Mira stood.";
+        let mentions = vec![
+            packet(1, "Aella", 0, 5, 0),
+            packet(2, "Kai", 10, 13, 0),
+            packet(3, "Rowan", 15, 20, 1),
+            packet(4, "Len", 29, 32, 2),
+            packet(5, "Mira", 42, 46, 3),
+        ];
+        let hits = vec![
+            surface_hit("cue-rel", LensSurfaceHitKind::RelationCue, 6, 9, "approved"),
+            surface_hit("cue-event", LensSurfaceHitKind::EventCue, 21, 27, "arrival"),
+            surface_hit(
+                "cue-temporal",
+                LensSurfaceHitKind::TemporalCue,
+                33,
+                40,
+                "afterward",
+            ),
+            surface_hit(
+                "cue-causal",
+                LensSurfaceHitKind::CausalCue,
+                47,
+                52,
+                "because",
+            ),
+        ];
+        let base = base_chunks(text);
+        let input = LensChunkInput {
+            text,
+            base_chunks: &base,
+            mentions: &mentions,
+            ner_hints: &[],
+            mention_graph: &LensMentionGraph::default(),
+            surface_hits: &hits,
+        };
+
+        for (lens, cue_id) in [
+            (LensKind::Relationship, "cue-rel"),
+            (LensKind::Event, "cue-event"),
+            (LensKind::Temporal, "cue-temporal"),
+            (LensKind::Causal, "cue-causal"),
+        ] {
+            let config = LensChunkerConfig {
+                enabled_lenses: vec![lens],
+                relationship_context_sentences: 0,
+                event_context_sentences: 0,
+                temporal_context_sentences: 0,
+                causal_context_sentences: 0,
+                ..LensChunkerConfig::default()
+            };
+            let chunks = build_lens_chunks(&input, &config);
+            let chunk = chunks.iter().find(|chunk| chunk.lens == lens).unwrap();
+            assert!(chunk.cue_hit_ids.contains(&cue_id.to_owned()), "{lens:?}");
+            assert!(
+                chunk.surface_hit_ids.contains(&cue_id.to_owned()),
+                "{lens:?}"
+            );
+        }
+
+        assert!(!text.contains("approved"));
+        assert!(!text.contains("arrival"));
+        assert!(!text.contains("afterward"));
+        assert!(!text.contains("because"));
     }
 
     #[test]
@@ -1526,6 +1776,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &LensChunkerConfig::default());
         let event = chunks
@@ -1555,6 +1806,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let temporal = chunks
@@ -1581,6 +1833,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let temporal = chunks
@@ -1607,6 +1860,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         assert!(chunks
@@ -1632,6 +1886,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let causal = chunks
@@ -1658,6 +1913,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let causal = chunks
@@ -1684,6 +1940,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         assert!(chunks.iter().all(|chunk| chunk.lens != LensKind::Causal));
@@ -1704,6 +1961,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let attribute = chunks
@@ -1731,6 +1989,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let world = chunks
@@ -1758,6 +2017,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let chunks = build_lens_chunks(&input, &config);
         let evidence = chunks
@@ -1781,6 +2041,7 @@ mod tests {
             mentions: &mentions,
             ner_hints: &[],
             mention_graph: &LensMentionGraph::default(),
+            surface_hits: &[],
         };
         let left = build_lens_chunks(&input, &LensChunkerConfig::default());
         let right = build_lens_chunks(&input, &LensChunkerConfig::default());

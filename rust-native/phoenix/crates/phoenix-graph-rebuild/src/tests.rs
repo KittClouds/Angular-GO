@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
 
-use phoenix_types::{EntityId, EntityKind, LexiconEntry, ScopeKey};
+use phoenix_alex::{AlexSnapshotId, PatternId, SurfaceHit, SurfaceHitKind};
+use phoenix_chunker::{
+    LensChunk, LensKind, LensMentionEdge, LensMentionEdgeKind, LensMentionGraph,
+};
+use phoenix_types::{EntityId, EntityKind, LexiconEntry, ScopeKey, TextRange};
 use serde::Deserialize;
 
-use crate::{build_graph_rebuild_snapshot, GraphRebuildInput, GraphScopeKind};
+use crate::{
+    build_graph_rebuild_snapshot, compile_dual_write_snapshot, compile_graph_snapshot,
+    compile_legacy_snapshot_strict, EvidenceKind, FactLane, GraphAtomKind, GraphChunk,
+    GraphCompilerInput, GraphMention, GraphRebuildInput, GraphScopeKind,
+};
 
 const PARITY_FIXTURE: &str =
     include_str!("../../../../../src/app/graph-rebuild/fixtures/graph-rebuild-parity-smoke.json");
@@ -89,6 +97,202 @@ fn emits_memory_state_and_graph_fact_targets() {
         .embedding_targets
         .iter()
         .any(|target| target.kind == "memoryState"));
+}
+
+#[test]
+fn compiles_legacy_snapshot_into_fact_graph_with_receipts() {
+    let text =
+        "Kai approved the packet with Tempest because Nemo warned Kai. Tempest stood as Diamond.";
+    let entities = vec![
+        entry("e-kai", "Kai", &[]),
+        entry("e-tempest", "Tempest", &[]),
+        entry("e-nemo", "Nemo", &[]),
+    ];
+    let snapshot = build_graph_rebuild_snapshot(GraphRebuildInput {
+        scope_kind: GraphScopeKind::Note,
+        scope_id: "note:compiler",
+        note_id: "note-compiler",
+        text,
+        scope: ScopeKey::default(),
+        entities: &entities,
+        candidate_count: 3,
+        built_at: Some(33),
+    })
+    .expect("snapshot");
+
+    let compiled = compile_legacy_snapshot_strict(&snapshot).expect("compiled graph");
+
+    assert_eq!(compiled.schema_version, "phoenix-graph-compiler/v1");
+    assert_eq!(compiled.receipts.counters.invariant_failures, 0);
+    assert!(compiled
+        .atoms
+        .iter()
+        .any(|atom| atom.kind == GraphAtomKind::Entity && atom.source_id == "e-kai"));
+    assert!(compiled
+        .facts
+        .iter()
+        .any(|fact| fact.lane == FactLane::RelationshipFact));
+    assert!(compiled
+        .bundles
+        .iter()
+        .any(|bundle| bundle.lane == FactLane::CooccurrenceWeak));
+    assert!(compiled
+        .projected_edges
+        .iter()
+        .filter(|edge| edge.projection_kind == "legacyBinary")
+        .all(|edge| edge.source_fact_id.is_some() || edge.source_bundle_id.is_some()));
+    assert!(compiled
+        .receipts
+        .roots
+        .iter()
+        .any(|root| root.lane == FactLane::AnchorEvidence && root.evidence_anchors > 0));
+}
+
+#[test]
+fn dual_write_projects_legacy_ui_graph_from_fact_graph() {
+    let text = "Kai watched Hazel. Hazel answered Kai. Rift watched Kai.";
+    let entities = vec![
+        entry("e-kai", "Kai", &["Captain Kai"]),
+        entry("e-hazel", "Hazel", &[]),
+        entry("e-rift", "Rift", &[]),
+    ];
+    let snapshot = build_graph_rebuild_snapshot(GraphRebuildInput {
+        scope_kind: GraphScopeKind::Note,
+        scope_id: "note:dual",
+        note_id: "note-dual",
+        text,
+        scope: ScopeKey::default(),
+        entities: &entities,
+        candidate_count: 3,
+        built_at: Some(44),
+    })
+    .expect("snapshot");
+
+    let dual = compile_dual_write_snapshot(&snapshot);
+
+    assert_eq!(dual.legacy_snapshot.id, snapshot.id);
+    assert_eq!(dual.receipts, dual.fact_graph.receipts);
+    assert!(!dual.fact_graph.bundles.is_empty());
+    assert!(dual
+        .projected_ui_graph
+        .iter()
+        .any(|edge| edge.edge_type == "anchored-cooccurrence"));
+    assert!(dual
+        .projected_ui_graph
+        .iter()
+        .all(|edge| !edge.evidence_anchor_ids.is_empty()));
+}
+
+#[test]
+fn compiles_prepared_artifacts_without_legacy_rescan() {
+    let note_ids = vec!["note-prepared".into()];
+    let chunks = vec![GraphChunk {
+        id: "chunk-prepared-1".into(),
+        note_id: "note-prepared".into(),
+        start: 0,
+        end: 16,
+        ordinal: 0,
+        source: "prepared".into(),
+    }];
+    let mentions = vec![
+        GraphMention {
+            id: "1".into(),
+            note_id: "note-prepared".into(),
+            chunk_id: Some("chunk-prepared-1".into()),
+            surface: "Aella".into(),
+            source_start: 0,
+            source_end: 5,
+            source: "prepared-ner".into(),
+            confidence: 0.95,
+            entity_id: None,
+            status: "accepted".into(),
+        },
+        GraphMention {
+            id: "2".into(),
+            note_id: "note-prepared".into(),
+            chunk_id: Some("chunk-prepared-1".into()),
+            surface: "Kai".into(),
+            source_start: 10,
+            source_end: 13,
+            source: "prepared-ner".into(),
+            confidence: 0.94,
+            entity_id: None,
+            status: "accepted".into(),
+        },
+    ];
+    let surface_hits = vec![SurfaceHit {
+        snapshot_id: AlexSnapshotId(7),
+        pattern_id: PatternId(10_011),
+        kind: SurfaceHitKind::RelationCue,
+        source_range: TextRange { start: 6, end: 9 },
+        normalized_range: TextRange { start: 0, end: 8 },
+        surface: "met".into(),
+        normalized: "approved".into(),
+        confidence: 1.0,
+    }];
+    let mention_graph = LensMentionGraph {
+        edges: vec![LensMentionEdge {
+            left: 1,
+            right: 2,
+            kind: LensMentionEdgeKind::DependencyCoreArgument,
+            weight: 0.91,
+        }],
+    };
+    let lens_frames = vec![LensChunk {
+        id: "lens-relationship-prepared".into(),
+        lens: LensKind::Relationship,
+        start: 0,
+        end: 16,
+        base_chunk_start: 0,
+        base_chunk_end: 1,
+        sentence_start: 0,
+        sentence_end: 1,
+        mention_ids: vec![1, 2],
+        surfaces: vec!["aella".into(), "kai".into()],
+        trigger_terms: vec!["approved".into()],
+        surface_hit_ids: vec!["cue-rel".into()],
+        cue_hit_ids: vec!["cue-rel".into()],
+        source_hint_ids: Vec::new(),
+        content_hash: 42,
+    }];
+
+    let compiled = compile_graph_snapshot(GraphCompilerInput {
+        scope_kind: GraphScopeKind::Note,
+        scope_id: "note:prepared",
+        built_at: 99,
+        note_ids: &note_ids,
+        chunks: &chunks,
+        surface_hits: &surface_hits,
+        mentions: &mentions,
+        mention_graph: Some(&mention_graph),
+        lens_frames: &lens_frames,
+        entity_anchors: &[],
+        nodes: &[],
+        relationships: &[],
+        events: &[],
+        temporal_edges: &[],
+        causal_edges: &[],
+        memory_state: &[],
+        legacy_edges: &[],
+    });
+
+    assert_eq!(compiled.receipts.counters.invariant_failures, 0);
+    assert!(compiled
+        .evidence_anchors
+        .iter()
+        .any(|evidence| evidence.kind == EvidenceKind::CueHit));
+    assert!(compiled
+        .evidence_anchors
+        .iter()
+        .any(|evidence| evidence.kind == EvidenceKind::LensFrame));
+    assert!(compiled
+        .evidence_anchors
+        .iter()
+        .any(|evidence| evidence.kind == EvidenceKind::MentionGraphEdge));
+    assert!(compiled
+        .projected_edges
+        .iter()
+        .any(|edge| edge.projection_kind == "mentionGraph"));
 }
 
 #[test]

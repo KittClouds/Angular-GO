@@ -11,6 +11,7 @@ import {
 } from './graph-rebuild-embedding-signatures';
 import type { EntityOccurrence } from '../lib/dexie/db';
 import type { RegisteredEntity } from '../lib/registry';
+import type { GraphCompilerDualWriteSidecar } from './graph-compiler-read-model';
 
 describe('Phoenix graph rebuild builder', () => {
     it('resolves canonical Alex entities by label and alias', () => {
@@ -158,6 +159,54 @@ describe('Phoenix graph rebuild builder', () => {
             hubEntityIds: ['e-hazel', 'e-kai', 'e-rift'],
         });
         expect(snapshot.structuralPostProcess?.components).toHaveLength(1);
+    });
+
+    it('uses an injected Rust compiler sidecar as the graph model authority', () => {
+        const receipts = {
+            roots: [],
+            counters: { atoms: 2, evidenceAnchors: 1, bundles: 1, facts: 0, roles: 0, projectedEdges: 1, invariantFailures: 0 },
+            invariantFailures: [],
+        };
+        const graphCompilerSidecar = {
+            factGraph: {
+                schemaVersion: 'phoenix-graph-compiler/v1',
+                scopeKind: 'note',
+                scopeId: 'note:rust',
+                builtAt: 77,
+                atoms: [
+                    { id: 'atom:entity:kai', kind: 'entity', sourceId: 'kai', label: 'Kai', entityId: 'kai', evidenceIds: ['evidence:anchor:kai'] },
+                    { id: 'atom:entity:hazel', kind: 'entity', sourceId: 'hazel', label: 'Hazel', entityId: 'hazel', evidenceIds: ['evidence:anchor:hazel'] },
+                ],
+                evidenceAnchors: [{ id: 'evidence:anchor:kai', kind: 'sourceSpan', sourceId: 'kai:anchor', confidence: 0.9 }],
+                bundles: [{ id: 'bundle:rust:co', lane: 'cooccurrenceWeak', predicate: 'co_occurs_with', sourceRecordId: 'rust-co', status: 'review', evidenceIds: ['evidence:anchor:kai'], confidence: 0.8 }],
+                facts: [],
+                roles: [],
+                projectedEdges: [{ id: 'projection:rust:co', sourceId: 'atom:entity:kai', targetId: 'atom:entity:hazel', edgeType: 'co_occurs_with', projectionKind: 'legacyBinary', sourceBundleId: 'bundle:rust:co', confidence: 0.8 }],
+                receipts,
+            },
+            projectedUiGraph: [{ id: 'ui:rust:co', sourceId: 'kai', targetId: 'hazel', type: 'co_occurs_with', edgeType: 'co_occurs_with', weight: 800, confidence: 0.8, evidenceAnchorIds: ['bundle:rust:co'], scopeKeys: [], noteIds: [] }],
+            receipts,
+        } satisfies GraphCompilerDualWriteSidecar;
+
+        const snapshot = buildGraphRebuildSnapshot({
+            scopeKind: 'note',
+            scopeId: 'note:rust',
+            noteIds: ['note-1'],
+            entities: [entity('kai', 'Kai', []), entity('hazel', 'Hazel', [])],
+            chunks: [{ id: 'chunk-1', noteId: 'note-1', start: 0, end: 18, ordinal: 0, source: 'note-block' }],
+            occurrences: [occurrence('note-1', 'kai', 'Kai', 0, 3), occurrence('note-1', 'hazel', 'Hazel', 8, 13)],
+            graphCompilerSidecar,
+            builtAt: 77,
+        });
+
+        expect(snapshot.graphCompilerSource).toBe('rust');
+        expect(snapshot.graphCompiler).toBe(graphCompilerSidecar.factGraph);
+        expect(snapshot.projectedUiGraph).toBe(graphCompilerSidecar.projectedUiGraph);
+        expect(snapshot.graphModelV2?.facts).toHaveLength(0);
+        expect(snapshot.graphModelV2?.bundles).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'bundle:rust:co', family: 'cooccurrence' }),
+        ]));
+        expect(snapshot.graphModelV2?.projectionEdges[0]).toMatchObject({ sourceBundleId: 'bundle:rust:co' });
     });
 
     it('defers disabled embedding lanes without hiding their candidates', () => {

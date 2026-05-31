@@ -14,7 +14,7 @@ pub use lens::{
     build_graph_delta_for_lens, build_lens_chunks, ChunkLens, GraphBuildContext, GraphDelta,
     LensChunk, LensChunkConsumer, LensChunkHint, LensChunkHintKind, LensChunkHintSource,
     LensChunkInput, LensChunkerConfig, LensKind, LensMention, LensMentionEdge, LensMentionEdgeKind,
-    LensMentionGraph, LensMentionKind, LensVoteReason,
+    LensMentionGraph, LensMentionKind, LensSurfaceHit, LensSurfaceHitKind, LensVoteReason,
 };
 pub use normalize::{is_sentence_guard, normalize_raw};
 pub use sentence::split_sentence_ranges;

@@ -6,6 +6,7 @@
 
 mod adjudication;
 mod builder;
+mod compiler;
 mod embedding;
 mod facts;
 #[cfg(test)]
@@ -14,6 +15,14 @@ mod types;
 
 pub use builder::{
     build_graph_rebuild_snapshot, GraphRebuildBuilder, GraphRebuildError, GraphRebuildInput,
+};
+pub use compiler::{
+    assert_graph_compile_invariants, compile_dual_write_snapshot, compile_graph_snapshot,
+    compile_legacy_snapshot, compile_legacy_snapshot_strict, project_ui_edges,
+    verify_graph_compile_output, EvidenceAnchor, EvidenceKind, FactBundle, FactLane, FactRole,
+    GraphAtom, GraphAtomKind, GraphCompileCounters, GraphCompileReceipts, GraphCompilerDualWrite,
+    GraphCompilerError, GraphCompilerInput, GraphCompilerOutput, GraphRootReceipt,
+    ProjectedGraphEdge, RelationFact,
 };
 pub use types::{
     GraphAnchor, GraphChunk, GraphCounters, GraphDropReasons, GraphEdge, GraphEmbeddingTarget,

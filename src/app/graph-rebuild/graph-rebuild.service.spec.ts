@@ -236,7 +236,9 @@ describe('GraphRebuildService persistence helpers', () => {
         expect(document?.namespace).toBe(GRAPH_REBUILD_NAMESPACE);
         expect(document?.documentKey).toBe(GRAPH_MODEL_V2_OVERGRAPH_DOCUMENT_KEY);
         expect(roundtripped?.schemaVersion).toBe('phoenix-graph-model-v2-overgraph/v1');
-        const expectedVertices = (snapshot.graphModelV2?.counters.atoms || 0) + (snapshot.graphModelV2?.counters.facts || 0);
+        const expectedVertices = (snapshot.graphModelV2?.counters.atoms || 0)
+            + (snapshot.graphModelV2?.counters.bundles || 0)
+            + (snapshot.graphModelV2?.counters.facts || 0);
         expect(roundtripped?.graphBatch.vertices.length).toBe(expectedVertices);
         expect(roundtripped?.graphBatch.edges.some((edge) => edge.edgeType === 'role:source')).toBe(true);
     });

@@ -174,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sentences: &sentences,
         scope: &ScopeKey::default(),
         lexicon: None, // No known lexicon for this simple test
+        surface_hits: &[],
     };
 
     println!("Running NER pipeline...");
@@ -188,7 +189,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[],
         0,
     );
-    let needs = router.build_need_vectors(input.text, input.sentences, &[], &native);
+    let needs = router.build_need_vectors(
+        input.text,
+        input.sentences,
+        &[],
+        &native,
+        input.surface_hits,
+    );
     for (i, need) in needs.iter().enumerate() {
         println!("Sentence {}: {:?}", i, need);
     }

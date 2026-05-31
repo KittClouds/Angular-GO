@@ -42,11 +42,12 @@ describe('graph model v2 OverGraph export', () => {
         expect(exported.graphBatch.vertices.find((vertex) => vertex.id === 'atom:entity:kai')?.attributes).toMatchObject({
             graphModelV2: {
                 targetType: 'atom',
-                styleTags: { entityFamily: ['CHARACTER'] },
+                styleTags: { structuralKind: ['entity'] },
             },
         });
         expect(exported.summary).toMatchObject({
             atomVertices: snapshot.graphModelV2?.atoms.length,
+            bundleVertices: snapshot.graphModelV2?.bundles.length,
             factVertices: snapshot.graphModelV2?.facts.length,
             roleEdges: snapshot.graphModelV2?.roles.length,
             droppedProjectionEdges: expect.any(Number),
@@ -66,6 +67,8 @@ describe('graph model v2 OverGraph export', () => {
         });
 
         const exported = buildGraphModelV2OverGraphExport(snapshot);
+        expect(snapshot.graphModelV2?.facts.filter((fact) => fact.family === 'cooccurrence')).toHaveLength(0);
+        expect(snapshot.graphModelV2?.bundles.filter((bundle) => bundle.family === 'cooccurrence').length).toBeGreaterThan(0);
         const cooccurrenceEdges = exported.graphBatch.edges.filter((edge) =>
             edge.attributes.graphModelV2
             && (edge.attributes.graphModelV2 as { factFamily?: string }).factFamily === 'cooccurrence'

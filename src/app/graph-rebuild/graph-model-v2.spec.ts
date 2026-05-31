@@ -32,6 +32,9 @@ describe('graph model v2 foundation', () => {
 
         expect(model?.schemaVersion).toBe('phoenix-graph-model/v2');
         expect(model?.sourceSnapshotId).toBe(snapshot.id);
+        expect(snapshot.graphCompilerSource).toBe('typescriptCompatibility');
+        expect(snapshot.graphCompiler?.schemaVersion).toBe('phoenix-graph-compiler/v1');
+        expect(snapshot.graphCompileReceipts?.counters.bundles).toBeGreaterThan(0);
         expect(model?.atoms.some((atom) => String(atom.kind) === 'cooccurrence')).toBe(false);
         expect(model?.atoms.some((atom) => String(atom.kind) === 'relationship')).toBe(false);
         expect(model?.laneRoots.map((lane) => lane.lane)).toEqual(expect.arrayContaining([
@@ -44,9 +47,12 @@ describe('graph model v2 foundation', () => {
         ]));
 
         const cooccurrenceFacts = model?.facts.filter((fact) => fact.family === 'cooccurrence') || [];
-        expect(cooccurrenceFacts).toHaveLength(3);
-        expect(cooccurrenceFacts.every((fact) => fact.lane === 'cooccurrence_weak')).toBe(true);
-        expect(cooccurrenceFacts.every((fact) => fact.status === 'review')).toBe(true);
+        const cooccurrenceBundles = model?.bundles.filter((bundle) => bundle.family === 'cooccurrence') || [];
+        expect(cooccurrenceFacts).toHaveLength(0);
+        expect(cooccurrenceBundles).toHaveLength(3);
+        expect(cooccurrenceBundles.every((bundle) => bundle.lane === 'cooccurrence_weak')).toBe(true);
+        expect(cooccurrenceBundles.every((bundle) => bundle.status === 'review')).toBe(true);
+        expect(model?.counters.stagedCooccurrenceBundles).toBe(3);
 
         const approvedFact = model?.facts.find((fact) => fact.family === 'approval');
         expect(approvedFact).toMatchObject({
@@ -56,7 +62,8 @@ describe('graph model v2 foundation', () => {
         });
         expect(model?.styleTags).toEqual(expect.arrayContaining([
             expect.objectContaining({ targetId: approvedFact?.id, targetType: 'fact', tagKind: 'relationFamily', value: 'approval' }),
-            expect.objectContaining({ targetId: 'atom:entity:e-kai', targetType: 'atom', tagKind: 'entityFamily', value: 'CHARACTER' }),
+            expect.objectContaining({ targetId: cooccurrenceBundles[0]?.id, targetType: 'bundle', tagKind: 'relationFamily', value: 'cooccurrence' }),
+            expect.objectContaining({ targetId: 'atom:entity:e-kai', targetType: 'atom', tagKind: 'structuralKind', value: 'entity' }),
         ]));
     });
 

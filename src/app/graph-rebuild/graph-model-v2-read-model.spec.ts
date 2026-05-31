@@ -32,18 +32,23 @@ describe('graph model v2 read model', () => {
 
         const readModel = createGraphModelV2ReadModel(model!);
         const transfer = readModel.getFactsByFamily('transfer')[0];
+        const cooccurrenceBundle = readModel.getBundlesByFamily('cooccurrence')[0];
         expect(readModel.getAtomsByKind('entity').map((atom) => atom.sourceId)).toEqual(expect.arrayContaining(['kai', 'hazel']));
+        expect(readModel.getBundle(cooccurrenceBundle.id)).toBe(cooccurrenceBundle);
         expect(readModel.getFact(transfer.id)).toBe(transfer);
         expect(readModel.getRolesForFact(transfer.id).map((role) => role.role)).toEqual(expect.arrayContaining(['source', 'target', 'evidence']));
         expect(readModel.getStyleTagsForTarget(transfer.id, 'relationFamily')).toEqual(expect.arrayContaining([
             expect.objectContaining({ value: 'transfer' }),
         ]));
         expect(readModel.getProjectionEdgesForTarget(transfer.id).map((edge) => edge.projectionKind)).toContain('factRole');
+        expect(readModel.getProjectionEdgesForTarget(cooccurrenceBundle.id).some((edge) => edge.sourceBundleId === cooccurrenceBundle.id)).toBe(true);
 
         expect(readModel.debugSummary()).toMatchObject({
             atomsByKind: expect.objectContaining({ entity: expect.any(Number) }),
+            bundlesByFamily: expect.objectContaining({ cooccurrence: expect.any(Number) }),
             factsByFamily: expect.objectContaining({ transfer: expect.any(Number) }),
             hyperedgeFacts: expect.any(Number),
+            stagedCooccurrenceBundles: expect.any(Number),
             projectionEdges: expect.any(Number),
             styleTags: expect.any(Number),
         });
