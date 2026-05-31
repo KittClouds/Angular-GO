@@ -60,6 +60,7 @@ import type {
 } from '../../services/atlas-capability-runtime.model';
 import {
   EMBEDDING_MODELS,
+  DEFAULT_SEARCH_MODEL_ID,
   RETRIEVAL_LANE_OPTIONS,
   TRUNCATE_DIMS,
   buildSearchSnippet,
@@ -215,7 +216,7 @@ export class SearchPanelComponent implements OnInit {
   readonly nerStatus = this.nerService.providerStatuses;
   readonly isDynamicScanning = computed(() => this.nerService.isAnalyzing() || this.atlasScan.running());
 
-  readonly selectedModel = signal<ModelId>('mongodb-leaf');
+  readonly selectedModel = signal<ModelId>(DEFAULT_SEARCH_MODEL_ID);
   readonly truncateDim = signal<TruncateDim>('full');
   readonly selectedRecipe = signal<AtlasRecipeId>('textGraph');
   readonly selectedCapabilityId = signal<AtlasCapabilityId>('assertedKernel');

@@ -1,6 +1,11 @@
 import type { GraphAuditSnapshot } from '../../services/graph-audit.model';
 import type { RetrievalLane } from '../../services/retrieval-workbench-state.service';
 import {
+    DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL,
+    DEFAULT_GRAPH_EMBEDDING_MODEL_ID,
+    DEFAULT_GRAPH_EMBEDDING_MODEL_LABEL,
+} from '../../lib/embeddings/models/ModelRegistry';
+import {
     ATLAS_CAPABILITY_REGISTRY,
     type AtlasCapabilityCost,
     type AtlasGraphTargetId,
@@ -13,6 +18,9 @@ export type VectorStatus = 'idle' | 'loading' | 'ready' | 'indexing' | 'error';
 export type GraphIndexStatus = 'idle' | 'building' | 'ready' | 'searching' | 'error';
 export type ModelId = 'mongodb-leaf' | 'bge-small-en' | 'jina-v5-nano-retrieval';
 export type TruncateDim = 'full' | '256' | '128' | '64';
+export const DEFAULT_SEARCH_MODEL_ID = DEFAULT_GRAPH_EMBEDDING_MODEL_ID as ModelId;
+export const DEFAULT_SEARCH_MODEL_LABEL = DEFAULT_GRAPH_EMBEDDING_MODEL_LABEL;
+export const DEFAULT_SEARCH_DIMENSION_LABEL = DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL;
 
 export interface AtlasGraphTarget {
     id: AtlasGraphTargetId;
@@ -75,9 +83,9 @@ export const RETRIEVAL_LANE_OPTIONS: Array<{ id: RetrievalLane; label: string; i
 ];
 
 export const EMBEDDING_MODELS: Array<{ id: ModelId; label: string; dims: number; desc: string }> = [
+    { id: 'jina-v5-nano-retrieval', label: 'Jina v5 Nano', dims: 768, desc: 'Primary graph compiler semantic runner target.' },
     { id: 'mongodb-leaf', label: 'MDBR Leaf', dims: 384, desc: 'Native Rust semantic runner target.' },
     { id: 'bge-small-en', label: 'BGE-small', dims: 384, desc: 'Native Rust semantic runner target.' },
-    { id: 'jina-v5-nano-retrieval', label: 'Jina v5 Nano', dims: 768, desc: 'Retrieval-tuned Rust runner target.' },
 ];
 
 export const TRUNCATE_DIMS: TruncateDim[] = ['full', '256', '128', '64'];

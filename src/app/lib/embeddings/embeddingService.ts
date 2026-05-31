@@ -2,6 +2,7 @@
 // High-level embedding service for notes
 
 import { EmbeddingEngine } from './EmbeddingEngine';
+import { DEFAULT_GRAPH_EMBEDDING_MODEL_ID } from './models/ModelRegistry';
 // Import Note type from local dexie DB definition
 import { Note } from '../dexie/db';
 
@@ -13,7 +14,7 @@ export interface EmbeddingConfig {
 }
 
 export const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfig = {
-    defaultModel: 'mongodb-leaf',
+    defaultModel: DEFAULT_GRAPH_EMBEDDING_MODEL_ID,
     maxBatchSize: 32,
 };
 

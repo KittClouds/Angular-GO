@@ -64,7 +64,12 @@ describe('embedding model adapter boundary', () => {
             'topology',
             'classification',
         ]);
-        expect(jina.vectorHeads.map((head) => head.id)).toEqual(['document', 'query', 'topology']);
+        expect(jina.vectorHeads.map((head) => head.id)).toEqual([
+            'document',
+            'query',
+            'topology',
+            'classification',
+        ]);
     });
 
     it('preserves explicit custom vector heads', () => {

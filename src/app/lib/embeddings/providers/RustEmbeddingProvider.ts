@@ -84,14 +84,14 @@ export class RustEmbeddingProvider implements IEmbeddingProvider {
             case 'jina-v5-nano-retrieval':
                 return {
                     id: 'jina-v5-nano-retrieval',
-                    name: 'Jina Embeddings v5 Nano Retrieval (768d)',
+                    name: 'Jina Embeddings v5 Nano (768d)',
                     provider: 'rust',
                     dimensions: 768,
-                    maxTokens: 1024,
+                    maxTokens: 8192,
                     speed: 'fast',
                     quality: 'high',
                     costPer1kTokens: 0,
-                    description: 'Jina v5 retrieval embeddings through the native Rust runner.',
+                    description: 'Jina v5 Nano embeddings through the native Rust runner.',
                 };
             default:
                 return {

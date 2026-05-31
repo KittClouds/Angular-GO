@@ -1,6 +1,10 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 
 import { db } from '../lib/dexie/db';
+import {
+    DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL,
+    DEFAULT_GRAPH_EMBEDDING_MODEL_ID,
+} from '../lib/embeddings/models/ModelRegistry';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import { parseContentToPlainText } from '../lib/analytics';
 import { NerService } from './ner.service';
@@ -99,8 +103,8 @@ export class AtlasScanCoordinatorService {
                 scanId,
                 scope,
                 policy: options.policy || 'dirty-only',
-                embeddingModelId: options.modelId || 'mongodb-leaf',
-                embeddingDimension: Number.parseInt(options.dimensionLabel || '', 10) || undefined,
+                embeddingModelId: options.modelId || DEFAULT_GRAPH_EMBEDDING_MODEL_ID,
+                embeddingDimension: Number.parseInt(options.dimensionLabel || DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL, 10) || undefined,
                 returnCandidateSuggestions: true,
                 includeSemanticAtlas,
                 documents: documents.map((note) => ({

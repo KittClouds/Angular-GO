@@ -3,6 +3,10 @@
 
 export type EmbeddingProvider = 'rust';
 
+export const DEFAULT_GRAPH_EMBEDDING_MODEL_ID = 'jina-v5-nano-retrieval';
+export const DEFAULT_GRAPH_EMBEDDING_MODEL_LABEL = 'Jina v5 Nano';
+export const DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL = '768d';
+
 export interface EmbeddingModelDefinition {
     id: string;
     name: string;
@@ -53,10 +57,10 @@ export class EmbeddingModelRegistry {
             'jina-v5-nano-retrieval',
             {
                 id: 'jina-v5-nano-retrieval',
-                name: 'Jina Embeddings v5 Nano Retrieval (768d)',
+                name: 'Jina Embeddings v5 Nano (768d)',
                 provider: 'rust',
                 dimensions: 768,
-                maxTokens: 1024,
+                maxTokens: 8192,
                 speed: 'fast',
                 quality: 'high',
                 costPer1kTokens: 0,
@@ -65,7 +69,7 @@ export class EmbeddingModelRegistry {
                     quantization: 'fp16',
                     memoryMB: 220,
                 },
-                description: 'Jina v5 retrieval-tuned embeddings through the native Rust ONNX runner.',
+                description: 'Jina v5 Nano embeddings through the native Rust ONNX runner for retrieval, classification, and graph topology.',
             },
         ],
         [
@@ -137,13 +141,13 @@ export class EmbeddingModelRegistry {
     static getRecommended(preference: 'speed' | 'quality' | 'privacy'): string {
         switch (preference) {
             case 'speed':
-                return 'mongodb-leaf';
+                return DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
             case 'quality':
-                return 'mongodb-leaf';
+                return DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
             case 'privacy':
-                return 'mongodb-leaf';
+                return DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
             default:
-                return 'mongodb-leaf';
+                return DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
         }
     }
 }

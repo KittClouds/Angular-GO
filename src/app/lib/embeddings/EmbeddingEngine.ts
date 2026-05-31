@@ -2,7 +2,7 @@
 // Unified Embedding Engine - orchestrates providers
 
 import type { IEmbeddingProvider } from './providers/types';
-import { EmbeddingModelRegistry } from './models/ModelRegistry';
+import { DEFAULT_GRAPH_EMBEDDING_MODEL_ID, EmbeddingModelRegistry } from './models/ModelRegistry';
 
 /**
  * Unified Embedding Engine
@@ -17,8 +17,8 @@ export class EmbeddingEngine {
      * Initialize embedding engine with configured model
      */
     static async initialize(modelId?: string): Promise<void> {
-        // Default to the native semantic runner target.
-        const targetModelId = modelId || 'mongodb-leaf';
+        // Default to the graph compiler semantic runner target.
+        const targetModelId = modelId || DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
 
         // Check if already initialized with this model
         if (this.currentProvider?.getModelInfo().id === targetModelId) {

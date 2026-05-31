@@ -2,6 +2,11 @@ import { Injectable, inject, signal } from '@angular/core';
 
 import { parseContentToPlainText } from '../lib/analytics';
 import { db } from '../lib/dexie/db';
+import {
+    DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL,
+    DEFAULT_GRAPH_EMBEDDING_MODEL_ID,
+    DEFAULT_GRAPH_EMBEDDING_MODEL_LABEL,
+} from '../lib/embeddings/models/ModelRegistry';
 import { NoteEditorStore } from '../lib/store/note-editor.store';
 import type { EntitySuggestionScanRequest } from '../lib/entity-suggestions/entity-suggestion.types';
 import {
@@ -1321,15 +1326,15 @@ export class AtlasCapabilityRuntimeService {
     }
 
     private embeddingModelId(options: AtlasRunOptions): PhoenixMachineModelId {
-        return options.selectedModel || 'mongodb-leaf';
+        return options.selectedModel || (DEFAULT_GRAPH_EMBEDDING_MODEL_ID as PhoenixMachineModelId);
     }
 
     private embeddingModelLabel(options: AtlasRunOptions): string {
-        return options.selectedModelLabel || this.embeddingModelId(options);
+        return options.selectedModelLabel || (options.selectedModel ? this.embeddingModelId(options) : DEFAULT_GRAPH_EMBEDDING_MODEL_LABEL);
     }
 
     private embeddingDimensionLabel(options: AtlasRunOptions): string {
-        return options.dimensionLabel || '384d';
+        return options.dimensionLabel || DEFAULT_GRAPH_EMBEDDING_DIMENSION_LABEL;
     }
 
     private searchScope(options: AtlasRunOptions): SearchScope | undefined {

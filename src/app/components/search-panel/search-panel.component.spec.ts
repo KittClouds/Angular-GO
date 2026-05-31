@@ -93,10 +93,16 @@ describe('SearchPanelComponent model recipe lifecycle', () => {
         expect(ner.runDynamicScan).toHaveBeenCalledWith(expect.objectContaining({
             plainText: expect.stringContaining('Aella'),
         }));
-        expect(machine.loadSemanticModel).toHaveBeenCalledWith('mongodb-leaf', 'MDBR Leaf', '384d');
+        expect(machine.loadSemanticModel).toHaveBeenCalledWith(
+            'jina-v5-nano-retrieval',
+            'Jina v5 Nano',
+            '768d',
+        );
         expect(atlasScan.runRichEmbeddingScan).toHaveBeenCalledWith(expect.objectContaining({
             includeSemanticAtlas: true,
-            modelId: 'mongodb-leaf',
+            modelId: 'jina-v5-nano-retrieval',
+            modelLabel: 'Jina v5 Nano',
+            dimensionLabel: '768d',
         }));
         expect(machine.loadSemanticModel.mock.invocationCallOrder[0])
             .toBeLessThan(atlasScan.runRichEmbeddingScan.mock.invocationCallOrder[0]);

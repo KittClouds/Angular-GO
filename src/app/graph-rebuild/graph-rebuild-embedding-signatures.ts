@@ -7,6 +7,7 @@ import type {
     GraphRebuildEmbeddingTopologySupport,
     GraphRebuildEmbeddingVectorHead,
 } from './graph-rebuild-snapshot';
+import { DEFAULT_GRAPH_EMBEDDING_MODEL_ID } from '../lib/embeddings/models/ModelRegistry';
 
 export interface SparseEmbeddingSignature {
     indexes: Uint32Array;
@@ -67,7 +68,7 @@ interface EmbeddingAdapterConfig extends Partial<GraphRebuildEmbeddingProfile> {
 }
 
 function embeddingModelAdapterFromConfig(config: EmbeddingAdapterConfig): GraphRebuildEmbeddingModelAdapter {
-    const modelId = config.modelId || 'mongodb-leaf';
+    const modelId = config.modelId || DEFAULT_GRAPH_EMBEDDING_MODEL_ID;
     const modelLabel = config.modelLabel || modelId;
     const family = config.modelFamily || modelFamily(modelId, modelLabel);
     const nativeDimensions = positiveInt(config.nativeDimensions)
@@ -179,7 +180,7 @@ function dimensionsFromLabel(label: string | undefined): number {
 
 function defaultNativeDimensions(modelId: string, modelLabel = ''): number {
     const text = `${modelId} ${modelLabel}`;
-    if (/jina.*v5/i.test(text)) return 786;
+    if (/jina.*v5/i.test(text)) return 768;
     if (/(mdbr|mongodb.*leaf|leaf).*mt|mt.*(mdbr|leaf)/i.test(text)) return 768;
     return 384;
 }
@@ -259,6 +260,7 @@ function defaultVectorHeads(
             vectorHead('document', 'document', dimensions, normalized, true, 'document and graph topology vectors'),
             vectorHead('query', 'query', dimensions, normalized, false, 'query-side retrieval vectors'),
             vectorHead('topology', 'topology', dimensions, normalized, false, 'product manifold topology vectors'),
+            vectorHead('classification', 'classification', dimensions, normalized, false, 'lane and evidence-bundle classification vectors'),
         ];
     }
     return [
