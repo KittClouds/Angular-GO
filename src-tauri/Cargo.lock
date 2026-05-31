@@ -3591,11 +3591,28 @@ name = "phoenix-alex"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "compact_str 0.8.1",
  "daachorse",
  "fst",
  "js-sys",
  "memchr",
- "phoenix-types",
+ "phoenix-types 0.1.0",
+ "serde",
+ "stop-words",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "phoenix-alex"
+version = "0.1.1"
+dependencies = [
+ "bincode",
+ "compact_str 0.8.1",
+ "daachorse",
+ "fst",
+ "js-sys",
+ "phoenix-chunker 0.1.1",
+ "phoenix-types 0.1.1",
  "serde",
  "stop-words",
  "thiserror 1.0.69",
@@ -3606,7 +3623,7 @@ name = "phoenix-analytics"
 version = "0.1.0"
 dependencies = [
  "memchr",
- "phoenix-alex",
+ "phoenix-alex 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -3620,8 +3637,8 @@ dependencies = [
  "aho-corasick",
  "compact_str 0.8.1",
  "fst",
- "phoenix-alex",
- "phoenix-types",
+ "phoenix-alex 0.1.0",
+ "phoenix-types 0.1.0",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -3635,7 +3652,7 @@ dependencies = [
  "phoenix-machine",
  "phoenix-semantics",
  "phoenix-time",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "smallvec",
 ]
@@ -3650,7 +3667,7 @@ dependencies = [
  "phoenix-om",
  "phoenix-store-native",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
 ]
@@ -3667,14 +3684,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-chunker"
+version = "0.1.1"
+dependencies = [
+ "memchr",
+ "phoenix-types 0.1.1",
+ "rustc-hash 1.1.0",
+ "scirs2-text",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "wasm-bindgen",
+ "wee_alloc",
+]
+
+[[package]]
 name = "phoenix-dynamic-ner"
 version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
  "daachorse",
  "memchr",
- "phoenix-alex",
- "phoenix-types",
+ "phoenix-alex 0.1.0",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "smallvec",
@@ -3685,7 +3717,7 @@ dependencies = [
 name = "phoenix-graph"
 version = "0.1.0"
 dependencies = [
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -3697,10 +3729,26 @@ name = "phoenix-graph-kernel"
 version = "0.1.0"
 dependencies = [
  "phoenix-graph",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "phoenix-graph-rebuild"
+version = "0.1.1"
+dependencies = [
+ "compact_str 0.8.1",
+ "hashbrown 0.15.5",
+ "memchr",
+ "phoenix-alex 0.1.1",
+ "phoenix-chunker 0.1.1",
+ "phoenix-types 0.1.1",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3721,9 +3769,9 @@ name = "phoenix-index"
 version = "0.1.0"
 dependencies = [
  "fst",
- "phoenix-alex",
+ "phoenix-alex 0.1.0",
  "phoenix-qgram",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
 ]
 
@@ -3734,12 +3782,12 @@ dependencies = [
  "daachorse",
  "lz4_flex",
  "memchr",
- "phoenix-chunker",
+ "phoenix-chunker 0.1.0",
  "phoenix-graph",
  "phoenix-kernel",
  "phoenix-semantic-v2",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rayon",
  "rmp-serde",
  "rustc-hash 1.1.0",
@@ -3756,13 +3804,13 @@ version = "0.1.0"
 dependencies = [
  "lz4_flex",
  "memchr",
- "phoenix-chunker",
+ "phoenix-chunker 0.1.0",
  "phoenix-graph",
  "phoenix-graph-kernel",
  "phoenix-semantic-v2",
  "phoenix-store-native",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rayon",
  "rmp-serde",
  "rustc-hash 1.1.0",
@@ -3785,10 +3833,10 @@ dependencies = [
 name = "phoenix-lex"
 version = "0.1.0"
 dependencies = [
- "phoenix-alex",
+ "phoenix-alex 0.1.0",
  "phoenix-qgram",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde_json",
 ]
@@ -3799,7 +3847,7 @@ version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
  "memchr",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "scirs2-text",
  "serde",
@@ -3812,7 +3860,7 @@ version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-machine",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
 ]
 
@@ -3824,7 +3872,7 @@ dependencies = [
  "phoenix-graph",
  "phoenix-runtime",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3839,7 +3887,7 @@ dependencies = [
  "phoenix-store-native",
  "phoenix-store-native-core",
  "phoenix-structure",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3852,7 +3900,7 @@ version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-machine",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
 ]
 
@@ -3861,8 +3909,8 @@ name = "phoenix-qgram"
 version = "0.1.0"
 dependencies = [
  "daachorse",
- "phoenix-alex",
- "phoenix-types",
+ "phoenix-alex 0.1.0",
+ "phoenix-types 0.1.0",
  "roaring",
  "rustc-hash 1.1.0",
  "serde",
@@ -3877,7 +3925,7 @@ dependencies = [
  "compact_str 0.8.1",
  "phoenix-index",
  "phoenix-kernel",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
 ]
 
@@ -3899,10 +3947,10 @@ version = "0.1.0"
 dependencies = [
  "js-sys",
  "overgraph",
- "phoenix-alex",
+ "phoenix-alex 0.1.0",
  "phoenix-analytics",
  "phoenix-chat",
- "phoenix-chunker",
+ "phoenix-chunker 0.1.0",
  "phoenix-dynamic-ner",
  "phoenix-graph",
  "phoenix-hyperbolic",
@@ -3919,7 +3967,7 @@ dependencies = [
  "phoenix-store-overgraph",
  "phoenix-structure",
  "phoenix-triverse-v2",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -3941,7 +3989,7 @@ dependencies = [
  "phoenix-semantics",
  "phoenix-store-native-core",
  "phoenix-time",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -3952,8 +4000,8 @@ name = "phoenix-scanner"
 version = "0.1.0"
 dependencies = [
  "fst",
- "phoenix-alex",
- "phoenix-types",
+ "phoenix-alex 0.1.0",
+ "phoenix-types 0.1.0",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -3963,7 +4011,7 @@ name = "phoenix-semantic-v2"
 version = "0.1.0"
 dependencies = [
  "phoenix-graph-kernel",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "zerocopy 0.7.35",
 ]
@@ -3973,7 +4021,7 @@ name = "phoenix-semantics"
 version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rustc-hash 1.1.0",
  "serde",
 ]
@@ -3986,7 +4034,7 @@ dependencies = [
  "phoenix-graph-kernel",
  "phoenix-semantic-v2",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
 ]
@@ -3998,7 +4046,7 @@ dependencies = [
  "phoenix-graph",
  "phoenix-graph-kernel",
  "phoenix-semantic-v2",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -4018,7 +4066,7 @@ dependencies = [
 name = "phoenix-structure"
 version = "0.1.0"
 dependencies = [
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -4032,9 +4080,10 @@ dependencies = [
  "hound",
  "ort",
  "ort-sys",
+ "phoenix-graph-rebuild",
  "phoenix-hyperbolic",
  "phoenix-native",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
  "serde_json",
  "specta",
@@ -4050,7 +4099,7 @@ name = "phoenix-time"
 version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "serde",
 ]
 
@@ -4065,7 +4114,7 @@ dependencies = [
  "phoenix-semantic-v2",
  "phoenix-store-native",
  "phoenix-store-native-core",
- "phoenix-types",
+ "phoenix-types 0.1.0",
  "rmp-serde",
  "rustc-hash 1.1.0",
  "serde",
@@ -4074,6 +4123,19 @@ dependencies = [
 [[package]]
 name = "phoenix-types"
 version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "rowan",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "zerocopy 0.7.35",
+]
+
+[[package]]
+name = "phoenix-types"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "rowan",

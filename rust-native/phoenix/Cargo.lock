@@ -2488,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-alex"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "compact_str 0.8.1",
@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-analytics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "memchr",
  "phoenix-alex",
@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-alex",
  "phoenix-causal-post",
@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-automata"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aho-corasick",
  "compact_str 0.8.1",
@@ -2557,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-causal-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-scope-analysis",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-causality"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-automata",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-chat"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "js-sys",
@@ -2601,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-chunker"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "memchr",
  "phoenix-types",
@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-dynamic-ner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "criterion",
@@ -2635,7 +2635,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-embed"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ort",
  "thiserror 1.0.69",
@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-er-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-embed",
@@ -2662,7 +2662,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-event-identity-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-scope-analysis",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-evidence-graph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "memchr",
@@ -2694,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-graph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-types",
  "rustc-hash 1.1.0",
@@ -2705,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-graph-kernel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hashbrown 0.15.5",
  "phoenix-graph",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-graph-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bm25_turbo",
  "hashbrown 0.15.5",
@@ -2742,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-graph-rebuild"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "hashbrown 0.15.5",
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-hyperbolic"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-ingest-overgraph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "daachorse",
  "gline-rs",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-kernel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "phoenix-graph",
@@ -2816,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-machine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-chunker",
@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-memory-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-scope-analysis",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-mentions"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-machine",
@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-numerology"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "itoa",
  "memchr",
@@ -2869,7 +2869,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-om"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "openrouter-rs",
  "phoenix-store-native-core",
@@ -2883,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-proposition"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-machine",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-rel-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gline-rs",
  "half",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-scope-analysis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hashbrown 0.15.5",
  "phoenix-semantic-v2",
@@ -2931,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-semantic-v2"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-graph-kernel",
  "phoenix-types",
@@ -2941,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-state-schema-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-scope-analysis",
@@ -2957,7 +2957,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-store-native-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-graph",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-store-overgraph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "bm25_turbo",
@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-structure"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-machine",
  "phoenix-types",
@@ -2999,7 +2999,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-temporal-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phoenix-chunker",
  "phoenix-scope-analysis",
@@ -3015,7 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-text"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bstr",
  "compact_str 0.8.1",
@@ -3027,7 +3027,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-time"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "phoenix-types",
@@ -3036,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "phoenix-types"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str 0.8.1",
  "rowan",

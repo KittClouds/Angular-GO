@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub enum GraphScopeKind {
     Global,
+    Folder,
     Narrative,
     Note,
     MultiNote,
@@ -71,6 +72,7 @@ pub struct GraphEdge {
     pub id: CompactString,
     pub source_id: EntityId,
     pub target_id: EntityId,
+    #[serde(alias = "type")]
     pub edge_type: CompactString,
     pub weight: u32,
     pub confidence: f32,

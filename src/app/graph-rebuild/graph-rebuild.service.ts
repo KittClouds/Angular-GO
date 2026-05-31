@@ -9,7 +9,9 @@ import {
 } from '../lib/dexie/db';
 import { parseContentToPlainText } from '../lib/analytics';
 import type { RegisteredEntity } from '../lib/registry';
+import { PhoenixBackendService } from '../services/phoenix-backend.service';
 import { PhoenixStoreService, type StoreScopedDocument } from '../services/phoenix-store.service';
+import { attachGraphCompilerReadModels } from './graph-compiler-read-model';
 import { buildGraphRebuildSnapshot } from './graph-rebuild-builder';
 import { buildAdaptiveGraphRebuildChunks } from './graph-rebuild-meaning-frames';
 import {
@@ -28,6 +30,7 @@ import type {
     GraphRebuildScopeKind,
     GraphRebuildSnapshot,
 } from './graph-rebuild-snapshot';
+import type { GraphCompilerDualWriteSidecar } from './graph-compiler-read-model';
 
 export const GRAPH_REBUILD_NAMESPACE = 'phoenix_graph_rebuild_v1';
 const SNAPSHOT_DOCUMENT_KEY = 'snapshot';
@@ -62,6 +65,7 @@ export interface GraphRebuildBuildRequest {
 @Injectable({ providedIn: 'root' })
 export class GraphRebuildService {
     private readonly store = inject(PhoenixStoreService);
+    private readonly phoenix = inject(PhoenixBackendService);
     private readonly snapshotState = signal<GraphRebuildSnapshot | null>(null);
     private readonly buildingState = signal(false);
     private readonly errorState = signal<string | null>(null);
@@ -110,6 +114,7 @@ export class GraphRebuildService {
                 embeddingStagePolicy: request.embeddingStagePolicy,
                 candidateCount: request.candidateCount,
             }));
+            await this.attachNativeGraphCompilerSidecar(snapshot);
             finalizeBuildTimings(timings, totalStarted);
             snapshot.buildTimings = timings;
             const stateStarted = performance.now();
@@ -131,6 +136,16 @@ export class GraphRebuildService {
             return snapshot;
         } finally {
             this.buildingState.set(false);
+        }
+    }
+
+    private async attachNativeGraphCompilerSidecar(snapshot: GraphRebuildSnapshot): Promise<void> {
+        try {
+            const sidecar = await this.phoenix.storeCommand('graphRebuild:compileDualWrite', { snapshot }) as GraphCompilerDualWriteSidecar | null;
+            if (!sidecar?.factGraph) return;
+            attachGraphCompilerReadModels(snapshot, sidecar, 'rust');
+        } catch (error) {
+            console.warn('[GraphRebuild] Native graph compiler sidecar unavailable; using compatibility sidecar', error);
         }
     }
 

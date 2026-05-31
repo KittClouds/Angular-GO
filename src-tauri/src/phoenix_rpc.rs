@@ -8,6 +8,7 @@ use crate::tts::{
     NativeQwenSpeakRequest, NativeSupertonicSpeakRequest, NativeTtsLoadRequest, NativeTtsService,
     NativeTtsSpeakRequest, NativeTtsStatus, NativeTtsSynthResult,
 };
+use phoenix_graph_rebuild::{compile_dual_write_snapshot, GraphRebuildSnapshot};
 use phoenix_native::{runtime_banner, PhoenixNativeHost, SnapshotPartition};
 use phoenix_hyperbolic::lorentz_tree::{
     HyperboloidPoint, LorentzForest, LorentzForestIndex, LorentzNode, LorentzQueryMode,
@@ -690,6 +691,25 @@ impl PhoenixApi for PhoenixApiImpl {
             serde_json::from_str::<Value>(&payload_json)
                 .map_err(|error| format!("invalid store command payload JSON: {error}"))?
         };
+
+        if command == "graphRebuild:compileDualWrite" {
+            let snapshot_value = payload
+                .get("snapshot")
+                .cloned()
+                .unwrap_or(payload);
+            let snapshot = serde_json::from_value::<GraphRebuildSnapshot>(snapshot_value)
+                .map_err(|error| format!("invalid graph rebuild snapshot: {error}"))?;
+            let dual = compile_dual_write_snapshot(&snapshot);
+            return serialize_json(&json!({
+                "success": true,
+                "payload": {
+                    "factGraph": dual.fact_graph,
+                    "projectedUiGraph": dual.projected_ui_graph,
+                    "receipts": dual.receipts,
+                },
+                "error": null,
+            }));
+        }
 
         let guard = self.lock_state()?;
         let result = guard

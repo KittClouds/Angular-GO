@@ -1,6 +1,7 @@
 mod fuzzy;
 mod normalize;
 mod sentence;
+mod surface;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -20,6 +21,7 @@ pub use normalize::{
     TOK_SEP,
 };
 pub use sentence::split_sentence_ranges;
+pub use surface::{AlexSnapshotId, PatternId, SurfaceHit, SurfaceHitBatch, SurfaceHitKind};
 
 #[derive(Debug, Error)]
 pub enum AlexError {
@@ -253,6 +255,15 @@ impl Lexicon {
 
     pub fn stats(&self) -> LexiconStats {
         self.snapshot.stats.clone()
+    }
+
+    pub fn snapshot_id(&self) -> AlexSnapshotId {
+        AlexSnapshotId(self.snapshot.compiled_at.max(0) as u64)
+    }
+
+    pub fn scan_surface_hits(&self, text: &str, scope: &ScopeKey) -> SurfaceHitBatch {
+        let known = self.scan(text, scope);
+        surface::build_surface_hit_batch(self.snapshot_id(), text, known)
     }
 
     pub fn exact_surface_patterns(&self) -> Vec<ExactSurfacePattern> {
