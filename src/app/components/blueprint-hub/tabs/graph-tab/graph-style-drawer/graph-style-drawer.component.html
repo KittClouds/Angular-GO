@@ -4,9 +4,9 @@
         <div class="mb-5 flex items-start justify-between gap-4">
             <div>
                 <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200/80">Graph Style Lab</p>
-                <h3 class="mt-2 text-xl font-semibold text-white">Highlighting and entity style</h3>
+                <h3 class="mt-2 text-xl font-semibold text-white">Model style controls</h3>
                 <p class="mt-2 text-sm leading-6 text-zinc-400">
-                    Keep the controls close to the graph where they actually matter.
+                    Tune entity families, fact families, and projection structure.
                 </p>
             </div>
             <button type="button"
@@ -95,13 +95,13 @@
         <section class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
             <div class="flex items-center justify-between gap-3">
                 <div>
-                    <h4 class="text-sm font-semibold text-white">Graph node types</h4>
-                    <p class="mt-1 text-xs text-zinc-400">Tune relationship facts and structural graph nodes directly.</p>
+                    <h4 class="text-sm font-semibold text-white">Fact and projection styles</h4>
+                    <p class="mt-1 text-xs text-zinc-400">Facts carry roles; atoms and projections only control how the model is drawn.</p>
                 </div>
                 <button type="button"
                     class="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:border-zinc-700 hover:text-white"
                     (click)="resetSelectedGraphNode()">
-                    Reset {{ formatGraphNodeKind(selectedGraphNodeKind()) }}
+                    Reset selected
                 </button>
             </div>
 

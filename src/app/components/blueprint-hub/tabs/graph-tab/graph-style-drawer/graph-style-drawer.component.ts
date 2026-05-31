@@ -36,13 +36,13 @@ const ENTITY_CATEGORIES: EntityCategory[] = [
 ];
 
 const GRAPH_NODE_COLOR_CATEGORIES: GraphNodeColorCategory[] = [
-    { name: 'Relationship facts', kinds: ['cooccurrence', 'observation', 'communication', 'authority', 'approval', 'relationship'] },
-    { name: 'Story signals', kinds: ['scenePresence', 'family', 'intimacy', 'transfer', 'causal', 'temporal'] },
-    { name: 'Graph structure', kinds: ['document', 'chunk', 'anchor', 'graphFact', 'eventNode', 'temporalFact', 'causalFact', 'memoryState'] },
+    { name: 'Fact families', kinds: ['cooccurrence', 'observation', 'communication', 'authority', 'approval', 'relationship'] },
+    { name: 'Narrative facts', kinds: ['family', 'intimacy', 'transfer', 'causal', 'temporal', 'scenePresence'] },
+    { name: 'Projection structure', kinds: ['document', 'chunk', 'anchor', 'graphFact', 'eventNode', 'temporalFact', 'causalFact', 'memoryState'] },
 ];
 
 const GRAPH_NODE_COLOR_LABELS: Record<GraphNodeColorKind, string> = {
-    cooccurrence: 'Co-occurrence',
+    cooccurrence: 'Weak co-occurrence',
     observation: 'Observation',
     communication: 'Communication',
     authority: 'Authority',
@@ -54,14 +54,14 @@ const GRAPH_NODE_COLOR_LABELS: Record<GraphNodeColorKind, string> = {
     causal: 'Causal',
     temporal: 'Temporal',
     relationship: 'Relationship',
-    document: 'Document',
-    chunk: 'Chunk',
-    anchor: 'Anchor',
-    graphFact: 'Graph fact',
-    eventNode: 'Event node',
-    temporalFact: 'Temporal fact',
-    causalFact: 'Causal fact',
-    memoryState: 'Memory state',
+    document: 'Document atom',
+    chunk: 'Chunk atom',
+    anchor: 'Evidence anchor',
+    graphFact: 'Fact vertex',
+    eventNode: 'Event atom',
+    temporalFact: 'Temporal fact vertex',
+    causalFact: 'Causal fact vertex',
+    memoryState: 'Memory state atom',
 };
 
 const MODE_ORDER: HighlightMode[] = ['vivid', 'gradient', 'subtle', 'clean', 'focus', 'off'];
