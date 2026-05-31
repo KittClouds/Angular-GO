@@ -229,25 +229,25 @@ export function buildGraphModelV2FromCompilerOutput(
 }
 
 export function projectUiGraphFromCompilerOutput(output: GraphCompilerOutput): GraphCompilerProjectedUiEdge[] {
-    return output.projectedEdges
-        .map((edge) => {
-            const sourceId = entityIdFromAtom(edge.sourceId);
-            const targetId = entityIdFromAtom(edge.targetId);
-            if (!sourceId || !targetId) return null;
-            return {
-                id: edge.id,
-                sourceId,
-                targetId,
-                type: edge.edgeType,
-                edgeType: edge.edgeType,
-                weight: Math.round(clamp(edge.confidence, 0, 1) * 1000),
-                confidence: edge.confidence,
-                evidenceAnchorIds: [edge.sourceFactId, edge.sourceBundleId].filter(Boolean) as string[],
-                scopeKeys: [],
-                noteIds: [],
-            };
-        })
-        .filter((edge): edge is GraphCompilerProjectedUiEdge => Boolean(edge));
+    const edges: GraphCompilerProjectedUiEdge[] = [];
+    for (const edge of output.projectedEdges) {
+        const sourceId = entityIdFromAtom(edge.sourceId);
+        const targetId = entityIdFromAtom(edge.targetId);
+        if (!sourceId || !targetId) continue;
+        edges.push({
+            id: edge.id,
+            sourceId,
+            targetId,
+            type: edge.edgeType,
+            edgeType: edge.edgeType,
+            weight: Math.round(clamp(edge.confidence, 0, 1) * 1000),
+            confidence: edge.confidence,
+            evidenceAnchorIds: [edge.sourceFactId, edge.sourceBundleId].filter(Boolean) as string[],
+            scopeKeys: [],
+            noteIds: [],
+        });
+    }
+    return edges;
 }
 
 function graphModelAtoms(output: GraphCompilerOutput, styleTags: GraphModelV2StyleTag[]): GraphModelV2Atom[] {
