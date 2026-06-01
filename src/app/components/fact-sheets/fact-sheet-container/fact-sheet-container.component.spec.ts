@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FactSheetContainerComponent, ParsedEntity } from './fact-sheet-container.component';
 import { CardWithFields, FactSheetService } from '../fact-sheet.service';
+import { EntityGraphFactSheetService } from '../entity-graph-fact-sheet.service';
+import type { EntityGraphFactSheetView } from '../entity-graph-fact-sheet';
 import { FactSheetFieldSchema } from '../../../lib/dexie/db';
 import { FactSheetCardComponent } from '../fact-sheet-card/fact-sheet-card.component';
 
@@ -46,12 +48,18 @@ describe('FactSheetContainerComponent accessibility markup', () => {
         loadAttributes: ReturnType<typeof vi.fn>;
         setAttribute: ReturnType<typeof vi.fn>;
     };
+    let graphFactSheetServiceMock: {
+        loadView: ReturnType<typeof vi.fn>;
+    };
 
     beforeEach(async () => {
         factSheetServiceMock = {
             getCardsSync: vi.fn(),
             loadAttributes: vi.fn().mockResolvedValue({}),
             setAttribute: vi.fn().mockResolvedValue(undefined),
+        };
+        graphFactSheetServiceMock = {
+            loadView: vi.fn().mockResolvedValue(emptyRelationshipView()),
         };
 
         TestBed.overrideComponent(FactSheetContainerComponent, {
@@ -67,6 +75,7 @@ describe('FactSheetContainerComponent accessibility markup', () => {
             imports: [FactSheetContainerComponent, NoopAnimationsModule],
             providers: [
                 { provide: FactSheetService, useValue: factSheetServiceMock },
+                { provide: EntityGraphFactSheetService, useValue: graphFactSheetServiceMock },
             ],
         }).compileComponents();
     });
@@ -165,6 +174,52 @@ describe('FactSheetContainerComponent accessibility markup', () => {
         expect(statSlider?.getAttribute('aria-label')).toBe('Strength');
     });
 
+    it('renders graph-backed relationship rows instead of placeholder strings', async () => {
+        const fields: FactSheetFieldSchema[] = [
+            createField('relationships', 'relationship', 'Connections'),
+        ];
+        const graphView: EntityGraphFactSheetView = {
+            ...emptyRelationshipView(),
+            relationships: [{
+                id: 'rel-1',
+                source: 'compilerFact',
+                sourceRecordId: 'fact-1',
+                relationType: 'observes',
+                family: 'observation',
+                direction: 'outgoing',
+                sourceEntityId: entity.id,
+                targetEntityId: 'entity-rift',
+                targetLabel: 'Rift',
+                targetKind: 'CHARACTER',
+                status: 'review',
+                confidence: 0.68,
+                evidenceCount: 1,
+                evidenceIds: ['evidence-1'],
+                network: false,
+            }],
+            summary: {
+                total: 1,
+                committed: 0,
+                promoted: 0,
+                review: 1,
+                staged: 0,
+                network: 0,
+                evidenceAnchors: 1,
+            },
+        };
+        graphFactSheetServiceMock.loadView.mockResolvedValue(graphView);
+
+        const { fixture, component } = await renderComponent(fields);
+        component.relationshipView.set(graphView);
+        fixture.detectChanges(false);
+        const text = (fixture.nativeElement as HTMLElement).textContent || '';
+
+        expect(text).toContain('to Rift');
+        expect(text).toContain('observes');
+        expect(text).toContain('fact');
+        expect(text).not.toContain('New Relation');
+    });
+
     async function renderComponent(fields: FactSheetFieldSchema[], attrs: Record<string, unknown> = {}) {
         factSheetServiceMock.getCardsSync.mockReturnValue([createCard(fields)]);
         factSheetServiceMock.loadAttributes.mockResolvedValue(attrs);
@@ -230,6 +285,23 @@ describe('FactSheetContainerComponent accessibility markup', () => {
             createdAt: 0,
             updatedAt: 0,
             ...overrides,
+        };
+    }
+
+    function emptyRelationshipView() {
+        return {
+            entityId: entity.id,
+            scopeId: 'global',
+            relationships: [],
+            summary: {
+                total: 0,
+                committed: 0,
+                promoted: 0,
+                review: 0,
+                staged: 0,
+                network: 0,
+                evidenceAnchors: 0,
+            },
         };
     }
 });

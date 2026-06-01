@@ -9,6 +9,8 @@ import { InputText } from 'primeng/inputtext';
 import { InputNumber } from 'primeng/inputnumber';
 import { FactSheetCardComponent } from '../fact-sheet-card/fact-sheet-card.component';
 import { FactSheetService, CardWithFields } from '../fact-sheet.service';
+import { EntityGraphFactSheetService } from '../entity-graph-fact-sheet.service';
+import type { EntityGraphFactSheetRelationRow, EntityGraphFactSheetView } from '../entity-graph-fact-sheet';
 import { FactSheetFieldSchema } from '../../../lib/dexie';
 import { SliderManagerComponent } from '../fields/slider-manager.component';
 import { smartGraphRegistry } from '../../../lib/registry';
@@ -248,19 +250,57 @@ export interface ParsedEntity {
                       <!-- RELATIONSHIP -->
                       @case ('relationship') {
                          <div class="space-y-2">
-                             @if (getArrayValue(field.fieldName).length === 0) {
-                                <div class="text-sm text-muted-foreground/60 italic flex justify-between items-center">
-                                    No relationships yet
-                                    <button class="text-xs bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors" (click)="addPlaceholderRelationship(field.fieldName)">+ Add</button>
+                              @if (relationshipView(); as graphView) {
+                                <div class="grid grid-cols-4 gap-1.5">
+                                  <div class="rounded border border-teal-300/15 bg-teal-400/5 px-2 py-1">
+                                    <span class="block truncate text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Committed</span>
+                                    <strong class="text-xs text-teal-100">{{ graphView.summary.committed }}</strong>
+                                  </div>
+                                  <div class="rounded border border-fuchsia-300/15 bg-fuchsia-400/5 px-2 py-1">
+                                    <span class="block truncate text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Facts</span>
+                                    <strong class="text-xs text-fuchsia-100">{{ graphView.summary.promoted }}</strong>
+                                  </div>
+                                  <div class="rounded border border-amber-300/15 bg-amber-400/5 px-2 py-1">
+                                    <span class="block truncate text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Review</span>
+                                    <strong class="text-xs text-amber-100">{{ graphView.summary.review }}</strong>
+                                  </div>
+                                  <div class="rounded border border-cyan-300/15 bg-cyan-400/5 px-2 py-1">
+                                    <span class="block truncate text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Network</span>
+                                    <strong class="text-xs text-cyan-100">{{ graphView.summary.network }}</strong>
+                                  </div>
                                 </div>
-                             } @else {
-                                 @for (rel of getArrayValue(field.fieldName); track $index) {
-                                     <div class="flex items-center justify-between text-sm bg-muted/30 p-2 rounded border border-border/50">
-                                         <span>{{ rel }}</span>
-                                         <button class="text-muted-foreground hover:text-red-500" (click)="removeArrayItem(field.fieldName, $index)">×</button>
-                                     </div>
-                                 }
-                                 <button class="text-xs text-primary hover:underline mt-1" (click)="addPlaceholderRelationship(field.fieldName)">+ Add Another</button>
+                                @if (getRelationshipRows().length === 0) {
+                                  <div class="rounded border border-border/50 bg-muted/20 p-2 text-sm italic text-muted-foreground/70">
+                                    No graph relationships yet
+                                  </div>
+                                } @else {
+                                  <div class="space-y-1.5">
+                                    @for (rel of getRelationshipRows(); track rel.id) {
+                                      <div class="rounded border border-border/50 bg-muted/25 px-2.5 py-2">
+                                        <div class="flex min-w-0 items-center justify-between gap-2">
+                                          <div class="flex min-w-0 items-center gap-2">
+                                            <span class="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-primary">
+                                              {{ relationSourceLabel(rel.source) }}
+                                            </span>
+                                            <span class="truncate text-sm font-semibold text-foreground">
+                                              {{ relationshipTargetText(rel) }}
+                                            </span>
+                                          </div>
+                                          <span class="shrink-0 text-[10px] font-mono text-teal-200">
+                                            {{ formatConfidence(rel.confidence) }}
+                                          </span>
+                                        </div>
+                                        <div class="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+                                          <span class="shrink-0 font-mono uppercase tracking-wider">{{ rel.relationType }}</span>
+                                          <span class="truncate">{{ rel.status }}</span>
+                                          @if (rel.evidenceCount > 0) {
+                                            <span class="shrink-0">{{ rel.evidenceCount }} evidence</span>
+                                          }
+                                        </div>
+                                      </div>
+                                    }
+                                  </div>
+                                }
                              }
                         </div>
                       }
@@ -426,6 +466,8 @@ export interface ParsedEntity {
 })
 export class FactSheetContainerComponent implements OnInit {
   private factSheetService = inject(FactSheetService);
+  private graphFactSheets = inject(EntityGraphFactSheetService);
+  private relationshipLoadSeq = 0;
 
   entity = input<ParsedEntity | null>(null);
   contextId = input<string>('global'); // Default to global context
@@ -438,6 +480,7 @@ export class FactSheetContainerComponent implements OnInit {
 
   orderedCards = signal<CardWithFields[]>([]);
   attributes = signal<Record<string, any>>({});
+  relationshipView = signal<EntityGraphFactSheetView>(emptyRelationshipView('', 'global'));
 
   editingField = signal<string | null>(null);
 
@@ -455,16 +498,21 @@ export class FactSheetContainerComponent implements OnInit {
     effect(() => {
       const ent = this.entity();
       const ctx = this.contextId(); // React to context changes
+      const requestId = ++this.relationshipLoadSeq;
 
       if (ent) {
+        this.relationshipView.set(emptyRelationshipView(ent.id, ctx));
         // Always load generic attributes first, then context specific?
         // Service handles merging now.
         // We force load to ensure we get the merged view for this context.
         this.factSheetService.loadAttributes(ent.id, ctx).then((attrs) => {
+          if (requestId !== this.relationshipLoadSeq) return;
           this.loadAttributesIntoModels(attrs);
+          void this.loadRelationshipView(ent, ctx, attrs, requestId);
         });
       } else {
         this.attributes.set({});
+        this.relationshipView.set(emptyRelationshipView('', ctx));
         this.resetModels();
       }
     });
@@ -515,6 +563,19 @@ export class FactSheetContainerComponent implements OnInit {
     this.statModels.set({});
   }
 
+  private async loadRelationshipView(
+    entity: ParsedEntity,
+    contextId: string,
+    attrs: Record<string, any>,
+    requestId: number,
+  ): Promise<void> {
+    const view = await this.graphFactSheets.loadView(entity, contextId, attrs).catch((error) => {
+      console.warn('[FactSheet] Graph relationship view failed:', error);
+      return emptyRelationshipView(entity.id, contextId);
+    });
+    if (requestId === this.relationshipLoadSeq) this.relationshipView.set(view);
+  }
+
   getValue(fieldName: string): any {
     return this.attributes()[fieldName];
   }
@@ -522,6 +583,28 @@ export class FactSheetContainerComponent implements OnInit {
   getArrayValue(fieldName: string): any[] {
     const val = this.getValue(fieldName);
     return Array.isArray(val) ? val : [];
+  }
+
+  getRelationshipRows(): EntityGraphFactSheetRelationRow[] {
+    return this.relationshipView().relationships.slice(0, 12);
+  }
+
+  relationshipTargetText(row: EntityGraphFactSheetRelationRow): string {
+    const prefix = row.direction === 'incoming' ? 'from ' : row.direction === 'outgoing' ? 'to ' : '';
+    return `${prefix}${row.targetLabel}`;
+  }
+
+  relationSourceLabel(source: EntityGraphFactSheetRelationRow['source']): string {
+    switch (source) {
+      case 'registry': return 'truth';
+      case 'compilerFact': return 'fact';
+      case 'compilerBundle': return 'bundle';
+      case 'factSheetCuration': return 'staged';
+    }
+  }
+
+  formatConfidence(value: number): string {
+    return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
   }
 
   parseStats(statsJson: string | undefined): Array<{ name: string; abbr: string; label: string }> {
@@ -719,19 +802,6 @@ export class FactSheetContainerComponent implements OnInit {
       });
   }
 
-  async addPlaceholderRelationship(fieldName: string) {
-    const entity = this.entity();
-    if (!entity) return;
-
-    const newRelation = `New Relation ${this.getArrayValue(fieldName).length + 1}`;
-    const currentArray = this.getArrayValue(fieldName);
-    const newArray = [...currentArray, newRelation];
-
-    this.arrayModels.update(m => ({ ...m, [fieldName]: newArray }));
-    this.attributes.update(a => ({ ...a, [fieldName]: newArray }));
-    await this.factSheetService.setAttribute(entity.id, fieldName, newArray, this.contextId());
-  }
-
   async onProgressChange(field: FactSheetFieldSchema, value: number) {
     const entity = this.entity();
     if (!entity || !field.currentField) return;
@@ -780,4 +850,21 @@ export class FactSheetContainerComponent implements OnInit {
 
     return sanitized || 'field';
   }
+}
+
+function emptyRelationshipView(entityId: string, scopeId: string): EntityGraphFactSheetView {
+  return {
+    entityId,
+    scopeId,
+    relationships: [],
+    summary: {
+      total: 0,
+      committed: 0,
+      promoted: 0,
+      review: 0,
+      staged: 0,
+      network: 0,
+      evidenceAnchors: 0,
+    },
+  };
 }
